@@ -1,0 +1,116 @@
+// @vitest-environment happy-dom
+import { beforeEach, describe, expect, it } from 'vitest'
+import {
+  assembleFrames,
+  createTransferPackage,
+  decryptTransfer,
+  encryptTransfer,
+  importTransferPackage,
+  parseFrame,
+  restoreTransferUndo,
+  splitIntoFrames,
+} from '../src/composables/localTransfer.js'
+
+const PASSWORD = 'password123'
+
+describe('二维码分帧', () => {
+  it('分帧后可完整还原', () => {
+    const payload = 'A'.repeat(2000)
+    const frames = splitIntoFrames(payload)
+    expect(frames.length).toBe(Math.ceil(2000 / 720))
+    const map = new Map()
+    for (const frame of frames) {
+      const parsed = parseFrame(frame)
+      map.set(parsed.index, parsed)
+    }
+    expect(assembleFrames(map)).toBe(payload)
+  })
+
+  it('无法识别的字符串被拒绝', () => {
+    expect(() => parseFrame('hello')).toThrow()
+  })
+
+  it('缺少分片时返回 null 而不是报错', () => {
+    const frames = splitIntoFrames('B'.repeat(1500))
+    const map = new Map()
+    for (const frame of frames.slice(0, -1)) {
+      const parsed = parseFrame(frame)
+      map.set(parsed.index, parsed)
+    }
+    expect(assembleFrames(map)).toBeNull()
+  })
+})
+
+describe('加密迁移码', () => {
+  it('加解密往返一致', async () => {
+    const pkg = { app: 'study-life', version: 2, data: { sl_tasks: [{ id: 't1' }] } }
+    const payload = await encryptTransfer(pkg, PASSWORD)
+    const decoded = await decryptTransfer(payload, PASSWORD)
+    expect(decoded).toEqual(pkg)
+  })
+
+  it('密码错误时抛出友好错误', async () => {
+    const payload = await encryptTransfer({ app: 'x' }, PASSWORD)
+    await expect(decryptTransfer(payload, 'wrong-password')).rejects.toThrow('无法解密')
+  })
+
+  it('短密码在加密前被拒绝', async () => {
+    await expect(encryptTransfer({ app: 'x' }, 'short')).rejects.toThrow('8 个字符')
+  })
+})
+
+describe('导入与撤销', () => {
+  beforeEach(() => {
+    localStorage.clear()
+  })
+
+  it('覆盖模式替换数据并支持撤销', async () => {
+    localStorage.setItem('sl_tasks', JSON.stringify([{ id: 'old', title: '旧任务' }]))
+    const pkg = {
+      app: 'study-life',
+      version: 2,
+      modules: ['tasks'],
+      data: { sl_tasks: [{ id: 'new1' }, { id: 'new2' }] },
+    }
+
+    const result = await importTransferPackage(pkg, 'replace')
+    expect(result.affected).toBe(1)
+    expect(JSON.parse(localStorage.getItem('sl_tasks'))).toHaveLength(2)
+
+    expect(await restoreTransferUndo()).toBe(true)
+    const restored = JSON.parse(localStorage.getItem('sl_tasks'))
+    expect(restored).toHaveLength(1)
+    expect(restored[0].id).toBe('old')
+  })
+
+  it('合并模式对数组去重追加', async () => {
+    localStorage.setItem(
+      'sl_tasks',
+      JSON.stringify([{ id: 'a', title: '相同' }, { id: 'b', title: '本地独有' }])
+    )
+    const pkg = {
+      app: 'study-life',
+      version: 2,
+      modules: ['tasks'],
+      data: { sl_tasks: [{ id: 'a', title: '相同' }, { id: 'c', title: '新任务' }] },
+    }
+
+    const result = await importTransferPackage(pkg, 'merge')
+    const tasks = JSON.parse(localStorage.getItem('sl_tasks'))
+    expect(tasks.map((task) => task.id)).toEqual(['a', 'b', 'c'])
+    expect(result.added).toBe(1)
+  })
+
+  it('非法包被拒绝', async () => {
+    await expect(importTransferPackage({ app: 'other', version: 2 }, 'replace')).rejects.toThrow()
+  })
+
+  it('打包器只收集所选模块的键', async () => {
+    localStorage.setItem('sl_tasks', JSON.stringify([]))
+    localStorage.setItem('sl_bills', JSON.stringify([{ id: 'bill1' }]))
+    const pkg = await createTransferPackage(['tasks'])
+    expect(Object.keys(pkg.data)).toEqual(['sl_tasks'])
+    expect(pkg.app).toBe('study-life')
+    expect(pkg.version).toBe(2)
+  })
+})

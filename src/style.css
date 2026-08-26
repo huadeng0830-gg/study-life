@@ -1,0 +1,163 @@
+:root {
+  --bg: #f5f7fb;
+  --card: #ffffff;
+  --text: #172033;
+  --muted: #667085;
+  --primary: #456fe8;
+  --primary-hover: #365fd2;
+  --primary-soft: #edf2ff;
+  --danger: #ef4444;
+  --border: #e3e8f2;
+  --brand-grad-a: #456fe8;
+  --brand-grad-b: #7855dc;
+  --shadow-sm: 0 1px 2px rgba(22, 34, 64, 0.04);
+  --shadow-md: 0 8px 24px rgba(35, 52, 93, 0.08);
+}
+
+/* ---------- 主题色切换 ---------- */
+:root[data-theme='purple'] {
+  --primary: #8b5cf6;
+  --primary-hover: #7c4ae0;
+  --primary-soft: #f3eeff;
+  --brand-grad-a: #7c3aed;
+  --brand-grad-b: #a855f7;
+}
+:root[data-theme='green'] {
+  --primary: #0ea271;
+  --primary-hover: #0b8a60;
+  --primary-soft: #e6f7f0;
+  --brand-grad-a: #0b9e69;
+  --brand-grad-b: #34d399;
+}
+:root[data-theme='pink'] {
+  --primary: #ec4899;
+  --primary-hover: #d93887;
+  --primary-soft: #fdeaf3;
+  --brand-grad-a: #db2777;
+  --brand-grad-b: #f472b6;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body {
+  min-height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Microsoft YaHei', 'PingFang SC', system-ui, -apple-system,
+    sans-serif;
+  font-size: 15px;
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+input,
+select,
+textarea {
+  font-family: inherit;
+  font-size: 14px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  outline: none;
+  background: #fff;
+  color: var(--text);
+}
+
+/* 触屏设备：输入框字号不小于 16px，否则 iOS Safari 聚焦时会自动放大整个页面 */
+@media (pointer: coarse) {
+  input,
+  select,
+  textarea {
+    font-size: 16px !important;
+  }
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(69, 111, 232, 0.12);
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 3px solid rgba(69, 111, 232, 0.28);
+  outline-offset: 2px;
+}
+
+.btn {
+  border: none;
+  border-radius: 8px;
+  padding: 9px 18px;
+  font-size: 14px;
+  font-weight: 600;
+  transition: background 0.15s, color 0.15s, transform 0.15s,
+    box-shadow 0.15s;
+}
+
+.btn:hover {
+  transform: translateY(-1px);
+}
+
+.btn:disabled {
+  opacity: 0.48;
+  transform: none;
+}
+
+.btn-primary {
+  background: var(--primary);
+  color: #fff;
+  box-shadow: 0 3px 10px rgba(69, 111, 232, 0.2);
+}
+
+.btn-primary:hover {
+  background: var(--primary-hover);
+}
+
+.btn-ghost {
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+
+.btn-ghost:hover {
+  background: #e1e9ff;
+}
+
+.btn-danger {
+  background: #fee2e2;
+  color: var(--danger);
+}
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 22px;
+  box-shadow: var(--shadow-sm);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
