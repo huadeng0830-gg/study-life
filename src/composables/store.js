@@ -1,4 +1,5 @@
 import { effectScope, ref, watch } from 'vue'
+import { markLocalChanged } from './cloudSync.js'
 import { mirrorLocalValue } from './dataVault.js'
 
 // 同一个存储键在整个应用中只创建一个响应式引用。
@@ -46,6 +47,7 @@ function writeNow(key, makeRaw) {
     const raw = makeRaw()
     localStorage.setItem(key, raw)
     void mirrorLocalValue(key, raw)
+    markLocalChanged()
   } catch {
     // 浏览器禁用或存储空间不足时，仍保留当前会话内的数据。
   }

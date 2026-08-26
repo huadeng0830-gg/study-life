@@ -4,6 +4,7 @@ import Modal from './Modal.vue'
 import LocalTransfer from './LocalTransfer.vue'
 import { checkForAppUpdate, updateMessage } from '../composables/appUpdate.js'
 import { markBackedUp, needsBackup } from '../composables/backupReminder.js'
+import { useCloudSync } from '../composables/cloudSync.js'
 import {
   exportWallpapersForTransfer,
   importWallpapersFromTransfer,
@@ -18,6 +19,9 @@ const error = ref('')
 const message = ref('')
 const showTransfer = ref(false)
 const includeWallpapers = ref(false)
+
+const { code, syncStatus, lastError, lastSyncedAt, remoteUpdatedAt, pull, push, init, setCode, clearCode } = useCloudSync()
+const codeInput = ref('')
 
 const STORAGE_KEYS = {
   courses: 'sl_courses',
@@ -201,6 +205,40 @@ async function restoreBackup() {
     error.value = '恢复失败，浏览器可能已禁止本地存储或存储空间不足'
   }
 }
+async function verifyCode() {
+  if (!codeInput.value || !/^\d{6}$/.test(codeInput.value)) {
+    error.value = '请输入 6 位数字访问码'
+    return
+  }
+  try {
+    const res = await fetch(`${location.origin}/api/auth/verify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code: codeInput.value }),
+    })
+    const { exists, updatedAt } = await res.json()
+    if (exists) {
+      await pull()
+      if (syncStatus.value !== 'error') {
+        code.value = codeInput.value
+        message.value = '验证成功，已拉取远程数据'
+      }
+    } else {
+      // 首次使用该码，直接记录码（首次推送会创建）
+      code.value = codeInput.value
+      message.value = '新访问码，首次推送将创建远程数据'
+    }
+    codeInput.value = ''
+  } catch (e) {
+    error.value = e.message
+  }
+}
+
+function clearCodeAndLocal() {
+  clearCode()
+  codeInput.value = ''
+  message.value = '已断开同步，本地数据保留'
+}
 </script>
 
 <template>
@@ -245,6 +283,32 @@ async function restoreBackup() {
             选择备份文件
             <input type="file" accept="application/json,.json" @change="selectFile" />
           </label>
+        </div>
+      </section>
+
+      <section class="data-section">
+        <div class="section-icon sync">☁</div>
+        <div class="section-copy">
+          <h4>云端同步（可选）</h4>
+          <p>输入 6 位访问码，数据 AES-GCM 加密存 Cloudflare KV，多设备自动合并。忘记码 = 数据永久不可恢复。</p>
+          <div class="sync-input-row">
+            <input v-model="codeInput" type="text" maxlength="6" placeholder="6 位数字" @keydown.enter="verifyCode" />
+            <button class="btn btn-primary" @click="verifyCode" :disabled="syncStatus === 'pulling' || syncStatus === 'pushing'">
+              <span v-if="!code">验证并拉取</span>
+              <span v-else-if="syncStatus === 'pulling'">拉取中…</span>
+              <span v-else-if="syncStatus === 'pushing'">推送中…</span>
+            </button>
+          </div>
+          <div v-if="code" class="sync-status">
+            <span v-if="syncStatus === 'error'" class="error">⚠ {{ lastError }}</span>
+            <span v-else-if="syncStatus === 'success'" class="success">✓ {{ lastError || '同步完成' }}</span>
+            <span v-else class="muted">{{ syncStatus === 'idle' ? '就绪' : syncStatus }} · 远程更新：{{ remoteUpdatedAt ? new Date(remoteUpdatedAt).toLocaleString() : '无' }} · 本地上次同步：{{ lastSyncedAt ? new Date(lastSyncedAt).toLocaleString() : '无' }}</span>
+            <div class="sync-actions">
+              <button class="btn" @click="pull" :disabled="syncStatus !== 'idle'">立即拉取</button>
+              <button class="btn btn-primary" @click="push" :disabled="syncStatus !== 'idle'">立即推送</button>
+              <button class="btn btn-danger" @click="clearCodeAndLocal">断开同步</button>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -321,6 +385,10 @@ async function restoreBackup() {
   color: #7755d0;
   background: #f0ebff;
 }
+.section-icon.sync {
+  color: #0891b2;
+  background: #e0f7ff;
+}
 .update-message {
   color: var(--primary);
   font-size: 11px;
@@ -359,6 +427,35 @@ async function restoreBackup() {
   gap: 7px;
   color: var(--text);
   font-size: 12px;
+}
+.sync-input-row {
+  display: flex;
+  gap: 8px;
+  margin: 8px 0;
+}
+.sync-input-row input {
+  flex: 1;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 14px;
+  text-align: center;
+  letter-spacing: 0.2em;
+}
+.sync-status {
+  margin-top: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #f5f7fb;
+  font-size: 12px;
+  line-height: 1.6;
+}
+.sync-status .muted { color: var(--muted); }
+.sync-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+  flex-wrap: wrap;
 }
 .restore-preview {
   display: flex;
