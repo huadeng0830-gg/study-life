@@ -5,6 +5,8 @@ import { VitePWA } from 'vite-plugin-pwa'
 // https://vite.dev/config/
 export default defineConfig({
   build: {
+    target: 'es2019',
+    cssTarget: 'safari13',
     rollupOptions: {
       output: {
         codeSplitting: {
@@ -51,11 +53,33 @@ export default defineConfig({
         ],
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,svg,png,ico,woff2}'],
+        globPatterns: [
+          'index.html',
+          'manifest.webmanifest',
+          '*.{svg,png,ico}',
+          'assets/index-*.{js,css}',
+          'assets/vue-vendor-*.js',
+          'assets/App-*.{js,css}',
+          'assets/appearance-*.js',
+          'assets/appUpdate-*.js',
+          'assets/HomeView-*.{js,css}',
+          'assets/hero-*.png',
+          'assets/_plugin-vue_export-helper-*.js',
+        ],
         maximumFileSizeToCacheInBytes: 3 * 1024 * 1024,
         skipWaiting: true,
         clientsClaim: true,
         cleanupOutdatedCaches: true,
+        runtimeCaching: [
+          {
+            urlPattern: /\/assets\/.*\.(?:js|css|png|svg)$/i,
+            handler: 'StaleWhileRevalidate',
+            options: {
+              cacheName: 'study-life-lazy-assets',
+              expiration: { maxEntries: 80, maxAgeSeconds: 30 * 24 * 60 * 60 },
+            },
+          },
+        ],
       },
     }),
   ],

@@ -1,6 +1,8 @@
 const DB_NAME = 'study-life-local-vault'
 const STORE_NAME = 'records'
 const DB_VERSION = 1
+const DB_OPEN_TIMEOUT = 800
+const DB_REQUEST_TIMEOUT = 1200
 
 function managedKey(key) {
   return typeof key === 'string' && key.startsWith('sl_') && key !== 'sl_transfer_undo'
@@ -11,25 +13,45 @@ let vaultPromise = null
 
 function openVault() {
   if (typeof indexedDB === 'undefined') return Promise.resolve(null)
-  vaultPromise ??= new Promise((resolve, reject) => {
+  vaultPromise ??= new Promise((resolve) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION)
+    let settled = false
+    const finish = (value) => {
+      if (settled) {
+        if (value?.close) value.close()
+        return
+      }
+      settled = true
+      window.clearTimeout(timer)
+      resolve(value)
+    }
+    const timer = window.setTimeout(() => finish(null), DB_OPEN_TIMEOUT)
     request.onupgradeneeded = () => {
       const db = request.result
       if (!db.objectStoreNames.contains(STORE_NAME)) db.createObjectStore(STORE_NAME, { keyPath: 'key' })
     }
-    request.onsuccess = () => resolve(request.result)
-    request.onerror = () => reject(request.error)
-  }).catch(() => {
-    vaultPromise = null
-    return null
+    request.onsuccess = () => finish(request.result)
+    request.onerror = () => finish(null)
+    request.onblocked = () => finish(null)
   })
   return vaultPromise
 }
 
 function requestResult(request) {
   return new Promise((resolve, reject) => {
-    request.onsuccess = () => resolve(request.result)
-    request.onerror = () => reject(request.error)
+    let settled = false
+    const finish = (callback, value) => {
+      if (settled) return
+      settled = true
+      window.clearTimeout(timer)
+      callback(value)
+    }
+    const timer = window.setTimeout(
+      () => finish(reject, new Error('本地安全副本读取超时')),
+      DB_REQUEST_TIMEOUT
+    )
+    request.onsuccess = () => finish(resolve, request.result)
+    request.onerror = () => finish(reject, request.error)
   })
 }
 
@@ -69,14 +91,11 @@ export async function initializeDataVault() {
   try {
     // 请求持久化存储，防止 iOS 等系统在存储紧张时自动清除数据
     if (typeof navigator !== 'undefined' && navigator.storage?.persist) {
-      try {
-        const persisted = await navigator.storage.persist()
-        if (!persisted && typeof window !== 'undefined' && window.matchMedia?.('(display-mode: standalone)').matches) {
-          console.warn('[DataVault] 持久化存储未授予，PWA 数据可能在系统清理时丢失，建议定期导出备份')
+      void navigator.storage.persist().then((persisted) => {
+        if (!persisted && window.matchMedia?.('(display-mode: standalone)').matches) {
+          console.warn('[DataVault] 持久化存储未授予，建议定期导出备份')
         }
-      } catch {
-        // 忽略错误，继续正常流程
-      }
+      }).catch(() => {})
     }
     const db = await openVault()
     if (!db) return []
