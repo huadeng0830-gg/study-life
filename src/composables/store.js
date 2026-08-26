@@ -47,7 +47,7 @@ function writeNow(key, makeRaw) {
     const raw = makeRaw()
     localStorage.setItem(key, raw)
     void mirrorLocalValue(key, raw)
-    markLocalChanged()
+    markLocalChanged(key)
   } catch {
     // 浏览器禁用或存储空间不足时，仍保留当前会话内的数据。
   }
@@ -98,6 +98,33 @@ if (typeof document !== 'undefined') {
 // 导致后续所有修改都不再落盘。统一挂到永不停止的模块级作用域上。
 const persistenceScope = effectScope()
 
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+export function normalizeStoredValue(saved, defaultValue) {
+  if (Array.isArray(defaultValue)) {
+    if (Array.isArray(saved)) return { value: saved, repaired: false }
+    if (isPlainObject(saved)) {
+      const numericEntries = Object.entries(saved)
+        .filter(([entryKey]) => /^\d+$/.test(entryKey))
+        .sort(([a], [b]) => Number(a) - Number(b))
+      if (numericEntries.length) return { value: numericEntries.map(([, value]) => value), repaired: true }
+    }
+    return { value: JSON.parse(JSON.stringify(defaultValue)), repaired: true }
+  }
+  if (isPlainObject(defaultValue)) {
+    if (!isPlainObject(saved)) {
+      return { value: JSON.parse(JSON.stringify(defaultValue)), repaired: true }
+    }
+    const value = { ...JSON.parse(JSON.stringify(defaultValue)), ...saved }
+    return { value, repaired: JSON.stringify(value) !== JSON.stringify(saved) }
+  }
+  return typeof saved === typeof defaultValue
+    ? { value: saved, repaired: false }
+    : { value: JSON.parse(JSON.stringify(defaultValue)), repaired: true }
+}
+
 export function useStoredRef(key, defaultValue) {
   if (storedRefs.has(key)) return storedRefs.get(key)
 
@@ -107,7 +134,19 @@ export function useStoredRef(key, defaultValue) {
   } catch {
     saved = null
   }
-  const state = ref(saved ?? JSON.parse(JSON.stringify(defaultValue)))
+  const normalized = saved === null
+    ? { value: JSON.parse(JSON.stringify(defaultValue)), repaired: false }
+    : normalizeStoredValue(saved, defaultValue)
+  const state = ref(normalized.value)
+  if (normalized.repaired) {
+    try {
+      const raw = JSON.stringify(normalized.value)
+      localStorage.setItem(key, raw)
+      void mirrorLocalValue(key, raw)
+    } catch {
+      // 无法落盘时仍使用修复后的内存值，确保页面能够打开。
+    }
+  }
   storedRefs.set(key, state)
   persistenceScope.run(() => {
     watch(
@@ -411,15 +450,8 @@ export function normalizeTimes(cfg) {
   }
 }
 
-export const timeConfig = ref(loadTimeConfig())
+export const timeConfig = useStoredRef('sl_timecfg', loadTimeConfig())
 normalizeTimes(timeConfig.value)
-watch(
-  timeConfig,
-  () => {
-    scheduleWrite('sl_timecfg', () => JSON.stringify(timeConfig.value))
-  },
-  { deep: true }
-)
 
 // ---------- 一次性迁移：课程节次从数字索引改为节次 ID ----------
 ;(function migrateCoursePeriodIds() {

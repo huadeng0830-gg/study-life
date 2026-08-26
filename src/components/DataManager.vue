@@ -20,7 +20,19 @@ const message = ref('')
 const showTransfer = ref(false)
 const includeWallpapers = ref(false)
 
-const { code, syncStatus, lastError, lastSyncedAt, remoteUpdatedAt, pull, push, init, setCode, clearCode } = useCloudSync()
+const {
+  code,
+  syncStatus,
+  lastError,
+  lastSyncedAt,
+  remoteUpdatedAt,
+  canUndoPull,
+  pull,
+  push,
+  undoLastPull,
+  setCode,
+  clearCode,
+} = useCloudSync()
 const codeInput = ref('')
 
 const STORAGE_KEYS = {
@@ -216,16 +228,21 @@ async function verifyCode() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ code: codeInput.value }),
     })
-    const { exists, updatedAt } = await res.json()
+    if (!res.ok) throw new Error('访问码验证失败')
+    const { exists } = await res.json()
     if (exists) {
-      await pull()
-      if (syncStatus.value !== 'error') {
-        code.value = codeInput.value
+      const inputCode = codeInput.value
+      setCode(inputCode)
+      const pulled = await pull(inputCode)
+      if (pulled) {
         message.value = '验证成功，已拉取远程数据'
+      } else {
+        clearCode()
+        error.value = lastError.value || '云端数据拉取失败，本机数据未改变'
       }
     } else {
       // 首次使用该码，直接记录码（首次推送会创建）
-      code.value = codeInput.value
+      setCode(codeInput.value)
       message.value = '新访问码，首次推送将创建远程数据'
     }
     codeInput.value = ''
@@ -304,8 +321,9 @@ function clearCodeAndLocal() {
             <span v-else-if="syncStatus === 'success'" class="success">✓ {{ lastError || '同步完成' }}</span>
             <span v-else class="muted">{{ syncStatus === 'idle' ? '就绪' : syncStatus }} · 远程更新：{{ remoteUpdatedAt ? new Date(remoteUpdatedAt).toLocaleString() : '无' }} · 本地上次同步：{{ lastSyncedAt ? new Date(lastSyncedAt).toLocaleString() : '无' }}</span>
             <div class="sync-actions">
-              <button class="btn" @click="pull" :disabled="syncStatus !== 'idle'">立即拉取</button>
+              <button class="btn" @click="pull()" :disabled="syncStatus !== 'idle'">立即拉取</button>
               <button class="btn btn-primary" @click="push" :disabled="syncStatus !== 'idle'">立即推送</button>
+              <button v-if="canUndoPull" class="btn" @click="undoLastPull" :disabled="syncStatus !== 'idle'">撤销上次拉取</button>
               <button class="btn btn-danger" @click="clearCodeAndLocal">断开同步</button>
             </div>
           </div>
