@@ -1,6 +1,7 @@
 import vue from '@vitejs/plugin-vue'
 import { defineConfig } from 'vite'
 import { VitePWA } from 'vite-plugin-pwa'
+import { viteStaticCopy } from 'vite-plugin-static-copy'
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -57,6 +58,14 @@ export default defineConfig({
         clientsClaim: true,
         cleanupOutdatedCaches: true,
       },
+    }),
+    viteStaticCopy({
+      targets: [
+        {
+          src: 'functions',
+          dest: '',
+        },
+      ],
     }),
   ],
 })
