@@ -1,7 +1,7 @@
 // GET /api/sync/pull?code=xxxxxx
 // 返回：{ data: base64url密文, updatedAt: ISO } 或 { data: null, updatedAt: null }
 export async function onRequestGet(context) {
-  const { codeHash, kv } = context
+  const { codeHash, kv } = context.data
 
   const key = `sync:${codeHash}:data`
   const stored = await kv.get(key, 'json')

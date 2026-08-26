@@ -1,7 +1,8 @@
 // POST /api/sync/push { code, data: base64url密文 }
 // 返回：{ ok: true, updatedAt: ISO }
 export async function onRequestPost(context) {
-  const { codeHash, kv, request } = context
+  const { codeHash, kv } = context.data
+  const { request } = context
 
   let body
   try {

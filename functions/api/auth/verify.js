@@ -1,7 +1,7 @@
 // POST /api/auth/verify { code }
 // 仅校验访问码格式 + 是否已有数据（不返回明文）
 export async function onRequestPost(context) {
-  const { codeHash, kv } = context
+  const { codeHash, kv } = context.data
 
   const key = `sync:${codeHash}:data`
   const stored = await kv.get(key, 'json')
