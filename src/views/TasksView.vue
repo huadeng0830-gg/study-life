@@ -2,6 +2,9 @@
 import { computed, ref } from 'vue'
 import Modal from '../components/Modal.vue'
 import NoticePaste from '../components/NoticePaste.vue'
+import SwipeActionItem from '../components/SwipeActionItem.vue'
+import VirtualList from '../components/VirtualList.vue'
+import { appearance } from '../composables/appearance.js'
 import { fmtDate, todayStr, useStoredRef } from '../composables/store.js'
 
 const tasks = useStoredRef('sl_tasks', [])
@@ -87,9 +90,37 @@ function remove() {
 function toggleDone(event, id) {
   event.stopPropagation()
   const task = tasks.value.find((item) => item.id === id)
+  toggleTask(task)
+}
+
+function toggleTask(task) {
   if (!task) return
   task.done = !task.done
   task.completedAt = task.done ? new Date().toISOString() : null
+}
+
+function swipeLabel(task, direction) {
+  const action = appearance.value.swipeActions.tasks[direction]
+  if (action === 'complete') return task.done ? '恢复待办' : '完成'
+  if (action === 'edit') return '编辑'
+  if (action === 'delete') return '删除'
+  return ''
+}
+
+function swipeTone(direction) {
+  const action = appearance.value.swipeActions.tasks[direction]
+  if (action === 'complete') return 'success'
+  if (action === 'delete') return 'danger'
+  return 'primary'
+}
+
+function handleTaskSwipe(direction, task) {
+  const action = appearance.value.swipeActions.tasks[direction]
+  if (action === 'complete') toggleTask(task)
+  else if (action === 'edit') openEdit(task)
+  else if (action === 'delete' && window.confirm(`确定删除待办“${task.title}”吗？`)) {
+    tasks.value = tasks.value.filter((item) => item.id !== task.id)
+  }
 }
 
 function onNoticeCommit(payload) {
@@ -189,38 +220,44 @@ const courseNames = computed(() => [...new Set(courses.value.map((course) => cou
       这个列表暂时是空的
     </div>
 
-    <div v-else class="task-list">
-      <article
-        v-for="task in visibleTasks"
-        :key="task.id"
-        class="card task"
-        :class="{ done: task.done }"
-        @click="openEdit(task)"
+    <VirtualList v-else v-slot="{ item: task }" class="task-list" :items="visibleTasks" :estimated-height="92" :gap="10" :threshold="40">
+      <SwipeActionItem
+        :left-label="swipeLabel(task, 'left')"
+        :right-label="swipeLabel(task, 'right')"
+        :left-tone="swipeTone('left')"
+        :right-tone="swipeTone('right')"
+        @swipe="handleTaskSwipe($event, task)"
       >
-        <button
-          type="button"
-          class="check"
-          :class="{ checked: task.done }"
-          :aria-label="task.done ? '标记为未完成' : '标记为已完成'"
-          @click="toggleDone($event, task.id)"
+        <article
+          class="card task"
+          :class="{ done: task.done }"
+          @click="openEdit(task)"
         >
-          {{ task.done ? '✓' : '' }}
-        </button>
+          <button
+            type="button"
+            class="check"
+            :class="{ checked: task.done }"
+            :aria-label="task.done ? '标记为未完成' : '标记为已完成'"
+            @click="toggleDone($event, task.id)"
+          >
+            {{ task.done ? '✓' : '' }}
+          </button>
 
-        <div class="task-main">
-          <div class="task-topline">
-            <span class="priority" :class="task.priority ?? 'normal'">
-              {{ PRIORITIES[task.priority]?.label ?? '普通' }}
-            </span>
-            <span v-if="task.course" class="course-tag">{{ task.course }}</span>
+          <div class="task-main">
+            <div class="task-topline">
+              <span class="priority" :class="task.priority ?? 'normal'">
+                {{ PRIORITIES[task.priority]?.label ?? '普通' }}
+              </span>
+              <span v-if="task.course" class="course-tag">{{ task.course }}</span>
+            </div>
+            <h3>{{ task.title }}</h3>
+            <p v-if="task.note">{{ task.note }}</p>
           </div>
-          <h3>{{ task.title }}</h3>
-          <p v-if="task.note">{{ task.note }}</p>
-        </div>
 
-        <span class="due" :class="dueInfo(task).cls">{{ dueInfo(task).text }}</span>
-      </article>
-    </div>
+          <span class="due" :class="dueInfo(task).cls">{{ dueInfo(task).text }}</span>
+        </article>
+      </SwipeActionItem>
+    </VirtualList>
 
     <Modal :open="showForm" :title="editingId ? '编辑待办' : '添加待办'" @close="showForm = false">
       <div class="form">

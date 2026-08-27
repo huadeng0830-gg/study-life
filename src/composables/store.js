@@ -36,11 +36,12 @@ if (typeof document !== 'undefined') {
   })
 }
 
-// 写入合并：300ms 内的连续修改只落盘一次（输入时不再逐字符写存储），
-// 页面隐藏或关闭前强制冲刷，避免丢数据。
+// 统一写入队列：300ms 内所有数据键的连续修改合并成一批，浏览器空闲时
+// 一次性写入本地存储和镜像备份。页面隐藏或关闭前仍同步冲刷，避免丢数据。
 const WRITE_DELAY = 300
 const pendingWrites = new Map()
-const writeTimers = new Map()
+let writeTimer = null
+let idleWrite = null
 
 function writeNow(key, makeRaw) {
   try {
@@ -53,37 +54,46 @@ function writeNow(key, makeRaw) {
   }
 }
 
+function cancelScheduledBatch() {
+  if (writeTimer) {
+    clearTimeout(writeTimer)
+    writeTimer = null
+  }
+  if (idleWrite !== null && typeof window !== 'undefined' && 'cancelIdleCallback' in window) {
+    window.cancelIdleCallback(idleWrite)
+  }
+  idleWrite = null
+}
+
+function writePendingBatch() {
+  cancelScheduledBatch()
+  const batch = [...pendingWrites.entries()]
+  pendingWrites.clear()
+  for (const [key, producer] of batch) writeNow(key, producer)
+}
+
 function scheduleWrite(key, makeRaw) {
   pendingWrites.set(key, makeRaw)
-  const previous = writeTimers.get(key)
-  if (previous) clearTimeout(previous)
-  writeTimers.set(
-    key,
-    setTimeout(() => {
-      writeTimers.delete(key)
-      const producer = pendingWrites.get(key)
-      if (!producer) return
-      pendingWrites.delete(key)
-      writeNow(key, producer)
-    }, WRITE_DELAY)
-  )
+  if (writeTimer) clearTimeout(writeTimer)
+  writeTimer = setTimeout(() => {
+    writeTimer = null
+    if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+      idleWrite = window.requestIdleCallback(writePendingBatch, { timeout: 700 })
+    } else {
+      writePendingBatch()
+    }
+  }, WRITE_DELAY)
 }
 
 function flushAllWrites() {
-  for (const timer of writeTimers.values()) clearTimeout(timer)
-  writeTimers.clear()
-  for (const [key, producer] of pendingWrites) writeNow(key, producer)
-  pendingWrites.clear()
+  if (pendingWrites.size) writePendingBatch()
+  else cancelScheduledBatch()
 }
 
 // 其他标签页写入了新值时，取消本地排队中的旧值回写，避免旧数据覆盖新数据。
 function cancelPendingWrite(key) {
-  const timer = writeTimers.get(key)
-  if (timer) {
-    clearTimeout(timer)
-    writeTimers.delete(key)
-  }
   pendingWrites.delete(key)
+  if (!pendingWrites.size) cancelScheduledBatch()
 }
 
 if (typeof document !== 'undefined') {
@@ -703,6 +713,43 @@ export function courseInWeek(c, week) {
   if (t === 'odd') return week % 2 === 1
   if (t === 'even') return week % 2 === 0
   return true
+}
+
+// ---------- 特殊日期课表：停课 / 按某个星期补课 ----------
+export const scheduleExceptions = useStoredRef('sl_schedule_exceptions', [])
+
+function dateString(date) {
+  const p = (value) => String(value).padStart(2, '0')
+  return `${date.getFullYear()}-${p(date.getMonth() + 1)}-${p(date.getDate())}`
+}
+
+export function dateForWeekDay(week, day) {
+  const date = new Date(semester.value.start + 'T00:00:00')
+  date.setDate(date.getDate() + (Number(week) - 1) * 7 + Number(day))
+  return dateString(date)
+}
+
+export function scheduleExceptionForDate(date) {
+  return scheduleExceptions.value.find((item) => item.date === date) ?? null
+}
+
+export function coursesForDate(courseList, date) {
+  const target = new Date(date + 'T00:00:00')
+  const actualDay = target.getDay() === 0 ? 6 : target.getDay() - 1
+  const week = weekOf(date)
+  const exception = scheduleExceptionForDate(date)
+  if (exception?.type === 'off') return []
+  const sourceDay = exception?.type === 'makeup'
+    ? Math.min(6, Math.max(0, Number(exception.sourceDay) || 0))
+    : actualDay
+  return courseList
+    .filter((course) => course.day === sourceDay && courseInWeek(course, week))
+    .map((course) => ({
+      ...course,
+      displayDay: actualDay,
+      sourceDay,
+      exceptionDate: exception ? date : '',
+    }))
 }
 
 export function weekLabel(c) {

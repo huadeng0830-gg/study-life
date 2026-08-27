@@ -1,6 +1,9 @@
 <script setup>
 import { computed, ref } from 'vue'
 import Modal from '../components/Modal.vue'
+import SwipeActionItem from '../components/SwipeActionItem.vue'
+import VirtualList from '../components/VirtualList.vue'
+import { appearance } from '../composables/appearance.js'
 import { useStoredRef } from '../composables/store.js'
 
 const lists = useStoredRef('sl_checklists', [])
@@ -164,7 +167,35 @@ function removeItem() {
 function toggleItem(event, id) {
   event.stopPropagation()
   const item = activeList.value?.items.find((value) => value.id === id)
+  toggleListItem(item)
+}
+
+function toggleListItem(item) {
   if (item) item.done = !item.done
+}
+
+function swipeLabel(item, direction) {
+  const action = appearance.value.swipeActions.lists[direction]
+  if (action === 'complete') return item.done ? '恢复' : '完成'
+  if (action === 'edit') return '编辑'
+  if (action === 'delete') return '删除'
+  return ''
+}
+
+function swipeTone(direction) {
+  const action = appearance.value.swipeActions.lists[direction]
+  if (action === 'complete') return 'success'
+  if (action === 'delete') return 'danger'
+  return 'primary'
+}
+
+function handleItemSwipe(direction, item) {
+  const action = appearance.value.swipeActions.lists[direction]
+  if (action === 'complete') toggleListItem(item)
+  else if (action === 'edit') openEditItem(item)
+  else if (action === 'delete' && window.confirm(`确定删除“${item.name}”吗？`)) {
+    activeList.value.items = activeList.value.items.filter((entry) => entry.id !== item.id)
+  }
 }
 
 function clearBought() {
@@ -240,28 +271,34 @@ function clearBought() {
           <button class="clear-bought" :disabled="!listStats.done" @click="clearBought">清除已完成</button>
         </div>
 
-        <div v-if="visibleItems.length" class="item-list">
-          <article
-            v-for="item in visibleItems"
-            :key="item.id"
-            class="shopping-item"
-            :class="{ done: item.done }"
-            @click="openEditItem(item)"
+        <VirtualList v-if="visibleItems.length" v-slot="{ item }" class="item-list" :items="visibleItems" :estimated-height="62" :gap="0" :threshold="50">
+          <SwipeActionItem
+            :left-label="swipeLabel(item, 'left')"
+            :right-label="swipeLabel(item, 'right')"
+            :left-tone="swipeTone('left')"
+            :right-tone="swipeTone('right')"
+            @swipe="handleItemSwipe($event, item)"
           >
-            <div class="item-copy">
-              <div><b>{{ item.name }}</b><span v-if="activeList.type === 'shopping'">{{ item.category }}</span></div>
-              <small v-if="activeList.type === 'shopping'">{{ item.quantity }} {{ item.unit }}<template v-if="item.note"> · {{ item.note }}</template></small>
-              <small v-else>{{ item.note || '点击可添加备注' }}</small>
-            </div>
-            <strong v-if="activeList.type === 'shopping'" class="item-price">{{ item.price === '' ? '未估价' : money(item.quantity * item.price) }}</strong>
-            <button
-              class="item-check"
-              :class="{ checked: item.done }"
-              :aria-label="item.done ? '标记为未完成' : '标记为已完成'"
-              @click="toggleItem($event, item.id)"
-            >{{ item.done ? '✓' : '' }}</button>
-          </article>
-        </div>
+            <article
+              class="shopping-item"
+              :class="{ done: item.done }"
+              @click="openEditItem(item)"
+            >
+              <div class="item-copy">
+                <div><b>{{ item.name }}</b><span v-if="activeList.type === 'shopping'">{{ item.category }}</span></div>
+                <small v-if="activeList.type === 'shopping'">{{ item.quantity }} {{ item.unit }}<template v-if="item.note"> · {{ item.note }}</template></small>
+                <small v-else>{{ item.note || '点击可添加备注' }}</small>
+              </div>
+              <strong v-if="activeList.type === 'shopping'" class="item-price">{{ item.price === '' ? '未估价' : money(item.quantity * item.price) }}</strong>
+              <button
+                class="item-check"
+                :class="{ checked: item.done }"
+                :aria-label="item.done ? '标记为未完成' : '标记为已完成'"
+                @click="toggleItem($event, item.id)"
+              >{{ item.done ? '✓' : '' }}</button>
+            </article>
+          </SwipeActionItem>
+        </VirtualList>
         <p v-else class="items-empty">这个筛选下暂时没有物品。</p>
       </section>
     </div>
@@ -336,6 +373,7 @@ function clearBought() {
 .item-toolbar > div button.on { color: var(--primary); font-weight: 700; background: var(--primary-soft); }
 .clear-bought:disabled { opacity: .45; }
 .item-list { display: flex; flex-direction: column; }
+.item-list :deep(.swipe-item) { border-radius: 0; }
 .shopping-item { display: flex; align-items: center; gap: 12px; padding: 13px 22px; cursor: pointer; border-bottom: 1px solid var(--border); }
 .shopping-item:last-child { border-bottom: none; }
 .shopping-item:hover { background: #fafbfd; }

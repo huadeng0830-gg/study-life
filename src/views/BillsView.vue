@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref } from 'vue'
 import Modal from '../components/Modal.vue'
+import VirtualList from '../components/VirtualList.vue'
 import { fmtDate, todayStr, useStoredRef } from '../composables/store.js'
 
 const bills = useStoredRef('sl_bills', [])
@@ -381,10 +382,8 @@ function moneyShort(value) {
     </div>
     <div v-else-if="visibleBills.length === 0" class="card empty-state compact">这个列表暂时是空的。</div>
 
-    <div v-else class="bill-list">
+    <VirtualList v-else v-slot="{ item: bill }" class="bill-list" :items="visibleBills" :estimated-height="120" :gap="10" :threshold="40">
       <article
-        v-for="bill in visibleBills"
-        :key="bill.id"
         class="card bill"
         :class="{ inactive: bill.active === false }"
         @click="openEdit(bill)"
@@ -408,7 +407,7 @@ function moneyShort(value) {
           <button @click="toggleActive($event, bill.id)">{{ bill.active === false ? '恢复' : '暂停' }}</button>
         </div>
       </article>
-    </div>
+    </VirtualList>
 
     <Modal :open="showForm" :title="editingId ? '编辑账单' : '添加账单'" @close="showForm = false">
       <div class="form">

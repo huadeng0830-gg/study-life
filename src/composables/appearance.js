@@ -45,6 +45,10 @@ function defaultAppearanceValue() {
     homeModules: HOME_MODULES.map((item) => ({ id: item.id, visible: true })),
     scheduleSkin: 'classic',
     foodPickerMode: 'cards',
+    swipeActions: {
+      tasks: { left: 'complete', right: 'edit' },
+      lists: { left: 'complete', right: 'edit' },
+    },
   }
 }
 
@@ -69,6 +73,16 @@ function normalize() {
   const current = appearance.value ?? {}
   const existing = Array.isArray(current.homeModules) ? current.homeModules : []
   const homeModules = HOME_MODULES.map((item) => existing.find((entry) => entry.id === item.id) ?? { id: item.id, visible: true })
+  const swipeActions = {
+    tasks: {
+      left: current.swipeActions?.tasks?.left ?? 'complete',
+      right: current.swipeActions?.tasks?.right ?? 'edit',
+    },
+    lists: {
+      left: current.swipeActions?.lists?.left ?? 'complete',
+      right: current.swipeActions?.lists?.right ?? 'edit',
+    },
+  }
   appearance.value = {
     quoteMode: 'daily',
     fixedQuoteIndex: 0,
@@ -79,6 +93,7 @@ function normalize() {
     ...current,
     quotes: Array.isArray(current.quotes) && current.quotes.length ? current.quotes : ['今天也要漂亮通关。'],
     homeModules,
+    swipeActions,
   }
 }
 
@@ -107,4 +122,10 @@ export function resetAppearanceState() {
     targets: JSON.parse(JSON.stringify(defaultTargets)),
   }
   appearance.value = defaultAppearanceValue()
+}
+
+export function resetWallpapersOnly() {
+  wallpaperConfig.value = {
+    targets: JSON.parse(JSON.stringify(defaultTargets)),
+  }
 }

@@ -14,6 +14,15 @@ describe('云同步数据保护', () => {
     expect(result.invalidKeys).toEqual(['sl_timecfg', 'sl_semester'])
   })
 
+  it('允许同步特殊日期，并忽略加密包中的设备元数据字段', () => {
+    const result = sanitizeSyncPayload({
+      sl_schedule_exceptions: [{ id: 'off', date: '2026-10-01', type: 'off' }],
+      __sync_meta: { name: '我的 iPhone' },
+    })
+    expect(result.values.sl_schedule_exceptions).toHaveLength(1)
+    expect(result.invalidKeys).toEqual([])
+  })
+
   it('远程空数组不会删除本机已有记录', () => {
     const local = [{ id: 'local', title: '本机待办' }]
     expect(mergeSyncValue(local, [])).toEqual(local)

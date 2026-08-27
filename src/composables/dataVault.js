@@ -104,6 +104,7 @@ export async function initializeDataVault() {
     const localKeys = Object.keys(localStorage).filter(managedKey)
     const keys = new Set([...localKeys, ...backupMap.keys()])
     const restored = []
+    const pendingMirrors = []
 
     for (const key of keys) {
       if (!managedKey(key)) continue
@@ -115,9 +116,19 @@ export async function initializeDataVault() {
       } else if (localValue !== null) {
         // 空数组可能是正常删除结果，但不应覆盖最后一份非空安全副本。
         if (!backup || !isEmptyCollection(localValue) || isEmptyCollection(backup.value)) {
-          await writeRecord(db, key, localValue)
+          pendingMirrors.push([key, localValue])
         }
       }
+    }
+
+    // 恢复检查完成即可显示页面；安全副本的常规刷新放到后台串行执行，
+    // 避免 iPhone 每次启动都等待多次 IndexedDB 写入。
+    if (pendingMirrors.length) {
+      void (async () => {
+        for (const [key, value] of pendingMirrors) {
+          try { await writeRecord(db, key, value) } catch { /* 下次保存时再补写 */ }
+        }
+      })()
     }
     return restored
   } catch {

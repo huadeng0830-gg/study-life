@@ -3,6 +3,7 @@ export const SYNC_DEFAULTS = {
   sl_course_templates: [],
   sl_timecfg: {},
   sl_semester: { start: '' },
+  sl_schedule_exceptions: [],
   sl_tasks: [],
   sl_exams: [],
   sl_countdown_show_past: false,

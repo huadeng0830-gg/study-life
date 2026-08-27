@@ -3,7 +3,8 @@ import { createRouter, createWebHashHistory } from 'vue-router'
 import './style.css'
 import { initializeDataVault, redirectPreviewOrigin } from './composables/dataVault.js'
 
-const VAULT_STARTUP_BUDGET = 900
+// iPhone 上 IndexedDB 偶尔会延迟打开；安全副本继续后台检查，不阻塞首屏。
+const VAULT_STARTUP_BUDGET = 350
 const PRELOAD_RELOAD_KEY = 'study_life_preload_reload'
 
 function delay(ms) {

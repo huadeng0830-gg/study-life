@@ -6,7 +6,7 @@ import {
 } from './wallpaperStorage.js'
 
 export const TRANSFER_MODULES = {
-  courses: { label: '课程、课表模板与作息', keys: ['sl_courses', 'sl_course_templates', 'sl_timecfg', 'sl_semester'] },
+  courses: { label: '课程、课表模板、作息与特殊日期', keys: ['sl_courses', 'sl_course_templates', 'sl_timecfg', 'sl_semester', 'sl_schedule_exceptions'] },
   tasks: { label: '作业与待办', keys: ['sl_tasks'] },
   countdowns: { label: '考试与倒计时', keys: ['sl_exams', 'sl_countdown_show_past'] },
   lists: { label: '生活清单', keys: ['sl_checklists'] },
@@ -18,7 +18,7 @@ export const TRANSFER_MODULES = {
 }
 
 const ARRAY_KEYS = new Set([
-  'sl_courses', 'sl_course_templates', 'sl_tasks', 'sl_exams', 'sl_checklists',
+  'sl_courses', 'sl_course_templates', 'sl_schedule_exceptions', 'sl_tasks', 'sl_exams', 'sl_checklists',
   'sl_bills', 'sl_food_places', 'sl_food_history',
 ])
 const UNDO_KEY = 'sl_transfer_undo'

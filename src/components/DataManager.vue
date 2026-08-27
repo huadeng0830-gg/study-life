@@ -1,14 +1,17 @@
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, defineAsyncComponent, ref } from 'vue'
 import Modal from './Modal.vue'
-import LocalTransfer from './LocalTransfer.vue'
-import { checkForAppUpdate, updateMessage } from '../composables/appUpdate.js'
+import { checkForAppUpdate, updateChecking, updateMessage } from '../composables/appUpdate.js'
 import { markBackedUp, needsBackup } from '../composables/backupReminder.js'
 import { useCloudSync } from '../composables/cloudSync.js'
+import { deviceProfile, setDeviceName } from '../composables/deviceIdentity.js'
 import {
   exportWallpapersForTransfer,
   importWallpapersFromTransfer,
 } from '../composables/wallpaperStorage.js'
+
+// 二维码生成/扫描依赖体积较大，仅在用户真正打开迁移面板时下载和解析。
+const LocalTransfer = defineAsyncComponent(() => import('./LocalTransfer.vue'))
 
 defineProps({ open: Boolean })
 const emit = defineEmits(['close'])
@@ -26,6 +29,8 @@ const {
   lastError,
   lastSyncedAt,
   remoteUpdatedAt,
+  remoteDevice,
+  lastPushedDevice,
   canUndoPull,
   pull,
   push,
@@ -34,6 +39,17 @@ const {
   clearCode,
 } = useCloudSync()
 const codeInput = ref('')
+const deviceNameInput = ref(deviceProfile.value.name)
+
+function saveCurrentDeviceName() {
+  if (!setDeviceName(deviceNameInput.value)) {
+    error.value = '设备名称不能为空'
+    return
+  }
+  deviceNameInput.value = deviceProfile.value.name
+  error.value = ''
+  message.value = `当前设备已命名为“${deviceProfile.value.name}”`
+}
 
 const STORAGE_KEYS = {
   courses: 'sl_courses',
@@ -44,6 +60,7 @@ const STORAGE_KEYS = {
   bills: 'sl_bills',
   timeConfig: 'sl_timecfg',
   semester: 'sl_semester',
+  scheduleExceptions: 'sl_schedule_exceptions',
   theme: 'sl_theme',
   countdownShowPast: 'sl_countdown_show_past',
   foodPlaces: 'sl_food_places',
@@ -65,7 +82,7 @@ function readStored(key, fallback) {
 function makeBackup() {
   return {
     app: 'study-life',
-    version: 5,
+    version: 6,
     exportedAt: new Date().toISOString(),
     data: {
       courses: readStored(STORAGE_KEYS.courses, []),
@@ -76,6 +93,7 @@ function makeBackup() {
       bills: readStored(STORAGE_KEYS.bills, []),
       timeConfig: readStored(STORAGE_KEYS.timeConfig, null),
       semester: readStored(STORAGE_KEYS.semester, null),
+      scheduleExceptions: readStored(STORAGE_KEYS.scheduleExceptions, []),
       theme: readStored(STORAGE_KEYS.theme, 'blue'),
       countdownShowPast: readStored(STORAGE_KEYS.countdownShowPast, false),
       foodPlaces: readStored(STORAGE_KEYS.foodPlaces, []),
@@ -124,7 +142,7 @@ function sanitizeWallpaperImages(value) {
 }
 
 function validateBackup(value) {
-  if (!value || value.app !== 'study-life' || ![1, 2, 3, 4, 5].includes(value.version) || !value.data) {
+  if (!value || value.app !== 'study-life' || ![1, 2, 3, 4, 5, 6].includes(value.version) || !value.data) {
     throw new Error('这不是有效的控制台备份文件')
   }
   const data = value.data
@@ -142,6 +160,7 @@ function validateBackup(value) {
       bills: Array.isArray(data.bills) ? data.bills : [],
       timeConfig: data.timeConfig && typeof data.timeConfig === 'object' ? data.timeConfig : null,
       semester: data.semester && typeof data.semester === 'object' ? data.semester : null,
+      scheduleExceptions: Array.isArray(data.scheduleExceptions) ? data.scheduleExceptions : [],
       theme: typeof data.theme === 'string' ? data.theme : 'blue',
       countdownShowPast: Boolean(data.countdownShowPast),
       foodPlaces: Array.isArray(data.foodPlaces) ? data.foodPlaces : [],
@@ -181,6 +200,7 @@ const summary = computed(() => {
     courseTemplates: data.courseTemplates.length,
     checklists: data.checklists.length,
     bills: data.bills.length,
+    scheduleExceptions: data.scheduleExceptions.length,
     foodPlaces: data.foodPlaces.length,
     wallpapers: data.__wallpaper_images ? Object.keys(data.__wallpaper_images).length : 0,
   }
@@ -201,6 +221,7 @@ async function restoreBackup() {
     localStorage.setItem(STORAGE_KEYS.bills, JSON.stringify(data.bills))
     if (data.timeConfig) localStorage.setItem(STORAGE_KEYS.timeConfig, JSON.stringify(data.timeConfig))
     if (data.semester) localStorage.setItem(STORAGE_KEYS.semester, JSON.stringify(data.semester))
+    localStorage.setItem(STORAGE_KEYS.scheduleExceptions, JSON.stringify(data.scheduleExceptions))
     localStorage.setItem(STORAGE_KEYS.theme, JSON.stringify(data.theme))
     localStorage.setItem(STORAGE_KEYS.countdownShowPast, JSON.stringify(data.countdownShowPast))
     localStorage.setItem(STORAGE_KEYS.foodPlaces, JSON.stringify(data.foodPlaces))
@@ -261,7 +282,7 @@ function clearCodeAndLocal() {
 <template>
   <Modal :open="open" title="数据备份与恢复" @close="emit('close')">
     <div class="data-manager">
-      <p v-if="needsBackup" class="backup-hint">⚠️ 本地数据可能被 iPhone 系统清空（清理后台、删除图标等）。已超过 7 天未备份，建议先导出一份。</p>
+      <p v-if="needsBackup" class="backup-hint">⚠️ 删除苹果桌面应用或清除 Safari 网站数据可能同时删除本地记录。已超过 7 天未备份，建议先导出一份。</p>
       <section class="data-section">
         <div class="section-icon">↓</div>
         <div class="section-copy">
@@ -275,9 +296,11 @@ function clearCodeAndLocal() {
       <section class="data-section">
         <div class="section-icon update">↻</div>
         <div class="section-copy">
-          <h4>苹果桌面版更新</h4>
-          <p>直接在原桌面应用中检查并更新，不要删除图标重新安装；卸载可能同时删除该桌面应用的本地记录。</p>
-          <button class="btn btn-primary" @click="checkForAppUpdate()">检查并更新</button>
+          <h4>电脑与手机更新</h4>
+          <p>电脑浏览器和苹果桌面版都可以直接检查新版本。更新页面不会删除本地课程和记录。</p>
+          <button class="btn btn-primary" :disabled="updateChecking" @click="checkForAppUpdate()">
+            {{ updateChecking ? '正在更新…' : '检查更新' }}
+          </button>
           <span v-if="updateMessage" class="update-message">{{ updateMessage }}</span>
         </div>
       </section>
@@ -308,8 +331,13 @@ function clearCodeAndLocal() {
         <div class="section-copy">
           <h4>云端同步（可选）</h4>
           <p>输入 6 位访问码，数据 AES-GCM 加密存 Cloudflare KV，多设备自动合并。忘记码 = 数据永久不可恢复。</p>
+          <div class="device-name-row">
+            <label>当前设备</label>
+            <input v-model="deviceNameInput" maxlength="30" placeholder="例如：我的 iPhone" @keydown.enter="saveCurrentDeviceName" />
+            <button class="btn" @click="saveCurrentDeviceName">保存名称</button>
+          </div>
           <div class="sync-input-row">
-            <input v-model="codeInput" type="text" maxlength="6" placeholder="6 位数字" @keydown.enter="verifyCode" />
+            <input v-model="codeInput" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="6" placeholder="6 位数字" @keydown.enter="verifyCode" />
             <button class="btn btn-primary" @click="verifyCode" :disabled="syncStatus === 'pulling' || syncStatus === 'pushing'">
               <span v-if="!code">验证并拉取</span>
               <span v-else-if="syncStatus === 'pulling'">拉取中…</span>
@@ -319,7 +347,8 @@ function clearCodeAndLocal() {
           <div v-if="code" class="sync-status">
             <span v-if="syncStatus === 'error'" class="error">⚠ {{ lastError }}</span>
             <span v-else-if="syncStatus === 'success'" class="success">✓ {{ lastError || '同步完成' }}</span>
-            <span v-else class="muted">{{ syncStatus === 'idle' ? '就绪' : syncStatus }} · 远程更新：{{ remoteUpdatedAt ? new Date(remoteUpdatedAt).toLocaleString() : '无' }} · 本地上次同步：{{ lastSyncedAt ? new Date(lastSyncedAt).toLocaleString() : '无' }}</span>
+            <span v-else class="muted">{{ syncStatus === 'idle' ? '就绪' : syncStatus }} · 云端来源：{{ remoteDevice?.name || '旧版或未知设备' }} · 远程更新：{{ remoteUpdatedAt ? new Date(remoteUpdatedAt).toLocaleString() : '无' }} · 本地上次同步：{{ lastSyncedAt ? new Date(lastSyncedAt).toLocaleString() : '无' }}</span>
+            <span v-if="lastPushedDevice" class="device-history">最近推送：{{ lastPushedDevice.name }} · {{ new Date(lastPushedDevice.pushedAt).toLocaleString() }}</span>
             <div class="sync-actions">
               <button class="btn" @click="pull()" :disabled="syncStatus !== 'idle'">立即拉取</button>
               <button class="btn btn-primary" @click="push" :disabled="syncStatus !== 'idle'">立即推送</button>
@@ -333,6 +362,7 @@ function clearCodeAndLocal() {
       <div v-if="summary" class="restore-preview">
         <b>{{ selectedName }}</b>
         <span>{{ summary.courses }} 门课程</span>
+        <span>{{ summary.scheduleExceptions }} 个特殊日期</span>
         <span>{{ summary.countdowns }} 个倒计时</span>
         <span>{{ summary.tasks }} 项待办</span>
         <span>{{ summary.courseTemplates }} 个课表模板</span>
@@ -347,12 +377,12 @@ function clearCodeAndLocal() {
       <p v-if="error" class="error">{{ error }}</p>
       <p class="local-note">
         数据保存在当前浏览器，并同步保留一份设备内安全副本。换设备或清理浏览器前仍建议导出备份。
-        <b class="ios-warning">iPhone 注意：清理后台后重开、或删除桌面图标，都可能触发系统清空本地数据（安全副本无法幸免）。请养成定期导出备份的习惯，重要数据建议用二维码迁移到第二台设备。</b>
+        <b class="ios-warning">iPhone 注意：从后台划掉应用不会删除记录；删除桌面应用或清除 Safari 网站数据则可能清空本地数据。重要操作前请先导出备份或推送云端。</b>
       </p>
     </div>
   </Modal>
 
-  <LocalTransfer :open="showTransfer" @close="showTransfer = false" />
+  <LocalTransfer v-if="showTransfer" :open="showTransfer" @close="showTransfer = false" />
 </template>
 
 <style scoped>
@@ -446,6 +476,19 @@ function clearCodeAndLocal() {
   color: var(--text);
   font-size: 12px;
 }
+.device-name-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin-top: 4px;
+  padding: 9px;
+  border-radius: 9px;
+  background: var(--bg);
+}
+.device-name-row label { color: var(--muted); font-size: 11px; }
+.device-name-row input { min-width: 0; width: 100%; }
 .sync-input-row {
   display: flex;
   gap: 8px;
@@ -469,6 +512,7 @@ function clearCodeAndLocal() {
   line-height: 1.6;
 }
 .sync-status .muted { color: var(--muted); }
+.device-history { display: block; margin-top: 3px; color: #5e6f85; font-size: 10px; }
 .sync-actions {
   display: flex;
   gap: 8px;
@@ -516,5 +560,15 @@ function clearCodeAndLocal() {
   display: block;
   margin-top: 6px;
   color: #a35e22;
+}
+@media (max-width: 520px) {
+  .data-section { gap: 10px; padding: 12px; }
+  .section-icon { width: 32px; height: 32px; flex-basis: 32px; font-size: 17px; }
+  .section-copy { min-width: 0; width: 100%; }
+  .device-name-row { grid-template-columns: 1fr auto; }
+  .device-name-row label { grid-column: 1 / -1; }
+  .sync-input-row { flex-direction: column; width: 100%; }
+  .sync-input-row .btn { width: 100%; }
+  .sync-actions { display: grid; grid-template-columns: 1fr 1fr; width: 100%; }
 }
 </style>

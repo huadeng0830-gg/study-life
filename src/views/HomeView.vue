@@ -13,13 +13,13 @@ import {
   currentCampusId,
   currentSeasonId,
   weekOf,
-  courseInWeek,
   periodLabelById,
   periodIndex,
   MAX_WEEK,
   todayStr,
   currentTimes,
   clock,
+  coursesForDate,
 } from '../composables/store.js'
 import heroArt from '../assets/hero.png'
 import { appearance, homeModuleState } from '../composables/appearance.js'
@@ -27,6 +27,7 @@ import { appearance, homeModuleState } from '../composables/appearance.js'
 const courses = useStoredRef('sl_courses', [])
 const exams = useStoredRef('sl_exams', [])
 const tasks = useStoredRef('sl_tasks', [])
+const bills = useStoredRef('sl_bills', [])
 const sessionQuoteIndex = Math.floor(Math.random() * Math.max(1, appearance.value.quotes.length))
 
 const now = computed(() => clock.value)
@@ -45,13 +46,8 @@ function greeting() {
   return '晚上好'
 }
 
-const weekCourses = computed(() =>
-  courses.value.filter((c) => courseInWeek(c, weekNum))
-)
-
 const todayCourses = computed(() =>
-  courses.value
-    .filter((c) => c.day === todayIndex() && courseInWeek(c, weekNum))
+  coursesForDate(courses.value, todayStr())
     .sort((a, b) => periodIndex(a.start) - periodIndex(b.start))
 )
 
@@ -116,22 +112,95 @@ function minutesOf(value) {
   return hour * 60 + minute
 }
 
-const nextCourse = computed(() => {
-  const times = currentTimes()
+function dateFromOffset(offset) {
+  const date = new Date(todayStr() + 'T00:00:00')
+  date.setDate(date.getDate() + offset)
+  const pad = (value) => String(value).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+}
+
+const nextUpcomingCourse = computed(() => {
   const currentMinutes = now.value.getHours() * 60 + now.value.getMinutes()
-  const course = todayCourses.value.find((item) => {
-    const end = minutesOf(times[periodIndex(item.end)]?.end)
-    return end === null || end === undefined || end >= currentMinutes
-  })
-  if (!course) return null
-  const start = minutesOf(times[periodIndex(course.start)]?.start)
-  const end = minutesOf(times[periodIndex(course.end)]?.end)
-  return {
-    ...course,
-    status: start !== null && start !== undefined && end !== null && end !== undefined && currentMinutes >= start && currentMinutes <= end
-      ? '正在进行'
-      : `${times[periodIndex(course.start)]?.start ?? ''} 开始`,
+  return todayCourses.value.find((course) => {
+    const start = minutesOf(currentTimes()[periodIndex(course.start)]?.start)
+    return start !== null && start !== undefined && start > currentMinutes
+  }) ?? null
+})
+
+const currentCourse = computed(() => todayCourses.value.find((course) => courseState(course) === 'live') ?? null)
+
+const nextClassCard = computed(() => {
+  if (!todayCourses.value.length) return { value: '今日没有课程', detail: '可以自由安排时间', state: 'free' }
+  if (nextUpcomingCourse.value) {
+    return {
+      value: startTimeOf(nextUpcomingCourse.value),
+      detail: nextUpcomingCourse.value.name,
+      state: 'upcoming',
+    }
   }
+  if (currentCourse.value) {
+    const end = currentTimes()[periodIndex(currentCourse.value.end)]?.end ?? ''
+    return { value: '正在上课', detail: `${currentCourse.value.name}${end ? ` · ${end}结束` : ''}`, state: 'live' }
+  }
+  return { value: '今日课程已结束', detail: '今天的课程已经完成', state: 'done' }
+})
+
+const riskCard = computed(() => {
+  const today = todayStr()
+  const nowTime = now.value.getTime()
+  const overdue = pendingTasks.value.filter((task) => task.dueDate && taskTimestamp(task) < nowTime).length
+  const dueToday = pendingTasks.value.filter((task) => task.dueDate === today && taskTimestamp(task) >= nowTime).length
+  const nearExams = upcomingExams.value.filter((item) => {
+    const date = item.countdown.target
+    if (!date) return false
+    const days = Math.floor((date.getTime() - new Date(today + 'T00:00:00').getTime()) / 86400000)
+    return days >= 0 && days <= 3
+  }).length
+  const nearBills = bills.value.filter((bill) => {
+    if (bill.active === false || !bill.nextDate) return false
+    const days = Math.round((new Date(bill.nextDate + 'T00:00:00') - new Date(today + 'T00:00:00')) / 86400000)
+    return days >= 0 && days <= 3
+  }).length
+  const total = overdue + dueToday + nearExams + nearBills
+  const detail = [
+    overdue ? `${overdue}项逾期` : '',
+    dueToday ? `${dueToday}项今天截止` : '',
+    nearExams ? `${nearExams}个近期事件` : '',
+    nearBills ? `${nearBills}笔近期账单` : '',
+  ].filter(Boolean).join(' · ')
+  return {
+    value: total ? `${total} 项` : '暂无风险',
+    detail: detail || '目前没有紧急事项',
+    urgent: total > 0,
+  }
+})
+
+const weeklyPeak = computed(() => {
+  const days = Array.from({ length: 7 }, (_, offset) => {
+    const date = dateFromOffset(offset)
+    const courseCount = coursesForDate(courses.value, date).length
+    const taskCount = pendingTasks.value.filter((task) => task.dueDate === date).length
+    const examCount = upcomingExams.value.filter((item) => {
+      const target = item.countdown.target
+      if (!target) return false
+      const pad = (value) => String(value).padStart(2, '0')
+      const targetDate = `${target.getFullYear()}-${pad(target.getMonth() + 1)}-${pad(target.getDate())}`
+      return targetDate === date
+    }).length
+    const billCount = bills.value.filter((bill) => bill.active !== false && bill.nextDate === date).length
+    return { date, offset, courseCount, taskCount, examCount, billCount, total: courseCount + taskCount + examCount + billCount }
+  })
+  const peak = days.sort((a, b) => b.total - a.total || a.offset - b.offset)[0]
+  if (!peak?.total) return { value: '本周较轻松', detail: '未来七天没有固定安排' }
+  const date = new Date(peak.date + 'T00:00:00')
+  const label = peak.offset === 0 ? '今天' : ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][date.getDay()]
+  const detail = [
+    peak.courseCount ? `${peak.courseCount}节课` : '',
+    peak.taskCount ? `${peak.taskCount}项截止` : '',
+    peak.examCount ? `${peak.examCount}个事件` : '',
+    peak.billCount ? `${peak.billCount}笔账单` : '',
+  ].filter(Boolean).join(' · ')
+  return { value: `${label}最忙`, detail }
 })
 
 function taskTimestamp(task) {
@@ -142,6 +211,18 @@ function taskTimestamp(task) {
 const nextTask = computed(() =>
   [...pendingTasks.value].sort((a, b) => taskTimestamp(a) - taskTimestamp(b))[0] ?? null
 )
+
+const nextBill = computed(() =>
+  [...bills.value]
+    .filter((bill) => bill.active !== false && bill.nextDate)
+    .sort((a, b) => a.nextDate.localeCompare(b.nextDate))[0] ?? null
+)
+
+function billBrief(bill) {
+  if (!bill) return ''
+  const amount = Number(bill.amount || 0).toFixed(2)
+  return `¥${amount} · ${bill.nextDate.slice(5).replace('-', '月')}日`
+}
 
 function taskDeadline(task) {
   if (!task?.dueDate) return '未设置截止日期'
@@ -250,44 +331,44 @@ function moduleOrder(id) {
     </section>
 
     <div v-if="moduleVisible('stats')" class="stats wide-module" :style="{ order: moduleOrder('stats') }">
-      <div class="stat stat-blue">
-        <div class="stat-icon">01</div>
+      <div class="stat stat-blue" :class="{ urgent: riskCard.urgent }">
+        <div class="stat-icon">!</div>
         <div>
-          <span class="stat-label">本周课程</span>
-          <span class="stat-num">{{ weekCourses.length }}</span>
+          <span class="stat-label">当前风险</span>
+          <span class="stat-num">{{ riskCard.value }}</span>
+          <span class="stat-detail">{{ riskCard.detail }}</span>
         </div>
-        <span class="stat-unit">COURSES</span>
       </div>
-      <div class="stat stat-violet">
-        <div class="stat-icon">02</div>
+      <div class="stat stat-violet" :class="`state-${nextClassCard.state}`">
+        <div class="stat-icon">→</div>
         <div>
-          <span class="stat-label">今日课程</span>
-          <span class="stat-num">{{ todayCourses.length }}</span>
+          <span class="stat-label">下一节课</span>
+          <span class="stat-num">{{ nextClassCard.value }}</span>
+          <span class="stat-detail">{{ nextClassCard.detail }}</span>
         </div>
-        <span class="stat-unit">MISSIONS</span>
       </div>
       <div class="stat stat-orange">
-        <div class="stat-icon">03</div>
+        <div class="stat-icon">7D</div>
         <div>
-          <span class="stat-label">即将到期</span>
-          <span class="stat-num">{{ upcomingExams.length }}</span>
+          <span class="stat-label">未来七天</span>
+          <span class="stat-num">{{ weeklyPeak.value }}</span>
+          <span class="stat-detail">{{ weeklyPeak.detail }}</span>
         </div>
-        <span class="stat-unit">EVENTS</span>
       </div>
     </div>
 
     <section v-if="moduleVisible('focus')" class="focus-grid wide-module" :style="{ order: moduleOrder('focus') }" aria-label="近期重点">
-      <router-link to="/schedule" class="focus-card focus-course">
-        <span class="focus-icon">→</span>
+      <router-link to="/bills" class="focus-card focus-bill">
+        <span class="focus-icon">¥</span>
         <div class="focus-copy">
-          <span class="focus-label">NEXT CLASS · 下一节课</span>
-          <template v-if="nextCourse">
-            <strong>{{ nextCourse.name }}</strong>
-            <small>{{ nextCourse.status }}<template v-if="nextCourse.room"> · {{ nextCourse.room }}</template></small>
+          <span class="focus-label">NEXT BILL · 最近账单</span>
+          <template v-if="nextBill">
+            <strong>{{ nextBill.name }}</strong>
+            <small>{{ billBrief(nextBill) }}</small>
           </template>
           <template v-else>
-            <strong>今天没有后续课程</strong>
-            <small>可以安排自主学习或休息</small>
+            <strong>近期没有固定账单</strong>
+            <small>可以添加订阅或生活缴费</small>
           </template>
         </div>
         <span class="focus-enter">›</span>
@@ -716,28 +797,34 @@ function moduleOrder(id) {
 .stat > div:nth-child(2) {
   display: flex;
   flex-direction: column;
+  min-width: 0;
 }
 .stat-blue { color: #456fe8; }
 .stat-violet { color: #7a55e8; }
 .stat-orange { color: #ef7b45; }
+.stat.urgent { color: var(--danger); border-color: #f3c2c2; }
 .stat-label {
   color: var(--muted);
   font-size: 12px;
   font-weight: 600;
 }
 .stat-num {
+  overflow: hidden;
   color: var(--text);
-  font-size: 28px;
+  font-size: clamp(19px, 2vw, 25px);
   font-weight: 900;
   line-height: 1.1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.stat-unit {
-  margin-left: auto;
-  align-self: flex-end;
-  opacity: 0.55;
-  font-size: 9px;
-  font-weight: 900;
-  letter-spacing: 0.1em;
+.stat-detail {
+  overflow: hidden;
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .focus-grid {
   display: grid;
@@ -1005,10 +1092,6 @@ function moduleOrder(id) {
     flex-basis: 240px;
   }
 
-  .stat-unit {
-    display: none;
-  }
-
   .grid {
     grid-template-columns: 1fr;
   }
@@ -1023,6 +1106,21 @@ function moduleOrder(id) {
 }
 
 @media (max-width: 760px) {
+  .hero-visual img {
+    animation: none;
+    filter: none;
+  }
+
+  .level-orbit::after,
+  .xp-fill::after {
+    animation: none;
+  }
+
+  .hero-meta span,
+  .mission-core {
+    backdrop-filter: none;
+  }
+
   .hero {
     min-height: 0;
     padding: 30px;
@@ -1039,9 +1137,7 @@ function moduleOrder(id) {
     max-width: 520px;
   }
 
-  .stats {
-    grid-template-columns: 1fr;
-  }
+  .stats { grid-template-columns: repeat(3, minmax(230px, 1fr)); overflow-x: auto; padding-bottom: 3px; scroll-snap-type: x proximity; }
 
   .focus-grid {
     grid-template-columns: 1fr;
@@ -1053,10 +1149,7 @@ function moduleOrder(id) {
 
   .stat {
     min-height: 84px;
-  }
-
-  .stat-unit {
-    display: inline;
+    scroll-snap-align: start;
   }
 }
 

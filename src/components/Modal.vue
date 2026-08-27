@@ -16,9 +16,15 @@ function onKeydown(event) {
 watch(
   () => props.open,
   (open) => {
-    if (open) document.addEventListener('keydown', onKeydown)
-    else document.removeEventListener('keydown', onKeydown)
-    document.body.style.overflow = open ? 'hidden' : ''
+    if (open) {
+      document.addEventListener('keydown', onKeydown)
+      document.body.style.overflow = 'hidden'
+      document.body.dataset.modalOpen = 'true'
+    } else {
+      document.removeEventListener('keydown', onKeydown)
+      document.body.style.overflow = ''
+      delete document.body.dataset.modalOpen
+    }
   },
   { immediate: true }
 )
@@ -64,12 +70,14 @@ onBeforeUnmount(() => {
   animation: fade-in 0.16s ease-out;
 }
 .modal {
+  display: flex;
+  flex-direction: column;
   background: #fff;
   border-radius: 14px;
   width: 420px;
   max-width: 100%;
   max-height: 85vh;
-  overflow-y: auto;
+  overflow: hidden;
   box-shadow: 0 10px 40px rgba(30, 40, 80, 0.2);
   animation: modal-in 0.18s ease-out;
 }
@@ -77,6 +85,9 @@ onBeforeUnmount(() => {
   width: min(920px, 100%);
 }
 .modal-head {
+  position: relative;
+  z-index: 2;
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -96,6 +107,10 @@ onBeforeUnmount(() => {
   color: var(--text);
 }
 .modal-body {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
   padding: 18px 22px 22px;
 }
 
@@ -115,8 +130,19 @@ onBeforeUnmount(() => {
 
   .modal {
     width: 100%;
-    max-height: 90vh;
+    max-height: 92vh;
+    max-height: 92dvh;
     border-radius: 18px 18px 0 0;
+  }
+
+  .modal-head {
+    padding: 15px 16px 10px;
+    border-bottom: 1px solid var(--border);
+    background: #fff;
+  }
+
+  .modal-body {
+    padding: 14px 16px calc(18px + env(safe-area-inset-bottom));
   }
 }
 </style>

@@ -1,9 +1,9 @@
 <script setup>
-import { defineAsyncComponent, onMounted, ref } from 'vue'
+import { defineAsyncComponent, ref } from 'vue'
 import { autoWallpaperColor, THEMES, themeKey } from '../composables/theme.js'
 import { needsBackup } from '../composables/backupReminder.js'
 
-// 三个弹窗都按需加载（含二维码库约 100KB），挂载后空闲时预热，首次打开不卡。
+// 工具弹窗严格按需加载。手机端不在后台预载二维码库，避免与页面切换争抢网络和主线程。
 const DataManager = defineAsyncComponent(() => import('./DataManager.vue'))
 const AppearanceSettings = defineAsyncComponent(() => import('./AppearanceSettings.vue'))
 
@@ -29,15 +29,26 @@ const navGroups = [
 const collapsed = ref(false)
 const showDataManager = ref(false)
 const showAppearance = ref(false)
+const checkingUpdate = ref(false)
+const updateNotice = ref('')
+let noticeTimer = 0
 
-onMounted(() => {
-  const warm = () => {
-    void import('./DataManager.vue')
-    void import('./AppearanceSettings.vue')
+async function checkUpdate() {
+  if (checkingUpdate.value) return
+  checkingUpdate.value = true
+  updateNotice.value = '正在检查新版本…'
+  try {
+    const updater = await import('../composables/appUpdate.js')
+    await updater.checkForAppUpdate(true)
+    updateNotice.value = updater.updateMessage.value || '检查完成'
+  } catch {
+    updateNotice.value = '检查失败，请确认网络后重试'
+  } finally {
+    checkingUpdate.value = false
+    window.clearTimeout(noticeTimer)
+    noticeTimer = window.setTimeout(() => { updateNotice.value = '' }, 3500)
   }
-  if ('requestIdleCallback' in window) requestIdleCallback(warm, { timeout: 4000 })
-  else window.setTimeout(warm, 2500)
-})
+}
 
 function chooseTheme(key) {
   autoWallpaperColor.value = false
@@ -81,6 +92,10 @@ function chooseTheme(key) {
         <span class="icon">💾<i v-if="needsBackup" class="backup-dot"></i></span>
         <span class="nav-label">数据管理</span>
       </button>
+      <button type="button" class="nav-item data-item" :disabled="checkingUpdate" @click="checkUpdate">
+        <span class="icon" aria-hidden="true">↻</span>
+        <span class="nav-label">{{ checkingUpdate ? '检查中…' : '更新' }}</span>
+      </button>
     </div>
 
     <div class="theme-row" role="group" aria-label="主题色切换">
@@ -111,7 +126,10 @@ function chooseTheme(key) {
       本地存储 · 可随时备份
       <span class="kbd-hint">按 1-7 快速切换页面</span>
     </div>
+
   </aside>
+
+  <div v-if="updateNotice" class="update-toast" role="status" aria-live="polite">{{ updateNotice }}</div>
 
   <DataManager v-if="showDataManager" :open="showDataManager" @close="showDataManager = false" />
   <AppearanceSettings v-if="showAppearance" :open="showAppearance" @close="showAppearance = false" />
@@ -274,6 +292,21 @@ function chooseTheme(key) {
   opacity: 0.75;
 }
 
+.update-toast {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 100;
+  max-width: min(320px, calc(100vw - 28px));
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--card);
+  color: var(--text);
+  font-size: 12px;
+  box-shadow: var(--shadow-md);
+}
+
 .theme-row {
   display: flex;
   gap: 9px;
@@ -340,6 +373,8 @@ function chooseTheme(key) {
     gap: 2px;
     overflow-x: auto;
     scrollbar-width: none;
+    overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch;
   }
 
   .nav-group {
@@ -364,9 +399,12 @@ function chooseTheme(key) {
     justify-content: center;
     flex-direction: column;
     gap: 2px;
+    min-height: 46px;
     padding: 6px 10px;
     font-size: 12px;
     flex: 0 0 auto;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
   }
 
   .sidebar.collapsed .nav-label,
@@ -383,6 +421,11 @@ function chooseTheme(key) {
 
   .data-item .nav-label {
     font-size: 11px;
+  }
+
+  .update-toast {
+    right: 14px;
+    bottom: calc(112px + env(safe-area-inset-bottom));
   }
 }
 </style>

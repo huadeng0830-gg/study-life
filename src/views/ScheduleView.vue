@@ -32,9 +32,15 @@ import {
   weekOf,
   currentWeek,
   todayStr,
-  courseInWeek,
   weekLabel,
+  scheduleExceptions,
+  dateForWeekDay,
+  scheduleExceptionForDate,
+  coursesForDate,
 } from '../composables/store.js'
+import { parseBatchLine as newParseBatchLine } from '../composables/courseParser.js'
+import { performOCR, getOCRState, cleanupOCR } from '../composables/ocrService.js'
+import { parseTimetableColumns, parseTimetableLayout } from '../composables/timetableLayoutParser.js'
 
 const DAYS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
 
@@ -45,16 +51,21 @@ const showTimeEditor = ref(false)
 const showSemester = ref(false)
 const showBatch = ref(false)
 const showCourseManager = ref(false)
+const showExceptions = ref(false)
 const editingId = ref(null)
 const error = ref('')
 const batchText = ref('')
 const batchError = ref('')
+const ocrSummary = ref('')
+const message = ref('')
 const selectedCourseIds = ref([])
 const templateName = ref('')
 const managerMessage = ref('')
 const managerError = ref('')
+const exceptionError = ref('')
 const semStart = ref(semester.value.start)
 const viewWeek = ref(Math.min(Math.max(currentWeek(), 1), MAX_WEEK))
+const exceptionForm = reactive({ date: todayStr(), type: 'off', sourceDay: 0, note: '' })
 const form = reactive({
   name: '',
   teacher: '',
@@ -396,69 +407,9 @@ function deleteCourseTemplate(template) {
 function openBatch() {
   batchText.value = ''
   batchError.value = ''
+  ocrSummary.value = ''
+  message.value = ''
   showBatch.value = true
-}
-
-function parseDay(value) {
-  const text = String(value ?? '').trim()
-  const chinese = ['一', '二', '三', '四', '五', '六', '日']
-  const chineseIndex = chinese.findIndex((name) => text.includes(name))
-  if (chineseIndex >= 0) return chineseIndex
-  const number = Number(text.match(/[1-7]/)?.[0])
-  return number >= 1 && number <= 7 ? number - 1 : -1
-}
-
-function parseNumberRange(value, min, max, fallbackEnd = null) {
-  const numbers = String(value ?? '').match(/\d+/g)?.map(Number) ?? []
-  if (!numbers.length) return null
-  let start = numbers[0]
-  let end = numbers[1] ?? fallbackEnd ?? start
-  if (end < start) [start, end] = [end, start]
-  if (start < min || end > max) return null
-  return [start, end]
-}
-
-function parseBatchLine(line, sourceIndex) {
-  const cells = (line.includes('\t') ? line.split('\t') : line.split(/[,，]/))
-    .map((cell) => cell.trim())
-  const [name = '', dayText = '', periodText = '', weekText = '', typeText = '', room = '', teacher = ''] = cells
-  const periods = timeConfig.value.periods
-  const day = parseDay(dayText)
-  const period = /早自习/.test(periodText)
-    ? [periods[0]?.id, periods[0]?.id]
-    : (() => {
-        const range = parseNumberRange(periodText, 0, periods.length - 1)
-        return range ? [periods[range[0]]?.id, periods[range[1]]?.id] : null
-      })()
-  const weeks = /全学期/.test(weekText)
-    ? [1, MAX_WEEK]
-    : parseNumberRange(weekText, 1, MAX_WEEK)
-  const typeSource = `${weekText} ${typeText}`
-  const weekType = /单/.test(typeSource) ? 'odd' : /双/.test(typeSource) ? 'even' : 'all'
-  const errors = []
-  if (!name) errors.push('缺少课程名称')
-  if (day < 0) errors.push('星期格式不正确')
-  if (!period || !period[0] || !period[1]) errors.push(`节次应在 1-${periods.length} 之间`)
-  if (!weeks) errors.push(`周次应在 1-${MAX_WEEK} 周之间`)
-
-  return {
-    sourceIndex,
-    cells,
-    error: errors.join('；'),
-    data: errors.length
-      ? null
-      : {
-          name,
-          day,
-          start: period[0],
-          end: period[1],
-          startWeek: weeks[0],
-          endWeek: weeks[1],
-          weekType,
-          room,
-          teacher,
-        },
-  }
 }
 
 const batchRows = computed(() => {
@@ -470,11 +421,12 @@ const batchRows = computed(() => {
   return lines
     .map((line, index) => ({ line, index }))
     .filter(({ line, index }) => !(index === 0 && /课程.*星期/.test(line)))
-    .map(({ line, index }) => parseBatchLine(line, index + 1))
+    .map(({ line, index }) => newParseBatchLine(line, index + 1, timeConfig, MAX_WEEK))
 })
 
 const validBatchCount = computed(() => batchRows.value.filter((row) => row.data).length)
-const invalidBatchCount = computed(() => batchRows.value.length - validBatchCount.value)
+const invalidBatchCount = computed(() => batchRows.value.filter((row) => row.error).length)
+const needsReviewCount = computed(() => batchRows.value.filter((row) => row.needsReview).length)
 
 function importBatch() {
   batchError.value = ''
@@ -489,14 +441,61 @@ function importBatch() {
 
   const stamp = Date.now()
   const initialCount = courses.value.length
+  let importedCount = 0
+
   batchRows.value.forEach((row, index) => {
-    courses.value.push({
-      id: `c${stamp}_${index}`,
-      color: PALETTE[(initialCount + index) % PALETTE.length],
-      ...row.data,
-    })
+    if (row.data) {
+      courses.value.push({
+        id: `c${stamp}_${index}`,
+        color: PALETTE[(initialCount + index) % PALETTE.length],
+        ...row.data,
+      })
+      importedCount++
+    }
   })
+
+  batchText.value = ''
+  batchError.value = ''
+
+  const reviewMsg = needsReviewCount.value > 0 ? `（${needsReviewCount.value} 门课程建议确认）` : ''
+  message.value = `成功导入 ${importedCount} 门课程${reviewMsg}`
+}
+
+function continueBatchImport() {
+  message.value = ''
+  batchText.value = ''
+  ocrSummary.value = ''
+}
+
+function finishBatchImport() {
+  message.value = ''
   showBatch.value = false
+}
+
+async function ocrImage(event) {
+  const file = event.target.files?.[0]
+  if (!file) return
+  if (!file.type.startsWith('image/')) {
+    batchError.value = '请选择图片文件'
+    return
+  }
+  event.target.value = ''
+
+  try {
+    const result = await performOCR(file)
+    const columnTable = parseTimetableColumns(result.columns, timeConfig, MAX_WEEK)
+    const layoutTable = parseTimetableLayout(result.layout, timeConfig, MAX_WEEK)
+    const table = columnTable.courses.length >= layoutTable.courses.length ? columnTable : layoutTable
+    const recognizedText = table.batchText || result.text
+    // 追加到现有文本，避免覆盖用户已经修改过的内容。
+    batchText.value = (batchText.value ? batchText.value + '\n' : '') + recognizedText
+    ocrSummary.value = table.courses.length
+      ? `已按星期分列识别 ${table.courses.length} 门课程${table.detectedHeaders ? `，定位到 ${table.detectedHeaders} 个星期标题` : ''}。请检查预览后再导入。`
+      : '已提取图片文字，但没有可靠识别出表格位置。建议裁掉页面顶部和空白区域后重试，或在文本框中补充星期与节次。'
+    console.log(`[OCR] result: confidence=${result.confidence?.toFixed?.(2)}, words=${result.wordCount}`)
+  } catch (e) {
+    batchError.value = e.message
+  }
 }
 
 const curWeek = computed(() => Math.min(Math.max(currentWeek(), 1), MAX_WEEK))
@@ -518,9 +517,57 @@ function semesterPreview() {
   return weekOf(todayStr())
 }
 
+const viewDates = computed(() => DAYS.map((_, day) => dateForWeekDay(viewWeek.value, day)))
+const viewExceptions = computed(() => viewDates.value.map((date) => scheduleExceptionForDate(date)))
 const visibleCourses = computed(() =>
-  courses.value.filter((c) => courseInWeek(c, viewWeek.value))
+  viewDates.value.flatMap((date) => coursesForDate(courses.value, date))
 )
+
+const sortedExceptions = computed(() =>
+  [...scheduleExceptions.value].sort((a, b) => a.date.localeCompare(b.date))
+)
+
+function courseInstanceKey(course) {
+  return `${course.id}-${course.displayDay ?? course.day}`
+}
+
+function openExceptionManager() {
+  exceptionForm.date = todayStr()
+  exceptionForm.type = 'off'
+  exceptionForm.sourceDay = 0
+  exceptionForm.note = ''
+  exceptionError.value = ''
+  showExceptions.value = true
+}
+
+function saveException() {
+  if (!exceptionForm.date) {
+    exceptionError.value = '请选择特殊日期'
+    return
+  }
+  const value = {
+    id: `exception-${exceptionForm.date}`,
+    date: exceptionForm.date,
+    type: exceptionForm.type,
+    sourceDay: exceptionForm.type === 'makeup' ? Number(exceptionForm.sourceDay) : null,
+    note: exceptionForm.note.trim(),
+    updatedAt: new Date().toISOString(),
+  }
+  const index = scheduleExceptions.value.findIndex((item) => item.date === value.date)
+  if (index >= 0) scheduleExceptions.value[index] = value
+  else scheduleExceptions.value.push(value)
+  exceptionError.value = ''
+  exceptionForm.note = ''
+}
+
+function removeException(id) {
+  scheduleExceptions.value = scheduleExceptions.value.filter((item) => item.id !== id)
+}
+
+function exceptionLabel(item) {
+  if (!item) return ''
+  return item.type === 'makeup' ? `补${DAYS[item.sourceDay] ?? '课'}` : '停课'
+}
 
 const conflictIds = computed(() => {
   const ids = new Set()
@@ -534,13 +581,13 @@ const conflictIds = computed(() => {
       const bStart = periodIndex(b.start)
       const bEnd = periodIndex(b.end)
       if (
-        a.day === b.day &&
+        a.displayDay === b.displayDay &&
         aStart >= 0 && aEnd >= 0 && bStart >= 0 && bEnd >= 0 &&
         aStart <= bEnd &&
         bStart <= aEnd
       ) {
-        ids.add(a.id)
-        ids.add(b.id)
+        ids.add(courseInstanceKey(a))
+        ids.add(courseInstanceKey(b))
       }
     }
   }
@@ -559,7 +606,7 @@ const conflictCount = computed(() => {
       const bStart = periodIndex(b.start)
       const bEnd = periodIndex(b.end)
       if (
-        a.day === b.day &&
+        a.displayDay === b.displayDay &&
         aStart >= 0 && aEnd >= 0 && bStart >= 0 && bEnd >= 0 &&
         aStart <= bEnd &&
         bStart <= aEnd
@@ -639,16 +686,6 @@ function remove() {
   showForm.value = false
 }
 
-function courseAt(day, periodId) {
-  const target = periodIndex(periodId)
-  if (target < 0) return null
-  return visibleCourses.value.find((c) => {
-    const s = periodIndex(c.start)
-    const e = periodIndex(c.end)
-    return c.day === day && s >= 0 && e >= 0 && target >= s && target <= e
-  })
-}
-
 function periodOption(id) {
   const label = periodLabelById(id)
   const t = periodRangeById(id)
@@ -666,6 +703,11 @@ function templateDate(value) {
 }
 
 const todayIdx = computed(() => todayIndex())
+import { onUnmounted } from 'vue'
+
+onUnmounted(() => {
+  cleanupOCR()
+})
 </script>
 
 <template>
@@ -674,6 +716,7 @@ const todayIdx = computed(() => todayIndex())
       <h2>📅 我的课程表</h2>
       <div class="head-btns">
         <button class="btn btn-ghost" @click="openCourseManager">☷ 批量管理</button>
+        <button class="btn btn-ghost" @click="openExceptionManager">🗓 特殊日期</button>
         <button class="btn btn-ghost" @click="showSemester = true">📅 学期设置</button>
         <button class="btn btn-ghost" @click="openTimeSettings">🕐 作息与时间设置</button>
       </div>
@@ -749,7 +792,7 @@ const todayIdx = computed(() => todayIndex())
           class="tt-head"
           :class="{ today: i === todayIdx && viewWeek === curWeek }"
         >
-          {{ d }}<span v-if="i === todayIdx && viewWeek === curWeek" class="today-tag">今天</span>
+          {{ d }}<span v-if="i === todayIdx && viewWeek === curWeek" class="today-tag">今天</span><span v-if="viewExceptions[i]" class="exception-tag" :class="viewExceptions[i].type">{{ exceptionLabel(viewExceptions[i]) }}</span>
         </div>
 
         <template v-for="(row, ri) in timeConfig.periods" :key="row.id">
@@ -769,11 +812,11 @@ const todayIdx = computed(() => todayIndex())
 
         <div
           v-for="c in visibleCourses"
-          :key="c.id"
+          :key="courseInstanceKey(c)"
           class="course"
-          :class="{ conflict: conflictIds.has(c.id) }"
+          :class="{ conflict: conflictIds.has(courseInstanceKey(c)) }"
           :style="{
-            gridColumn: c.day + 2,
+            gridColumn: c.displayDay + 2,
             gridRow: `${periodIndex(c.start) + 2} / ${periodIndex(c.end) + 3}`,
             background: c.color + '18',
             borderLeftColor: c.color,
@@ -981,29 +1024,48 @@ const todayIdx = computed(() => todayIndex())
     <Modal :open="showBatch" title="批量录入课程" wide @close="showBatch = false">
       <div class="batch-import">
         <div class="batch-help">
-          <b>从 Excel、WPS 或表格中复制后直接粘贴</b>
-          <span>每行依次为：课程名称、星期、节次、周次、类型、地点、教师。前四列必填，列之间用制表符或逗号分隔。</span>
+          <b>方式一：粘贴文字</b>（字段顺序不限，分隔符随意）
+          <span>每行一门课，自动识别"周一/星期三"、节次"1-2节/第3节"、周次"1-16周/全学期"、单双周、地点、教师。支持 Tab/逗号/空格/中文标点混用。</span>
         </div>
 
-        <div class="batch-columns" aria-hidden="true">
-          <span>课程名称</span><span>星期</span><span>节次</span><span>周次</span>
-          <span>每周/单周/双周</span><span>地点</span><span>教师</span>
+        <div class="batch-help">
+          <b>方式二：上传教务系统课表截图/照片</b>
+          <span>会读取文字在表格中的位置，自动还原星期、节次、周次、教室和教师。图片不上传服务器，本地完成。</span>
         </div>
 
-        <textarea
-          v-model="batchText"
-          rows="7"
-          placeholder="高等数学, 周一, 1-2, 1-16, 每周, A201, 张老师&#10;大学英语, 周三, 3-4, 1-16, 单周, B305, 李老师"
-          @input="batchError = ''"
-        ></textarea>
+        <div class="batch-input-row">
+          <textarea
+            v-model="batchText"
+            rows="7"
+            placeholder="高等数学 周一 1-2节 1-16周 A201 张老师&#10;大学英语,星期三,3-4,1-16,单周,B305,李老师"
+            @input="batchError = ''"
+            @keydown.stop
+            @click.stop
+            class="batch-textarea"
+          ></textarea>
+          <div class="batch-image-upload" @click.stop>
+            <label class="file-button" for="batch-ocr-input" :class="{ busy: getOCRState().status === 'initializing' || getOCRState().status === 'recognizing' }">
+              <input id="batch-ocr-input" type="file" accept="image/*" @change="ocrImage" hidden />
+              <span v-if="getOCRState().status === 'initializing' || getOCRState().status === 'recognizing'">🔄 {{ getOCRState().stage }}</span>
+              <span v-else>📷 上传图片识别</span>
+            </label>
+            <p class="ocr-hint">支持 PNG/JPG/WebP；长截图会保留小字清晰度，首次识别需加载约 2.5 MB 中文模型</p>
+            <div v-if="getOCRState().status === 'initializing' || getOCRState().status === 'recognizing'" class="ocr-progress">
+              <div class="ocr-progress-bar" :style="{ width: getOCRState().progress + '%' }"></div>
+            </div>
+            <p v-if="getOCRState().error" class="ocr-hint ocr-error-hint">⚠️ {{ getOCRState().error }}（重新选择图片即可重试）</p>
+            <p v-if="ocrSummary" class="ocr-result-hint">{{ ocrSummary }}</p>
+          </div>
+        </div>
 
         <div v-if="batchRows.length" class="batch-preview-wrap">
           <div class="batch-summary">
             <b>导入预览</b>
             <span class="ok-text">{{ validBatchCount }} 行可导入</span>
             <span v-if="invalidBatchCount" class="error-text">{{ invalidBatchCount }} 行需修改</span>
+            <span v-if="needsReviewCount" class="warning-text">{{ needsReviewCount }} 行需要确认</span>
           </div>
-          <div class="batch-table-scroll">
+          <div class="batch-table-scroll batch-desktop-preview">
             <table class="batch-table">
               <thead>
                 <tr>
@@ -1011,33 +1073,95 @@ const todayIdx = computed(() => todayIndex())
                 </tr>
               </thead>
               <tbody>
-                <template v-for="row in batchRows" :key="row.sourceIndex">
-                  <tr :class="{ invalid: row.error }">
-                    <td>{{ row.sourceIndex }}</td>
-                    <td>{{ row.data?.name || row.cells[0] || '—' }}</td>
-                    <td>{{ row.data ? DAYS[row.data.day] : row.cells[1] || '—' }}</td>
-                    <td>{{ row.data ? coursePeriodText(row.data) : row.cells[2] || '—' }}</td>
-                    <td>{{ row.data ? `${row.data.startWeek}-${row.data.endWeek}` : row.cells[3] || '—' }}</td>
-                    <td>{{ row.data ? ({ all: '每周', odd: '单周', even: '双周' }[row.data.weekType]) : row.cells[4] || '—' }}</td>
-                    <td>{{ row.data?.room || row.cells[5] || '—' }}</td>
-                    <td>{{ row.data?.teacher || row.cells[6] || '—' }}</td>
-                  </tr>
-                  <tr v-if="row.error" class="batch-error-row">
-                    <td></td><td colspan="7">{{ row.error }}</td>
-                  </tr>
-                </template>
+<template v-for="row in batchRows" :key="row.sourceIndex">
+                   <tr :class="{ invalid: row.error, needsReview: row.needsReview }">
+                     <td>{{ row.sourceIndex }}</td>
+                     <td>{{ row.data?.name || (row.cells && row.cells[0]) || '—' }}</td>
+                     <td>{{ row.data ? DAYS[row.data.day] : (row.cells && row.cells[1]) || '—' }}</td>
+                     <td>{{ row.data ? coursePeriodText(row.data) : (row.cells && row.cells[2]) || '—' }}</td>
+                     <td>{{ row.data ? `${row.data.startWeek}-${row.data.endWeek}` : (row.cells && row.cells[3]) || '—' }}</td>
+                     <td>{{ row.data ? ({ all: '每周', odd: '单周', even: '双周' }[row.data.weekType]) : (row.cells && row.cells[4]) || '—' }}</td>
+                     <td>{{ row.data?.room || (row.cells && row.cells[5]) || '—' }}</td>
+                     <td>{{ row.data?.teacher || (row.cells && row.cells[6]) || '—' }}</td>
+                   </tr>
+                   <tr v-if="row.error" class="batch-error-row">
+                     <td></td><td colspan="7">
+                       <div class="error-message">
+                         <span class="error-icon">⚠️</span>
+                         <span>{{ row.error }}</span>
+                       </div>
+                     </td>
+                   </tr>
+                   <tr v-if="row.needsReview && !row.error" class="batch-review-row">
+                     <td></td><td colspan="7">
+                       <div class="review-message">
+                         <span class="review-icon">ℹ️</span>
+                         <span>置信度: {{ (row.confidence.score * 100).toFixed(0) }}% (建议确认)</span>
+                       </div>
+                     </td>
+                   </tr>
+                 </template>
               </tbody>
             </table>
+          </div>
+          <div class="batch-mobile-preview">
+            <article
+              v-for="row in batchRows"
+              :key="`mobile-${row.sourceIndex}`"
+              class="batch-mobile-card"
+              :class="{ invalid: row.error, needsReview: row.needsReview }"
+            >
+              <div class="batch-mobile-head">
+                <span>第 {{ row.sourceIndex }} 行</span>
+                <b>{{ row.data?.name || row.cells?.[0] || '未识别课程' }}</b>
+                <em v-if="row.error">需修改</em><em v-else-if="row.needsReview">请确认</em><em v-else class="ok">可导入</em>
+              </div>
+              <dl v-if="row.data">
+                <div><dt>星期</dt><dd>{{ DAYS[row.data.day] }}</dd></div>
+                <div><dt>节次</dt><dd>{{ coursePeriodText(row.data) }}</dd></div>
+                <div><dt>周次</dt><dd>{{ row.data.startWeek }}-{{ row.data.endWeek }}周 · {{ { all: '每周', odd: '单周', even: '双周' }[row.data.weekType] }}</dd></div>
+                <div><dt>地点</dt><dd>{{ row.data.room || '—' }}</dd></div>
+                <div><dt>教师</dt><dd>{{ row.data.teacher || '—' }}</dd></div>
+              </dl>
+              <p v-if="row.error">⚠️ {{ row.error }}</p>
+              <p v-else-if="row.needsReview">ℹ️ 识别结果建议人工确认</p>
+            </article>
           </div>
         </div>
 
         <p v-if="batchError" class="error">{{ batchError }}</p>
-        <div class="actions">
+        <div v-if="message" class="batch-success">
+          <b>✓ {{ message }}</b>
+          <span>课程已经保存在本机，可以继续录入或返回课表检查。</span>
+          <div><button class="btn btn-ghost" @click="continueBatchImport">继续录入</button><button class="btn btn-primary" @click="finishBatchImport">完成并查看课表</button></div>
+        </div>
+        <div v-else class="actions">
           <button class="btn btn-ghost" @click="batchText = ''">清空</button>
           <button class="btn btn-primary" :disabled="!validBatchCount || invalidBatchCount" @click="importBatch">
             导入 {{ validBatchCount }} 门课程
           </button>
         </div>
+      </div>
+    </Modal>
+
+    <Modal :open="showExceptions" title="🗓 节假日与补课" wide @close="showExceptions = false">
+      <div class="exception-editor">
+        <p class="muted-tip">特殊日期只影响指定的一天，不会修改原来的每周课程。补课可以让某天临时按照指定星期显示课程。</p>
+        <div class="exception-form">
+          <label>日期<input v-model="exceptionForm.date" type="date" @input="exceptionError = ''" /></label>
+          <label>安排<select v-model="exceptionForm.type"><option value="off">停课 / 放假</option><option value="makeup">补课</option></select></label>
+          <label v-if="exceptionForm.type === 'makeup'">按照<select v-model.number="exceptionForm.sourceDay"><option v-for="(day, index) in DAYS" :key="day" :value="index">{{ day }}课表</option></select></label>
+          <label class="exception-note">说明<input v-model="exceptionForm.note" placeholder="例如：国庆放假、周六补周一课程" /></label>
+          <button class="btn btn-primary" @click="saveException">保存特殊日期</button>
+        </div>
+        <p v-if="exceptionError" class="error">{{ exceptionError }}</p>
+        <div v-if="sortedExceptions.length" class="exception-list">
+          <div v-for="item in sortedExceptions" :key="item.id" class="exception-item">
+            <div><b>{{ item.date }}</b><span :class="item.type">{{ exceptionLabel(item) }}</span><small>{{ item.note || (item.type === 'makeup' ? `当天按照${DAYS[item.sourceDay]}课表` : '当天课程暂停') }}</small></div>
+            <button class="btn btn-danger" @click="removeException(item.id)">删除</button>
+          </div>
+        </div>
+        <p v-else class="manager-empty">还没有设置特殊日期。</p>
       </div>
     </Modal>
 
@@ -1364,6 +1488,18 @@ const todayIdx = computed(() => todayIndex())
   border-radius: 999px;
   vertical-align: 2px;
 }
+.exception-tag {
+  display: block;
+  width: fit-content;
+  margin: 3px auto 0;
+  padding: 1px 5px;
+  color: #b13f3f;
+  font-size: 9px;
+  font-weight: 800;
+  border-radius: 5px;
+  background: #feecec;
+}
+.exception-tag.makeup { color: #7a55e8; background: #f1ebff; }
 .tt-period {
   display: flex;
   flex-direction: column;
@@ -1770,12 +1906,6 @@ const todayIdx = computed(() => todayIndex())
   border-radius: 6px;
   background: var(--bg);
 }
-.batch-import textarea {
-  width: 100%;
-  min-height: 148px;
-  resize: vertical;
-  line-height: 1.6;
-}
 .batch-preview-wrap {
   overflow: hidden;
   border: 1px solid var(--border);
@@ -1789,6 +1919,158 @@ const todayIdx = computed(() => todayIndex())
   font-size: 12px;
   border-bottom: 1px solid var(--border);
   background: #fafbfd;
+}
+
+.batch-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.batch-table th {
+  text-align: left;
+  padding: 8px 12px;
+  font-weight: 500;
+  color: var(--text);
+  border-bottom: 1px solid var(--border);
+}
+
+.batch-table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+
+.batch-table tr.invalid td {
+  background: #fff0f0;
+  color: #d32f2f;
+}
+
+.batch-table tr.needsReview td {
+  background: #fff8e1;
+  color: #f57c00;
+}
+
+.batch-table tr.invalid td:first-child {
+  background: #ffebee;
+}
+
+.batch-table tr.needsReview td:first-child {
+  background: #fff8e1;
+}
+
+.batch-error-row {
+  background: #fff0f0;
+  color: #d32f2f;
+}
+
+.batch-error-row td {
+  padding: 6px 12px;
+  font-size: 12px;
+}
+
+.batch-review-row {
+  background: #fff8e1;
+  color: #f57c00;
+}
+
+.batch-review-row td {
+  padding: 6px 12px;
+  font-size: 12px;
+}
+
+.error-message {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.error-icon {
+  font-size: 14px;
+}
+
+.review-message {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.review-icon {
+  font-size: 14px;
+}
+
+.ocr-progress {
+  margin-top: 8px;
+  height: 6px;
+  background: #e0e0e0;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.file-button.busy {
+  pointer-events: none;
+  opacity: 0.7;
+}
+
+.ocr-error-hint {
+  color: #d32f2f;
+}
+
+.ocr-progress-bar {
+  height: 100%;
+  background: #4caf50;
+  transition: width 0.3s ease;
+}
+
+.ocr-hint {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 6px;
+}
+
+.batch-table-scroll {
+  max-height: 300px;
+  overflow-y: auto;
+}
+.ocr-result-hint {
+  margin: 2px 0 0;
+  padding: 8px 10px;
+  color: #08785a;
+  font-size: 11px;
+  line-height: 1.55;
+  border: 1px solid #b8e5d7;
+  border-radius: 8px;
+  background: #effbf7;
+}
+.batch-mobile-preview { display: none; }
+.batch-success {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  color: #08785a;
+  border: 1px solid #a7e3d2;
+  border-radius: 12px;
+  background: #effbf7;
+}
+.batch-success span { color: var(--muted); font-size: 12px; line-height: 1.55; }
+.batch-success>div { display: flex; justify-content: flex-end; gap: 8px; }
+
+.batch-table-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+
+.batch-table-scroll::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 3px;
+}
+
+.batch-table-scroll::-webkit-scrollbar-thumb {
+  background: #c1c1c1;
+  border-radius: 3px;
+}
+
+.batch-table-scroll::-webkit-scrollbar-thumb:hover {
+  background: #a8a8a8;
 }
 .ok-text {
   color: #07805d;
@@ -1829,8 +2111,23 @@ const todayIdx = computed(() => todayIndex())
   color: var(--danger);
   background: #fff7f7;
 }
+.exception-editor { display: flex; flex-direction: column; gap: 13px; }
+.exception-form { display: grid; grid-template-columns: 1fr 1fr 1fr; align-items: end; gap: 9px; }
+.exception-form label { display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: 11px; }
+.exception-form input, .exception-form select { width: 100%; }
+.exception-note { grid-column: 1 / 3; }
+.exception-list { display: flex; flex-direction: column; gap: 7px; max-height: 310px; overflow-y: auto; }
+.exception-item { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 11px 12px; border: 1px solid var(--border); border-radius: 10px; background: #fff; }
+.exception-item>div { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; min-width: 0; }
+.exception-item b { font-size: 12px; }
+.exception-item span { padding: 3px 6px; color: #b13f3f; font-size: 9px; font-weight: 800; border-radius: 5px; background: #feecec; }
+.exception-item span.makeup { color: #7a55e8; background: #f1ebff; }
+.exception-item small { width: 100%; color: var(--muted); font-size: 10px; }
 
 @media (max-width: 760px) {
+  .exception-form { grid-template-columns: 1fr 1fr; }
+  .exception-note { grid-column: 1 / -1; }
+  .exception-form>.btn { grid-column: 1 / -1; }
   .head {
     align-items: flex-start;
     flex-direction: column;
@@ -1908,6 +2205,24 @@ const todayIdx = computed(() => todayIndex())
   .warn-banner {
     line-height: 1.55;
   }
+
+  .batch-summary { flex-wrap: wrap; gap: 6px 10px; }
+  .batch-desktop-preview { display: none; }
+  .batch-mobile-preview { display: flex; flex-direction: column; gap: 8px; padding: 9px; }
+  .batch-mobile-card { padding: 10px; border: 1px solid var(--border); border-radius: 10px; background: #fff; }
+  .batch-mobile-card.invalid { border-color: #f3b7b7; background: #fff7f7; }
+  .batch-mobile-card.needsReview:not(.invalid) { border-color: #f1d38b; background: #fffbef; }
+  .batch-mobile-head { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 7px; }
+  .batch-mobile-head span { color: var(--muted); font-size: 10px; }
+  .batch-mobile-head b { overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+  .batch-mobile-head em { padding: 2px 5px; color: var(--danger); font-size: 9px; font-style: normal; border-radius: 5px; background: #feecec; }
+  .batch-mobile-head em.ok { color: #08785a; background: #e8f8f2; }
+  .batch-mobile-card dl { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 10px; margin: 9px 0 0; }
+  .batch-mobile-card dl>div { min-width: 0; }
+  .batch-mobile-card dt { color: var(--muted); font-size: 9px; }
+  .batch-mobile-card dd { overflow: hidden; margin: 1px 0 0; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+  .batch-mobile-card p { margin: 8px 0 0; color: var(--danger); font-size: 10px; line-height: 1.5; }
+  .batch-success>div { display: grid; grid-template-columns: 1fr 1fr; }
 }
 
 /* ---------- 作息与时间设置 ---------- */
@@ -2070,6 +2385,52 @@ const todayIdx = computed(() => todayIndex())
   padding: 7px 12px;
   font-size: 12px;
 }
+
+/* ---------- 批量录入 ---------- */
+.batch-input-row {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.batch-input-row textarea {
+  width: 100%;
+  min-height: 148px;
+  resize: vertical;
+  line-height: 1.6;
+  z-index: 2;
+  pointer-events: auto;
+  position: relative;
+}
+.batch-textarea {
+  box-sizing: border-box;
+}
+.batch-image-upload {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-self: flex-start;
+  z-index: 1;
+}
+.batch-image-upload .file-button {
+  display: inline-flex;
+  align-items: center;
+  padding: 9px 14px;
+  border-radius: 8px;
+  background: var(--primary);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.batch-image-upload .file-button input {
+  display: none;
+}
+.ocr-hint {
+  color: var(--muted);
+  font-size: 11px;
+  margin: 0;
+}
+
 /* ---------- 设置弹窗标签页 ---------- */
 .tab-bar {
   display: flex;

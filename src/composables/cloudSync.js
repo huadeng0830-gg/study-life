@@ -1,6 +1,7 @@
 // 前端云同步：远程数据先校验、再快照、最后写入本机响应式状态。
 import { ref } from 'vue'
 import { decryptData, encryptData } from '../utils/crypto.js'
+import { deviceProfile, encryptedDeviceMeta } from './deviceIdentity.js'
 import {
   SYNC_DEFAULTS,
   SYNC_KEYS,
@@ -11,15 +12,47 @@ import {
 } from './cloudSyncData.js'
 
 const UNDO_KEY = 'study_life_cloud_pull_undo'
+const SYNC_HISTORY_KEY = 'study_life_sync_history'
 
 const code = ref('')
 const syncStatus = ref('idle') // idle | pulling | pushing | success | error
 const lastError = ref('')
 const lastSyncedAt = ref(null)
 const remoteUpdatedAt = ref(null)
+const remoteDevice = ref(readSyncHistory().remoteDevice ?? null)
+const lastPushedDevice = ref(readSyncHistory().lastPushedDevice ?? null)
 const localChanged = ref(false)
 const canUndoPull = ref(readUndo() !== null)
 const remoteWriteKeys = new Set()
+
+function readSyncHistory() {
+  try { return JSON.parse(localStorage.getItem(SYNC_HISTORY_KEY)) ?? {} } catch { return {} }
+}
+
+function saveSyncHistory() {
+  try {
+    localStorage.setItem(SYNC_HISTORY_KEY, JSON.stringify({
+      remoteDevice: remoteDevice.value,
+      lastPushedDevice: lastPushedDevice.value,
+    }))
+  } catch {}
+}
+
+function safeDeviceMeta(meta) {
+  if (!meta || typeof meta !== 'object' || typeof meta.name !== 'string') return null
+  return {
+    id: typeof meta.id === 'string' ? meta.id.slice(0, 80) : '',
+    name: meta.name.trim().slice(0, 30) || '未知设备',
+    pushedAt: typeof meta.pushedAt === 'string' ? meta.pushedAt : '',
+  }
+}
+
+function unpackSyncPackage(value) {
+  if (value?.format === 'study-life-sync' && value.version === 2 && value.values) {
+    return { values: value.values, meta: safeDeviceMeta(value.meta) }
+  }
+  return { values: value, meta: safeDeviceMeta(value?.__sync_meta) }
+}
 
 export function markLocalChanged(key = '') {
   if (key && remoteWriteKeys.delete(key)) return
@@ -111,8 +144,8 @@ async function pull(accessCode = code.value) {
       return showSuccess('云端暂无数据，本机数据未改变')
     }
 
-    const remote = await decryptData(data, accessCode)
-    const { values: validated, invalidKeys } = sanitizeSyncPayload(remote)
+    const remote = unpackSyncPackage(await decryptData(data, accessCode))
+    const { values: validated, invalidKeys } = sanitizeSyncPayload(remote.values)
     if (!Object.keys(validated).length && invalidKeys.length) {
       throw new Error('云端数据全部为旧版异常格式，本机数据未改变')
     }
@@ -122,8 +155,10 @@ async function pull(accessCode = code.value) {
 
     code.value = accessCode
     remoteUpdatedAt.value = updatedAt
+    remoteDevice.value = remote.meta
     lastSyncedAt.value = new Date().toISOString()
     localChanged.value = false
+    saveSyncHistory()
     return showSuccess(
       invalidKeys.length
         ? `已合并可用数据，并跳过 ${invalidKeys.length} 项旧版异常设置`
@@ -145,7 +180,9 @@ async function push() {
     const states = await storedStates()
     const payload = snapshotStates(states)
     validateSyncPayload(payload)
-    const encrypted = await encryptData(payload, code.value)
+    const meta = encryptedDeviceMeta()
+    // 元数据放在保留字段中；旧版客户端会忽略它但仍能读取 sl_* 数据。
+    const encrypted = await encryptData({ ...payload, __sync_meta: meta }, code.value)
 
     const res = await fetch(API.push, {
       method: 'POST',
@@ -156,9 +193,12 @@ async function push() {
     if (!res.ok) throw new Error(await responseError(res, '推送失败'))
     const { updatedAt } = await res.json()
     remoteUpdatedAt.value = updatedAt
+    remoteDevice.value = meta
+    lastPushedDevice.value = { ...meta, pushedAt: updatedAt }
     lastSyncedAt.value = new Date().toISOString()
     localChanged.value = false
-    return showSuccess('已加密推送到云端')
+    saveSyncHistory()
+    return showSuccess(`已从“${deviceProfile.value.name}”加密推送到云端`)
   } catch (error) {
     return showError(error instanceof Error ? error.message : '推送失败')
   }
@@ -199,6 +239,8 @@ export function useCloudSync() {
     lastError,
     lastSyncedAt,
     remoteUpdatedAt,
+    remoteDevice,
+    lastPushedDevice,
     localChanged,
     canUndoPull,
     pull,

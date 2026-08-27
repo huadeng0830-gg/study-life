@@ -1,14 +1,60 @@
 <script setup>
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch, defineComponent } from 'vue'
 import Modal from './Modal.vue'
-import { appearance, HOME_MODULES, resetAppearanceState, WALLPAPER_TARGETS, wallpaperConfig } from '../composables/appearance.js'
-import { autoWallpaperColor, themeKey, wallpaperAccent } from '../composables/theme.js'
+import { appearance, HOME_MODULES, resetAppearanceState, resetWallpapersOnly, WALLPAPER_TARGETS, wallpaperConfig } from '../composables/appearance.js'
+import { autoWallpaperColor, themeKey, wallpaperAccent, customThemeColor, THEMES } from '../composables/theme.js'
 import { clearAllWallpapers, compressWallpaper, getWallpaper, removeWallpaper, setWallpaper, wallpaperRevision } from '../composables/wallpaperStorage.js'
+
+const SwipeActionSelector = defineComponent({
+  props: {
+    modelValue: String,
+    title: String,
+    options: Array,
+    color: String,
+  },
+  emits: ['update:modelValue'],
+  setup(props, { emit }) {
+    const optionColors = {
+      none: 'muted',
+      complete: 'success',
+      edit: 'primary',
+      delete: 'danger',
+    }
+    const optionIcons = {
+      none: '➖',
+      complete: '✅',
+      edit: '✏️',
+      delete: '🗑️',
+    }
+    const colorMap = {
+      success: { bg: '#e7f8f1', border: '#14966d', text: '#07805d' },
+      primary: { bg: '#edf2ff', border: '#456fe8', text: '#365fd2' },
+      danger: { bg: '#feecec', border: '#ef4444', text: '#c0392b' },
+      muted: { bg: '#f3f4f6', border: '#9ca3af', text: '#6b7280' },
+    }
+    return () => {
+      const opt = props.options.find(o => o.id === props.modelValue) || props.options[0]
+      const c = colorMap[optionColors[opt.id] || 'muted']
+      const style = { background: c.bg, borderColor: c.border, color: c.text }
+      return h('div', { class: 'swipe-action-card' }, [
+        h('div', { class: 'swipe-action-title' }, props.title),
+        h('label', { class: 'swipe-action-select-wrap' }, [
+          h('select', {
+            value: props.modelValue,
+            onInput: (e) => emit('update:modelValue', e.target.value),
+            class: 'swipe-action-select',
+            style,
+          }, props.options.map(o => h('option', { value: o.id, key: o.id }, `${optionIcons[o.id] || ''} ${o.label}`))),
+        ]),
+      ])
+    }
+  },
+})
 
 const props = defineProps({ open: Boolean })
 const emit = defineEmits(['close'])
 
-const tab = ref('wallpaper')
+const tab = ref('theme')
 const selectedTarget = ref('global')
 const previewUrl = ref('')
 const hasOwnImage = ref(false)
@@ -18,6 +64,12 @@ const error = ref('')
 const message = ref('')
 const quoteDraft = ref('')
 const draggedModule = ref('')
+const SWIPE_OPTIONS = [
+  { id: 'none', label: '无操作' },
+  { id: 'complete', label: '完成 / 取消完成' },
+  { id: 'edit', label: '编辑' },
+  { id: 'delete', label: '删除（会再次确认）' },
+]
 
 const targetConfig = computed(() => wallpaperConfig.value.targets[selectedTarget.value])
 const isGlobal = computed(() => selectedTarget.value === 'global')
@@ -91,7 +143,7 @@ async function uploadImage(event) {
 }
 
 async function resetAllAppearance() {
-  if (!window.confirm('确定恢复初始外观吗？本机壁纸、励志语、首页排序和页面皮肤都会重置，课程与待办等业务数据不受影响。')) return
+  if (!window.confirm('确定恢复初始外观吗？本机壁纸、励志语、首页排序、页面皮肤和滑动操作都会重置，课程与待办等业务数据不受影响。')) return
   busy.value = true
   error.value = ''
   try {
@@ -118,6 +170,31 @@ async function removeImage() {
   else targetConfig.value.mode = 'inherit'
   message.value = '壁纸已删除'
   await loadPreview()
+}
+
+async function resetCurrentWallpaper() {
+  if (!window.confirm('确定恢复当前页面壁纸为默认设置吗？')) return
+  if (isGlobal.value) {
+    targetConfig.value.enabled = false
+  } else {
+    targetConfig.value.mode = 'inherit'
+  }
+  await removeWallpaper(selectedTarget.value)
+  message.value = '当前页面壁纸已恢复默认'
+  await loadPreview()
+}
+
+async function resetAllWallpapers() {
+  if (!window.confirm('确定恢复所有页面的壁纸为默认设置吗？这会删除所有自定义壁纸图片。')) return
+  busy.value = true
+  try {
+    await clearAllWallpapers()
+    resetWallpapersOnly()
+    message.value = '全部壁纸已恢复默认'
+    await loadPreview()
+  } finally {
+    busy.value = false
+  }
 }
 
 function saveQuotes() {
@@ -165,10 +242,22 @@ const previewStyle = computed(() => ({
 
 <template>
   <Modal :open="open" title="🎨 个性化外观" wide @close="emit('close')">
-    <div class="appearance-tabs"><button :class="{ on: tab === 'wallpaper' }" @click="tab = 'wallpaper'">本地壁纸</button><button :class="{ on: tab === 'quotes' }" @click="tab = 'quotes'">励志语与签名</button><button :class="{ on: tab === 'layout' }" @click="tab = 'layout'">页面布局</button></div>
-    <div class="reset-row"><span>恢复后只重置外观，不会删除课程、待办和账单。</span><button class="reset-button" :disabled="busy" @click="resetAllAppearance">恢复初始外观</button></div>
+    <div class="appearance-tabs"><button :class="{ on: tab === 'theme' }" @click="tab = 'theme'">主题色</button><button :class="{ on: tab === 'wallpaper' }" @click="tab = 'wallpaper'">本地壁纸</button><button :class="{ on: tab === 'quotes' }" @click="tab = 'quotes'">励志语与签名</button><button :class="{ on: tab === 'layout' }" @click="tab = 'layout'">页面布局</button><button :class="{ on: tab === 'swipe' }" @click="tab = 'swipe'">滑动操作</button></div>
+    <div v-if="tab === 'theme'" class="theme-editor">
+      <div class="theme-grid">
+        <label v-for="(theme, key) in THEMES" :key="key" :class="{ on: themeKey === key }">
+          <span class="theme-dot" :style="{ background: theme.primary || 'transparent', border: theme.primary ? 'none' : '2px dashed var(--border)' }"></span>
+          <span class="theme-name">{{ theme.name }}</span>
+        </label>
+      </div>
+      <div v-if="themeKey === 'custom'" class="custom-color-picker">
+        <label>自定义主题色 <input v-model="customThemeColor" type="color" /></label>
+      </div>
+      <div class="divider"></div>
+      <label class="enable-row"><input v-model="autoWallpaperColor" type="checkbox" /> 从壁纸自动提取主题色（开启后覆盖上方选择）</label>
+    </div>
 
-    <div v-if="tab === 'wallpaper'" class="wallpaper-layout">
+    <div v-else-if="tab === 'wallpaper'" class="wallpaper-layout">
       <aside class="target-list"><button v-for="(target, key) in WALLPAPER_TARGETS" :key="key" :class="{ on: selectedTarget === key }" @click="chooseTarget(key)">{{ target.label }}</button></aside>
       <section class="wallpaper-editor">
         <div v-if="!isGlobal" class="mode-row"><button :class="{ on: targetConfig.mode === 'inherit' }" @click="setPageMode('inherit')">跟随全站</button><button :class="{ on: targetConfig.mode === 'own' }" @click="setPageMode('own')">单独设置</button><button :class="{ on: targetConfig.mode === 'none' }" @click="setPageMode('none')">此页关闭</button></div>
@@ -177,7 +266,14 @@ const previewStyle = computed(() => ({
         <div class="wallpaper-preview"><div class="preview-image" :style="previewStyle"></div><div class="preview-overlay" :style="{ opacity: previewSettings.overlay / 100 }"></div><div class="preview-card"><b>{{ WALLPAPER_TARGETS[selectedTarget].label }}</b><span>{{ previewUrl ? imageInfo : '尚未选择图片' }}</span></div></div>
 
         <template v-if="ownMode">
-          <div class="upload-row"><label class="file-button">{{ busy ? '正在压缩…' : '选择本机图片' }}<input type="file" accept="image/*" :disabled="busy" @change="uploadImage" /></label><button v-if="hasOwnImage" class="btn btn-danger" @click="removeImage">删除壁纸</button></div>
+          <div class="upload-row">
+            <label class="file-button primary">
+              <input type="file" accept="image/*" :disabled="busy" @change="uploadImage" hidden />
+              <span v-if="busy">🔄 压缩中…</span>
+              <span v-else>📷 上传照片</span>
+            </label>
+            <button v-if="hasOwnImage" class="btn btn-danger" @click="removeImage">删除壁纸</button>
+          </div>
           <div class="control-grid">
             <label>模糊 <b>{{ targetConfig.blur }}px</b><input v-model.number="targetConfig.blur" type="range" min="0" max="20" /></label>
             <label>亮度 <b>{{ targetConfig.brightness }}%</b><input v-model.number="targetConfig.brightness" type="range" min="50" max="130" /></label>
@@ -187,6 +283,13 @@ const previewStyle = computed(() => ({
             <label>图片适应<select v-model="targetConfig.fit"><option value="auto">智能适应（推荐）</option><option value="cover">始终铺满</option><option value="contain">始终完整显示</option></select></label>
           </div>
         </template>
+
+        <div class="wallpaper-actions">
+          <button class="btn btn-warning" @click="resetAllWallpapers">🖼 一键恢复全部壁纸</button>
+          <span class="action-hint">仅重置壁纸图片与设置，不影响主题色、励志语等其他个性化</span>
+          <button class="btn btn-danger" @click="resetAllAppearance">🔄 一键恢复所有个性化</button>
+          <span class="action-hint">重置壁纸、主题色、励志语、首页排序、页面皮肤和滑动操作等所有个性化设置</span>
+        </div>
 
         <div class="color-row"><label><input v-model="autoWallpaperColor" type="checkbox" /> 使用壁纸自动取色</label><span class="color-swatch" :style="{ background: wallpaperAccent }"></span><input v-model="wallpaperAccent" type="color" aria-label="壁纸主题色" /></div>
         <p class="privacy-note">图片会先在本机压缩，再保存到当前设备；不会上传服务器。二维码迁移时可单独选择是否携带壁纸。</p>
@@ -201,11 +304,65 @@ const previewStyle = computed(() => ({
       <button class="btn btn-primary" @click="saveQuotes">保存文字</button>
     </section>
 
-    <section v-else class="layout-editor">
+    <section v-else-if="tab === 'layout'" class="layout-editor">
       <div><h4>首页模块</h4><p>拖动调整顺序；手机也可以使用上下按钮。</p></div>
       <div class="module-sort"><div v-for="(module, index) in appearance.homeModules" :key="module.id" draggable="true" @dragstart="draggedModule = module.id" @dragover.prevent @drop="dropModule(module.id)"><span class="drag">⠿</span><b>{{ moduleLabel(module.id) }}</b><label><input v-model="module.visible" type="checkbox" /> 显示</label><button :disabled="index === 0" @click="moveModule(module.id, -1)">↑</button><button :disabled="index === appearance.homeModules.length - 1" @click="moveModule(module.id, 1)">↓</button></div></div>
       <div><h4>课表皮肤</h4><p>只改变课表视觉，不影响课程数据。</p></div>
       <div class="skin-options"><label v-for="skin in [{id:'classic',name:'经典表格',icon:'▦'},{id:'notebook',name:'校园笔记',icon:'📒'},{id:'timeline',name:'极简时间轴',icon:'⌁'}]" :key="skin.id" :class="{ on: appearance.scheduleSkin === skin.id }"><input v-model="appearance.scheduleSkin" type="radio" :value="skin.id" /><span>{{ skin.icon }}</span><b>{{ skin.name }}</b></label></div>
+    </section>
+
+    <section v-else class="swipe-editor">
+      <div class="swipe-intro"><h4>手机左右滑动</h4><p>滑过约三分之一张卡片才会执行，删除还会再次确认；电脑端原有点击操作不变。</p></div>
+
+      <div class="swipe-category">
+        <div class="swipe-category-header">
+          <span class="swipe-category-icon">✅</span>
+          <div>
+            <b>作业与待办</b>
+            <span>对单条待办生效</span>
+          </div>
+        </div>
+        <div class="swipe-direction-row">
+          <SwipeActionSelector
+            title="向左滑"
+            v-model="appearance.swipeActions.tasks.left"
+            :options="SWIPE_OPTIONS"
+            :color="'success'"
+          />
+          <SwipeActionSelector
+            title="向右滑"
+            v-model="appearance.swipeActions.tasks.right"
+            :options="SWIPE_OPTIONS"
+            :color="'primary'"
+          />
+        </div>
+      </div>
+
+      <div class="swipe-category">
+        <div class="swipe-category-header">
+          <span class="swipe-category-icon">☑️</span>
+          <div>
+            <b>我的清单</b>
+            <span>对清单中的单个项目生效</span>
+          </div>
+        </div>
+        <div class="swipe-direction-row">
+          <SwipeActionSelector
+            title="向左滑"
+            v-model="appearance.swipeActions.lists.left"
+            :options="SWIPE_OPTIONS"
+            :color="'success'"
+          />
+          <SwipeActionSelector
+            title="向右滑"
+            v-model="appearance.swipeActions.lists.right"
+            :options="SWIPE_OPTIONS"
+            :color="'primary'"
+          />
+        </div>
+      </div>
+
+      <p class="privacy-note">默认设置：向左滑完成，向右滑编辑。选择“无操作”可以关闭某个方向。</p>
     </section>
 
     <p v-if="message" class="success">{{ message }}</p><p v-if="error" class="error">{{ error }}</p>
@@ -213,7 +370,5 @@ const previewStyle = computed(() => ({
 </template>
 
 <style scoped>
-.appearance-tabs{display:flex;gap:5px;margin-bottom:14px;padding:4px;border-radius:10px;background:var(--bg)}.appearance-tabs button{flex:1;padding:9px;border:0;border-radius:7px;background:transparent;color:var(--muted);font-weight:700}.appearance-tabs button.on{background:#fff;color:var(--primary);box-shadow:var(--shadow-sm)}.wallpaper-layout{display:grid;grid-template-columns:145px 1fr;gap:15px}.target-list{display:flex;flex-direction:column;gap:5px}.target-list button,.mode-row button{padding:9px 11px;border:1px solid transparent;border-radius:8px;background:var(--bg);color:var(--muted);text-align:left}.target-list button.on,.mode-row button.on{border-color:var(--primary);background:var(--primary-soft);color:var(--primary);font-weight:700}.wallpaper-editor{display:flex;flex-direction:column;gap:12px}.mode-row{display:flex;gap:6px}.mode-row button{text-align:center}.enable-row{display:flex!important;align-items:center;gap:7px!important;color:var(--text)!important}.wallpaper-preview{position:relative;min-height:220px;overflow:hidden;border:1px solid var(--border);border-radius:15px;background:linear-gradient(135deg,#e8edf8,#cdd8ee)}.preview-image{position:absolute;inset:-10px;background-repeat:no-repeat}.preview-overlay{position:absolute;inset:0;background:#071020}.preview-card{position:absolute;left:18px;bottom:18px;display:flex;flex-direction:column;gap:3px;padding:12px 16px;border:1px solid rgba(255,255,255,.4);border-radius:11px;background:rgba(255,255,255,.83);backdrop-filter:blur(9px)}.preview-card span{color:var(--muted);font-size:10px}.upload-row{display:flex;gap:8px}.file-button{display:inline-flex;align-items:center;padding:9px 14px;border-radius:8px;background:var(--primary);color:#fff;font-size:12px;font-weight:700;cursor:pointer}.file-button input{display:none}.control-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}.control-grid label,.quotes-editor>label,.quote-row label{display:flex;flex-direction:column;gap:5px;color:var(--muted);font-size:11px}.control-grid label b{margin-left:auto;color:var(--text)}.control-grid input[type=range]{width:100%;padding:0}.color-row{display:flex;align-items:center;gap:8px;padding:10px;border-radius:9px;background:var(--bg);font-size:12px}.color-row label{display:flex;align-items:center;gap:6px;margin-right:auto}.color-row input[type=color]{width:34px;height:28px;padding:2px}.color-swatch{width:25px;height:25px;border-radius:50%;box-shadow:0 0 0 2px #fff,0 0 0 3px var(--border)}.privacy-note{color:var(--muted);font-size:10px;line-height:1.55}.quotes-editor,.layout-editor{display:flex;flex-direction:column;gap:13px}.quotes-editor textarea,.quotes-editor input,.quotes-editor select{width:100%}.quotes-editor>.btn{align-self:flex-start}.quote-row{display:grid;grid-template-columns:1fr 1fr;gap:10px}.layout-editor h4{font-size:13px}.layout-editor p{margin-top:3px;color:var(--muted);font-size:10px}.module-sort{display:flex;flex-direction:column;gap:6px}.module-sort>div{display:grid;grid-template-columns:25px 1fr auto 32px 32px;align-items:center;gap:7px;padding:9px;border:1px solid var(--border);border-radius:9px;background:#fff}.module-sort b{font-size:11px}.module-sort label{display:flex;align-items:center;gap:5px;font-size:10px}.module-sort button{height:28px;border:0;border-radius:6px;background:var(--bg)}.drag{color:var(--muted);cursor:grab}.skin-options{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.skin-options label{display:flex;flex-direction:column;align-items:center;gap:5px;padding:13px;border:1px solid var(--border);border-radius:10px;cursor:pointer}.skin-options label.on{border-color:var(--primary);background:var(--primary-soft);color:var(--primary)}.skin-options input{display:none}.skin-options span{font-size:23px}.skin-options b{font-size:11px}.success{margin-top:10px;color:#087a58;font-size:11px}.error{margin-top:10px;color:var(--danger);font-size:11px}
-.reset-row{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:-4px 0 14px;padding:8px 10px;border-radius:8px;background:#fff8f1}.reset-row span{color:#8a6845;font-size:10px}.reset-button{padding:6px 9px;border:1px solid #e9c9aa;border-radius:7px;background:#fff;color:#a35e22;font-size:10px;font-weight:700;white-space:nowrap}.reset-button:disabled{opacity:.5}
-@media(max-width:700px){.wallpaper-layout{grid-template-columns:1fr}.target-list{flex-direction:row;overflow-x:auto}.target-list button{white-space:nowrap}.control-grid,.quote-row{grid-template-columns:1fr}.skin-options{grid-template-columns:1fr}.module-sort>div{grid-template-columns:22px 1fr auto 30px 30px}.wallpaper-preview{min-height:180px}}
+.appearance-tabs{display:flex;gap:5px;margin-bottom:14px;padding:4px;border-radius:10px;background:var(--bg)}.appearance-tabs button{flex:1;padding:9px;border:0;border-radius:7px;background:transparent;color:var(--muted);font-weight:700}.appearance-tabs button.on{background:#fff;color:var(--primary);box-shadow:var(--shadow-sm)}.theme-editor{display:flex;flex-direction:column;gap:16px}.theme-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(80px,1fr));gap:10px}.theme-grid label{display:flex;flex-direction:column;align-items:center;gap:6px;padding:14px 10px;border:2px solid transparent;border-radius:12px;background:var(--bg);color:var(--text);cursor:pointer;transition:all .15s}.theme-grid label:hover{border-color:var(--border)}.theme-grid label.on{border-color:var(--primary);background:var(--primary-soft)}.theme-dot{width:36px;height:36px;border-radius:50%;box-shadow:0 0 0 2px #fff,0 0 0 3px var(--border)}.theme-name{font-size:12px;font-weight:600}.custom-color-picker{padding:10px;border:1px dashed var(--border);border-radius:10px;background:var(--bg)}.custom-color-picker label{display:flex;align-items:center;gap:10px;color:var(--text)}.custom-color-picker input{width:44px;height:44px;border:none;border-radius:8px;cursor:pointer}.divider{height:1px;background:var(--border);margin:4px 0}.wallpaper-layout{display:grid;grid-template-columns:145px 1fr;gap:15px}.target-list{display:flex;flex-direction:column;gap:5px}.target-list button,.mode-row button{padding:9px 11px;border:1px solid transparent;border-radius:8px;background:var(--bg);color:var(--muted);text-align:left}.target-list button.on,.mode-row button.on{border-color:var(--primary);background:var(--primary-soft);color:var(--primary);font-weight:700}.wallpaper-editor{display:flex;flex-direction:column;gap:12px}.mode-row{display:flex;gap:6px}.mode-row button{text-align:center}.enable-row{display:flex!important;align-items:center;gap:7px!important;color:var(--text)!important}.wallpaper-preview{position:relative;min-height:200px;border-radius:10px;overflow:hidden;background:var(--border)}.preview-image{position:absolute;inset:0;background-size:cover;background-position:center;background-repeat:no-repeat;transition:filter .2s}.preview-overlay{position:absolute;inset:0;background:var(--bg)}.preview-card{position:absolute;bottom:12px;left:12px;padding:8px 12px;border-radius:8px;background:rgba(255,255,255,.9);backdrop-filter:blur(4px);color:#1f2937}.preview-card b{display:block;font-size:13px}.preview-card span{display:block;font-size:11px;color:#6b7280}.upload-row{display:flex;gap:8px}.file-button{flex:1;display:flex;align-items:center;justify-content:center;padding:11px 14px;border-radius:8px;background:var(--primary);color:#fff;cursor:pointer;font-weight:600;transition:transform .1s,background .15s}.file-button:active{transform:scale(.97)}.control-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.control-grid>label{display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text)}.control-grid>label>b{margin-left:auto;font-size:11px;color:var(--muted)}.control-grid>label input[type="range"]{flex:1;height:4px;background:var(--border);border-radius:2px;-webkit-appearance:none}.control-grid>label input[type="range"]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;border-radius:50%;background:var(--primary);cursor:pointer}.control-grid>label select{flex:1;padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:var(--card);color:var(--text)}.wallpaper-actions{display:flex;flex-direction:column;gap:8px;padding:10px;border:1px solid var(--border);border-radius:8px;background:var(--bg)}.action-hint{display:block;font-size:11px;color:var(--muted);margin-top:2px}.color-row{display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg)}.color-swatch{width:24px;height:24px;border-radius:4px;border:1px solid var(--border)}.color-row input{width:32px;height:32px;padding:0;border:none;border-radius:4px;background:transparent;cursor:pointer}.quotes-editor{display:flex;flex-direction:column;gap:12px}.quote-row{display:grid;grid-template-columns:1fr 1fr;gap:8px}.quotes-editor textarea{width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);resize:vertical;font-family:inherit}.quotes-editor input[type="text"]{width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--text)}.layout-editor{display:flex;flex-direction:column;gap:12px}.layout-editor>div>p{margin:4px 0 8px;color:var(--muted);font-size:12px}.module-sort{display:flex;flex-direction:column;gap:4px}.module-sort>div{display:grid;grid-template-columns:22px 1fr auto 30px 30px;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;background:var(--bg);cursor:move}.module-sort .drag{color:var(--muted);font-size:12px}.module-sort label{font-size:12px}.module-sort button{padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--bg);color:var(--muted)}.module-sort button:disabled{opacity:.3}.skin-options{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.skin-options label{display:flex;flex-direction:column;align-items:center;gap:6px;padding:14px 10px;border:2px solid transparent;border-radius:10px;background:var(--bg);color:var(--text);cursor:pointer;transition:all .15s}.skin-options label:hover{border-color:var(--border)}.skin-options label.on{border-color:var(--primary);background:var(--primary-soft)}.skin-options label span{font-size:20px}.swipe-editor{display:flex;flex-direction:column;gap:16px}.swipe-intro h4{margin:0 0 4px}.swipe-intro p{margin:0;color:var(--muted);font-size:12px}.swipe-category{display:flex;flex-direction:column;gap:8px;padding:12px;border:1px solid var(--border);border-radius:10px;background:var(--bg)}.swipe-category-header{display:flex;align-items:center;gap:10px}.swipe-category-icon{font-size:20px}.swipe-category-header b{display:block}.swipe-category-header span{display:block;color:var(--muted);font-size:12px}.swipe-direction-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}.swipe-action-card{display:flex;flex-direction:column;gap:8px;padding:12px;border:1px solid var(--border);border-radius:8px;background:var(--card)}.swipe-action-title{font-size:13px;font-weight:600;color:var(--text)}.swipe-action-select-wrap{display:flex;align-items:center}.swipe-action-select{flex:1;padding:8px 10px;border:2px solid transparent;border-radius:6px;background:var(--bg);color:var(--text);font-weight:600;cursor:pointer;transition:border-color .15s}.swipe-action-select:hover{border-color:var(--border)}.privacy-note{margin:8px 0 0;color:var(--muted);font-size:11px;text-align:center}@media(max-width:700px){.appearance-tabs{display:grid;grid-template-columns:1fr 1fr}.wallpaper-layout{grid-template-columns:1fr}.target-list{flex-direction:row;overflow-x:auto}.target-list button{white-space:nowrap}.control-grid,.quote-row{grid-template-columns:1fr}.skin-options{grid-template-columns:1fr}.module-sort>div{grid-template-columns:22px 1fr auto 30px 30px}.wallpaper-preview{min-height:180px}.swipe-direction-row{grid-template-columns:1fr}.theme-grid{grid-template-columns:repeat(3,1fr)}.upload-row{flex-direction:column}.file-button{width:100%;justify-content:center}}
 </style>
