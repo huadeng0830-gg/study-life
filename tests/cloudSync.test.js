@@ -8,14 +8,12 @@ import {
   pullFromCloud,
   pushToCloud,
   remoteRevision,
-  remoteRevision,
 } from '../src/composables/cloudSync.js'
 
 describe('云同步长任务控制', () => {
   beforeEach(() => {
     localStorage.clear()
     code.value = ''
-    remoteRevision.value = null
     remoteRevision.value = null
     connectionState.value = 'disconnected'
     vi.restoreAllMocks()
@@ -35,14 +33,6 @@ describe('云同步长任务控制', () => {
     expect(result.error).toContain('取消')
     expect(fetchMock.mock.calls[0][1].signal.aborted).toBe(true)
     expect(connectionState.value).toBe('disconnected')
-  })
-
-  it('输入访问码只请求 verify metadata，不会拉取或推送业务数据', async () => {
-    const fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({ exists: true, revision: 3, updatedAt: '2026-08-28T00:00:00.000Z', updatedByDeviceName: '我的 iPad' }) }))
-    vi.stubGlobal('fetch', fetchMock)
-    expect(await connectCloud('123456')).toMatchObject({ ok: true, revision: 3 })
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-    expect(fetchMock.mock.calls[0][0]).toBe('/api/auth/verify')
   })
 
   it('输入访问码只请求 verify metadata，不会拉取或推送业务数据', async () => {
@@ -93,13 +83,4 @@ describe('云同步长任务控制', () => {
     expect(fetchMock.mock.calls[0][0]).toBe('/api/auth/verify')
   })
 
-  it('推送前发现 revision 已变化时停止，不发送上传请求', async () => {
-    code.value = '123456'
-    remoteRevision.value = 7
-    const fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({ exists: true, revision: 8, updatedAt: '2026-08-28T00:00:00.000Z', updatedByDeviceName: '我的 iPad' }) }))
-    vi.stubGlobal('fetch', fetchMock)
-    expect(await pushToCloud()).toBe(false)
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-    expect(fetchMock.mock.calls[0][0]).toBe('/api/auth/verify')
-  })
 })

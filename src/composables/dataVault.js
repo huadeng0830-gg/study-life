@@ -10,6 +10,9 @@ function managedKey(key) {
 
 // 应用生命周期内复用同一个连接，避免高频保存时反复开关数据库。
 let vaultPromise = null
+const pendingMirrorWrites = new Map()
+let mirrorTimer = null
+let flushingMirrors = false
 
 function openVault() {
   if (typeof indexedDB === 'undefined') return Promise.resolve(null)
@@ -55,9 +58,13 @@ function requestResult(request) {
   })
 }
 
-async function readRecord(db, key) {
+async function readRecords(db, keys) {
+  if (!keys.length) return new Map()
   const transaction = db.transaction(STORE_NAME, 'readonly')
-  return requestResult(transaction.objectStore(STORE_NAME).get(key))
+  const store = transaction.objectStore(STORE_NAME)
+  const requests = keys.map((key) => [key, requestResult(store.get(key))])
+  const records = await Promise.all(requests.map(async ([key, request]) => [key, await request]))
+  return new Map(records)
 }
 
 async function readAllRecords(db) {
@@ -65,13 +72,21 @@ async function readAllRecords(db) {
   return requestResult(transaction.objectStore(STORE_NAME).getAll())
 }
 
-async function writeRecord(db, key, value) {
+async function writeRecords(db, entries) {
+  if (!entries.length) return
   const transaction = db.transaction(STORE_NAME, 'readwrite')
-  await requestResult(transaction.objectStore(STORE_NAME).put({
-    key,
-    value,
-    updatedAt: new Date().toISOString(),
-  }))
+  const store = transaction.objectStore(STORE_NAME)
+  const updatedAt = new Date().toISOString()
+  for (const [key, value] of entries) store.put({ key, value, updatedAt })
+  await transactionDone(transaction)
+}
+
+function transactionDone(transaction) {
+  return new Promise((resolve, reject) => {
+    transaction.oncomplete = () => resolve()
+    transaction.onabort = () => reject(transaction.error || new Error('本地安全副本写入失败'))
+    transaction.onerror = () => reject(transaction.error || new Error('本地安全副本写入失败'))
+  })
 }
 
 function isEmptyCollection(raw) {
@@ -123,13 +138,7 @@ export async function initializeDataVault() {
 
     // 恢复检查完成即可显示页面；安全副本的常规刷新放到后台串行执行，
     // 避免 iPhone 每次启动都等待多次 IndexedDB 写入。
-    if (pendingMirrors.length) {
-      void (async () => {
-        for (const [key, value] of pendingMirrors) {
-          try { await writeRecord(db, key, value) } catch { /* 下次保存时再补写 */ }
-        }
-      })()
-    }
+    if (pendingMirrors.length) void writeRecords(db, pendingMirrors).catch(() => {})
     return restored
   } catch {
     // IndexedDB 不可用时仍使用 localStorage，避免阻断应用启动。
@@ -137,18 +146,57 @@ export async function initializeDataVault() {
   }
 }
 
-// 每次正常保存时同步一份设备内副本；它不联网，也不会跨设备同步。
-export async function mirrorLocalValue(key, rawValue) {
-  if (!managedKey(key) || rawValue === null || rawValue === undefined) return
+async function flushMirrorWrites() {
+  if (flushingMirrors || !pendingMirrorWrites.size) return
+  flushingMirrors = true
+  const entries = [...pendingMirrorWrites.entries()]
+  pendingMirrorWrites.clear()
   try {
     const db = await openVault()
     if (!db) return
-    const previous = await readRecord(db, key)
-    if (!previous || !isEmptyCollection(rawValue) || isEmptyCollection(previous.value)) {
-      await writeRecord(db, key, rawValue)
-    }
+    const previous = await readRecords(db, entries.map(([key]) => key))
+    const safeEntries = entries.filter(([key, value]) => {
+      const backup = previous.get(key)
+      return !backup || !isEmptyCollection(value) || isEmptyCollection(backup.value)
+    })
+    await writeRecords(db, safeEntries)
   } catch {
     // 影子备份失败不影响本次正常保存。
+  } finally {
+    flushingMirrors = false
+    if (pendingMirrorWrites.size) scheduleMirrorFlush()
+  }
+}
+
+function scheduleMirrorFlush() {
+  if (mirrorTimer !== null) return
+  mirrorTimer = window.setTimeout(() => {
+    mirrorTimer = null
+    void flushMirrorWrites()
+  }, 240)
+}
+
+// 每次正常保存时同步一份设备内副本；同一小段时间内的多个模块会合并为
+// 一次读取和一次 IndexedDB 事务，不再为每个键单独打开读写事务。
+export function mirrorLocalValue(key, rawValue) {
+  if (!managedKey(key) || rawValue === null || rawValue === undefined) return Promise.resolve()
+  pendingMirrorWrites.set(key, rawValue)
+  scheduleMirrorFlush()
+  return Promise.resolve()
+}
+
+// 恢复或批量导入时用一个 IndexedDB 事务提交，避免逐键写入留下半套影子副本。
+export async function mirrorLocalValues(records) {
+  const entries = Object.entries(records || {}).filter(([key, value]) =>
+    managedKey(key) && typeof value === 'string'
+  )
+  if (!entries.length) return
+  try {
+    const db = await openVault()
+    if (!db) return
+    await writeRecords(db, entries)
+  } catch {
+    // 影子备份失败不影响本次恢复；localStorage 仍会保留已恢复的数据。
   }
 }
 

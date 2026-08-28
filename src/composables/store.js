@@ -1,6 +1,6 @@
 import { effectScope, ref, watch } from 'vue'
 import { markLocalChanged } from './cloudSync.js'
-import { mirrorLocalValue } from './dataVault.js'
+import { mirrorLocalValue, mirrorLocalValues } from './dataVault.js'
 
 // 同一个存储键在整个应用中只创建一个响应式引用。
 // 之前每个页面都会创建自己的 ref，导致课程、待办等修改后，
@@ -168,6 +168,29 @@ export function useStoredRef(key, defaultValue) {
     )
   })
   return state
+}
+
+// 备份恢复统一从这里进入：先完成 localStorage 写入，再同步已创建的响应式引用，
+// 最后用一个 IndexedDB 事务更新影子副本，并把本机标记为待同步。
+export async function restoreStoredValues(values) {
+  const entries = Object.entries(values || {}).filter(([key]) => typeof key === 'string' && key.startsWith('sl_'))
+  if (!entries.length) return
+  const rawValues = Object.fromEntries(entries.map(([key, value]) => [key, JSON.stringify(value)]))
+  const previous = Object.fromEntries(entries.map(([key]) => [key, localStorage.getItem(key)]))
+  try {
+    for (const [key, raw] of Object.entries(rawValues)) localStorage.setItem(key, raw)
+    for (const [key, value] of entries) {
+      if (storedRefs.has(key)) storedRefs.get(key).value = value
+    }
+    await mirrorLocalValues(rawValues)
+    markLocalChanged()
+  } catch (error) {
+    for (const [key, raw] of Object.entries(previous)) {
+      if (raw === null) localStorage.removeItem(key)
+      else localStorage.setItem(key, raw)
+    }
+    throw error
+  }
 }
 
 // 同一站点的其他标签页修改数据时，立即更新当前标签页。
@@ -438,7 +461,8 @@ function loadTimeConfig() {
   return defaultTimeConfig()
 }
 
-// 保证每个 季×校区 的时间数组与节次数量对齐，并统一补零为 HH:MM
+// 保证每个 季×校区 的时间数组与节次数量对齐，并统一补零为 HH:MM。
+// 未设置（空）的时间保持为空，绝不静默填充 08:00-08:45 之类的默认值。
 export function normalizeTimes(cfg) {
   const pad = (value) => {
     const [h = '0', m = '00'] = String(value ?? '').split(':')
@@ -452,7 +476,10 @@ export function normalizeTimes(cfg) {
         ? cfg.times[season.id][campus.id]
         : []
       const fixed = cfg.periods.map((_, i) => {
-        const source = list[i] ?? { ...FALLBACK_TIME }
+        const source = list[i]
+        if (!source || (!String(source.start ?? '').trim() && !String(source.end ?? '').trim())) {
+          return { start: '', end: '' }
+        }
         return { start: pad(source.start), end: pad(source.end) }
       })
       cfg.times[season.id][campus.id] = fixed

@@ -28,36 +28,40 @@ function weekdayFromText(text) {
   return match ? DAY_DIGITS[match[1]] : null
 }
 
-function fitDayColumns(layout) {
-  const width = Math.max(1, Number(layout?.width) || 1)
+// Weekday labels are semantic anchors, not a seven-column template. Build
+// bands from their actual locations so uneven, partial and rotated tables do
+// not inherit coordinates from an unrelated layout.
+function detectDayBands(layout) {
   const headers = (layout?.words || [])
     .map((word) => ({ day: weekdayFromText(word.text), x: centerX(word), y: centerY(word) }))
-    .filter((item) => item.day !== null && Number.isFinite(item.x))
+    .filter((item) => item.day !== null && Number.isFinite(item.x) && Number.isFinite(item.y))
+  const pickClosest = (axis) => [...new Map(
+    [...headers].sort((left, right) => left[axis] - right[axis]).map((item) => [item.day, item]),
+  ).values()]
+  const top = pickClosest('y')
+  const left = pickClosest('x')
+  const spread = (items, axis) => items.length > 1
+    ? Math.max(...items.map((item) => item[axis])) - Math.min(...items.map((item) => item[axis]))
+    : 0
+  const orientation = spread(top, 'x') > spread(top, 'y') * 1.8
+    ? 'columns'
+    : spread(left, 'y') > spread(left, 'x') * 1.8 ? 'rows' : 'unknown'
+  const anchors = orientation === 'columns' ? top : orientation === 'rows' ? left : []
+  if (anchors.length < 2) return { orientation: 'unknown', bands: [], detectedHeaders: anchors.length }
 
-  const unique = [...new Map(headers.map((item) => [item.day, item])).values()]
-  let spacing = width * 0.122
-  let firstCenter = width * 0.232
-
-  if (unique.length >= 2) {
-    const meanDay = unique.reduce((sum, item) => sum + item.day, 0) / unique.length
-    const meanX = unique.reduce((sum, item) => sum + item.x, 0) / unique.length
-    const numerator = unique.reduce((sum, item) => sum + (item.day - meanDay) * (item.x - meanX), 0)
-    const denominator = unique.reduce((sum, item) => sum + (item.day - meanDay) ** 2, 0)
-    if (denominator) spacing = numerator / denominator
-    firstCenter = meanX - spacing * meanDay
-  } else if (unique.length === 1) {
-    firstCenter = unique[0].x - spacing * unique[0].day
-  }
-
-  const headerBottom = unique.length
-    ? Math.max(...unique.map((item) => item.y))
-    : (Number(layout?.height) || 1) * 0.22
-
+  const axis = orientation === 'columns' ? 'x' : 'y'
+  const crossAxis = orientation === 'columns' ? 'y' : 'x'
+  const extent = Math.max(1, Number(layout?.[axis === 'x' ? 'width' : 'height']) || 1)
+  const ordered = [...anchors].sort((leftAnchor, rightAnchor) => leftAnchor[axis] - rightAnchor[axis])
   return {
-    centers: Array.from({ length: 7 }, (_, day) => firstCenter + spacing * day),
-    spacing: Math.abs(spacing),
-    headerBottom,
-    detectedHeaders: unique.length,
+    orientation,
+    detectedHeaders: anchors.length,
+    boundary: Math.max(...anchors.map((item) => item[crossAxis])),
+    bands: ordered.map((item, index) => ({
+      day: item.day,
+      start: index ? (ordered[index - 1][axis] + item[axis]) / 2 : 0,
+      end: index < ordered.length - 1 ? (item[axis] + ordered[index + 1][axis]) / 2 : extent,
+    })),
   }
 }
 
@@ -123,6 +127,27 @@ function groupWordsIntoLines(words) {
     })
 }
 
+function groupWordsIntoColumns(words) {
+  const sorted = [...words].sort((a, b) => centerX(a) - centerX(b) || centerY(a) - centerY(b))
+  const widths = sorted
+    .map((word) => Number(word?.bbox?.x1) - Number(word?.bbox?.x0))
+    .filter((width) => width > 0)
+    .sort((a, b) => a - b)
+  const tolerance = Math.max(18, (widths[Math.floor(widths.length / 2)] || 20) * 2.2)
+  const columns = []
+  for (const word of sorted) {
+    const x = centerX(word)
+    let column = columns.find((candidate) => Math.abs(candidate.x - x) <= tolerance)
+    if (!column) {
+      column = { x, words: [] }
+      columns.push(column)
+    }
+    column.words.push(word)
+    column.x = column.words.reduce((sum, item) => sum + centerX(item), 0) / column.words.length
+  }
+  return columns.sort((a, b) => a.x - b.x).map((column) => groupWordsIntoLines(column.words))
+}
+
 function parseWeek(text, maxWeek) {
   const normalized = cleanText(text)
   const match = normalized.match(/(\d{1,2})\s*-\s*(\d{1,2})\s*(?:\((?:单|双)?周\)|(?:单|双)?周)/)
@@ -180,10 +205,10 @@ function parseRecord(lines, day, timeConfig, maxWeek, confidence) {
   if (beforeWeek.length) {
     const last = beforeWeek[beforeWeek.length - 1]
     const tokens = last.split(/\s+/)
-    if (tokens.length > 1 && isTeacherCandidate(tokens[tokens.length - 1])) {
+    if (beforeWeek.length > 1 && tokens.length > 1 && isTeacherCandidate(tokens[tokens.length - 1])) {
       teacher = tokens.pop()
       beforeWeek[beforeWeek.length - 1] = tokens.join(' ')
-    } else if (isTeacherCandidate(last)) {
+    } else if (beforeWeek.length > 1 && isTeacherCandidate(last)) {
       teacher = beforeWeek.pop()
     }
   }
@@ -257,7 +282,7 @@ function recordsForDay(lines, day, timeConfig, maxWeek) {
     const nameParts = stripNoise(before)
       .filter((text) => !parsePeriod(text) && !parseLoosePeriod(text))
     let teacher = ''
-    if (nameParts.length && isTeacherCandidate(nameParts[nameParts.length - 1])) {
+    if (nameParts.length > 1 && isTeacherCandidate(nameParts[nameParts.length - 1])) {
       teacher = nameParts.pop()
     }
     const name = nameParts
@@ -321,7 +346,7 @@ function recordsForDay(lines, day, timeConfig, maxWeek) {
     .map(({ _sourceIndex, ...record }) => record)
 }
 
-function toBatchLine(course) {
+export function toBatchLine(course) {
   const weekType = course.weekType === 'odd' ? '\t单周' : course.weekType === 'even' ? '\t双周' : ''
   const room = course.room ? `\t地点:${course.room}` : ''
   const teacher = course.teacher ? `\t教师:${course.teacher}` : ''
@@ -387,34 +412,46 @@ export function parseTimetableColumns(columns, timeConfig, maxWeek) {
 
 export function parseTimetableLayout(layout, timeConfig, maxWeek) {
   if (!layout?.lines?.length) return { courses: [], batchText: '', detectedHeaders: 0 }
-  const columns = fitDayColumns(layout)
+  const bands = detectDayBands(layout)
+  if (bands.orientation === 'unknown') {
+    return { courses: [], batchText: '', detectedHeaders: bands.detectedHeaders, orientation: bands.orientation, needsReview: true }
+  }
   const byDay = Array.from({ length: 7 }, () => [])
 
-  const sourceItems = (layout.words || []).length >= 12 ? layout.words : layout.lines
+  // A partial screenshot may contain only a few words. Once there are enough
+  // positioned words to form headers plus one record, prefer geometry over
+  // the OCR engine's plain-text reading order.
+  const sourceItems = (layout.words || []).length >= 6 ? layout.words : layout.lines
   for (const rawItem of sourceItems) {
     const item = { ...rawItem, text: cleanText(rawItem.text) }
-    if (!item.text || centerY(item) <= columns.headerBottom) continue
-    const x = centerX(item)
-    const distances = columns.centers.map((center) => Math.abs(center - x))
-    const day = distances.indexOf(Math.min(...distances))
-    if (distances[day] <= columns.spacing * 0.68) byDay[day].push(item)
+    const axisValue = bands.orientation === 'columns' ? centerX(item) : centerY(item)
+    const crossValue = bands.orientation === 'columns' ? centerY(item) : centerX(item)
+    if (!item.text || crossValue <= bands.boundary) continue
+    const band = bands.bands.find((candidate) => axisValue >= candidate.start && axisValue < candidate.end)
+    if (band) byDay[band.day].push(item)
   }
 
-  const courses = byDay.flatMap((items, day) => recordsForDay(
-    sourceItems === layout.words
-      ? groupWordsIntoLines(items)
-      : items.sort((a, b) => centerY(a) - centerY(b) || centerX(a) - centerX(b)),
-    day,
-    timeConfig,
-    maxWeek,
-  ))
+  const courses = byDay.flatMap((items, day) => {
+    if (bands.orientation === 'rows' && sourceItems === layout.words) {
+      return groupWordsIntoColumns(items).flatMap((lines) => recordsForDay(lines, day, timeConfig, maxWeek))
+    }
+    return recordsForDay(
+      sourceItems === layout.words
+        ? groupWordsIntoLines(items)
+        : items.sort((a, b) => centerY(a) - centerY(b) || centerX(a) - centerX(b)),
+      day,
+      timeConfig,
+      maxWeek,
+    )
+  })
 
   const unique = dedupeCourses(courses)
 
   return {
     courses: unique,
     batchText: unique.map(toBatchLine).join('\n'),
-    detectedHeaders: columns.detectedHeaders,
+    detectedHeaders: bands.detectedHeaders,
+    orientation: bands.orientation,
   }
 }
 

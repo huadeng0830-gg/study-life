@@ -1,7 +1,6 @@
 <script setup>
-import { ref, reactive, computed, watch, onBeforeUnmount } from 'vue'
+import { defineAsyncComponent, ref, reactive, computed, watch, onBeforeUnmount } from 'vue'
 import Modal from '../components/Modal.vue'
-import TaskProgress from '../components/TaskProgress.vue'
 import { appearance } from '../composables/appearance.js'
 import {
   useStoredRef,
@@ -46,20 +45,82 @@ import {
   scheduleExceptionForDate,
   coursesForDate,
 } from '../composables/store.js'
-import { parseBatchLine as newParseBatchLine } from '../composables/courseParser.js'
-import { buildImportPlan, classifyImportItems } from '../composables/courseImport.js'
-import { performOCR } from '../composables/ocrService.js'
-import {
-  performOCR as performAccurateOCR,
-} from '../composables/ocrPipeline.js'
-import { parseTimetableColumns, parseTimetableLayout, selectBestTimetableExtraction } from '../composables/timetableLayoutParser.js'
-import { normalizePeriod, parseScheduleOCR } from '../composables/scheduleOcrParser.js'
 import { useTaskProgress } from '../composables/taskProgress.js'
 
 const DAYS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
 
+// 课程表的识图、批量解析和导入规则只会在用户主动打开相应工具后使用。
+// 保持它们为独立异步模块，普通“查看课程表”不再解析这些大块业务代码。
+const TaskProgress = defineAsyncComponent(() => import('../components/TaskProgress.vue'))
+let batchParserApi = null
+let batchParserTask = null
+let courseImportApi = null
+let courseImportTask = null
+let scheduleParserApi = null
+let scheduleParserTask = null
+let recognitionApi = null
+let recognitionTask = null
+
+function loadBatchParser() {
+  if (batchParserApi) return Promise.resolve(batchParserApi)
+  batchParserTask ??= import('../composables/courseParser.js').then((api) => (batchParserApi = api))
+  return batchParserTask
+}
+
+function loadCourseImport() {
+  if (courseImportApi) return Promise.resolve(courseImportApi)
+  courseImportTask ??= import('../composables/courseImport.js').then((api) => (courseImportApi = api))
+  return courseImportTask
+}
+
+function loadScheduleParser() {
+  if (scheduleParserApi) return Promise.resolve(scheduleParserApi)
+  scheduleParserTask ??= import('../composables/scheduleOcrParser.js').then((api) => (scheduleParserApi = api))
+  return scheduleParserTask
+}
+
+function loadRecognition() {
+  if (recognitionApi) return Promise.resolve(recognitionApi)
+  recognitionTask ??= import('../composables/scheduleRecognition.js').then((api) => (recognitionApi = api))
+  return recognitionTask
+}
+
+function schemeDisplayName(...args) { return recognitionApi?.schemeDisplayName(...args) ?? '作息方案' }
+function schemeStatus(...args) { return recognitionApi?.schemeStatus(...args) ?? 'pending' }
+function targetPendingReasonText(...args) { return recognitionApi?.targetPendingReasonText(...args) ?? '正在准备识别结果' }
+
 const courses = useStoredRef('sl_courses', [])
 const courseTemplates = useStoredRef('sl_course_templates', [])
+
+// OCR 引擎、版面解析和本地纠错词典只在用户真正选择图片后才下载。
+// 普通查看/编辑课程表不再为这些重模块付出初始化成本。
+async function performAccurateOCR(...args) {
+  const module = await import('../composables/ocrPipeline.js')
+  return module.performOCR(...args)
+}
+
+async function performLegacyOCR(...args) {
+  const module = await import('../composables/ocrService.js')
+  return module.performOCR(...args)
+}
+
+async function extractTimetable(result) {
+  const parser = await import('../composables/timetableLayoutParser.js')
+  const columnTable = parser.parseTimetableColumns(result.columns, timeConfig, MAX_WEEK)
+  const layoutTable = parser.parseTimetableLayout(result.layout, timeConfig, MAX_WEEK)
+  return { table: parser.selectBestTimetableExtraction(columnTable, layoutTable), toBatchLine: parser.toBatchLine }
+}
+
+async function applyTimetableVocabulary(table) {
+  const { applyOcrVocabulary } = await import('../composables/ocrVocabulary.js')
+  const changes = []
+  table.courses = table.courses.map((course) => {
+    const adjusted = applyOcrVocabulary(course, courses.value)
+    changes.push(...adjusted.changes)
+    return adjusted.course
+  })
+  return changes
+}
 const showForm = ref(false)
 const showTimeEditor = ref(false)
 const showSemester = ref(false)
@@ -323,8 +384,8 @@ function loadPlanDraft(seasonId, campusId) {
   planCampusId.value = campusId
   const list = timeConfig.value.times[seasonId]?.[campusId] ?? []
   draft.value = timeConfig.value.periods.map((_, i) => ({
-    start: list[i]?.start ?? '08:00',
-    end: list[i]?.end ?? '08:45',
+    start: list[i]?.start ?? '',
+    end: list[i]?.end ?? '',
   }))
   draftDirty.value = false
   batchOpen.value = false
@@ -403,7 +464,7 @@ const planSections = computed(() => {
   timeConfig.value.periods.forEach((period, i) => {
     const row = { period, index: i, ...draft.value[i] }
     const minutes = toMinutes(row.start)
-    if (minutes < 12 * 60) groups[0].rows.push(row)
+    if (!Number.isFinite(minutes) || minutes < 12 * 60) groups[0].rows.push(row)
     else if (minutes < 18 * 60) groups[1].rows.push(row)
     else groups[2].rows.push(row)
   })
@@ -483,8 +544,8 @@ function toggleCopy() {
 function copyFrom(seasonId, campusId) {
   const source = timeConfig.value.times[seasonId]?.[campusId] ?? []
   draft.value = timeConfig.value.periods.map((_, i) => ({
-    start: source[i]?.start ?? '08:00',
-    end: source[i]?.end ?? '08:45',
+    start: source[i]?.start ?? '',
+    end: source[i]?.end ?? '',
   }))
   draftDirty.value = true
   copyOpen.value = false
@@ -530,7 +591,7 @@ function previewGenerate() {
       label: periods[i].label,
       from: draft.value[i] ? `${draft.value[i].start}–${draft.value[i].end}` : '',
       to: `${generated[i].start}–${generated[i].end}`,
-      blank: !draft.value[i] || (draft.value[i].start === '08:00' && draft.value[i].end === '08:45'),
+      blank: !draft.value[i] || !draft.value[i].start || !draft.value[i].end || (draft.value[i].start === '08:00' && draft.value[i].end === '08:45'),
     })
   }
   genPreview.value = { rows }
@@ -558,49 +619,50 @@ function toggleGenPreview() {
 const importOpen = ref(false)
 const importTab = ref('paste') // paste | image
 const pasteText = ref('')
-const importRows = ref([]) // [{label,start,end}]
 const importError = ref('')
-const importTargetSeason = ref('')
-const importTargetCampus = ref('')
-const detectedSeasonName = ref('')
-const detectedCampusName = ref('')
-const importAnalysis = ref(null)
-const importSchemeIndex = ref(0)
-const importAssignments = ref([])
 const lastScheduleImage = ref(null)
-const importNormalCount = computed(() => importRows.value.filter((row) => !row.needsReview || row.confirmed).length)
-const importReviewCount = computed(() => importRows.value.length - importNormalCount.value)
-const importSeasonsForCampus = computed(() =>
-  importTargetCampus.value ? seasonsForCampus(importTargetCampus.value, timeConfig.value) : []
+
+// ---- 识别暂存层（recognitionDraft）：确认前绝不写入正式作息 ----
+const recognitionDraft = ref(null)
+const activeSchemeId = ref(null)
+const schemeDetailOpen = ref(false)
+const detailFilter = ref('all') // all | issues
+const importPlanOpen = ref(false)
+const importPlan = ref(null)
+const importPlanOverrides = ref({})
+const planDiffExpanded = ref({})
+const importRunning = ref(false)
+const importProgress = useTaskProgress()
+const lastImportResult = ref(null)
+
+const schemeCount = computed(() => recognitionDraft.value?.schemes.length ?? 0)
+const selectedSchemeCount = computed(() =>
+  recognitionDraft.value?.schemes.filter((scheme) => scheme.selected).length ?? 0
 )
-const importAssignmentState = computed(() => {
-  const assignment = importAssignments.value[importSchemeIndex.value]
-  if (!importTargetCampus.value) return { type: 'missing', text: '无法确定归属，请选择校区和作息季。' }
-  if (!importTargetSeason.value) {
-    if (assignment?.mismatch) {
-      return {
-        type: 'error',
-        text: `识别结果与基础设置不一致：「${assignment.detectedSeasonName}」目前不适用于「${assignment.detectedCampusName}」。`,
-      }
-    }
-    return { type: 'missing', text: '无法确定作息季，请从当前校区的有效作息季中选择。' }
-  }
-  if (assignment?.userConfirmed) {
-    return { type: 'confirmed', text: `将保存到「${seasonName(importTargetSeason.value)} · ${campusName(importTargetCampus.value)}」` }
-  }
-  if (assignment?.preselected) {
-    return { type: 'matched', text: `已根据图片内容预选「${seasonName(importTargetSeason.value)} · ${campusName(importTargetCampus.value)}」` }
-  }
-  return { type: 'bound', text: `归属「${seasonName(importTargetSeason.value)} · ${campusName(importTargetCampus.value)}」` }
+const activeScheme = computed(() =>
+  recognitionDraft.value?.schemes.find((scheme) => scheme.id === activeSchemeId.value) ?? null
+)
+const activeSchemeValidation = computed(() =>
+  activeScheme.value && recognitionApi ? recognitionApi.validateSchemeRows(activeScheme.value, timeConfig.value) : null
+)
+const activeSchemeRows = computed(() => {
+  const scheme = activeScheme.value
+  if (!scheme) return []
+  if (detailFilter.value !== 'issues') return scheme.rows
+  const issues = activeSchemeValidation.value?.rowIssues
+  if (!issues) return []
+  return scheme.rows.filter((row) => issues.has(row.id))
 })
+const activeSchemeIssueCount = computed(() => activeSchemeValidation.value?.issueRowCount ?? 0)
 
 const SCHEDULE_OCR_STEPS = [
-  { id: 'read', label: '读取并检查图片' },
-  { id: 'engine', label: '准备识别引擎' },
-  { id: 'structure', label: '识别表格结构' },
-  { id: 'extract', label: '提取节次与时间' },
-  { id: 'validate', label: '校验异常' },
-  { id: 'preview', label: '生成可编辑预览' },
+  { id: 'read', label: '解析图片' },
+  { id: 'engine', label: 'OCR 识别' },
+  { id: 'structure', label: '恢复作息结构' },
+  { id: 'extract', label: '发现作息组' },
+  { id: 'match', label: '匹配已有配置' },
+  { id: 'validate', label: '时间校验' },
+  { id: 'preview', label: '等待用户确认' },
 ]
 
 const TIMETABLE_OCR_STEPS = [
@@ -638,118 +700,82 @@ function toggleImport() {
   copyOpen.value = false
   genPreview.value = null
   if (importOpen.value) {
-    importTab.value = 'paste'
-    importRows.value = []
     importError.value = ''
-    pasteText.value = ''
-    importAnalysis.value = null
-    importAssignments.value = []
+    importTab.value = recognitionDraft.value ? importTab.value : 'paste'
   }
 }
 
 // 解析作息文本：行 → {label,start,end}；同时嗅探「夏季时间 / 南校区」等标题
-function parseScheduleText(text) {
-  return parseScheduleOCR(text, {
+async function parseScheduleText(text) {
+  const parser = await loadScheduleParser()
+  return parser.parseScheduleOCR(text, {
     campuses: timeConfig.value.campuses,
     seasons: timeConfig.value.seasons,
   })
 }
 
-function createImportAssignment(scheme = {}, index = 0) {
-  const cfg = timeConfig.value
-  const detectedCampus = cfg.campuses.find((campus) => campus.id === scheme.campusId)
-    || cfg.campuses.find((campus) => campus.name === scheme.campus)
-  const detectedSeason = cfg.seasons.find((season) => season.id === scheme.seasonId)
-    || cfg.seasons.find((season) => season.name === scheme.season)
-  const campusReliable = Boolean(detectedCampus && Number(scheme.campusScore || 0) >= 0.82)
-  const seasonReliable = Boolean(detectedSeason && Number(scheme.seasonScore || 0) >= 0.82)
-  const campusId = campusReliable ? detectedCampus.id : cfg.campuses.length === 1 ? cfg.campuses[0].id : ''
-  const available = campusId ? seasonsForCampus(campusId, cfg) : []
-  const mismatch = Boolean(campusReliable && seasonReliable && !seasonAppliesTo(detectedSeason, campusId))
-  let seasonId = seasonReliable && !mismatch && available.some((season) => season.id === detectedSeason.id)
-    ? detectedSeason.id
-    : ''
-  if (!seasonId && !mismatch && available.length === 1) seasonId = available[0].id
-  return {
-    index,
-    campusId,
-    seasonId,
-    mismatch,
-    preselected: Boolean(campusId && seasonId && (campusReliable || seasonReliable)),
-    userConfirmed: false,
-    imported: false,
-    detectedCampusName: scheme.campus || detectedCampus?.name || '',
-    detectedSeasonName: scheme.season || detectedSeason?.name || '',
+function clearRecognition() {
+  recognitionDraft.value = null
+  activeSchemeId.value = null
+  schemeDetailOpen.value = false
+  detailFilter.value = 'all'
+  importPlanOpen.value = false
+  importPlan.value = null
+  importPlanOverrides.value = {}
+  planDiffExpanded.value = {}
+}
+
+function discardRecognition() {
+  clearRecognition()
+  pasteText.value = ''
+  showToast('已放弃本次识别结果，正式作息未受影响')
+}
+
+// 识别结果进入暂存层：此处绝不写入正式作息
+async function startRecognition(analysis, sourceName) {
+  const api = await loadRecognition()
+  const draft = api.buildRecognitionDraft(analysis, timeConfig.value, sourceName)
+  recognitionDraft.value = draft
+  activeSchemeId.value = draft.schemes[0]?.id ?? null
+  schemeDetailOpen.value = false
+  detailFilter.value = 'all'
+  return draft
+}
+
+function countTargetModes(draft) {
+  const modes = { replace: 0, create: 0, pending: 0 }
+  for (const scheme of draft.schemes) {
+    if (scheme.target.mode === 'replace') modes.replace += 1
+    else if (scheme.target.mode === 'create') modes.create += 1
+    else modes.pending += 1
   }
+  return modes
 }
 
-function ensureImportAssignments(analysis) {
-  const schemes = analysis?.schemes?.length ? analysis.schemes : [{ index: 0 }]
-  importAssignments.value = schemes.map((scheme, index) => createImportAssignment(scheme, index))
+function modesText(modes) {
+  const parts = []
+  if (modes.replace) parts.push(`${modes.replace} 组替换`)
+  if (modes.create) parts.push(`${modes.create} 组新建`)
+  if (modes.pending) parts.push(`${modes.pending} 组待确认`)
+  return parts.join(' / ') || '无匹配'
 }
 
-function syncActiveImportAssignment(patch = {}) {
-  const current = importAssignments.value[importSchemeIndex.value]
-  if (!current) return
-  Object.assign(current, {
-    campusId: importTargetCampus.value,
-    seasonId: importTargetSeason.value,
-    ...patch,
-  })
+function recognitionTimeText(createdAt) {
+  const date = new Date(createdAt)
+  if (Number.isNaN(date.getTime())) return ''
+  const pad = (value) => String(value).padStart(2, '0')
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}`
 }
 
-function selectImportCampus(campusId) {
-  importTargetCampus.value = campusId
-  const available = seasonsForCampus(campusId, timeConfig.value)
-  if (!available.some((season) => season.id === importTargetSeason.value)) {
-    importTargetSeason.value = available.length === 1 ? available[0].id : ''
-  }
-  syncActiveImportAssignment({ mismatch: false, preselected: false, userConfirmed: true })
-}
-
-function selectImportSeason(seasonId) {
-  importTargetSeason.value = seasonId
-  syncActiveImportAssignment({ mismatch: false, preselected: false, userConfirmed: true })
-}
-
-function applyImportScheme(index = 0) {
-  const analysis = importAnalysis.value
-  const scheme = analysis?.schemes?.[Number(index)]
-  importSchemeIndex.value = Number(index) || 0
-  importRows.value = (scheme?.rows || analysis?.rows || []).map((row) => ({
-    ...row,
-    confirmed: !row.needsReview,
-  }))
-  if (!importAssignments.value.length) ensureImportAssignments(analysis)
-  const assignment = importAssignments.value[importSchemeIndex.value] || createImportAssignment(scheme, importSchemeIndex.value)
-  importTargetCampus.value = assignment.campusId
-  importTargetSeason.value = assignment.seasonId
-  detectedSeasonName.value = scheme?.season || analysis?.seasons?.[0]?.value || ''
-  detectedCampusName.value = scheme?.campus || analysis?.campuses?.[0]?.value || ''
-}
-
-function importSchemeLabel(scheme) {
-  const assignment = importAssignments.value[scheme.index]
-  if (assignment?.imported) return `✓ 已导入 · ${seasonName(assignment.seasonId)} · ${campusName(assignment.campusId)}`
-  if (assignment?.campusId && assignment?.seasonId) return `✓ ${seasonName(assignment.seasonId)} · ${campusName(assignment.campusId)}`
-  if (assignment?.mismatch) return `⚠ ${assignment.detectedSeasonName} · ${assignment.detectedCampusName}（不适用）`
-  return '⚠ 尚未确定归属'
-}
-
-function acceptImportRow(row) {
-  row.confirmed = true
-}
-
-function runParsePaste() {
+async function runParsePaste() {
   importError.value = ''
-  const analysis = parseScheduleText(pasteText.value)
+  const analysis = await parseScheduleText(pasteText.value)
   if (!analysis.rows.length) {
     importError.value = '没有解析到「节次名称 + 时间段」行，示例：第一节 8:00-8:45'
     return
   }
-  importAnalysis.value = analysis
-  ensureImportAssignments(analysis)
-  applyImportScheme(0)
+  const draft = await startRecognition(analysis, '粘贴文本')
+  showToast(`识别完成 · 共 ${draft.schemes.length} 组作息（${modesText(countTargetModes(draft))}）`)
 }
 
 async function runParseImage(file, mode = 'auto') {
@@ -768,14 +794,28 @@ async function runParseImage(file, mode = 'auto') {
   scheduleOcrProgress.setStep('read', 'running', `正在读取 ${file.name}`)
   try {
     const onProgress = (event) => handleOcrActivity(scheduleOcrProgress, event, 'structure')
-    const result = mode === 'accurate'
-      ? await performAccurateOCR(file, onProgress, { kind: 'schedule', mode: 'accurate', signal: controller.signal })
-      : await performOCR(file, onProgress, { signal: controller.signal })
+    // The layout-aware engine handles ordinary table images as well. It only
+    // compares an enhanced pass when the quality signal warrants it, so the
+    // default path gains reliable row/column recovery without always doing a
+    // second full-page OCR. Keep the legacy engine as a compatibility fallback.
+    let result
+    try {
+      result = await performAccurateOCR(file, onProgress, {
+        kind: 'schedule',
+        mode: mode === 'accurate' ? 'accurate' : 'auto',
+        signal: controller.signal,
+      })
+    } catch (accurateError) {
+      if (accurateError?.name === 'AbortError') throw accurateError
+      scheduleOcrProgress.activity('布局识别暂不可用，正在切换兼容识别')
+      result = await performLegacyOCR(file, onProgress, { signal: controller.signal })
+    }
     scheduleOcrProgress.setStep('read', 'completed', '图片读取完成')
     scheduleOcrProgress.setStep('engine', 'completed', '识别引擎已就绪')
     scheduleOcrProgress.setStep('structure', 'completed', result.structure?.valid ? '表格网格与行结构已恢复' : '已提取文字位置与结构')
-    scheduleOcrProgress.setStep('extract', 'running', '正在提取校区、作息季、节次与时间')
-    const analysis = parseScheduleOCR(result, {
+    scheduleOcrProgress.setStep('extract', 'running', '正在解析节次与作息组')
+    const parser = await loadScheduleParser()
+    const analysis = parser.parseScheduleOCR(result, {
       campuses: timeConfig.value.campuses,
       seasons: timeConfig.value.seasons,
     })
@@ -787,17 +827,18 @@ async function runParseImage(file, mode = 'auto') {
     if (!analysis.rows.length) {
       throw new Error('节次时间提取失败：已识别文字，但未能可靠恢复“节次—时间”结构')
     }
-    scheduleOcrProgress.setStep('extract', 'completed', `已提取 ${analysis.rows.length} 个节次`)
-    scheduleOcrProgress.setStep('validate', 'running', '正在检查时间顺序、缺失节次和列对应')
-    importAnalysis.value = analysis
-    ensureImportAssignments(analysis)
-    scheduleOcrProgress.setStep('validate', analysis.reviewCount ? 'warning' : 'completed', analysis.reviewCount ? `${analysis.reviewCount} 项建议确认` : '结构与时间顺序检查通过')
-    scheduleOcrProgress.setStep('preview', 'running', '正在生成可编辑结果')
-    applyImportScheme(0)
-    scheduleOcrProgress.setStep('preview', 'completed', '可编辑预览已生成')
+    const schemeTotal = analysis.schemes?.length || 1
+    scheduleOcrProgress.setStep('extract', 'completed', `发现 ${schemeTotal} 组作息`)
+    scheduleOcrProgress.setStep('match', 'running', '正在匹配校区与作息方案')
+    const draft = await startRecognition(analysis, file.name)
+    scheduleOcrProgress.setStep('match', 'completed', modesText(countTargetModes(draft)))
+    scheduleOcrProgress.setStep('validate', 'running', '正在检查时间冲突与缺失')
+    const reviewSchemes = draft.schemes.filter((scheme) => schemeStatus(scheme, timeConfig.value) !== 'ready').length
+    scheduleOcrProgress.setStep('validate', reviewSchemes ? 'warning' : 'completed', reviewSchemes ? `${reviewSchemes} 组存在待确认项` : '全部通过')
+    scheduleOcrProgress.setStep('preview', 'completed', '等待用户确认')
     scheduleOcrProgress.finish(
-      analysis.reviewCount ? `识别完成，${analysis.reviewCount} 项建议确认` : '识别完成，可检查后保存',
-      analysis.reviewCount ? 'warning' : 'completed',
+      reviewSchemes ? `识别完成 · 共 ${draft.schemes.length} 组作息，${reviewSchemes} 组需要确认` : `识别完成 · 共发现 ${draft.schemes.length} 组作息`,
+      reviewSchemes ? 'warning' : 'completed',
     )
     if (result.quality?.warnings?.length) importError.value = `图片质量提示：${result.quality.warnings.join('、')}。精准模式已比较原图、增强图和表格行。`
   } catch (e) {
@@ -809,7 +850,7 @@ async function runParseImage(file, mode = 'auto') {
       scheduleOcrProgress.setStep('engine', 'completed', '识别引擎已启动')
     }
     const extractionStarted = scheduleOcrProgress.state.steps.some((step) => step.id === 'extract' && step.status === 'running')
-    scheduleOcrProgress.fail(engineFailed ? 'engine' : extractionStarted ? 'extract' : 'structure', importError.value, { retainedResult: importRows.value.length > 0 })
+    scheduleOcrProgress.fail(engineFailed ? 'engine' : extractionStarted ? 'extract' : 'structure', importError.value, { retainedResult: Boolean(recognitionDraft.value?.schemes.length) })
   } finally {
     if (scheduleOcrController === controller) scheduleOcrController = null
   }
@@ -831,88 +872,243 @@ function onImportImage(event) {
   void runParseImage(file)
 }
 
-function addImportRow() {
-  importRows.value.push({ label: '', start: '08:00', end: '08:45' })
-}
-function removeImportRow(index) {
-  importRows.value.splice(index, 1)
-}
+/* ---------- 识别结果总览 / 详情编辑 ---------- */
 
-function importTargetIndex(row, fallbackIndex, periods, rowCount) {
-  const exact = periods.findIndex((period) => period.label.trim() === row.label.trim())
-  if (exact >= 0) return exact
-  const parsedRow = normalizePeriod(row.label)
-  if (parsedRow) {
-    const normalized = periods.findIndex((period) => {
-      const parsedPeriod = normalizePeriod(period.label)
-      return parsedPeriod?.key === parsedRow.key || parsedPeriod?.label === parsedRow.label
-    })
-    if (normalized >= 0) return normalized
-  }
-  return rowCount === periods.length ? fallbackIndex : -1
+function toggleSchemeSelected(scheme) {
+  scheme.selected = !scheme.selected
 }
 
-// 确认导入只写入用户选定的真实「校区 × 作息季」，不会创建规则或改变课程表模式。
-function confirmImport() {
-  importError.value = ''
-  const rows = importRows.value.filter((row) => row.label.trim() && row.start && row.end)
-  if (!rows.length) { importError.value = '至少保留一行有效数据'; return }
-  const invalidTime = rows.find((row) => row.start >= row.end)
-  if (invalidTime) { importError.value = `${invalidTime.label}的开始时间必须早于结束时间`; return }
-  const unconfirmed = rows.filter((row) => row.needsReview && !row.confirmed)
-  if (unconfirmed.length) { importError.value = `还有 ${unconfirmed.length} 项低置信度结果未确认，请先修改或点击“确认无误”`; return }
+function openSchemeDetail(schemeId) {
+  activeSchemeId.value = schemeId
+  detailFilter.value = 'all'
+  schemeDetailOpen.value = true
+}
 
+function closeSchemeDetail() {
+  schemeDetailOpen.value = false
+}
+
+// 用户调整目标（校区/作息方案/新建名称）后重新推导 replace/create/pending
+function updateSchemeTarget(scheme, patch = {}) {
   const cfg = timeConfig.value
-  const seasonId = importTargetSeason.value
-  const campusId = importTargetCampus.value
-  const season = cfg.seasons.find((item) => item.id === seasonId)
-  const campus = cfg.campuses.find((item) => item.id === campusId)
-  if (!campus || !season) { importError.value = '请先选择识别结果所属的校区和作息季'; return }
-  if (!seasonAppliesTo(season, campusId)) {
-    importError.value = `识别结果与基础设置不一致：「${season.name}」目前不适用于「${campus.name}」`
-    return
+  const target = scheme.target
+  Object.assign(target, patch)
+  if (target.campusId && target.seasonId) {
+    const season = cfg.seasons.find((item) => item.id === target.seasonId)
+    if (season && !seasonAppliesTo(season, target.campusId)) target.seasonId = ''
   }
-
-  const mapped = rows.map((row, index) => ({
-    row,
-    index: importTargetIndex(row, index, cfg.periods, rows.length),
-  }))
-  const unmapped = mapped.filter((item) => item.index < 0)
-  if (unmapped.length) {
-    importError.value = `以下节次在基础设置中不存在：${unmapped.map((item) => item.row.label).join('、')}。请先完善基础设置中的节次。`
-    return
+  const hasCampus = Boolean(target.campusId) || Boolean(String(target.newCampusName ?? '').trim())
+  const hasSeason = Boolean(target.seasonId) || Boolean(String(target.newSeasonName ?? '').trim())
+  if (target.seasonId && target.campusId) {
+    target.mode = 'replace'
+    target.reason = 'ok'
+  } else if (hasCampus && hasSeason) {
+    target.mode = 'create'
+    target.reason = 'manual'
+  } else {
+    target.mode = 'pending'
+    target.reason = hasCampus ? 'no-season' : 'no-campus'
   }
-  if (new Set(mapped.map((item) => item.index)).size !== mapped.length) {
-    importError.value = '识别结果中有多个条目指向同一节次，请检查节次名称'
-    return
+}
+
+function pickSchemeCampus(scheme, campusId) {
+  updateSchemeTarget(scheme, { campusId, newCampusName: '' })
+}
+
+function pickSchemeSeason(scheme, seasonId) {
+  updateSchemeTarget(scheme, { seasonId, newSeasonName: '' })
+}
+
+function startNewCampus(scheme) {
+  updateSchemeTarget(scheme, { campusId: '', newCampusName: scheme.detectedCampus || '' })
+}
+
+function startNewSeason(scheme) {
+  updateSchemeTarget(scheme, { seasonId: '', newSeasonName: scheme.detectedSeason || '' })
+}
+
+function onSchemeRowInput(row) {
+  row.confirmed = true
+}
+
+function addSchemeRow(scheme) {
+  scheme.rows.push({
+    id: `row-manual-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+    key: '',
+    label: '',
+    periodStart: null,
+    periodEnd: null,
+    start: '',
+    end: '',
+    confidence: 'low',
+    score: 0,
+    source: 'manual',
+    sourceIssues: [],
+    confirmed: false,
+  })
+}
+
+function removeSchemeRow(scheme, index) {
+  scheme.rows.splice(index, 1)
+}
+
+function rowIssuesFor(row) {
+  return activeSchemeValidation.value?.rowIssues.get(row.id) ?? []
+}
+
+function schemeStatusBadge(scheme) {
+  const cfg = timeConfig.value
+  const status = schemeStatus(scheme, cfg)
+  if (status === 'pending') return { icon: '⚠', text: '映射待确认', cls: 'warn' }
+  const validation = recognitionApi?.validateSchemeRows(scheme, cfg)
+  if (status === 'blocked') return { icon: '⚠', text: `${validation.hardRowCount} 项待处理`, cls: 'warn' }
+  if (status === 'review') return { icon: '⚠', text: `${validation.issueRowCount} 项待确认`, cls: 'warn' }
+  const label = schemeDisplayName(scheme, cfg)
+  return scheme.target.mode === 'replace'
+    ? { icon: '✓', text: `替换「${label}」`, cls: 'ok' }
+    : { icon: '✓', text: `新建「${label}」`, cls: 'ok' }
+}
+
+function schemeReplaceChanged(scheme) {
+  if (scheme.target.mode !== 'replace') return 0
+  return recognitionApi?.buildReplaceDiff(scheme, timeConfig.value).changedCount ?? 0
+}
+
+const activeSchemeForQuick = computed(() => {
+  const draft = recognitionDraft.value
+  if (!draft?.schemes.length) return null
+  return draft.schemes.find((scheme) => scheme.id === activeSchemeId.value) ?? draft.schemes[0]
+})
+
+const detailSeasonOptions = computed(() => {
+  const scheme = activeScheme.value
+  if (!scheme) return []
+  return seasonsForCampus(scheme.target.campusId, timeConfig.value)
+})
+
+/* ---------- 导入计划（批量、事务、可撤销） ---------- */
+
+function openImportPlan(scopeSchemeId = null) {
+  if (!recognitionDraft.value?.schemes.length) return
+  importPlanScope.value = scopeSchemeId
+  importPlanOverrides.value = {}
+  planDiffExpanded.value = {}
+  importPlan.value = recognitionApi?.buildImportPlan(recognitionDraft.value, timeConfig.value, {}, scopeSchemeId) ?? null
+  importPlanOpen.value = true
+}
+
+function rebuildPlan() {
+  if (!recognitionDraft.value || !importPlan.value) return
+  importPlan.value = recognitionApi?.buildImportPlan(recognitionDraft.value, timeConfig.value, importPlanOverrides.value, importPlanScope.value) ?? null
+}
+
+const importPlanScope = ref(null)
+
+function setPlanItemAction(item, action) {
+  importPlanOverridesRebuilt.value = true
+  importPlanOverrides.value = { ...importPlanOverrides.value, [item.schemeId]: action }
+  rebuildPlan()
+}
+
+function togglePlanDiff(item) {
+  planDiffExpanded.value = { ...planDiffExpanded.value, [item.schemeId]: !planDiffExpanded.value[item.schemeId] }
+}
+
+function canReplaceItem(item) {
+  return item.targetMode === 'replace'
+}
+
+function canImportItem(item) {
+  return item.targetMode !== 'pending'
+}
+
+function createActionLabel(item) {
+  return item.targetMode === 'replace' ? '新建副本' : '新建'
+}
+
+function editFromPlan(schemeId) {
+  importPlanOpen.value = false
+  openSchemeDetail(schemeId)
+}
+
+function closeImportPlan() {
+  if (importRunning.value) return
+  importPlanOpen.value = false
+}
+
+function refreshDraftIfAffected(results) {
+  if (!planSeasonId.value || !planCampusId.value) return
+  const affected = results.some(
+    (result) => result.seasonId === planSeasonId.value && result.campusId === planCampusId.value
+  )
+  if (affected) loadPlanDraft(planSeasonId.value, planCampusId.value)
+}
+
+const sleep = (ms) => new Promise((resolve) => window.setTimeout(resolve, ms))
+
+async function confirmImportPlan() {
+  const plan = importPlan.value
+  if (!plan?.executable || importRunning.value) return
+  const cfg = timeConfig.value
+  const applied = plan.items.filter((item) => item.action !== 'skip')
+  importRunning.value = true
+  importProgress.start({
+    title: '正在导入作息',
+    steps: [
+      { id: 'snapshot', label: '创建原数据备份' },
+      { id: 'plan', label: '准备导入计划' },
+      ...applied.map((item, index) => ({
+        id: `apply-${index}`,
+        label: `${item.action === 'create' ? '新建' : '更新'} ${index + 1}/${applied.length}：${item.label}`,
+      })),
+      { id: 'save', label: '保存完成' },
+    ],
+  })
+  const snapshot = recognitionApi?.snapshotTimeConfig(cfg)
+  if (!snapshot) return
+  try {
+    importProgress.setStep('snapshot', 'running')
+    await sleep(160)
+    importProgress.setStep('snapshot', 'completed')
+    importProgress.setStep('plan', 'running')
+    await sleep(120)
+    importProgress.setStep('plan', 'completed')
+    for (let index = 0; index < applied.length; index++) {
+      importProgress.setStep(`apply-${index}`, 'running')
+      await sleep(140)
+      recognitionApi.applyImportItem(applied[index], cfg)
+      importProgress.setStep(`apply-${index}`, 'completed')
+    }
+    cfg.updatedAt = new Date().toISOString()
+    importProgress.setStep('save', 'running')
+    await sleep(120)
+    importProgress.setStep('save', 'completed')
+    importProgress.finish(`已成功导入 ${applied.length} 组作息`)
+    const replace = applied.filter((item) => item.action === 'replace').length
+    const create = applied.length - replace
+    lastImportResult.value = { snapshot, count: applied.length, replace, create, at: Date.now() }
+    importRunning.value = false
+    importPlanOpen.value = false
+    clearRecognition()
+    pasteText.value = ''
+    refreshDraftIfAffected(applied)
+    showToast(`✓ 已成功导入 ${applied.length} 组作息（${replace} 替换 / ${create} 新建），如识别有误可撤销`)
+  } catch (e) {
+    recognitionApi?.restoreTimeConfig(cfg, snapshot)
+    const messageText = `导入失败，已恢复原数据：${e?.message ?? '未知错误'}`
+    importProgress.fail('save', messageText)
+    importRunning.value = false
+    importError.value = messageText
   }
+}
 
-  normalizeTimes(cfg)
-  const existing = cfg.times[seasonId]?.[campusId]
-  if (!existing) { importError.value = '目标方案不存在，请返回基础设置检查适用校区'; return }
-  if (!window.confirm(`「${campus.name} · ${season.name}」已有节次设置。\n是否使用本次识别结果替换对应节次时间？`)) return
-
-  const targetIsCurrent = seasonId === planSeasonId.value && campusId === planCampusId.value
-  const target = targetIsCurrent ? draft.value : existing
-  while (target.length < cfg.periods.length) target.push({ start: '08:00', end: '08:45' })
-  for (const item of mapped) target[item.index] = { start: item.row.start, end: item.row.end }
-  if (targetIsCurrent) draftDirty.value = true
-  else cfg.updatedAt = new Date().toISOString()
-
-  const assignment = importAssignments.value[importSchemeIndex.value]
-  if (assignment) Object.assign(assignment, { imported: true, campusId, seasonId })
-  const next = importAssignments.value.find((item) => !item.imported)
-  if (importAnalysis.value?.schemes?.length > 1 && next) {
-    showToast(`已导入「${season.name} · ${campus.name}」，请继续核对下一组`)
-    applyImportScheme(next.index)
-    return
-  }
-
-  importOpen.value = false
-  importRows.value = []
-  pasteText.value = ''
-  if (targetIsCurrent) showToast('已导入到当前方案草稿，点击“保存”后生效')
-  else showToast(`已保存到「${season.name} · ${campus.name}」方案`)
+function undoLastImport() {
+  const result = lastImportResult.value
+  if (!result) return
+  recognitionApi?.restoreTimeConfig(timeConfig.value, result.snapshot)
+  lastImportResult.value = null
+  if (planSeasonId.value && planCampusId.value) loadPlanDraft(planSeasonId.value, planCampusId.value)
+  showToast('已撤销本次导入，恢复到导入前状态')
 }
 
 /* ---------- 轻量 toast（设置弹窗内） ---------- */
@@ -1091,7 +1287,9 @@ function deleteCourseTemplate(template) {
   courseTemplates.value = courseTemplates.value.filter((item) => item.id !== template.id)
 }
 
-function openBatchShift() {
+async function openBatchShift() {
+  // 在打开批量工具前才加载文本解析器；不会影响课程表首次进入。
+  await loadBatchParser()
   batchText.value = ''
   batchError.value = ''
   ocrSummary.value = ''
@@ -1112,6 +1310,7 @@ function continueScheduleResults() {
 }
 
 const batchRows = computed(() => {
+  if (!batchParserApi) return []
   const lines = batchText.value
     .split(/\r?\n/)
     .map((line) => line.trim())
@@ -1120,7 +1319,7 @@ const batchRows = computed(() => {
   return lines
     .map((line, index) => ({ line, index }))
     .filter(({ line, index }) => !(index === 0 && /课程.*星期/.test(line)))
-    .map(({ line, index }) => newParseBatchLine(line, index + 1, timeConfig, MAX_WEEK))
+    .map(({ line, index }) => batchParserApi.parseBatchLine(line, index + 1, timeConfig, MAX_WEEK))
 })
 
 const validBatchCount = computed(() => batchRows.value.filter((row) => row.data).length)
@@ -1161,15 +1360,16 @@ const importSummary = computed(() => {
 })
 const actionableImportItems = computed(() => (importDraft.value?.items || []).filter((item) => item.type !== 'direct'))
 
-function beginCourseImport(incoming, meta = {}) {
+async function beginCourseImport(incoming, meta = {}) {
+  const api = await loadCourseImport()
   const existing = meta.existingCourses ?? courses.value
-  const items = classifyImportItems(incoming, existing, courseConflictOptions.value)
+  const items = api.classifyImportItems(incoming, existing, courseConflictOptions.value)
   importDraft.value = {
     source: meta.source || 'batch', reviewCount: meta.reviewCount || 0, editingId: meta.editingId || null, existing,
     snapshot: JSON.parse(JSON.stringify(courses.value)), items,
     decisions: Object.fromEntries(items.filter((item) => item.type === 'direct').map((item) => [item.index, 'add'])),
   }
-  if (!items.some((item) => item.type !== 'direct')) { commitCourseImport(); return }
+  if (!items.some((item) => item.type !== 'direct')) { void commitCourseImport(); return }
   showImportConflict.value = true
 }
 
@@ -1190,10 +1390,11 @@ function commitWholeScheduleReplacement() {
   if (!draft || !window.confirm(`确认替换当前整张课表？\n将移除现有 ${courses.value.length} 门课程，仅保留本次导入的 ${draft.items.length} 门课程。`)) return
   commitCourseImport('replace-all')
 }
-function commitCourseImport(mode = 'smart') {
+async function commitCourseImport(mode = 'smart') {
   const draft = importDraft.value
   if (!draft || importCommitBusy.value) return
-  const plan = buildImportPlan({ existingCourses: draft.existing, items: draft.items, decisions: draft.decisions, mode, options: courseConflictOptions.value })
+  const api = await loadCourseImport()
+  const plan = api.buildImportPlan({ existingCourses: draft.existing, items: draft.items, decisions: draft.decisions, mode, options: courseConflictOptions.value })
   if (!plan) { batchError.value = '请先为每一门冲突课程选择处理方式'; return }
   if (plan.unsafe.length) {
     batchError.value = `有 ${new Set(plan.unsafe.map(({ item }) => item.index)).size} 门课程仅部分重叠。为避免误删未冲突的周次或节次，当前只能选择“保留两门”或“跳过”。`
@@ -1202,6 +1403,9 @@ function commitCourseImport(mode = 'smart') {
   importCommitBusy.value = true
   try {
     courses.value = plan.courses
+    // Only accepted import results train the on-device correction memory.
+    // OCR suggestions never leave this browser and never alter cloud data by themselves.
+    void import('../composables/ocrVocabulary.js').then(({ rememberOcrCourses }) => rememberOcrCourses(plan.courses))
     lastImportUndo.value = { snapshot: draft.snapshot, expiresAt: Date.now() + 30000 }
     const summary = `新增 ${plan.added} 门，替换 ${plan.replaced} 门，跳过 ${plan.skipped} 门${plan.kept ? `，保留冲突 ${plan.kept} 门` : ''}`
     if (draft.source === 'manual') { showForm.value = false; showToast(`课程已保存：${summary}`) }
@@ -1291,7 +1495,7 @@ async function runTimetableOCR(files) {
         if (accurateError?.name === 'AbortError') throw accurateError
         if (import.meta.env.DEV) console.warn('[OCR] 精准课表识别降级为兼容模式', accurateError)
         batchOcrProgress.activity('精准识别不可用，正在切换兼容引擎')
-        result = await performOCR(
+        result = await performLegacyOCR(
           file,
           (event) => handleOcrActivity(batchOcrProgress, event, 'recognize'),
           { signal: controller.signal },
@@ -1299,11 +1503,17 @@ async function runTimetableOCR(files) {
       }
       batchOcrProgress.setStep('engine', 'completed', '识别引擎已就绪')
       batchOcrProgress.setStep('recognize', 'completed', `第 ${index + 1}/${files.length} 张文字识别完成`)
-      batchOcrProgress.setStep('structure', 'running', '正在恢复星期列、节次行与合并单元格')
-      const columnTable = parseTimetableColumns(result.columns, timeConfig, MAX_WEEK)
-      const layoutTable = parseTimetableLayout(result.layout, timeConfig, MAX_WEEK)
-      const table = selectBestTimetableExtraction(columnTable, layoutTable)
-      batchOcrProgress.setStep('structure', 'completed', `恢复 ${table.courses.length} 门课程的表格位置`)
+      batchOcrProgress.setStep('structure', 'running', '正在分析文字区域、表头与单元格关系')
+      const { table, toBatchLine } = await extractTimetable(result)
+      const vocabularyChanges = await applyTimetableVocabulary(table)
+      if (vocabularyChanges.length) table.batchText = table.courses.map(toBatchLine).join('\n')
+      batchOcrProgress.setStep(
+        'structure',
+        table.needsReview ? 'warning' : 'completed',
+        table.needsReview
+          ? '表头锚点不足，已保留文字结果供手动确认'
+          : `恢复 ${table.courses.length} 门课程的空间归属${vocabularyChanges.length ? `，已应用 ${vocabularyChanges.length} 个本地词库建议` : ''}`,
+      )
       batchOcrProgress.setStep('validate', 'running', '正在检查课程字段与行列对应')
       const recognizedText = table.batchText || result.text
       batchText.value = (batchText.value ? batchText.value + '\n' : '') + recognizedText
@@ -2148,6 +2358,12 @@ onBeforeUnmount(() => {
             <button class="btn btn-sm" @click="onResetTimes">↺ 恢复默认</button>
           </div>
 
+          <!-- 导入结果横幅（独立于导入面板，导入后仍可撤销） -->
+          <div v-if="lastImportResult" class="import-result-banner">
+            <span>✓ 已成功导入 {{ lastImportResult.count }} 组作息（{{ lastImportResult.replace }} 替换 / {{ lastImportResult.create }} 新建）</span>
+            <button class="btn btn-xs" @click="undoLastImport">撤销本次导入</button>
+          </div>
+
           <!-- 复制方案面板 -->
           <div v-if="copyOpen" class="tool-panel">
             <div class="tool-panel-title">从哪个方案复制？（复制后两套方案互相独立）</div>
@@ -2294,8 +2510,8 @@ onBeforeUnmount(() => {
                 <span v-else>📷 上传学校官方作息表图片</span>
                 <input id="schedule-import-image" type="file" accept="image/*" :disabled="scheduleOcrProgress.state.status === 'running'" @change="onImportImage" />
               </label>
-              <p class="tool-tip">识别结果同样进入下方预览，确认前不会保存。</p>
-              <button v-if="lastScheduleImage && (importError || importReviewCount)" class="btn btn-sm btn-ghost accurate-retry" @click="retryScheduleAccurate">
+              <p class="tool-tip">识别结果先进入暂存区，确认导入计划前不会修改正式作息。</p>
+              <button v-if="lastScheduleImage && importError" class="btn btn-sm btn-ghost accurate-retry" @click="retryScheduleAccurate">
                 使用精准模式重新识别
               </button>
             </div>
@@ -2314,79 +2530,45 @@ onBeforeUnmount(() => {
 
             <p v-if="importError && !(scheduleOcrProgress.state.active && scheduleOcrProgress.state.visible)" class="error">{{ importError }}</p>
 
-            <!-- 识别预览 / 校对 -->
-            <div v-if="importRows.length" class="import-preview">
-              <div class="tool-panel-title">识别结果校对（可逐行修改）</div>
-              <div class="import-review-summary">
-                <span class="ok-text">✓ {{ importNormalCount }} 项正常</span>
-                <span v-if="importReviewCount" class="warning-text">⚠ {{ importReviewCount }} 项建议确认</span>
+            <!-- 第一级：识别结果总览（多组作息、自动匹配、批量导入） -->
+            <div v-if="recognitionDraft" class="recognition-overview">
+              <div class="overview-head">
+                <div class="tool-panel-title">识别结果总览 · 共发现 {{ schemeCount }} 组作息</div>
+                <button class="btn btn-xs btn-ghost" @click="discardRecognition">放弃识别</button>
               </div>
-              <div v-if="importAnalysis?.schemes?.length > 1" class="scheme-picker">
-                <b>已识别 {{ importAnalysis.schemes.length }} 组作息</b>
-                <div class="scheme-list">
-                  <button
-                    v-for="scheme in importAnalysis.schemes"
-                    :key="scheme.index"
-                    :class="{ on: importSchemeIndex === scheme.index, imported: importAssignments[scheme.index]?.imported }"
-                    @click="applyImportScheme(scheme.index)"
-                  >{{ importSchemeLabel(scheme) }}</button>
+              <p v-if="recognitionDraft.sourceName" class="detected-title">
+                来源：{{ recognitionDraft.sourceName }}
+                <template v-if="!recognitionDraft.sourceName.includes('粘贴')">
+                  · {{ recognitionTimeText(recognitionDraft.createdAt) }}
+                </template>
+              </p>
+              <div class="scheme-cards">
+                <div
+                  v-for="scheme in recognitionDraft.schemes"
+                  :key="scheme.id"
+                  class="scheme-card"
+                  :class="{ off: !scheme.selected, active: scheme.id === activeSchemeId }"
+                >
+                  <label class="scheme-check" :title="scheme.selected ? '取消勾选' : '勾选后参与批量导入'">
+                    <input type="checkbox" :checked="scheme.selected" @change="toggleSchemeSelected(scheme)" />
+                  </label>
+                  <div class="scheme-card-main" @click="openSchemeDetail(scheme.id)">
+                    <div class="scheme-card-title">{{ schemeDisplayName(scheme, timeConfig) }} · {{ scheme.rows.length }}节</div>
+                    <div class="scheme-card-status" :class="schemeStatusBadge(scheme).cls">
+                      {{ schemeStatusBadge(scheme).icon }} {{ schemeStatusBadge(scheme).text }}
+                      <span v-if="scheme.target.mode === 'replace' && schemeReplaceChanged(scheme)">（{{ schemeReplaceChanged(scheme) }} 项时间变化）</span>
+                    </div>
+                  </div>
+                  <button class="btn btn-xs" @click.stop="openSchemeDetail(scheme.id)">查看 / 编辑</button>
                 </div>
               </div>
 
-              <div class="import-targets">
-                <div class="import-target-title">识别结果归属</div>
-                <div class="it-row">
-                  <span>校区</span>
-                  <b v-if="timeConfig.campuses.length === 1" class="bound-value">{{ timeConfig.campuses[0].name }}</b>
-                  <div v-else class="choice-chips">
-                    <button
-                      v-for="campus in timeConfig.campuses"
-                      :key="campus.id"
-                      :class="{ on: importTargetCampus === campus.id }"
-                      @click="selectImportCampus(campus.id)"
-                    >{{ campus.name }}</button>
-                  </div>
-                </div>
-                <div class="it-row">
-                  <span>作息季</span>
-                  <b v-if="importSeasonsForCampus.length === 1 && importTargetSeason === importSeasonsForCampus[0].id" class="bound-value">{{ importSeasonsForCampus[0].name }}</b>
-                  <div v-else-if="importTargetCampus" class="choice-chips">
-                    <button
-                      v-for="season in importSeasonsForCampus"
-                      :key="season.id"
-                      :class="{ on: importTargetSeason === season.id }"
-                      @click="selectImportSeason(season.id)"
-                    >{{ season.name }}</button>
-                  </div>
-                  <small v-else>请先选择校区</small>
-                </div>
-                <p v-if="detectedSeasonName || detectedCampusName" class="detected-title">
-                  识别到标题：{{ [detectedSeasonName, detectedCampusName].filter(Boolean).join(' / ') }}
-                </p>
-                <p class="assignment-message" :class="importAssignmentState.type">
-                  {{ importAssignmentState.type === 'matched' || importAssignmentState.type === 'confirmed' || importAssignmentState.type === 'bound' ? '✓' : '⚠' }}
-                  {{ importAssignmentState.text }}
-                </p>
-              </div>
-
-              <div class="import-rows">
-                <div v-for="(row, index) in importRows" :key="index" class="import-row-wrap" :class="{ review: row.needsReview && !row.confirmed }">
-                  <div class="import-row">
-                  <input v-model="row.label" class="grow" placeholder="节次名称" @input="row.confirmed = true" />
-                  <input v-model="row.start" type="time" @input="row.confirmed = true" />
-                  <i>—</i>
-                  <input v-model="row.end" type="time" @input="row.confirmed = true" />
-                  <button class="setting-del" title="删除该行" @click="removeImportRow(index)">✕</button>
-                  </div>
-                  <div v-if="row.needsReview && !row.confirmed" class="row-review-detail">
-                    <span>⚠ {{ row.issues.join('；') || '多次识别结果不一致' }}</span>
-                    <button class="btn btn-xs" @click="acceptImportRow(row)">确认无误</button>
-                  </div>
-                </div>
-              </div>
-              <div class="import-foot">
-                <button class="btn btn-sm" @click="addImportRow">＋ 加一行</button>
-                <button class="btn btn-sm btn-primary" @click="confirmImport">确认导入</button>
+              <div class="import-foot overview-foot">
+                <button class="btn btn-sm btn-ghost" @click="discardRecognition">放弃</button>
+                <button class="btn btn-sm" :disabled="!activeSchemeForQuick" @click="openImportPlan(activeSchemeForQuick.id)">仅导入当前组</button>
+                <button class="btn btn-sm btn-primary" :disabled="!selectedSchemeCount" @click="openImportPlan()">
+                  导入选中的 {{ selectedSchemeCount }} 组作息
+                </button>
               </div>
             </div>
           </div>
@@ -2532,6 +2714,200 @@ onBeforeUnmount(() => {
           <button v-else class="btn btn-primary" @click="tryCloseTimeEditor">完成</button>
         </div>
       </div>
+    </Modal>
+
+    <!-- 第二级：某一组识别结果的详细编辑（大弹窗，底部固定操作栏） -->
+    <Modal
+      :open="schemeDetailOpen && !!activeScheme"
+      :title="activeScheme ? `编辑识别结果 · ${schemeDisplayName(activeScheme, timeConfig)}` : '编辑识别结果'"
+      wide
+      @close="closeSchemeDetail"
+    >
+      <template v-if="activeScheme">
+        <div class="detail-target">
+          <div class="it-row">
+            <span>校区</span>
+            <div class="choice-chips">
+              <button
+                v-for="campus in timeConfig.campuses"
+                :key="campus.id"
+                :class="{ on: activeScheme.target.campusId === campus.id }"
+                @click="pickSchemeCampus(activeScheme, campus.id)"
+              >{{ campus.name }}</button>
+              <button
+                :class="{ on: !activeScheme.target.campusId }"
+                title="导入为新校区"
+                @click="startNewCampus(activeScheme)"
+              >＋ 新校区</button>
+            </div>
+          </div>
+          <div v-if="!activeScheme.target.campusId" class="it-row">
+            <span>新校区名</span>
+            <input
+              class="grow"
+              :value="activeScheme.target.newCampusName"
+              :placeholder="activeScheme.detectedCampus || '例如：东校区'"
+              @input="updateSchemeTarget(activeScheme, { newCampusName: $event.target.value })"
+            />
+          </div>
+          <div class="it-row">
+            <span>作息方案</span>
+            <div class="choice-chips">
+              <button
+                v-for="season in detailSeasonOptions"
+                :key="season.id"
+                :class="{ on: activeScheme.target.seasonId === season.id }"
+                @click="pickSchemeSeason(activeScheme, season.id)"
+              >{{ season.name }}</button>
+              <button
+                :class="{ on: !activeScheme.target.seasonId }"
+                title="导入为新作息方案"
+                @click="startNewSeason(activeScheme)"
+              >＋ 新方案</button>
+            </div>
+          </div>
+          <div v-if="!activeScheme.target.seasonId" class="it-row">
+            <span>新方案名</span>
+            <input
+              class="grow"
+              :value="activeScheme.target.newSeasonName"
+              :placeholder="activeScheme.detectedSeason || '例如：夏季时间'"
+              @input="updateSchemeTarget(activeScheme, { newSeasonName: $event.target.value })"
+            />
+          </div>
+          <p v-if="activeScheme.target.mode === 'pending'" class="assignment-message missing">
+            ⚠ {{ targetPendingReasonText(activeScheme) }}
+          </p>
+          <p v-else-if="activeScheme.target.mode === 'replace'" class="assignment-message">
+            ✓ 将替换「{{ schemeDisplayName(activeScheme, timeConfig) }}」的现有作息
+          </p>
+          <p v-else class="assignment-message matched">
+            ✓ 将新建「{{ schemeDisplayName(activeScheme, timeConfig) }}」并写入识别结果
+          </p>
+        </div>
+
+        <div class="seg detail-tabs">
+          <button :class="{ on: detailFilter === 'all' }" @click="detailFilter = 'all'">全部 {{ activeScheme.rows.length }}</button>
+          <button :class="{ on: detailFilter === 'issues' }" @click="detailFilter = 'issues'">
+            异常 {{ activeSchemeIssueCount }}
+          </button>
+        </div>
+
+        <div class="detail-rows">
+          <div
+            v-for="(row, index) in activeSchemeRows"
+            :key="row.id"
+            class="detail-row"
+            :class="{ issue: rowIssuesFor(row).length }"
+          >
+            <div class="detail-row-main">
+              <input v-model="row.label" class="grow" placeholder="节次名称" @input="onSchemeRowInput(row)" />
+              <input v-model="row.start" type="time" @input="onSchemeRowInput(row)" />
+              <i>—</i>
+              <input v-model="row.end" type="time" @input="onSchemeRowInput(row)" />
+              <button class="setting-del" title="删除该行" @click="removeSchemeRow(activeScheme, index)">✕</button>
+            </div>
+            <div v-if="rowIssuesFor(row).length" class="detail-row-issues">
+              <span v-for="issue in rowIssuesFor(row)" :key="issue.message">⚠ {{ issue.message }}</span>
+              <button
+                v-if="rowIssuesFor(row).every((issue) => !issue.blocking)"
+                class="btn btn-xs"
+                @click="row.confirmed = true"
+              >确认无误</button>
+            </div>
+          </div>
+          <p v-if="!activeSchemeRows.length" class="tool-tip">没有待处理的异常项，可以直接返回总览进行导入。</p>
+        </div>
+        <button class="btn btn-sm btn-ghost" @click="addSchemeRow(activeScheme)">＋ 加一行</button>
+      </template>
+
+      <template #foot>
+        <div v-if="activeScheme" class="detail-foot">
+          <button class="btn" @click="closeSchemeDetail">返回总览</button>
+          <button class="btn btn-primary" @click="closeSchemeDetail(); openImportPlan(activeScheme.id)">仅导入这一组</button>
+        </div>
+      </template>
+    </Modal>
+
+    <!-- 第三级：导入计划确认 / 执行进度 -->
+    <Modal
+      :open="importPlanOpen"
+      :title="importRunning ? '正在导入' : '本次导入计划'"
+      medium
+      @close="closeImportPlan"
+    >
+      <template v-if="!importRunning && importPlan">
+        <p class="plan-summary">
+          共 {{ importPlan.summary.total }} 组作息 ·
+          <b class="ok-text">{{ importPlan.summary.replace }} 组替换</b> ·
+          <b class="ok-text">{{ importPlan.summary.create }} 组新建</b> ·
+          {{ importPlan.summary.skip }} 组跳过
+          <b v-if="importPlan.summary.blocked" class="warning-text">· {{ importPlan.summary.blocked }} 组待处理</b>
+        </p>
+        <p class="tool-tip">默认按推荐方案执行；替换不会与旧作息合并，而是整体覆盖。</p>
+        <div class="plan-items">
+          <div
+            v-for="item in importPlan.items"
+            :key="item.schemeId"
+            class="plan-item"
+            :class="{ blocked: item.action !== 'skip' && item.blockers.length }"
+          >
+            <div class="plan-item-head">
+              <b class="plan-item-label">{{ item.label }}</b>
+              <select class="plan-action" :value="item.action" @change="setPlanItemAction(item, $event.target.value)">
+                <option v-if="canReplaceItem(item)" value="replace">替换已有</option>
+                <option v-if="canImportItem(item)" value="create">{{ createActionLabel(item) }}</option>
+                <option value="skip">跳过</option>
+              </select>
+            </div>
+            <template v-if="item.action !== 'skip'">
+              <p v-if="item.diff" class="plan-diff-summary">
+                原有 {{ item.diff.oldCount }} 节 → 新识别 {{ item.diff.mappedCount }} 节 · 共 {{ item.diff.changedCount }} 项时间变化
+                <button
+                  v-if="item.diff.changedCount"
+                  class="btn btn-xs btn-ghost"
+                  @click="togglePlanDiff(item)"
+                >{{ planDiffExpanded[item.schemeId] ? '收起变化' : '查看变化' }}</button>
+              </p>
+              <div v-if="item.diff && planDiffExpanded[item.schemeId]" class="plan-diff-list">
+                <div v-for="change in item.diff.changes" :key="'c' + change.index" class="diff-row">
+                  <span class="diff-label">{{ change.label }}</span>
+                  <s>{{ change.from }}</s>
+                  <i>→</i>
+                  <b>{{ change.to }}</b>
+                </div>
+                <div v-for="addedRow in item.diff.added" :key="'a' + addedRow.index" class="diff-row">
+                  <span class="diff-label">{{ addedRow.label }}</span>
+                  <s>（原为空）</s>
+                  <i>→</i>
+                  <b>{{ addedRow.to }}</b>
+                </div>
+              </div>
+              <p v-for="warning in item.warnings" :key="warning" class="plan-warning">⚠ {{ warning }}</p>
+              <template v-if="item.blockers.length">
+                <p v-for="blocker in item.blockers" :key="blocker" class="plan-blocker">✕ {{ blocker }}</p>
+                <button class="btn btn-xs" @click="editFromPlan(item.schemeId)">去处理</button>
+              </template>
+            </template>
+            <p v-else class="plan-skip-note">已跳过，不写入任何数据</p>
+          </div>
+        </div>
+        <div class="plan-foot">
+          <button class="btn" @click="closeImportPlan">取消</button>
+          <button class="btn btn-primary" :disabled="!importPlan.executable" @click="confirmImportPlan">
+            确认并导入（{{ importPlan.summary.replace + importPlan.summary.create }} 组）
+          </button>
+        </div>
+      </template>
+      <template v-else>
+        <TaskProgress
+          :task="importProgress.state"
+          :elapsed-seconds="importProgress.elapsedSeconds.value"
+          :activity-age-seconds="importProgress.activityAgeSeconds.value"
+          :stalled="importProgress.isStalled.value"
+          compact
+        />
+      </template>
     </Modal>
   </div>
 </template>
@@ -2937,6 +3313,77 @@ onBeforeUnmount(() => {
 .row-review-detail { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 5px; color: #9a6414; font-size: 11px; line-height: 1.45; }
 .btn-xs { flex: 0 0 auto; padding: 4px 8px; font-size: 10.5px; }
 .import-foot { display: flex; justify-content: space-between; gap: 8px; }
+
+/* ---------- 识别结果总览（第一级） ---------- */
+.recognition-overview { display: flex; flex-direction: column; gap: 10px; padding-top: 4px; }
+.overview-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.scheme-cards { display: flex; flex-direction: column; gap: 7px; }
+.scheme-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 11px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: #fff;
+  transition: opacity .15s ease;
+}
+.scheme-card.off { opacity: .55; }
+.scheme-card.active { border-color: var(--primary); }
+.scheme-check { display: flex; align-items: center; }
+.scheme-check input { width: 16px; height: 16px; accent-color: var(--primary); cursor: pointer; }
+.scheme-card-main { min-width: 0; cursor: pointer; display: flex; flex-direction: column; gap: 3px; }
+.scheme-card-title { font-size: 13px; font-weight: 750; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.scheme-card-status { font-size: 11.5px; line-height: 1.4; }
+.scheme-card-status.ok { color: #08785a; }
+.scheme-card-status.warn { color: #9a6414; }
+.import-result-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 9px 11px;
+  border-radius: 9px;
+  background: #e7f8f1;
+  color: #08785a;
+  font-size: 12px;
+  font-weight: 700;
+}
+.overview-foot { align-items: center; }
+.overview-foot .btn-primary { margin-left: auto; }
+
+/* ---------- 详情编辑（第二级） ---------- */
+.detail-target { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 11px; background: var(--bg-tint); }
+.assignment-message.matched { background: #eef4ff; color: #2456b8; }
+.detail-tabs { align-self: flex-start; }
+.detail-tabs button { padding: 7px 14px; }
+.detail-rows { display: flex; flex-direction: column; gap: 6px; max-height: 46vh; overflow-y: auto; padding-right: 2px; }
+.detail-row { padding: 4px 6px; border-radius: 9px; }
+.detail-row.issue { padding: 7px; border: 1px solid #efd59d; background: #fff9e9; }
+.detail-row-main { display: grid; grid-template-columns: minmax(0, 1fr) 110px 14px 110px 26px; align-items: center; gap: 6px; }
+.detail-row-main i { color: var(--muted); font-style: normal; text-align: center; }
+.detail-row-main input[type='time'] { padding: 6px; font-size: 12.5px; }
+.detail-row-issues { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px; margin-top: 5px; color: #9a6414; font-size: 11px; line-height: 1.45; }
+.detail-foot { display: flex; justify-content: space-between; gap: 10px; }
+.detail-foot .btn-primary { margin-left: auto; }
+
+/* ---------- 导入计划（第三级） ---------- */
+.plan-summary { margin: 0 0 4px; font-size: 13px; color: var(--text); }
+.plan-summary b.ok-text { color: #08785a; }
+.plan-summary b.warning-text { color: #9a6414; }
+.plan-items { display: flex; flex-direction: column; gap: 8px; max-height: 46vh; overflow-y: auto; padding-right: 2px; }
+.plan-item { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 11px; background: #fff; }
+.plan-item.blocked { border-color: #e5b4b4; background: #fffafa; }
+.plan-item-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.plan-item-label { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.plan-action { padding: 5px 8px; font-size: 12px; border: 1px solid var(--border); border-radius: 8px; background: #fff; color: var(--text); }
+.plan-diff-summary { margin: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; color: var(--ink-soft); font-size: 11.5px; }
+.plan-diff-list { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border-radius: 8px; background: var(--bg-tint); }
+.plan-warning { margin: 0; color: #9a6414; font-size: 11.5px; }
+.plan-blocker { margin: 0; color: var(--danger); font-size: 11.5px; font-weight: 700; }
+.plan-skip-note { margin: 0; color: var(--ink-faint); font-size: 11.5px; }
+.plan-foot { display: flex; justify-content: flex-end; gap: 10px; margin-top: 12px; }
 
 /* 时间行：上午/下午/晚上分组 */
 .plan-list { display: flex; flex-direction: column; gap: 14px; }
@@ -3496,6 +3943,10 @@ onBeforeUnmount(() => {
   .it-row { grid-template-columns: 48px minmax(0, 1fr); }
   .import-row { grid-template-columns: minmax(0, 1fr) 86px 12px 86px 24px; gap: 4px; }
   .row-review-detail { align-items: flex-start; flex-direction: column; }
+  .detail-row-main { grid-template-columns: minmax(0, 1fr) 92px 12px 92px 24px; gap: 4px; }
+  .scheme-card { grid-template-columns: auto minmax(0, 1fr); }
+  .scheme-card > .btn-xs { grid-column: 1 / -1; justify-self: end; }
+  .overview-foot { flex-wrap: wrap; }
 }
 
 /* ---------- 作息与时间设置 ---------- */

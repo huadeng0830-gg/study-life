@@ -1,9 +1,22 @@
-import { RELEASE_NOTES as CURRENT_RELEASE_NOTES } from '../../release.config.js'
+import { RELEASE_NOTES as CURRENT_NOTES, RELEASE_UPDATES } from '../../release.config.js'
 
 // 由构建阶段根据实际发布源码自动注入，不再依赖人工或 Agent 记得修改版本号。
 export const APP_RELEASE = globalThis.__STUDY_LIFE_RELEASE__ || 'development'
 
-export const RELEASE_NOTES = Object.freeze([...CURRENT_RELEASE_NOTES])
+// 当前版本的更新说明。
+export const RELEASE_NOTES = Object.freeze([...CURRENT_NOTES])
+
+// 弹窗最多展示最近 3 个版本的更新；其余历史不再保留。
+export const MAX_SHOWN_RELEASE_UPDATES = 3
+export const RELEASE_UPDATE_GROUPS = Object.freeze(
+  RELEASE_UPDATES.slice(0, MAX_SHOWN_RELEASE_UPDATES).map((group) => ({
+    version: group.signature === RELEASE_UPDATES[0].signature ? APP_RELEASE : group.version ?? group.signature,
+    isCurrent: group === RELEASE_UPDATES[0],
+    notes: Object.freeze([...group.notes]),
+  }))
+)
+// 之前的版本（不含当前版本），供“之前的更新”分组展示。
+export const PREVIOUS_RELEASE_GROUPS = Object.freeze(RELEASE_UPDATE_GROUPS.slice(1))
 
 // 旧键继续保留用于兼容已经确认过更新说明的设备；历史键避免版本回滚时重复弹出。
 export const RELEASE_SEEN_KEY = 'study_life_seen_release'

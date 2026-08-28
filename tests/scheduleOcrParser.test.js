@@ -38,9 +38,15 @@ describe('schedule OCR structured parser', () => {
     expect(parsed.rows.map((row) => [row.start, row.end])).toEqual([
       ['08:00', '08:45'],
       ['08:55', '09:40'],
+      ['', ''],
       ['10:50', '10:05'],
     ])
-    expect(parsed.issues.map((issue) => issue.message).join(' ')).toContain('缺少第3节')
+    // OCR 漏识别的节次必须显式标记"未识别"，绝不静默填充默认时间
+    const missingRow = parsed.rows.find((row) => row.periodStart === 3)
+    expect(missingRow).toBeTruthy()
+    expect(missingRow.start).toBe('')
+    expect(missingRow.end).toBe('')
+    expect(missingRow.issues.join(' ')).toContain('未识别')
     expect(parsed.issues.map((issue) => issue.message).join(' ')).toContain('倒序')
   })
 
@@ -104,5 +110,27 @@ describe('schedule OCR structured parser', () => {
     })
     expect(parsed.rows.map((row) => row.label)).toEqual(['第1节', '第2节'])
     expect(parsed.summary.review).toBe(0)
+  })
+
+  it('associates multi-level season and campus headers with time columns by position', () => {
+    const word = (text, x, y) => ({ text, confidence: 93, bbox: { x0: x - 30, y0: y - 9, x1: x + 30, y1: y + 9 } })
+    const layout = {
+      width: 1000,
+      height: 700,
+      words: [
+        word('夏季时间', 290, 30), word('冬季时间', 730, 30),
+        word('南校区', 150, 70), word('北校区', 430, 70), word('南校区', 590, 70), word('北校区', 870, 70),
+        word('第一节', 45, 140), word('08:00-08:45', 150, 140), word('08:10-08:55', 430, 140), word('08:00-08:45', 590, 140), word('08:10-08:55', 870, 140),
+        word('第二节', 45, 190), word('08:55-09:40', 150, 190), word('09:05-09:50', 430, 190), word('08:55-09:40', 590, 190), word('09:05-09:50', 870, 190),
+      ],
+    }
+    const parsed = parseScheduleOCR({ text: '', layout }, {
+      campuses: [{ id: 'south', name: '南校区' }, { id: 'north', name: '北校区' }],
+      seasons: [{ id: 'summer', name: '夏季时间' }, { id: 'winter', name: '冬季时间' }],
+    })
+    expect(parsed.schemes.map((scheme) => [scheme.seasonId, scheme.campusId])).toEqual([
+      ['summer', 'south'], ['summer', 'north'], ['winter', 'south'], ['winter', 'north'],
+    ])
+    expect(parsed.schemes[3].rows[1]).toMatchObject({ start: '09:05', end: '09:50' })
   })
 })

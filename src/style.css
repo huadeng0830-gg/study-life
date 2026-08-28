@@ -181,6 +181,15 @@ textarea:focus-visible {
   }
 }
 
+:root[data-performance='reduced'] *,
+:root[data-performance='reduced'] *::before,
+:root[data-performance='reduced'] *::after {
+  scroll-behavior: auto !important;
+  transition-duration: 0.01ms !important;
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+}
+
 /* ---------- v2 公共规范：页头 / 分段控件 / 筛选片（本轮追加） ---------- */
 
 /* 统一页面标题区：左侧标题+说明，右侧操作，贴身排列不留大空白 */

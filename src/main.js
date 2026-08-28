@@ -2,6 +2,7 @@ import { createApp } from 'vue'
 import { createRouter, createWebHashHistory } from 'vue-router'
 import './style.css'
 import { initializeDataVault, redirectPreviewOrigin } from './composables/dataVault.js'
+import { routeLoaders } from './router/routePreload.js'
 
 // iPhone 上 IndexedDB 偶尔会延迟打开；安全副本继续后台检查，不阻塞首屏。
 const VAULT_STARTUP_BUDGET = 350
@@ -54,21 +55,16 @@ async function bootstrap() {
 
   const { default: App } = await import('./App.vue')
 
-  // 每次冷启动都从首页开始，不恢复上次的页面地址。
-  if (window.location.hash) {
-    history.replaceState(null, '', window.location.pathname + window.location.search)
-  }
-
   const router = createRouter({
     history: createWebHashHistory(),
     routes: [
-      { path: '/', component: () => import('./views/HomeView.vue') },
-      { path: '/schedule', component: () => import('./views/ScheduleView.vue') },
-      { path: '/tasks', component: () => import('./views/TasksView.vue') },
-      { path: '/exams', component: () => import('./views/ExamsView.vue') },
-      { path: '/lists', component: () => import('./views/ListsView.vue') },
-      { path: '/bills', component: () => import('./views/LedgerView.vue') },
-      { path: '/food', component: () => import('./views/FoodView.vue') },
+      { path: '/', name: 'home', component: routeLoaders['/'] },
+      { path: '/schedule', name: 'schedule', component: routeLoaders['/schedule'] },
+      { path: '/tasks', name: 'tasks', component: routeLoaders['/tasks'] },
+      { path: '/exams', name: 'exams', component: routeLoaders['/exams'] },
+      { path: '/lists', name: 'lists', component: routeLoaders['/lists'] },
+      { path: '/bills', name: 'bills', component: routeLoaders['/bills'] },
+      { path: '/food', name: 'food', component: routeLoaders['/food'] },
     ],
   })
 
@@ -97,3 +93,5 @@ async function bootstrap() {
 }
 
 bootstrap().catch(() => showStartupError())
+
+// update-e2e-marker

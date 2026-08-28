@@ -8,6 +8,7 @@ const props = defineProps({
   gap: { type: Number, default: 10 },
   overscan: { type: Number, default: 6 },
   threshold: { type: Number, default: 40 },
+  fixedHeight: { type: Boolean, default: false },
 })
 
 const root = ref(null)
@@ -44,7 +45,7 @@ function measure() {
   const rect = root.value.getBoundingClientRect()
   const sample = [...root.value.children].find((element) => !element.classList.contains('virtual-spacer'))
   const sampleHeight = sample?.getBoundingClientRect().height
-  if (sampleHeight > 0) measuredHeight.value = sampleHeight
+  if (!props.fixedHeight && sampleHeight > 0) measuredHeight.value = sampleHeight
   scrollTop.value = window.scrollY || document.documentElement.scrollTop || 0
   viewportHeight.value = window.innerHeight || document.documentElement.clientHeight || 800
   listTop.value = rect.top + scrollTop.value

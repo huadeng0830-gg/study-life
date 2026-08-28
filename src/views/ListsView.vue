@@ -40,10 +40,25 @@ function typeIcon(key) {
   return LIST_TYPES[key]?.icon ?? LIST_TYPES.general.icon
 }
 
+function summarizeList(list) {
+  const items = list?.items ?? []
+  let done = 0
+  let total = 0
+  let boughtTotal = 0
+  for (const item of items) {
+    const amount = Number(item.price) || 0
+    const value = (Number(item.quantity) || 0) * amount
+    total += value
+    if (item.done) { done++; boughtTotal += value }
+  }
+  const count = items.length
+  return { total, boughtTotal, done, count, remaining: count - done, percent: count ? Math.round((done / count) * 100) : 0 }
+}
+
+const listSummaryById = computed(() => new Map(lists.value.map((list) => [list.id, summarizeList(list)])))
+
 function listProgress(list) {
-  const count = list.items?.length ?? 0
-  const done = list.items?.filter((item) => item.done).length ?? 0
-  return { count, done, percent: count ? Math.round((done / count) * 100) : 0 }
+  return listSummaryById.value.get(list?.id) ?? { count: 0, done: 0, percent: 0 }
 }
 
 function listUpdatedText(list) {
@@ -83,13 +98,7 @@ const visibleItems = computed(() => {
   return items
 })
 
-const listStats = computed(() => {
-  const items = activeList.value?.items ?? []
-  const total = items.reduce((sum, item) => sum + item.quantity * (Number(item.price) || 0), 0)
-  const bought = items.filter((item) => item.done)
-  const boughtTotal = bought.reduce((sum, item) => sum + item.quantity * (Number(item.price) || 0), 0)
-  return { total, boughtTotal, done: bought.length, count: items.length, remaining: items.length - bought.length }
-})
+const listStats = computed(() => listSummaryById.value.get(activeList.value?.id) ?? summarizeList(null))
 
 function money(value) {
   return `¥${Number(value || 0).toFixed(2)}`

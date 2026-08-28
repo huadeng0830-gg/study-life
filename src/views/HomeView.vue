@@ -55,12 +55,66 @@ const upcomingExams = computed(() =>
 )
 
 const previewExams = computed(() => upcomingExams.value.slice(0, 3))
-const pendingTasks = computed(() => tasks.value.filter((task) => !task.done))
+const examDueByDate = computed(() => {
+  const dueByDate = new Map()
+  for (const item of upcomingExams.value) {
+    const target = item.countdown.target
+    if (!target) continue
+    const pad = (value) => String(value).padStart(2, '0')
+    const date = `${target.getFullYear()}-${pad(target.getMonth() + 1)}-${pad(target.getDate())}`
+    dueByDate.set(date, (dueByDate.get(date) || 0) + 1)
+  }
+  return dueByDate
+})
+
+function taskTimestamp(task) {
+  if (!task.dueDate) return Infinity
+  return new Date(`${task.dueDate}T${task.dueTime || '23:59'}`).getTime()
+}
+
+// 首页的任务卡片以前会各自 filter / sort 一遍同一批任务，未来七天还会
+// 重复扫描七次。集中成一个摘要，数据量变大时切回首页也只需一次遍历。
+const taskSummary = computed(() => {
+  const today = todayStr()
+  const nowDate = new Date(now.value)
+  const weekday = nowDate.getDay() === 0 ? 7 : nowDate.getDay()
+  const monday = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate() - (weekday - 1)).getTime()
+  const nowTime = nowDate.getTime()
+  const pending = []
+  const dueByDate = new Map()
+  let done = 0
+  let doneThisWeek = 0
+  let createdThisWeek = 0
+  let overdue = 0
+  let dueToday = 0
+  let next = null
+  let nextTime = Infinity
+
+  for (const task of tasks.value) {
+    const createdAt = task.createdAt ? new Date(task.createdAt).getTime() : NaN
+    if (Number.isFinite(createdAt) && createdAt >= monday && createdAt <= nowTime + 60_000) createdThisWeek++
+    if (task.done) {
+      done++
+      const completedAt = task.completedAt ? new Date(task.completedAt).getTime() : NaN
+      if (Number.isFinite(completedAt) && completedAt >= monday && completedAt <= nowTime + 60_000) doneThisWeek++
+      continue
+    }
+    pending.push(task)
+    if (task.dueDate) dueByDate.set(task.dueDate, (dueByDate.get(task.dueDate) || 0) + 1)
+    const timestamp = taskTimestamp(task)
+    if (timestamp < nextTime) { next = task; nextTime = timestamp }
+    if (task.dueDate && timestamp < nowTime) overdue++
+    else if (task.dueDate === today) dueToday++
+  }
+  return { pending, done, doneThisWeek, createdThisWeek, overdue, dueToday, dueByDate, next }
+})
+
+const pendingTasks = computed(() => taskSummary.value.pending)
 
 // ---------- 玩家等级系统：每完成 1 项待办 +20 EXP，满 100 EXP 升级 ----------
 const EXP_PER_TASK = 20
 
-const totalDone = computed(() => tasks.value.filter((task) => task.done).length)
+const totalDone = computed(() => taskSummary.value.done)
 const playerLevel = computed(() => Math.floor((totalDone.value * EXP_PER_TASK) / 100) + 1)
 const expPercent = computed(() => (totalDone.value * EXP_PER_TASK) % 100)
 const totalXp = computed(() => totalDone.value * EXP_PER_TASK)
@@ -68,19 +122,9 @@ const expToNext = computed(() => Math.max(1, Math.ceil((100 - expPercent.value) 
 
 // 本周完成情况：统计周一至今完成的待办，用于 Hero 右侧徽章
 const weekProgress = computed(() => {
-  const nowDate = new Date(now.value)
-  const day = nowDate.getDay() === 0 ? 7 : nowDate.getDay()
-  const monday = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate() - (day - 1))
-  const mondayTs = monday.getTime()
-  const isSameWeek = (iso) => {
-    if (!iso) return false
-    const t = new Date(iso)
-    return t.getTime() >= mondayTs && t.getTime() <= nowDate.getTime() + 60000
-  }
-  const doneThisWeek = tasks.value.filter((task) => task.done && isSameWeek(task.completedAt)).length
-  const createdThisWeek = tasks.value.filter((task) => isSameWeek(task.createdAt)).length
-  const total = createdThisWeek + pendingTasks.value.length
-  return { done: doneThisWeek, total, percent: total ? Math.round((doneThisWeek / total) * 100) : 0 }
+  const summary = taskSummary.value
+  const total = summary.createdThisWeek + summary.pending.length
+  return { done: summary.doneThisWeek, total, percent: total ? Math.round((summary.doneThisWeek / total) * 100) : 0 }
 })
 
 const LEVEL_TITLES = [
@@ -113,12 +157,19 @@ function dateFromOffset(offset) {
 
 // 风险提示：不再占用主卡位，紧急时在 Hero 显示警示 chip
 const riskCard = computed(() => {
-  const today = todayStr()
-  const nowTime = now.value.getTime()
-  const overdue = pendingTasks.value.filter((task) => task.dueDate && taskTimestamp(task) < nowTime).length
-  const dueToday = pendingTasks.value.filter((task) => task.dueDate === today && taskTimestamp(task) >= nowTime).length
-  const total = overdue + dueToday
+  const total = taskSummary.value.overdue + taskSummary.value.dueToday
   return { count: total, urgent: total > 0, label: total ? `${total} 项需注意` : '' }
+})
+
+const billSummary = computed(() => {
+  const dueByDate = new Map()
+  let next = null
+  for (const bill of bills.value) {
+    if (bill.active === false || !bill.nextDate) continue
+    dueByDate.set(bill.nextDate, (dueByDate.get(bill.nextDate) || 0) + 1)
+    if (!next || bill.nextDate.localeCompare(next.nextDate) < 0) next = bill
+  }
+  return { dueByDate, next }
 })
 
 // 卡片三：未来七天 —— 按真实数据动态统计
@@ -128,14 +179,9 @@ const weeklyAhead = computed(() => {
   let billCount = 0
   for (let offset = 0; offset < 7; offset++) {
     const date = dateFromOffset(offset)
-    taskCount += pendingTasks.value.filter((task) => task.dueDate === date).length
-    examCount += upcomingExams.value.filter((item) => {
-      const target = item.countdown.target
-      if (!target) return false
-      const pad = (value) => String(value).padStart(2, '0')
-      return `${target.getFullYear()}-${pad(target.getMonth() + 1)}-${pad(target.getDate())}` === date
-    }).length
-    billCount += bills.value.filter((bill) => bill.active !== false && bill.nextDate === date).length
+    taskCount += taskSummary.value.dueByDate.get(date) || 0
+    examCount += examDueByDate.value.get(date) || 0
+    billCount += billSummary.value.dueByDate.get(date) || 0
   }
   const important = taskCount + examCount + billCount
   const detail = [
@@ -150,20 +196,8 @@ const weeklyAhead = computed(() => {
   }
 })
 
-function taskTimestamp(task) {
-  if (!task.dueDate) return Infinity
-  return new Date(`${task.dueDate}T${task.dueTime || '23:59'}`).getTime()
-}
-
-const nextTask = computed(() =>
-  [...pendingTasks.value].sort((a, b) => taskTimestamp(a) - taskTimestamp(b))[0] ?? null
-)
-
-const nextBill = computed(() =>
-  [...bills.value]
-    .filter((bill) => bill.active !== false && bill.nextDate)
-    .sort((a, b) => a.nextDate.localeCompare(b.nextDate))[0] ?? null
-)
+const nextTask = computed(() => taskSummary.value.next)
+const nextBill = computed(() => billSummary.value.next)
 
 function billBrief(bill) {
   if (!bill) return ''

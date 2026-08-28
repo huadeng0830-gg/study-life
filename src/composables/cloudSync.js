@@ -20,6 +20,7 @@ const SYNC_HISTORY_KEY = 'study_life_sync_history'
 const LOCAL_TS_KEY = 'study_life_last_local_change'
 const VERIFY_TIMEOUT_MS = 15_000
 const SYNC_TIMEOUT_MS = 45_000
+const SYNC_CODE_PATTERN = /^\d{6}$/
 
 export const code = ref('')
 // disconnected -> validating -> connected（连接成功后停留，绝不进入 pulling）
@@ -230,7 +231,7 @@ function applyRemoteValues(states, validated) {
 // ---------- 连接：仅验证访问码 + 读取云端元数据（不下载业务数据） ----------
 export async function connectCloud(codeInput, { signal = null } = {}) {
   if (isSyncing.value) return { ok: false, error: '正在执行其他云操作，请稍后再试' }
-  if (!/^\d{6}$/.test(String(codeInput ?? ''))) {
+  if (!SYNC_CODE_PATTERN.test(String(codeInput ?? ''))) {
     connectionState.value = 'disconnected'
     return { ok: false, error: '请输入 6 位数字访问码' }
   }
@@ -272,13 +273,17 @@ export function disconnectCloud() {
 // ---------- 拉取：仅可由 UI 的「从云端拉取」按钮调用 ----------
 export async function pullFromCloud({ signal = null, onProgress = null } = {}) {
   if (isSyncing.value) return false
-  if (!/^\d{6}$/.test(code.value)) return showError('尚未连接云端，请先输入访问码连接')
+  if (!SYNC_CODE_PATTERN.test(code.value)) return showError('尚未连接云端，请先输入访问码连接')
   syncStatus.value = 'pulling'
   lastError.value = ''
 
   try {
     reportProgress(onProgress, 'request', '正在请求云端版本')
-    const res = await controlledFetch(`${API.pull}?code=${encodeURIComponent(code.value)}`, {}, { signal })
+    const res = await controlledFetch(API.pull, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code: code.value }),
+    }, { signal })
     if (!res.ok) throw new Error(await responseError(res, '拉取失败'))
     const response = await res.json()
     const { data } = response
@@ -328,7 +333,7 @@ export async function pullFromCloud({ signal = null, onProgress = null } = {}) {
 // ---------- 推送：仅可由 UI 的「推送到云端」按钮调用 ----------
 export async function pushToCloud({ signal = null, onProgress = null } = {}) {
   if (isSyncing.value) return false
-  if (!/^\d{6}$/.test(code.value)) return showError('尚未连接云端，请先输入访问码连接')
+  if (!SYNC_CODE_PATTERN.test(code.value)) return showError('尚未连接云端，请先输入访问码连接')
 
   syncStatus.value = 'pushing'
   lastError.value = ''

@@ -6,6 +6,15 @@ const INIT_TIMEOUT_MS = 45000
 const RECOGNIZE_TIMEOUT_MS = 120000
 const MAX_PIXELS = { fast: 6_500_000, auto: 8_500_000, accurate: 12_000_000 }
 
+function maxPixelsFor(mode) {
+  const requested = MAX_PIXELS[mode] || MAX_PIXELS.auto
+  const memory = Number(navigator.deviceMemory)
+  // 低内存设备会同时持有原图、增强图与 OCR worker 缓冲，准确模式必须更保守。
+  if (Number.isFinite(memory) && memory <= 2) return Math.min(requested, 4_000_000)
+  if (Number.isFinite(memory) && memory <= 4) return Math.min(requested, 6_500_000)
+  return requested
+}
+
 export const ocrState = reactive({ status: 'idle', progress: 0, stage: '', error: null })
 
 let worker = null
@@ -159,19 +168,16 @@ function enhanceCanvas(source, quality) {
   const canvas = document.createElement('canvas')
   canvas.width = source.width
   canvas.height = source.height
-  const context = canvas.getContext('2d', { alpha: false, willReadFrequently: true })
-  context.drawImage(source, 0, 0)
-  const image = context.getImageData(0, 0, canvas.width, canvas.height)
+  const context = canvas.getContext('2d', { alpha: false })
   const contrastFactor = Math.min(1.75, Math.max(1.08, 58 / Math.max(24, quality.contrast)))
-  for (let index = 0; index < image.data.length; index += 4) {
-    let luminance = image.data[index] * 0.299 + image.data[index + 1] * 0.587 + image.data[index + 2] * 0.114
-    luminance = Math.max(0, Math.min(255, (luminance - 128) * contrastFactor + 136))
-    image.data[index] = luminance
-    image.data[index + 1] = luminance
-    image.data[index + 2] = luminance
-    image.data[index + 3] = 255
+  // CSS Canvas filter runs in the browser's image pipeline. This replaces a
+  // full-resolution getImageData + JavaScript pixel loop, which was the main
+  // source of long frames on large timetable photos.
+  if ('filter' in context) {
+    context.filter = `grayscale(100%) contrast(${Math.round(contrastFactor * 100)}%) brightness(106%)`
   }
-  context.putImageData(image, 0, 0)
+  context.drawImage(source, 0, 0)
+  context.filter = 'none'
   return canvas
 }
 
@@ -183,7 +189,7 @@ async function preprocessImage(file, mode, signal = null) {
     const sourceWidth = drawable.width || drawable.naturalWidth
     const sourceHeight = drawable.height || drawable.naturalHeight
     if (!sourceWidth || !sourceHeight) throw new Error('无法读取图片尺寸')
-    const maxPixels = MAX_PIXELS[mode] || MAX_PIXELS.auto
+    const maxPixels = maxPixelsFor(mode)
     const minWidth = mode === 'fast' ? 1400 : 1800
     const desiredScale = sourceWidth < minWidth ? minWidth / sourceWidth : 1
     const memoryScale = Math.sqrt(maxPixels / Math.max(1, sourceWidth * sourceHeight))
@@ -198,9 +204,8 @@ async function preprocessImage(file, mode, signal = null) {
     context.fillRect(0, 0, canvas.width, canvas.height)
     context.drawImage(drawable, 0, 0, canvas.width, canvas.height)
     const quality = sampleQuality(canvas)
-    const enhanced = (mode === 'accurate' || quality.needsEnhancement) ? enhanceCanvas(canvas, quality) : null
     throwIfAborted(signal)
-    return { canvas, enhanced, width: canvas.width, height: canvas.height, sourceWidth, sourceHeight, quality }
+    return { canvas, enhanced: null, width: canvas.width, height: canvas.height, sourceWidth, sourceHeight, quality }
   } finally {
     releaseDrawable(drawable)
   }
@@ -279,6 +284,14 @@ function detectDayGeometry(layout) {
   }
 }
 
+function needsDetailPass(result, kind, mode, quality) {
+  if (mode === 'accurate') return true
+  if (result.confidence < 74) return true
+  if (kind === 'timetable') return detectDayGeometry(result.layout).detectedHeaders < 4
+  if (kind === 'schedule') return structuredEvidence(result, kind) < 28
+  return Boolean(quality.needsEnhancement && result.confidence < 84)
+}
+
 function cropColumn(source, geometry, day) {
   const center = geometry.centers[day]
   const sourceX = Math.max(0, Math.round(center - geometry.spacing * 0.47))
@@ -300,6 +313,11 @@ function cropColumn(source, geometry, day) {
 async function recognizeTimetableColumns(instance, source, bestResult, signal = null) {
   if (!/(?:星期|周)[一二三四五六日天]/.test(bestResult.text) || !/(?:0?1\s*[-—]\s*0?2|0102)/.test(bestResult.text)) return []
   const geometry = detectDayGeometry(bestResult.layout)
+  // Do not crop a guessed seven-column grid when the image itself did not
+  // provide enough weekday anchors. The layout parser can still use the full
+  // spatial OCR output, while the preview asks for confirmation instead of
+  // assigning course blocks to invented columns.
+  if (geometry.detectedHeaders < 2) return []
   const columns = []
   await instance.setParameters({ tessedit_pageseg_mode: tesseractModule.PSM.SINGLE_BLOCK, preserve_interword_spaces: '1' })
   try {
@@ -441,9 +459,8 @@ export async function performOCR(file, onProgress = null, options = {}) {
     const originalData = await recognizeWithTimeout(instance, prepared.canvas, '正在识别原图...', 60, 75, signal)
     const variants = [normalizeResult(originalData, prepared.canvas, 'original')]
     const shouldCompareEnhanced = mode === 'accurate'
-      || prepared.quality.needsEnhancement
-      || variants[0].confidence < 82
-      || (kind !== 'generic' && structuredEvidence(variants[0], kind) < 22)
+      || variants[0].confidence < 72
+      || (kind !== 'generic' && structuredEvidence(variants[0], kind) < 16)
     if (shouldCompareEnhanced) {
       if (!prepared.enhanced) prepared.enhanced = enhanceCanvas(prepared.canvas, prepared.quality)
       const enhancedData = await recognizeWithTimeout(instance, prepared.enhanced, '正在识别增强版本...', 75, 82, signal)
@@ -452,8 +469,11 @@ export async function performOCR(file, onProgress = null, options = {}) {
     const best = [...variants].sort((a, b) => structuredEvidence(b, kind) - structuredEvidence(a, kind))[0]
     if (!best.text.trim()) throw new Error('未识别到文字，请换张更清晰的图片')
     const sourceForColumns = best.name === 'enhanced' ? prepared.enhanced : prepared.canvas
-    const columns = kind === 'timetable' ? await recognizeTimetableColumns(instance, sourceForColumns, best, signal) : []
-    const scheduleRows = kind === 'schedule'
+    const detailPass = needsDetailPass(best, kind, mode, prepared.quality)
+    const columns = kind === 'timetable' && detailPass
+      ? await recognizeTimetableColumns(instance, sourceForColumns, best, signal)
+      : []
+    const scheduleRows = kind === 'schedule' && detailPass
       ? await recognizeScheduleRows(instance, sourceForColumns, signal)
       : { regions: [], grid: null }
     ocrState.status = 'completed'
@@ -468,6 +488,7 @@ export async function performOCR(file, onProgress = null, options = {}) {
       variants: variants.filter((variant) => variant !== best),
       quality: prepared.quality,
       strategy: best.name,
+      detailPass,
       structure: scheduleRows.grid,
       image: { width: prepared.width, height: prepared.height, sourceWidth: prepared.sourceWidth, sourceHeight: prepared.sourceHeight },
     }

@@ -1,11 +1,14 @@
 <script setup>
-import { defineAsyncComponent, ref } from 'vue'
+import { defineAsyncComponent, onBeforeUnmount, onMounted, ref } from 'vue'
 import { autoWallpaperColor, THEMES, themeKey } from '../composables/theme.js'
 import { needsBackup } from '../composables/backupReminder.js'
+import { preloadCommonRoutes, preloadRoute } from '../router/routePreload.js'
 
 // 工具弹窗严格按需加载。手机端不在后台预载二维码库，避免与页面切换争抢网络和主线程。
-const DataManager = defineAsyncComponent(() => import('./DataManager.vue'))
-const AppearanceSettings = defineAsyncComponent(() => import('./AppearanceSettings.vue'))
+const loadDataManager = () => import('./DataManager.vue')
+const loadAppearanceSettings = () => import('./AppearanceSettings.vue')
+const DataManager = defineAsyncComponent(loadDataManager)
+const AppearanceSettings = defineAsyncComponent(loadAppearanceSettings)
 
 const navGroups = [
   {
@@ -34,6 +37,32 @@ const updateNotice = ref('')
 const props = defineProps({ quickLedgerOpen: Boolean })
 const emit = defineEmits(['toggle-quick-ledger'])
 let noticeTimer = 0
+let warmupTimer = 0
+
+function warmTool(name) {
+  if (name === 'data') void loadDataManager()
+  if (name === 'appearance') void loadAppearanceSettings()
+}
+
+function warmRoute(path) {
+  void preloadRoute(path)
+}
+
+onMounted(() => {
+  // 桌面端在首屏空闲后预热最常点的入口；移动端仍保持按需下载，避免占用流量。
+  if (!window.matchMedia('(min-width: 901px)').matches) return
+  warmupTimer = window.setTimeout(() => {
+    const warm = () => {
+      warmTool('appearance')
+      warmTool('data')
+      preloadCommonRoutes()
+    }
+    if ('requestIdleCallback' in window) window.requestIdleCallback(warm, { timeout: 1800 })
+    else warm()
+  }, 1800)
+})
+
+onBeforeUnmount(() => window.clearTimeout(warmupTimer))
 
 async function checkUpdate() {
   if (checkingUpdate.value) return
@@ -77,6 +106,9 @@ function chooseTheme(key) {
           :to="item.path"
           class="nav-item"
           active-class="active"
+          @pointerenter="warmRoute(item.path)"
+          @pointerdown="warmRoute(item.path)"
+          @focus="warmRoute(item.path)"
         >
           <span class="icon">{{ item.icon }}</span>
           <span class="nav-label">{{ item.label }}</span>
@@ -97,7 +129,7 @@ function chooseTheme(key) {
     <div class="sidebar-foot">
       <span class="tools-title">设置与工具</span>
       <div class="sidebar-action-row">
-        <button type="button" class="nav-item data-item appearance-item" @click="showAppearance = true">
+        <button type="button" class="nav-item data-item appearance-item" @pointerenter="warmTool('appearance')" @focus="warmTool('appearance')" @click="showAppearance = true">
           <span class="icon">🎨</span>
           <span class="nav-label">个性化</span>
         </button>
@@ -114,7 +146,7 @@ function chooseTheme(key) {
           <span class="quick-add-label">记账</span>
         </button>
       </div>
-      <button type="button" class="nav-item data-item" @click="showDataManager = true">
+      <button type="button" class="nav-item data-item" @pointerenter="warmTool('data')" @focus="warmTool('data')" @click="showDataManager = true">
         <span class="icon">💾<i v-if="needsBackup" class="backup-dot"></i></span>
         <span class="nav-label">数据管理</span>
       </button>

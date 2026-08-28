@@ -179,14 +179,14 @@ function dueInfo(task) {
   return { text: `${fmtDate(task.dueDate)}${task.dueTime ? ` ${task.dueTime}` : ''}`, cls: '' }
 }
 
-const counts = computed(() => ({
-  todo: tasks.value.filter((task) => !task.done).length,
-  done: tasks.value.filter((task) => task.done).length,
-  all: tasks.value.length,
-}))
-
-const sorted = computed(() =>
-  [...tasks.value].sort((a, b) => {
+const taskView = computed(() => {
+  let todo = 0
+  let done = 0
+  for (const task of tasks.value) {
+    if (task.done) done++
+    else todo++
+  }
+  const sorted = [...tasks.value].sort((a, b) => {
     if (Boolean(a.done) !== Boolean(b.done)) return a.done ? 1 : -1
     if (sortKey.value === 'priority') {
       const priorityDiff = (PRIORITIES[a.priority]?.order ?? 1) - (PRIORITIES[b.priority]?.order ?? 1)
@@ -202,7 +202,13 @@ const sorted = computed(() =>
     if (dueDiff) return dueDiff
     return (PRIORITIES[a.priority]?.order ?? 1) - (PRIORITIES[b.priority]?.order ?? 1)
   })
-)
+  const visible = filter.value === 'all'
+    ? sorted
+    : sorted.filter((task) => filter.value === 'todo' ? !task.done : task.done)
+  return { counts: { todo, done, all: tasks.value.length }, visible }
+})
+
+const counts = computed(() => taskView.value.counts)
 
 function deleteTask(task) {
   if (!window.confirm(`确定删除待办“${task.title}”吗？`)) return
@@ -229,13 +235,7 @@ const emptyInfo = computed(() => {
   return { icon: '✦', title: '这个列表暂时是空的', description: '', hint: '', action: '' }
 })
 
-const visibleTasks = computed(() =>
-  sorted.value.filter((task) => {
-    if (filter.value === 'todo') return !task.done
-    if (filter.value === 'done') return task.done
-    return true
-  })
-)
+const visibleTasks = computed(() => taskView.value.visible)
 
 const courseNames = computed(() => [...new Set(courses.value.map((course) => course.name).filter(Boolean))])
 </script>

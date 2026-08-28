@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { onRequest as apiMiddleware } from '../functions/api/_middleware.js'
-import { onRequestGet as pull } from '../functions/api/sync/pull.js'
+import { onRequestPost as pull } from '../functions/api/sync/pull.js'
 import { onRequestPost as push } from '../functions/api/sync/push.js'
 import { onRequestPost as verify } from '../functions/api/auth/verify.js'
 
@@ -17,7 +17,11 @@ function createKv(initialValue = null) {
 describe('Pages Functions 云同步', () => {
   it('访问码只在 API 中间层校验', async () => {
     const response = await apiMiddleware({
-      request: new Request('https://example.com/api/sync/pull'),
+      request: new Request('https://example.com/api/sync/pull', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      }),
       env: { STUDY_LIFE_SYNC: createKv() },
       data: {},
       next: vi.fn(),
@@ -27,10 +31,45 @@ describe('Pages Functions 云同步', () => {
     expect(await response.json()).toEqual({ error: '需要访问码' })
   })
 
+  it('拒绝将访问码放在 URL 中', async () => {
+    const response = await apiMiddleware({
+      request: new Request('https://example.com/api/sync/pull?code=123456'),
+      env: { STUDY_LIFE_SYNC: createKv() },
+      data: {},
+      next: vi.fn(),
+    })
+
+    expect(response.status).toBe(405)
+  })
+
+  it('对同一来源的同步请求实施冷却', async () => {
+    const kv = createKv()
+    let response
+    for (let index = 0; index < 13; index++) {
+      response = await apiMiddleware({
+        request: new Request('https://example.com/api/auth/verify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': '203.0.113.8' },
+          body: JSON.stringify({ code: '123456' }),
+        }),
+        env: { STUDY_LIFE_SYNC: kv },
+        data: {},
+        next: vi.fn(async () => new Response(null, { status: 204 })),
+      })
+    }
+
+    expect(response.status).toBe(429)
+    expect(response.headers.get('Retry-After')).not.toBeNull()
+  })
+
   it('通过 context.data 向下游传递哈希和 KV', async () => {
     const kv = createKv()
     const context = {
-      request: new Request('https://example.com/api/sync/pull?code=123456'),
+      request: new Request('https://example.com/api/sync/pull', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: '123456' }),
+      }),
       env: { STUDY_LIFE_SYNC: kv },
       data: {},
       next: vi.fn(async () => new Response(null, { status: 204 })),

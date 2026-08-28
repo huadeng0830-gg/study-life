@@ -53,6 +53,9 @@ onBeforeUnmount(() => {
         <div class="modal-body">
           <slot />
         </div>
+        <div v-if="$slots.foot" class="modal-foot">
+          <slot name="foot" />
+        </div>
       </div>
     </div>
   </Teleport>
@@ -116,6 +119,12 @@ onBeforeUnmount(() => {
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
   padding: 18px 22px 22px;
+}
+.modal-foot {
+  flex: 0 0 auto;
+  padding: 12px 22px calc(14px + env(safe-area-inset-bottom, 0px));
+  border-top: 1px solid var(--border);
+  background: #fff;
 }
 
 @keyframes fade-in {

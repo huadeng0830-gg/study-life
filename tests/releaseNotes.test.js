@@ -17,6 +17,20 @@ describe('版本更新说明', () => {
     expect(RELEASE_NOTES.every((note) => typeof note === 'string' && note.trim().length >= 12)).toBe(true)
   })
 
+  it('更新弹窗最多只保留最近 3 个版本的说明', async () => {
+    const { RELEASE_UPDATE_GROUPS, PREVIOUS_RELEASE_GROUPS } = await import('../src/composables/releaseNotes.js')
+    expect(RELEASE_UPDATE_GROUPS.length).toBeLessThanOrEqual(3)
+    expect(RELEASE_UPDATE_GROUPS.length).toBeGreaterThan(0)
+    // 第一组始终是当前版本，其余按时间倒序
+    expect(RELEASE_UPDATE_GROUPS[0].isCurrent).toBe(true)
+    expect(RELEASE_UPDATE_GROUPS[0].version).toBe(APP_RELEASE)
+    expect(PREVIOUS_RELEASE_GROUPS.length).toBe(RELEASE_UPDATE_GROUPS.length - 1)
+    for (const group of RELEASE_UPDATE_GROUPS) {
+      expect(group.notes.length).toBeGreaterThan(0)
+      expect(group.notes.every((note) => typeof note === 'string' && note.trim().length >= 12)).toBe(true)
+    }
+  })
+
   it('当前版本只展示一次', () => {
     expect(shouldShowReleaseNotes()).toBe(true)
     markReleaseSeen()

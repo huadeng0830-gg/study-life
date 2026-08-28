@@ -10,7 +10,8 @@
     "preview:host": "vite preview --host",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
-    "test": "vitest run"
+    "test": "vitest run",
+    "check": "npm run lint && npm test && npm run build"
   },
   "dependencies": {
     "jsqr": "^1.4.0",

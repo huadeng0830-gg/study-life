@@ -2,6 +2,7 @@
 import { computed, nextTick, ref } from 'vue'
 import EmptyState from '../components/EmptyState.vue'
 import Modal from '../components/Modal.vue'
+import VirtualList from '../components/VirtualList.vue'
 import { todayStr, useStoredRef } from '../composables/store.js'
 import {
   DEFAULT_CATEGORIES,
@@ -111,29 +112,29 @@ function clearFilters() {
   fRange.value = 'all'; fFrom.value = ''; fTo.value = ''; fCat.value = ''; fMin.value = ''; fMax.value = ''; fKind.value = 'all'
 }
 
-// 按天分组的记录流
-const feedGroups = computed(() => {
-  const map = new Map()
-  for (const e of filteredExpenses.value) {
-    if (!map.has(e.date)) map.set(e.date, [])
-    map.get(e.date).push(e)
-  }
-  return [...map.entries()]
-    .sort((a, b) => b[0].localeCompare(a[0]))
-    .map(([date, items]) => ({ date, label: dayLabel(date), items }))
+// 已经按日期排序，扁平化后供虚拟列表使用；只在日期变化处渲染一个小标题。
+const feedItems = computed(() => {
+  let previousDate = ''
+  return filteredExpenses.value.map((expense) => {
+    const showDay = expense.date !== previousDate
+    previousDate = expense.date
+    return { ...expense, showDay, dayLabel: showDay ? dayLabel(expense.date) : '' }
+  })
 })
 
-const monthTotal = computed(() => {
+const periodStats = computed(() => {
   const ym = todayStr().slice(0, 7)
-  return expenses.value.filter((e) => e.date.slice(0, 7) === ym).reduce((s, e) => s + Number(e.amount || 0), 0)
+  const today = todayStr()
+  let monthTotal = 0
+  let monthCount = 0
+  let todayTotal = 0
+  for (const expense of expenses.value) {
+    const amount = Number(expense.amount || 0)
+    if (expense.date.slice(0, 7) === ym) { monthTotal += amount; monthCount++ }
+    if (expense.date === today) todayTotal += amount
+  }
+  return { monthTotal, monthCount, todayTotal }
 })
-const monthCount = computed(() => {
-  const ym = todayStr().slice(0, 7)
-  return expenses.value.filter((e) => e.date.slice(0, 7) === ym).length
-})
-const todayTotal = computed(() =>
-  expenses.value.filter((e) => e.date === todayStr()).reduce((s, e) => s + Number(e.amount || 0), 0)
-)
 
 /* ---------- 常记 ---------- */
 const frequent = computed(() => computeFrequent(expenses.value, freqPrefs.value))
@@ -645,8 +646,8 @@ function createBillFromSuggest() {
       <!-- 核心数据：只突出本月支出 -->
       <section class="hero-stat card">
         <span class="hero-label">这个月记录了</span>
-        <b class="hero-amount">{{ moneyHero(monthTotal) }}</b>
-        <span class="hero-sub">今天 {{ moneyRow(todayTotal) }} · 本月 {{ monthCount }} 笔</span>
+        <b class="hero-amount">{{ moneyHero(periodStats.monthTotal) }}</b>
+        <span class="hero-sub">今天 {{ moneyRow(periodStats.todayTotal) }} · 本月 {{ periodStats.monthCount }} 笔</span>
       </section>
 
       <!-- 待处理：固定账单临近（无则整块隐藏） -->
@@ -717,7 +718,7 @@ function createBillFromSuggest() {
       <!-- 最近记录：生活记录流 -->
       <section class="feed-block">
         <h3 class="block-title">最近记录</h3>
-        <div v-if="feedGroups.length === 0" class="feed-empty">
+        <div v-if="feedItems.length === 0" class="feed-empty">
           <EmptyState
             class="card"
             icon="🧾"
@@ -728,18 +729,20 @@ function createBillFromSuggest() {
           />
         </div>
         <div v-else class="feed">
-          <TransitionGroup name="feed">
-            <template v-for="group in feedGroups" :key="group.date">
-              <h4 class="feed-day">{{ group.label }}</h4>
-              <div v-for="e in group.items" :key="e.id" class="feed-item" @click="openDetail(e.id)">
-                <div class="fi-main">
-                  <b>{{ e.name }}</b>
-                  <small>{{ catInfo(e.cat).name }} · {{ e.time }}<template v-if="e.source === 'bill'"> · 固定账单</template></small>
+          <VirtualList :items="feedItems" item-key="id" :estimated-height="62" :gap="0" :threshold="80" fixed-height>
+            <template #default="{ item: e }">
+              <div class="feed-virtual-item">
+                <h4 v-if="e.showDay" class="feed-day">{{ e.dayLabel }}</h4>
+                <div class="feed-item" @click="openDetail(e.id)">
+                  <div class="fi-main">
+                    <b>{{ e.name }}</b>
+                    <small>{{ catInfo(e.cat).name }} · {{ e.time }}<template v-if="e.source === 'bill'"> · 固定账单</template></small>
+                  </div>
+                  <span class="fi-amount">{{ moneyRow(e.amount) }}</span>
                 </div>
-                <span class="fi-amount">{{ moneyRow(e.amount) }}</span>
               </div>
             </template>
-          </TransitionGroup>
+          </VirtualList>
         </div>
       </section>
     </div>
@@ -1139,7 +1142,7 @@ function createBillFromSuggest() {
 /* ---------- 最近记录流 ---------- */
 .feed { display: flex; flex-direction: column; }
 .feed-day { margin: 14px 0 6px; color: var(--ink-faint); font-size: 11.5px; font-weight: 800; letter-spacing: .04em; }
-.feed-day:first-child { margin-top: 0; }
+.feed-virtual-item:first-child .feed-day { margin-top: 0; }
 .feed-item {
   display: flex;
   align-items: center;

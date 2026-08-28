@@ -6,10 +6,10 @@ import { env } from 'node:process'
 import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vite'
 import { VitePWA } from 'vite-plugin-pwa'
-import { RELEASE_NOTES, RELEASE_SOURCE_SIGNATURE } from './release.config.js'
+import { RELEASE_NOTES, RELEASE_SOURCE_SIGNATURE, RELEASE_VERSION } from './release.config.js'
 
 const projectRoot = fileURLToPath(new URL('.', import.meta.url))
-const releaseInputs = ['src', 'public', 'index.html', 'package.json', 'package-lock.json', 'vite.config.js']
+const releaseInputs = ['src', 'functions', 'sync-coordinator', 'public', 'index.html', 'package.json', 'package-lock.json', 'vite.config.js', 'release.config.js', 'wrangler.jsonc']
 
 function collectReleaseFiles(target) {
   if (!existsSync(target)) return []
@@ -19,15 +19,24 @@ function collectReleaseFiles(target) {
 }
 
 // 相同源码永远得到相同版本；任何 Agent 修改发布源码后都会自动得到新版本。
-// CI 仍可用 VITE_APP_RELEASE 指定更易读的正式版本号。
+// CI 可覆盖版本号；默认始终使用面向用户的“年-月-日-v序号”格式，不暴露源码哈希。
 function createSourceSignature() {
   const hash = createHash('sha256')
   const files = releaseInputs
     .flatMap((input) => collectReleaseFiles(resolve(projectRoot, input)))
     .sort((a, b) => a.localeCompare(b))
   for (const file of files) {
-    hash.update(relative(projectRoot, file).replaceAll('\\', '/'))
-    hash.update(readFileSync(file))
+    const relativePath = relative(projectRoot, file).replaceAll('\\', '/')
+    hash.update(relativePath)
+    let content = readFileSync(file, 'utf8')
+    // release.config.js 同时保存说明与签名；对签名字段归一化，避免哈希自引用，
+    // 但说明正文仍参与签名，确保业务代码和更新说明必须一起更新。
+    if (relativePath === 'release.config.js') {
+      content = content
+        .replace(/signature: '[^']*'/g, "signature: '<source-signature>'")
+        .replace(/RELEASE_SOURCE_SIGNATURE = '[^']*'/, "RELEASE_SOURCE_SIGNATURE = '<source-signature>'")
+    }
+    hash.update(content)
   }
   return hash.digest('hex').slice(0, 10)
 }
@@ -41,7 +50,7 @@ if (env.NODE_ENV === 'production' && RELEASE_SOURCE_SIGNATURE !== sourceSignatur
   )
 }
 const notesSignature = createHash('sha256').update(JSON.stringify(RELEASE_NOTES)).digest('hex').slice(0, 4)
-const appRelease = env.VITE_APP_RELEASE?.trim() || `r-${sourceSignature}-${notesSignature}`
+const appRelease = env.VITE_APP_RELEASE?.trim() || RELEASE_VERSION
 
 // https://vite.dev/config/
 export default defineConfig({
@@ -62,6 +71,13 @@ export default defineConfig({
     },
   },
   plugins: [
+    {
+      // 输出纯文本版本号，供应用更新检查与服务器版本比对（绕过一切缓存）。
+      name: 'emit-release-version',
+      generateBundle() {
+        this.emitFile({ type: 'asset', fileName: 'version.txt', source: appRelease })
+      },
+    },
     vue(),
     VitePWA({
       registerType: 'autoUpdate',
@@ -107,11 +123,8 @@ export default defineConfig({
           'assets/App-*.{js,css}',
           'assets/appearance-*.js',
           'assets/appUpdate-*.js',
-          // 侧栏两个常用工具离线可用，首次打开不再等待网络。
-          'assets/AppearanceSettings-*.{js,css}',
-          'assets/DataManager-*.{js,css}',
-          // 普通页面全部预缓存，首次点击课程/待办等页面不再等待网络。
-          'assets/*View-*.{js,css}',
+          // 只预缓存应用壳和首页；其他页面首次访问时由运行时缓存保存，避免首屏下载全部业务页面。
+          'assets/HomeView-*.{js,css}',
           'assets/Modal-*.{js,css}',
           'assets/VirtualList-*.{js,css}',
           'assets/UpdateNotes-*.{js,css}',
@@ -123,7 +136,8 @@ export default defineConfig({
         maximumFileSizeToCacheInBytes: 3 * 1024 * 1024,
         skipWaiting: true,
         clientsClaim: true,
-        cleanupOutdatedCaches: true,
+        // 旧懒加载资源保留一个发布周期，用户点击旧页面链接时仍有机会离线回退。
+        cleanupOutdatedCaches: false,
         runtimeCaching: [
           {
             urlPattern: /\/ocr\/.*\.traineddata$/i,

@@ -1,5 +1,5 @@
 <script setup>
-import { defineAsyncComponent, computed, onBeforeUnmount, onMounted, ref, watchEffect } from 'vue'
+import { defineAsyncComponent, computed, KeepAlive, onBeforeUnmount, onMounted, ref, watchEffect } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Sidebar from './components/Sidebar.vue'
 import QuickLedgerPanel from './components/QuickLedgerPanel.vue'
@@ -80,6 +80,7 @@ const WIDTH_BY_PATH = {
   '/food': 'content-wide',
 }
 const widthClass = computed(() => WIDTH_BY_PATH[route.path] ?? '')
+const cachedPageNames = ['HomeView', 'TasksView', 'ExamsView', 'ListsView']
 </script>
 
 <template>
@@ -93,7 +94,11 @@ const widthClass = computed(() => WIDTH_BY_PATH[route.path] ?? '')
       <Transition name="quick-ledger">
         <QuickLedgerPanel v-if="showQuickLedger" @close="showQuickLedger = false" />
       </Transition>
-      <router-view />
+      <router-view v-slot="{ Component, route: activeRoute }">
+        <KeepAlive :include="cachedPageNames" :max="3">
+          <component :is="Component" :key="activeRoute.name" />
+        </KeepAlive>
+      </router-view>
     </main>
   </div>
   <UpdateNotes v-if="showReleaseNotes" :open="showReleaseNotes" @close="showReleaseNotes = false" />

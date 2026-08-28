@@ -94,4 +94,52 @@ describe('教务系统表格课表识别', () => {
     expect(selected.batchText).toBe('structured')
     expect(selected.diagnostics).toMatchObject({ invalid: 0, duplicateSlots: 0, reviewCount: 0 })
   })
+
+  it('使用图片中不等宽的星期锚点，而不是推定七等分列', () => {
+    const layout = {
+      width: 1000,
+      height: 600,
+      lines: [item('周一', 100, 30)],
+      words: [
+        item('周一', 100, 30), item('周三', 500, 30), item('周五', 850, 30),
+        item('高等数学', 100, 120), item('1-16(周)', 100, 150), item('01-02节', 100, 180),
+        item('大学英语', 500, 120), item('1-16(周)', 500, 150), item('01-02节', 500, 180),
+      ],
+    }
+    const parsed = parseTimetableLayout(layout, timeConfig, 20)
+    expect(parsed.orientation).toBe('columns')
+    expect(parsed.courses.map((course) => [course.name, course.day])).toEqual([
+      ['高等数学', 0],
+      ['大学英语', 2],
+    ])
+  })
+
+  it('支持星期标签位于左侧的纵向布局', () => {
+    const layout = {
+      width: 800,
+      height: 600,
+      lines: [item('周一', 30, 120)],
+      words: [
+        item('周一', 30, 120), item('周二', 30, 360),
+        item('线性代数', 200, 120), item('1-16(周)', 200, 150), item('01-02节', 200, 180),
+        item('大学物理', 200, 360), item('1-16(周)', 200, 390), item('01-02节', 200, 420),
+      ],
+    }
+    const parsed = parseTimetableLayout(layout, timeConfig, 20)
+    expect(parsed.orientation).toBe('rows')
+    expect(parsed.courses.map((course) => [course.name, course.day])).toEqual([
+      ['线性代数', 0],
+      ['大学物理', 1],
+    ])
+  })
+
+  it('仅找到一个星期标签时不虚构固定列位置', () => {
+    const parsed = parseTimetableLayout({
+      width: 800,
+      height: 600,
+      lines: [item('周一', 30, 30)],
+      words: [item('周一', 30, 30), item('高等数学', 220, 140)],
+    }, timeConfig, 20)
+    expect(parsed).toMatchObject({ courses: [], orientation: 'unknown', needsReview: true })
+  })
 })

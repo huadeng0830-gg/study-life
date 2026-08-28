@@ -1,10 +1,14 @@
-// GET /api/sync/pull?code=xxxxxx
+import { coordinatorJson } from './coordinator.js'
+
+// POST /api/sync/pull { code }
 // 返回密文及轻量版本 metadata。此接口只在用户确认“从云端拉取”后调用。
-export async function onRequestGet(context) {
+export async function onRequestPost(context) {
   const { codeHash, kv } = context.data
 
   const key = `sync:${codeHash}:data`
   const stored = await kv.get(key, 'json')
+  const coordinated = await coordinatorJson(context, { operation: 'pull', legacyRecord: stored })
+  if (coordinated) return json(coordinated.body, coordinated.status)
 
   if (!stored) {
     return json({

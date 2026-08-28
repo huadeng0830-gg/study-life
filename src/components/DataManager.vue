@@ -2,8 +2,14 @@
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import Modal from './Modal.vue'
 import TaskProgress from './TaskProgress.vue'
-import { checkForAppUpdate, updateChecking, updateMessage } from '../composables/appUpdate.js'
-import { markBackedUp, needsBackup } from '../composables/backupReminder.js'
+import {
+  appUpdateProgress,
+  checkForAppUpdate,
+  retryAppUpdate,
+  updateChecking,
+  updateMessage,
+} from '../composables/appUpdate.js'
+import { lastBackupAt, markBackedUp, needsBackup } from '../composables/backupReminder.js'
 import {
   canUndoPull,
   cloudExists,
@@ -28,6 +34,7 @@ import {
   exportWallpapersForTransfer,
   importWallpapersFromTransfer,
 } from '../composables/wallpaperStorage.js'
+import { restoreStoredValues } from '../composables/store.js'
 import { useTaskProgress } from '../composables/taskProgress.js'
 
 // 二维码生成/扫描依赖体积较大，仅在用户真正打开迁移面板时下载和解析。
@@ -50,6 +57,34 @@ let lastSyncAction = ''
 
 const codeInput = ref('')
 const deviceNameInput = ref(deviceProfile.value.name)
+const dataHealth = ref({ keys: 0, bytes: 0, quota: null, usage: null, largest: [] })
+
+function formatBytes(value) {
+  const bytes = Number(value) || 0
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`
+}
+
+async function refreshDataHealth() {
+  const records = []
+  for (let index = 0; index < localStorage.length; index++) {
+    const key = localStorage.key(index)
+    if (!key?.startsWith('sl_')) continue
+    const raw = localStorage.getItem(key) || ''
+    // localStorage 以 UTF-16 保存字符串，估算为每字符两个字节。
+    records.push({ key, bytes: (key.length + raw.length) * 2 })
+  }
+  let estimate = null
+  try { estimate = await navigator.storage?.estimate?.() } catch {}
+  dataHealth.value = {
+    keys: records.length,
+    bytes: records.reduce((sum, record) => sum + record.bytes, 0),
+    quota: Number(estimate?.quota) || null,
+    usage: Number(estimate?.usage) || null,
+    largest: records.sort((left, right) => right.bytes - left.bytes).slice(0, 3),
+  }
+}
 
 // 连接：只验证访问码 + 读取云端元数据（是否存在、最后更新时间），绝不触碰业务数据。
 async function connectCode() {
@@ -202,6 +237,7 @@ function continueSyncResult() {
 }
 
 watch(() => props.open, (open) => {
+  if (open) void refreshDataHealth()
   if (!open && syncProgress.state.status === 'running') void syncProgress.cancel()
   if (!open && backupProgress.state.status === 'running' && backupProgress.state.canCancel) void backupProgress.cancel()
 })
@@ -282,7 +318,8 @@ function readStored(key, fallback) {
 function makeBackup() {
   return {
     app: 'study-life',
-    version: 6,
+    version: 7,
+    schema: 'study-life.backup/v1',
     exportedAt: new Date().toISOString(),
     data: {
       courses: readStored(STORAGE_KEYS.courses, []),
@@ -305,6 +342,12 @@ function makeBackup() {
       wallpaperAccent: readStored(STORAGE_KEYS.wallpaperAccent, '#456fe8'),
     },
   }
+}
+
+async function backupChecksum(data) {
+  const bytes = new TextEncoder().encode(JSON.stringify(data))
+  const digest = await crypto.subtle.digest('SHA-256', bytes)
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')
 }
 
 async function exportBackup() {
@@ -345,6 +388,7 @@ async function exportBackup() {
     backupProgress.setStep('wallpapers', 'warning', '壁纸处理失败，将导出文字数据')
   }
   if (includeImages) backupProgress.setStep('file', 'running', '正在生成 JSON 备份文件')
+  backup.checksum = await backupChecksum(backup.data)
   const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' })
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
@@ -382,9 +426,15 @@ function sanitizeWallpaperImages(value) {
   return entries.length ? Object.fromEntries(entries) : null
 }
 
-function validateBackup(value) {
-  if (!value || value.app !== 'study-life' || ![1, 2, 3, 4, 5, 6].includes(value.version) || !value.data) {
+async function validateBackup(value) {
+  if (!value || value.app !== 'study-life' || ![1, 2, 3, 4, 5, 6, 7].includes(value.version) || !value.data) {
     throw new Error('这不是有效的控制台备份文件')
+  }
+  if (value.version >= 7 && value.schema !== 'study-life.backup/v1') {
+    throw new Error('备份文件版本不受支持')
+  }
+  if (value.checksum && value.checksum !== await backupChecksum(value.data)) {
+    throw new Error('备份文件校验失败，文件可能已损坏或被修改')
   }
   const data = value.data
   if (!Array.isArray(data.courses) || !Array.isArray(data.countdowns)) {
@@ -424,7 +474,7 @@ async function selectFile(event) {
   if (!file) return
   selectedName.value = file.name
   try {
-    selectedBackup.value = validateBackup(JSON.parse(await file.text()))
+    selectedBackup.value = await validateBackup(JSON.parse(await file.text()))
   } catch (reason) {
     error.value = reason instanceof Error ? reason.message : '无法读取这个备份文件'
   } finally {
@@ -456,7 +506,6 @@ async function restoreBackup() {
 
   const { data } = backup
   const hasWallpapers = Boolean(data.__wallpaper_images && Object.keys(data.__wallpaper_images).length)
-  const previous = Object.fromEntries(Object.values(STORAGE_KEYS).map((key) => [key, localStorage.getItem(key)]))
   if (hasWallpapers) {
     backupProgress.start({
       title: '正在恢复备份',
@@ -471,24 +520,26 @@ async function restoreBackup() {
     backupProgress.setStep('data', 'running', '正在写入本机数据')
   }
   try {
-    localStorage.setItem(STORAGE_KEYS.courses, JSON.stringify(data.courses))
-    localStorage.setItem(STORAGE_KEYS.countdowns, JSON.stringify(data.countdowns))
-    localStorage.setItem(STORAGE_KEYS.tasks, JSON.stringify(data.tasks))
-    localStorage.setItem(STORAGE_KEYS.courseTemplates, JSON.stringify(data.courseTemplates))
-    localStorage.setItem(STORAGE_KEYS.checklists, JSON.stringify(data.checklists))
-    localStorage.setItem(STORAGE_KEYS.bills, JSON.stringify(data.bills))
-    localStorage.setItem(STORAGE_KEYS.expenses, JSON.stringify(data.expenses))
-    if (data.timeConfig) localStorage.setItem(STORAGE_KEYS.timeConfig, JSON.stringify(data.timeConfig))
-    if (data.semester) localStorage.setItem(STORAGE_KEYS.semester, JSON.stringify(data.semester))
-    localStorage.setItem(STORAGE_KEYS.scheduleExceptions, JSON.stringify(data.scheduleExceptions))
-    localStorage.setItem(STORAGE_KEYS.theme, JSON.stringify(data.theme))
-    localStorage.setItem(STORAGE_KEYS.countdownShowPast, JSON.stringify(data.countdownShowPast))
-    localStorage.setItem(STORAGE_KEYS.foodPlaces, JSON.stringify(data.foodPlaces))
-    localStorage.setItem(STORAGE_KEYS.foodHistory, JSON.stringify(data.foodHistory))
-    if (data.appearance) localStorage.setItem(STORAGE_KEYS.appearance, JSON.stringify(data.appearance))
-    if (data.wallpaperConfig) localStorage.setItem(STORAGE_KEYS.wallpaperConfig, JSON.stringify(data.wallpaperConfig))
-    localStorage.setItem(STORAGE_KEYS.autoWallpaperColor, JSON.stringify(data.autoWallpaperColor))
-    localStorage.setItem(STORAGE_KEYS.wallpaperAccent, JSON.stringify(data.wallpaperAccent))
+    await restoreStoredValues({
+      [STORAGE_KEYS.courses]: data.courses,
+      [STORAGE_KEYS.countdowns]: data.countdowns,
+      [STORAGE_KEYS.tasks]: data.tasks,
+      [STORAGE_KEYS.courseTemplates]: data.courseTemplates,
+      [STORAGE_KEYS.checklists]: data.checklists,
+      [STORAGE_KEYS.bills]: data.bills,
+      [STORAGE_KEYS.expenses]: data.expenses,
+      ...(data.timeConfig ? { [STORAGE_KEYS.timeConfig]: data.timeConfig } : {}),
+      ...(data.semester ? { [STORAGE_KEYS.semester]: data.semester } : {}),
+      [STORAGE_KEYS.scheduleExceptions]: data.scheduleExceptions,
+      [STORAGE_KEYS.theme]: data.theme,
+      [STORAGE_KEYS.countdownShowPast]: data.countdownShowPast,
+      [STORAGE_KEYS.foodPlaces]: data.foodPlaces,
+      [STORAGE_KEYS.foodHistory]: data.foodHistory,
+      ...(data.appearance ? { [STORAGE_KEYS.appearance]: data.appearance } : {}),
+      ...(data.wallpaperConfig ? { [STORAGE_KEYS.wallpaperConfig]: data.wallpaperConfig } : {}),
+      [STORAGE_KEYS.autoWallpaperColor]: data.autoWallpaperColor,
+      [STORAGE_KEYS.wallpaperAccent]: data.wallpaperAccent,
+    })
     if (data.__wallpaper_images) {
       backupProgress.setStep('data', 'completed', '文字数据与设置已恢复')
       backupProgress.setStep('wallpapers', 'running', '正在解码壁纸图片')
@@ -550,11 +601,20 @@ async function restoreBackup() {
         <div class="section-icon update">↻</div>
         <div class="section-copy">
           <h4>电脑与手机更新</h4>
-          <p>电脑浏览器和苹果桌面版都可以直接检查新版本。更新页面不会删除本地课程和记录。</p>
+          <p>电脑浏览器和苹果桌面版都可以直接检查新版本。更新页面不会删除本地课程和记录；只有浏览器真实报告的阶段才会显示。</p>
           <button class="btn btn-primary" :disabled="updateChecking" @click="checkForAppUpdate()">
             {{ updateChecking ? '正在更新…' : '检查更新' }}
           </button>
           <span v-if="updateMessage" class="update-message">{{ updateMessage }}</span>
+          <TaskProgress
+            :task="appUpdateProgress.state"
+            :elapsed-seconds="appUpdateProgress.elapsedSeconds.value"
+            :activity-age-seconds="appUpdateProgress.activityAgeSeconds.value"
+            :stalled="appUpdateProgress.isStalled.value"
+            compact
+            @retry="retryAppUpdate"
+            @wait="appUpdateProgress.continueWaiting"
+          />
         </div>
       </section>
 
@@ -564,6 +624,20 @@ async function restoreBackup() {
           <h4>本地二维码迁移</h4>
           <p>电脑生成加密二维码，手机扫码后选择合并或覆盖。数据只在两台设备之间传递，不上传服务器。</p>
           <button class="btn btn-primary" @click="showTransfer = true">打开二维码迁移</button>
+        </div>
+      </section>
+
+      <section class="data-section">
+        <div class="section-icon health">⌁</div>
+        <div class="section-copy health-copy">
+          <div class="health-head"><div><h4>数据健康</h4><p>仅统计当前浏览器中的本地数据，不会上传任何内容。</p></div><button class="btn" @click="refreshDataHealth">刷新</button></div>
+          <div class="health-grid">
+            <span><small>数据模块</small><b>{{ dataHealth.keys }} 项</b></span>
+            <span><small>本地数据</small><b>{{ formatBytes(dataHealth.bytes) }}</b></span>
+            <span><small>最近备份</small><b>{{ fmtTime(lastBackupAt) }}</b></span>
+            <span v-if="dataHealth.quota"><small>浏览器已用</small><b>{{ formatBytes(dataHealth.usage) }} / {{ formatBytes(dataHealth.quota) }}</b></span>
+          </div>
+          <p v-if="dataHealth.largest.length" class="health-largest">占用较大：<span v-for="record in dataHealth.largest" :key="record.key">{{ record.key.replace('sl_', '') }} {{ formatBytes(record.bytes) }}</span></p>
         </div>
       </section>
 
@@ -966,4 +1040,17 @@ async function restoreBackup() {
   .sync-input-row .btn { width: 100%; }
   .sync-actions { display: grid; grid-template-columns: 1fr 1fr; width: 100%; }
 }
+</style>
+
+<style scoped>
+.section-icon.health { color: #7755d0; background: #f0ebff; }
+.health-copy { min-width: 0; width: 100%; }
+.health-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; width: 100%; }
+.health-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 7px; width: 100%; }
+.health-grid span { display: flex; flex-direction: column; gap: 3px; min-width: 0; padding: 8px; border-radius: 8px; background: var(--bg); }
+.health-grid small { color: var(--muted); font-size: 10px; }
+.health-grid b { overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.health-largest { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; width: 100%; font-size: 10.5px !important; }
+.health-largest span { padding: 3px 6px; border-radius: 5px; background: var(--bg); color: var(--ink-soft); }
+@media (max-width: 620px) { .health-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 </style>

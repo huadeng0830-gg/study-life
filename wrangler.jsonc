@@ -1,0 +1,16 @@
+{
+  "name": "study-life",
+  "pages_build_output_dir": "./dist",
+  "compatibility_date": "2026-08-28",
+  "kv_namespaces": [{
+    "binding": "STUDY_LIFE_SYNC",
+    "id": "81bcb55b6505465391dbb1c8860a886c"
+  }],
+  "durable_objects": {
+    "bindings": [{
+      "name": "SYNC_COORDINATOR",
+      "class_name": "SyncCoordinator",
+      "script_name": "study-life-sync-coordinator"
+    }]
+  }
+}

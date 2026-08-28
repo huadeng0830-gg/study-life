@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { activeWallpaperSpec, wallpaperConfig } from '../composables/appearance.js'
 import { getWallpaper, wallpaperRevision } from '../composables/wallpaperStorage.js'
+import { reducedEffects } from '../composables/performanceMode.js'
 
 const route = useRoute()
 const imageUrl = ref('')
@@ -108,9 +109,10 @@ const layerStyle = computed(() => {
   const settings = spec.value?.settings
   if (!settings || !imageUrl.value) return { display: 'none' }
   const requestedBlur = Math.max(0, Number(settings.blur) || 0)
+  const blur = reducedEffects.value ? 0 : mobileViewport ? Math.min(requestedBlur, 4) : requestedBlur
   return {
     '--wallpaper-image': `url("${imageUrl.value}")`,
-    '--wallpaper-blur': `${mobileViewport ? Math.min(requestedBlur, 4) : requestedBlur}px`,
+    '--wallpaper-blur': `${blur}px`,
     '--wallpaper-brightness': `${Number(settings.brightness) || 100}%`,
     '--wallpaper-opacity': `${(Number(settings.opacity) || 0) / 100}`,
     '--wallpaper-overlay': `${(Number(settings.overlay) || 0) / 100}`,
@@ -130,5 +132,5 @@ const layerStyle = computed(() => {
 </template>
 
 <style scoped>
-.wallpaper-layer{position:fixed;inset:0;z-index:0;overflow:hidden;pointer-events:none;background:var(--bg);contain:strict}.wallpaper-image{position:absolute;inset:var(--wallpaper-inset);background-image:var(--wallpaper-image);background-repeat:no-repeat;background-position:var(--wallpaper-position);background-size:var(--wallpaper-fit);filter:blur(var(--wallpaper-blur)) brightness(var(--wallpaper-brightness));opacity:var(--wallpaper-opacity);transform:translateZ(0) scale(var(--wallpaper-scale));backface-visibility:hidden}.wallpaper-shade{position:absolute;inset:0;background:rgba(10,16,32,var(--wallpaper-overlay))}
+.wallpaper-layer{position:fixed;inset:0;z-index:0;overflow:hidden;pointer-events:none;background:var(--bg);contain:strict}.wallpaper-image{position:absolute;inset:var(--wallpaper-inset);background-image:var(--wallpaper-image);background-repeat:no-repeat;background-position:var(--wallpaper-position);background-size:var(--wallpaper-fit);filter:blur(var(--wallpaper-blur)) brightness(var(--wallpaper-brightness));opacity:var(--wallpaper-opacity);transform:translateZ(0) scale(var(--wallpaper-scale));backface-visibility:hidden}:global(:root[data-performance='reduced']) .wallpaper-image{filter:none;transform:none}.wallpaper-shade{position:absolute;inset:0;background:rgba(10,16,32,var(--wallpaper-overlay))}
 </style>

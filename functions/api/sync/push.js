@@ -1,3 +1,5 @@
+import { coordinatorJson, readLegacyRecord } from './coordinator.js'
+
 // POST /api/sync/push { code, data, expectedRevision, deviceId, deviceName }
 // 仅在 expectedRevision 与当前版本一致时写入，防止页面打开后静默覆盖新版本。
 export async function onRequestPost(context) {
@@ -21,6 +23,17 @@ export async function onRequestPost(context) {
   if (typeof body.deviceId !== 'string' || !body.deviceId.trim() || typeof body.deviceName !== 'string' || !body.deviceName.trim()) {
     return json({ error: '缺少设备信息' }, 400)
   }
+
+  const legacyRecord = await readLegacyRecord(context)
+  const coordinated = await coordinatorJson(context, {
+    operation: 'push',
+    legacyRecord,
+    data: body.data,
+    expectedRevision: body.expectedRevision,
+    deviceId: body.deviceId.trim().slice(0, 80),
+    deviceName: body.deviceName.trim().slice(0, 30),
+  })
+  if (coordinated) return json(coordinated.body, coordinated.status)
 
   const key = `sync:${codeHash}:data`
   const previous = await kv.get(key, 'json')
