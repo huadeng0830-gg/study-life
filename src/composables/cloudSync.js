@@ -10,6 +10,7 @@ import { deviceProfile } from './deviceIdentity.js'
 import {
   SYNC_DEFAULTS,
   SYNC_KEYS,
+  assertValidSyncPayload,
   cloneValue,
   sanitizeSyncPayload,
   validateSyncPayload,
@@ -18,11 +19,21 @@ import {
 const UNDO_KEY = 'study_life_cloud_pull_undo'
 const SYNC_HISTORY_KEY = 'study_life_sync_history'
 const LOCAL_TS_KEY = 'study_life_last_local_change'
+const SESSION_CODE_KEY = 'study_life_sync_session_code'
 const VERIFY_TIMEOUT_MS = 15_000
 const SYNC_TIMEOUT_MS = 45_000
 const SYNC_CODE_PATTERN = /^\d{6}$/
 
-export const code = ref('')
+function readSessionCode() {
+  try {
+    const value = sessionStorage.getItem(SESSION_CODE_KEY) || ''
+    return SYNC_CODE_PATTERN.test(value) ? value : ''
+  } catch {
+    return ''
+  }
+}
+
+export const code = ref(readSessionCode())
 // disconnected -> validating -> connected（连接成功后停留，绝不进入 pulling）
 export const connectionState = ref('disconnected')
 export const syncStatus = ref('idle') // idle | pulling | pushing | restoring | success | error
@@ -36,7 +47,9 @@ export const remoteDevice = ref(readSyncHistory().remoteDevice ?? null)
 export const lastPushedDevice = ref(readSyncHistory().lastPushedDevice ?? null)
 export const localChanged = ref(false)
 export const canUndoPull = ref(readUndo() !== null)
-const remoteWriteKeys = new Set()
+const remoteWriteValues = new Map()
+let remoteWriteGeneration = 0
+let localChangeSequence = 0
 
 export const isSyncing = computed(() =>
   ['pulling', 'pushing', 'restoring'].includes(syncStatus.value)
@@ -131,8 +144,14 @@ function unpackSyncPackage(value) {
   return { values: value, meta: safeDeviceMeta(value?.__sync_meta) }
 }
 
-export function markLocalChanged(key = '') {
-  if (key && remoteWriteKeys.delete(key)) return
+export function markLocalChanged(key = '', rawValue = undefined) {
+  if (key && remoteWriteValues.has(key)) {
+    const expected = remoteWriteValues.get(key)
+    remoteWriteValues.delete(key)
+    // 只抑制“刚应用的远端值”本身；用户紧接着编辑出的不同值必须标记为本机修改。
+    if (typeof rawValue === 'string' && rawValue === expected.raw) return
+  }
+  localChangeSequence += 1
   lastLocalChangedAt.value = new Date().toISOString()
   try { localStorage.setItem(LOCAL_TS_KEY, lastLocalChangedAt.value) } catch {}
   localChanged.value = true
@@ -218,14 +237,24 @@ function snapshotStates(states) {
   return Object.fromEntries(SYNC_KEYS.map((key) => [key, cloneValue(states[key].value)]))
 }
 
+function currentStateValues(states) {
+  return Object.fromEntries(SYNC_KEYS.map((key) => [key, states[key].value]))
+}
+
 function applyRemoteValues(states, validated) {
+  const generation = ++remoteWriteGeneration
   for (const [key, remoteValue] of Object.entries(validated)) {
     const nextValue = cloneValue(remoteValue)
-    if (JSON.stringify(nextValue) === JSON.stringify(states[key].value)) continue
-    remoteWriteKeys.add(key)
+    const nextRaw = JSON.stringify(nextValue)
+    if (nextRaw === JSON.stringify(states[key].value)) continue
+    remoteWriteValues.set(key, { raw: nextRaw, generation })
     states[key].value = nextValue
   }
-  window.setTimeout(() => remoteWriteKeys.clear(), 1200)
+  window.setTimeout(() => {
+    for (const [key, marker] of remoteWriteValues) {
+      if (marker.generation === generation) remoteWriteValues.delete(key)
+    }
+  }, 1200)
 }
 
 // ---------- 连接：仅验证访问码 + 读取云端元数据（不下载业务数据） ----------
@@ -247,6 +276,7 @@ export async function connectCloud(codeInput, { signal = null } = {}) {
     const metadata = applyCloudMetadata(await res.json())
     // 仅在验证通过后记住当前空间，不触发任何数据下载或上传。
     code.value = codeInput
+    try { sessionStorage.setItem(SESSION_CODE_KEY, codeInput) } catch {}
     // 恢复上次已确认的本地基线；连接本身绝不改变业务数据或“本机已修改”标记。
     localChanged.value = readSyncHistory().localDirty === true
     connectionState.value = 'connected'
@@ -261,9 +291,28 @@ export async function connectCloud(codeInput, { signal = null } = {}) {
   }
 }
 
+// 已连接后只刷新 revision、更新时间与来源设备，不拉取或上传业务数据。
+export async function refreshCloudMetadata({ signal = null } = {}) {
+  if (isSyncing.value) return { ok: false, error: '正在执行其他云操作，请稍后再试' }
+  if (!SYNC_CODE_PATTERN.test(code.value)) return { ok: false, error: '尚未连接云端，请先输入访问码连接' }
+  lastError.value = ''
+  try {
+    const res = await controlledFetch(API.verify, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code: code.value }),
+    }, { signal, timeoutMs: VERIFY_TIMEOUT_MS })
+    if (!res.ok) throw new Error(await responseError(res, '无法刷新云端状态'))
+    return { ok: true, ...applyCloudMetadata(await res.json()) }
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : '无法刷新云端状态' }
+  }
+}
+
 export function disconnectCloud() {
   // 只断开同步空间，不删除本地任何数据。
   code.value = ''
+  try { sessionStorage.removeItem(SESSION_CODE_KEY) } catch {}
   applyCloudMetadata(emptyMetadata())
   localChanged.value = false
   lastError.value = ''
@@ -340,23 +389,17 @@ export async function pushToCloud({ signal = null, onProgress = null } = {}) {
 
   try {
     reportProgress(onProgress, 'collect', '正在收集本机可同步数据')
-    const states = await storedStates()
-    const payload = snapshotStates(states)
-    validateSyncPayload(payload)
-    // 上传前重新读取轻量 metadata。若版本已变化，停止在这里，绝不上传覆盖。
+    const storeModule = await import('./store.js')
+    storeModule.flushStoredWrites()
+    const states = Object.fromEntries(
+      SYNC_KEYS.map((key) => [key, storeModule.useStoredRef(key, cloneValue(SYNC_DEFAULTS[key]))])
+    )
+    const payload = currentStateValues(states)
+    assertValidSyncPayload(payload)
+    // push 端会原子比较 expectedRevision；不再先发一次重复 verify 请求。
     const knownRevision = remoteRevision.value
-    reportProgress(onProgress, 'check', '正在重新确认云端版本')
-    const checkRes = await controlledFetch(API.verify, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ code: code.value }),
-    }, { signal, timeoutMs: VERIFY_TIMEOUT_MS })
-    const latest = await checkRes.json()
-    if (!checkRes.ok) throw new Error(latest.error || '无法确认云端最新版本')
-    if (latest.revision !== knownRevision) {
-      applyCloudMetadata(latest)
-      return showError(`云端刚刚发生了变化${latest.updatedByDeviceName ? `，“${latest.updatedByDeviceName}”已经更新了数据` : ''}。请重新查看后再决定是否推送`)
-    }
+    const pushStartedAtSequence = localChangeSequence
+    reportProgress(onProgress, 'check', '已记录当前云端版本，提交时将原子校验')
     const meta = {
       id: deviceProfile.value.id,
       name: deviceProfile.value.name,
@@ -390,8 +433,9 @@ export async function pushToCloud({ signal = null, onProgress = null } = {}) {
     const metadata = applyCloudMetadata({ ...response, exists: true })
     lastPushedDevice.value = { ...meta, pushedAt: metadata.updatedAt }
     lastSyncedAt.value = new Date().toISOString()
-    localChanged.value = false
-    saveSyncBase({ hasBase: true, baseRevision: metadata.revision, localDirty: false })
+    const changedDuringPush = localChangeSequence !== pushStartedAtSequence
+    localChanged.value = changedDuringPush
+    saveSyncBase({ hasBase: true, baseRevision: metadata.revision, localDirty: changedDuringPush })
     saveSyncHistory()
     return showSuccess(`已推送到云端 ${nowText()}`)
   } catch (error) {
@@ -443,6 +487,7 @@ export function useCloudSync() {
     pushToCloud,
     undoLastPull,
     connectCloud,
+    refreshCloudMetadata,
     disconnectCloud,
     markLocalChanged,
   }

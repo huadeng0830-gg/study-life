@@ -101,6 +101,26 @@ function isEmptyCollection(raw) {
   }
 }
 
+function deferStartupMirror(entries) {
+  if (!entries.length) return
+  const flush = () => {
+    // 延迟期间用户可能已经修改过数据；只把此刻 localStorage 的最新值
+    // 放回统一队列，不能让启动时捕获的旧快照覆盖刚写入的影子副本。
+    for (const [key] of entries) {
+      const latest = localStorage.getItem(key)
+      if (latest !== null) pendingMirrorWrites.set(key, latest)
+    }
+    void flushMirrorWrites()
+  }
+  // 启动阶段以 localStorage 为即时数据源，影子副本可稍后补齐。
+  // 延后写入可避免 iPhone 首次点导航时与 IndexedDB 事务争抢主线程。
+  if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+    window.requestIdleCallback(flush, { timeout: 2400 })
+  } else {
+    window.setTimeout(flush, 2200)
+  }
+}
+
 // 在应用读取数据前执行：本地存储意外缺失时，从设备内的影子副本恢复。
 export async function initializeDataVault() {
   try {
@@ -130,7 +150,9 @@ export async function initializeDataVault() {
         restored.push(key)
       } else if (localValue !== null) {
         // 空数组可能是正常删除结果，但不应覆盖最后一份非空安全副本。
-        if (!backup || !isEmptyCollection(localValue) || isEmptyCollection(backup.value)) {
+        // 内容相同不重复写入；之前每次启动都会重写全部 sl_* 键。
+        const changed = !backup || backup.value !== localValue
+        if (changed && (!backup || !isEmptyCollection(localValue) || isEmptyCollection(backup.value))) {
           pendingMirrors.push([key, localValue])
         }
       }
@@ -138,7 +160,7 @@ export async function initializeDataVault() {
 
     // 恢复检查完成即可显示页面；安全副本的常规刷新放到后台串行执行，
     // 避免 iPhone 每次启动都等待多次 IndexedDB 写入。
-    if (pendingMirrors.length) void writeRecords(db, pendingMirrors).catch(() => {})
+    deferStartupMirror(pendingMirrors)
     return restored
   } catch {
     // IndexedDB 不可用时仍使用 localStorage，避免阻断应用启动。

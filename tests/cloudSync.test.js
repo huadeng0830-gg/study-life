@@ -5,16 +5,20 @@ import {
   connectCloud,
   connectionState,
   deriveSyncRelationship,
+  localChanged,
   pullFromCloud,
   pushToCloud,
+  refreshCloudMetadata,
   remoteRevision,
 } from '../src/composables/cloudSync.js'
+import { encryptData } from '../src/utils/crypto.js'
 
 describe('云同步长任务控制', () => {
   beforeEach(() => {
     localStorage.clear()
     code.value = ''
     remoteRevision.value = null
+    localChanged.value = false
     connectionState.value = 'disconnected'
     vi.restoreAllMocks()
     vi.unstubAllGlobals()
@@ -39,6 +43,19 @@ describe('云同步长任务控制', () => {
     const fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({ exists: true, revision: 3, updatedAt: '2026-08-28T00:00:00.000Z', updatedByDeviceName: '我的 iPad' }) }))
     vi.stubGlobal('fetch', fetchMock)
     expect(await connectCloud('123456')).toMatchObject({ ok: true, revision: 3 })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/auth/verify')
+  })
+
+  it('刷新云端状态只请求 metadata，不触碰业务数据', async () => {
+    code.value = '123456'
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ exists: true, revision: 9, updatedAt: '2026-08-28T01:00:00.000Z' }),
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(refreshCloudMetadata()).resolves.toMatchObject({ ok: true, revision: 9 })
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(fetchMock.mock.calls[0][0]).toBe('/api/auth/verify')
   })
@@ -73,14 +90,38 @@ describe('云同步长任务控制', () => {
     expect(deriveSyncRelationship({ ...base, revision: 18 }, { hasBase: true, baseRevision: 17, localDirty: true })).toBe('both-changed')
   })
 
-  it('推送前发现 revision 已变化时停止，不发送上传请求', async () => {
+  it('推送由服务端原子校验 revision，冲突时停止且刷新云端状态', async () => {
     code.value = '123456'
     remoteRevision.value = 7
-    const fetchMock = vi.fn(async () => ({ ok: true, json: async () => ({ exists: true, revision: 8, updatedAt: '2026-08-28T00:00:00.000Z', updatedByDeviceName: '我的 iPad' }) }))
+    const fetchMock = vi.fn(async () => ({
+      ok: false,
+      status: 409,
+      json: async () => ({ conflict: true, error: '云端刚刚发生了变化', exists: true, revision: 8, updatedAt: '2026-08-28T00:00:00.000Z', updatedByDeviceName: '我的 iPad' }),
+    }))
     vi.stubGlobal('fetch', fetchMock)
     expect(await pushToCloud()).toBe(false)
     expect(fetchMock).toHaveBeenCalledTimes(1)
-    expect(fetchMock.mock.calls[0][0]).toBe('/api/auth/verify')
+    expect(fetchMock.mock.calls[0][0]).toBe('/api/sync/push')
+    expect(remoteRevision.value).toBe(8)
+  })
+
+  it('拉取后立刻编辑同一模块仍会标记为本机修改', async () => {
+    const { flushStoredWrites, useStoredRef } = await import('../src/composables/store.js')
+    flushStoredWrites()
+    localChanged.value = false
+    code.value = '123456'
+    const encrypted = await encryptData({ sl_tasks: [{ id: 'remote', title: '云端任务' }] }, code.value)
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ exists: true, revision: 12, data: encrypted, updatedAt: '2026-08-28T02:00:00.000Z' }),
+    })))
+
+    expect(await pullFromCloud()).toBe(true)
+    const tasks = useStoredRef('sl_tasks', [])
+    tasks.value.push({ id: 'local', title: '刚刚新增' })
+    flushStoredWrites()
+
+    expect(localChanged.value).toBe(true)
   })
 
 })

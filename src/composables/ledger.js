@@ -1,5 +1,6 @@
 // 账本模块业务层：分类、消费记录存储、自然输入解析、常记推导。
 // 只新增存储键（sl_expenses / sl_ledger_categories / sl_ledger_freq），不触碰任何既有数据。
+import { computed } from 'vue'
 import { useStoredRef } from './store.js'
 
 export const DEFAULT_CATEGORIES = [
@@ -17,6 +18,73 @@ export const DEFAULT_CATEGORIES = [
 export const expenses = useStoredRef('sl_expenses', [])
 export const ledgerCategories = useStoredRef('sl_ledger_categories', DEFAULT_CATEGORIES)
 export const freqPrefs = useStoredRef('sl_ledger_freq', { pinned: [], hidden: [] })
+
+function compareExpenseNewestFirst(a, b) {
+  return (b.date + (b.time ?? '')).localeCompare(a.date + (a.time ?? ''))
+}
+
+function collectFrequentEntry(map, expense) {
+  const name = String(expense.name ?? '').trim()
+  if (!name) return
+  const timestamp = Date.parse(expense.createdAt || `${expense.date}T${expense.time || '00:00'}`) || 0
+  const previous = map.get(name)
+  if (!previous) {
+    map.set(name, {
+      name,
+      amount: Number(expense.amount) || 0,
+      cat: expense.cat,
+      count: 1,
+      last: timestamp,
+    })
+    return
+  }
+  previous.count += 1
+  if (timestamp >= previous.last) {
+    previous.last = timestamp
+    previous.amount = Number(expense.amount) || 0
+    previous.cat = expense.cat
+  }
+}
+
+// 账本默认页会同时用到时间排序、月/日统计和“常记”频次。
+// 统一在模块级 computed 中建索引，页面卸载后缓存仍然存在；
+// 账本数据未变时再次进入不会重复扫描全部记录。
+export function buildLedgerIndex(list) {
+  const source = Array.isArray(list) ? list : []
+  const monthStats = new Map()
+  const dayTotals = new Map()
+  const frequentByName = new Map()
+
+  for (const expense of source) {
+    const amount = Number(expense.amount || 0)
+    const month = expense.date.slice(0, 7)
+    const monthStat = monthStats.get(month) ?? { total: 0, count: 0 }
+    monthStat.total += amount
+    monthStat.count += 1
+    monthStats.set(month, monthStat)
+    dayTotals.set(expense.date, (dayTotals.get(expense.date) ?? 0) + amount)
+    collectFrequentEntry(frequentByName, expense)
+  }
+
+  return {
+    sortedExpenses: [...source].sort(compareExpenseNewestFirst),
+    monthStats,
+    dayTotals,
+    frequentEntries: [...frequentByName.values()],
+  }
+}
+
+export const ledgerIndex = computed(() => buildLedgerIndex(expenses.value))
+
+export function ledgerPeriodStatsFromIndex(index, date) {
+  const month = String(date ?? '').slice(0, 7)
+  const monthStat = index.monthStats.get(month)
+  return {
+    monthTotal: monthStat?.total ?? 0,
+    monthCount: monthStat?.count ?? 0,
+    todayTotal: index.dayTotals.get(date) ?? 0,
+  }
+}
 
 // ---------- 分类 ----------
 export function activeCategories() {
@@ -90,35 +158,27 @@ export function parseNatural(text) {
 // ---------- 常记推导 ----------
 // 规则：出现 ≥2 次的名称自动进入；最近使用加权靠前；金额/分类沿用最近一次。
 // 用户可固定（pinned）或隐藏（hidden）。
-export function computeFrequent(list, prefs, limit = 6) {
-  const map = new Map()
-  for (const e of list) {
-    const name = String(e.name ?? '').trim()
-    if (!name) continue
-    const ts = Date.parse(e.createdAt || `${e.date}T${e.time || '00:00'}`) || 0
-    const prev = map.get(name)
-    if (!prev) {
-      map.set(name, { name, amount: Number(e.amount) || 0, cat: e.cat, count: 1, last: ts })
-    } else {
-      prev.count += 1
-      if (ts >= prev.last) {
-        prev.last = ts
-        prev.amount = Number(e.amount) || 0
-        prev.cat = e.cat
-      }
-    }
-  }
-  const now = Date.now()
+function rankFrequent(entries, prefs, limit, now) {
   const pinned = Array.isArray(prefs?.pinned) ? prefs.pinned : []
   const hidden = Array.isArray(prefs?.hidden) ? prefs.hidden : []
   const out = []
-  for (const item of map.values()) {
+  for (const item of entries) {
     if (hidden.includes(item.name)) continue
     const isPinned = pinned.includes(item.name)
     if (item.count < 2 && !isPinned) continue
     const days = Math.max(0, (now - item.last) / 86400000)
-    item.score = item.count / (1 + days / 7) + (isPinned ? 1e6 : 0)
-    out.push(item)
+    const score = item.count / (1 + days / 7) + (isPinned ? 1e6 : 0)
+    out.push({ ...item, score })
   }
   return out.sort((a, b) => b.score - a.score).slice(0, limit)
+}
+
+export function computeFrequentFromIndex(index, prefs, limit = 6, now = Date.now()) {
+  return rankFrequent(index.frequentEntries, prefs, limit, now)
+}
+
+export function computeFrequent(list, prefs, limit = 6, now = Date.now()) {
+  const map = new Map()
+  for (const expense of list) collectFrequentEntry(map, expense)
+  return rankFrequent(map.values(), prefs, limit, now)
 }

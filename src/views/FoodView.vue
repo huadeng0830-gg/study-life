@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, ref } from 'vue'
+import { computed, onBeforeUnmount, onDeactivated, ref } from 'vue'
 import EmptyState from '../components/EmptyState.vue'
 import Modal from '../components/Modal.vue'
 import { todayStr, useStoredRef } from '../composables/store.js'
@@ -384,10 +384,15 @@ function pickOne() {
   window.setTimeout(() => flashTick(0), delays[0])
 }
 
-onBeforeUnmount(() => {
+function stopPickerAnimation() {
   shuffleSeq++
   window.clearTimeout(spinTimer)
-})
+  spinning.value = false
+  flashPlace.value = null
+}
+
+onDeactivated(stopPickerAnimation)
+onBeforeUnmount(stopPickerAnimation)
 
 function markAte() {
   if (!picked.value) return
@@ -683,7 +688,7 @@ const wheelGradient = computed(() => {
       </div>
     </section>
 
-    <Modal :open="showForm" :title="editingId ? '编辑吃饭选择' : '添加吃饭选择'" @close="showForm = false">
+    <Modal v-if="showForm" :open="showForm" :title="editingId ? '编辑吃饭选择' : '添加吃饭选择'" @close="showForm = false">
       <div class="form">
         <label>店铺、窗口或菜品名称 *</label>
         <input v-model="form.name" placeholder="例如：二食堂麻辣烫、某某外卖店" />

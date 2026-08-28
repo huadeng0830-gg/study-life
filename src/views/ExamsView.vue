@@ -245,7 +245,7 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <Modal :open="showForm" :title="editingId ? '编辑倒计时' : '添加倒计时'" @close="showForm = false">
+    <Modal v-if="showForm" :open="showForm" :title="editingId ? '编辑倒计时' : '添加倒计时'" @close="showForm = false">
       <div class="form">
         <label>倒计时名称 *</label>
         <input v-model="form.name" placeholder="例如：期末考试、生日或项目截止日" />

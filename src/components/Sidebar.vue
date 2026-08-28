@@ -50,16 +50,21 @@ function warmRoute(path) {
 
 onMounted(() => {
   // 桌面端在首屏空闲后预热最常点的入口；移动端仍保持按需下载，避免占用流量。
-  if (!window.matchMedia('(min-width: 901px)').matches) return
-  warmupTimer = window.setTimeout(() => {
-    const warm = () => {
-      warmTool('appearance')
-      warmTool('data')
-      preloadCommonRoutes()
-    }
-    if ('requestIdleCallback' in window) window.requestIdleCallback(warm, { timeout: 1800 })
-    else warm()
-  }, 1800)
+  if (window.matchMedia('(min-width: 901px)').matches) {
+    warmupTimer = window.setTimeout(() => {
+      const warm = () => {
+        warmTool('appearance')
+        warmTool('data')
+        preloadCommonRoutes()
+      }
+      if ('requestIdleCallback' in window) window.requestIdleCallback(warm, { timeout: 1800 })
+      else warm()
+    }, 1800)
+    return
+  }
+
+  // 移动端不做全量后台预热；只在 pointerdown 时预热用户即将进入的页面，
+  // 避免 Safari 在首次操作窗口连续解析所有路由。
 })
 
 onBeforeUnmount(() => window.clearTimeout(warmupTimer))

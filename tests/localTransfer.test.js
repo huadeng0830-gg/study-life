@@ -101,6 +101,30 @@ describe('导入与撤销', () => {
     expect(result.added).toBe(1)
   })
 
+  it('账本分类按 key 合并，不会产生重复分类键', async () => {
+    localStorage.setItem('sl_ledger_categories', JSON.stringify([
+      { key: 'food', name: '我的餐饮', icon: '🥗', hidden: true },
+    ]))
+    const pkg = {
+      app: 'study-life',
+      version: 2,
+      modules: ['expenses'],
+      data: {
+        sl_ledger_categories: [
+          { key: 'food', name: '餐饮', icon: '🍜', hidden: false },
+          { key: 'study', name: '学习', icon: '📚', hidden: false },
+        ],
+      },
+    }
+
+    await importTransferPackage(pkg, 'merge')
+    const categories = JSON.parse(localStorage.getItem('sl_ledger_categories'))
+    expect(categories.filter((item) => item.key === 'food')).toEqual([
+      { key: 'food', name: '我的餐饮', icon: '🥗', hidden: true },
+    ])
+    expect(categories.find((item) => item.key === 'study')).toBeTruthy()
+  })
+
   it('中途取消会自动恢复导入前数据，不留下半次导入', async () => {
     localStorage.setItem('sl_tasks', JSON.stringify([{ id: 'old-task' }]))
     localStorage.setItem('sl_exams', JSON.stringify([{ id: 'old-exam' }]))

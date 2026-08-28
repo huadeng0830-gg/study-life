@@ -324,7 +324,7 @@ const courseNames = computed(() => [...new Set(courses.value.map((course) => cou
       </SwipeActionItem>
     </VirtualList>
 
-    <Modal :open="showForm" :title="editingId ? '编辑待办' : '添加待办'" @close="showForm = false">
+    <Modal v-if="showForm" :open="showForm" :title="editingId ? '编辑待办' : '添加待办'" @close="showForm = false">
       <div class="form">
         <label>待办内容 *</label>
         <input v-model="form.title" placeholder="例如：完成高数第三章作业" />

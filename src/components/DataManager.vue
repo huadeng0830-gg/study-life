@@ -23,6 +23,7 @@ import {
   localChanged,
   pullFromCloud,
   pushToCloud,
+  refreshCloudMetadata,
   remoteDevice,
   remoteUpdatedAt,
   syncRelationship,
@@ -31,8 +32,11 @@ import {
 } from '../composables/cloudSync.js'
 import { deviceProfile, setDeviceName } from '../composables/deviceIdentity.js'
 import {
+  backupWallpapersForUndo,
+  discardWallpaperUndo,
   exportWallpapersForTransfer,
   importWallpapersFromTransfer,
+  restoreWallpaperUndo,
 } from '../composables/wallpaperStorage.js'
 import { restoreStoredValues } from '../composables/store.js'
 import { useTaskProgress } from '../composables/taskProgress.js'
@@ -55,7 +59,8 @@ let syncController = null
 let backupController = null
 let lastSyncAction = ''
 
-const codeInput = ref('')
+const codeInput = ref(code.value)
+const refreshingCloud = ref(false)
 const deviceNameInput = ref(deviceProfile.value.name)
 const dataHealth = ref({ keys: 0, bytes: 0, quota: null, usage: null, largest: [] })
 
@@ -163,6 +168,34 @@ function requestPushConfirm() {
       ['提示', overwritesNewerCloud ? '继续推送将覆盖当前云端版本。' : '推送成功后，云端版本将更新为本机当前数据。'],
     ],
     confirmLabel: overwritesNewerCloud ? '仍然使用本机覆盖' : '确认推送',
+  }
+}
+
+const recommendedSyncLabel = computed(() => ({
+  'local-changes': '一键同步（推送本机）',
+  'cloud-updated': '一键同步（拉取云端）',
+  empty: '一键同步（创建云端）',
+  synced: '已同步',
+  'both-changed': '双方都有修改，请选择',
+  unknown: '请选择拉取或推送',
+}[syncRelationship.value] || '请选择同步操作'))
+
+function requestRecommendedSync() {
+  if (['local-changes', 'empty'].includes(syncRelationship.value)) requestPushConfirm()
+  else if (syncRelationship.value === 'cloud-updated') requestPullConfirm()
+}
+
+async function refreshCloudStatus() {
+  if (refreshingCloud.value || isSyncing.value) return
+  refreshingCloud.value = true
+  error.value = ''
+  message.value = ''
+  try {
+    const result = await refreshCloudMetadata()
+    if (!result.ok) error.value = result.error
+    else message.value = '云端状态已刷新，未拉取或上传任何业务数据'
+  } finally {
+    refreshingCloud.value = false
   }
 }
 
@@ -294,10 +327,13 @@ const STORAGE_KEYS = {
   checklists: 'sl_checklists',
   bills: 'sl_bills',
   expenses: 'sl_expenses',
+  ledgerCategories: 'sl_ledger_categories',
+  ledgerFreq: 'sl_ledger_freq',
   timeConfig: 'sl_timecfg',
   semester: 'sl_semester',
   scheduleExceptions: 'sl_schedule_exceptions',
   theme: 'sl_theme',
+  customThemeColor: 'sl_custom_theme_color',
   countdownShowPast: 'sl_countdown_show_past',
   foodPlaces: 'sl_food_places',
   foodHistory: 'sl_food_history',
@@ -329,10 +365,13 @@ function makeBackup() {
       checklists: readStored(STORAGE_KEYS.checklists, []),
       bills: readStored(STORAGE_KEYS.bills, []),
       expenses: readStored(STORAGE_KEYS.expenses, []),
+      ledgerCategories: readStored(STORAGE_KEYS.ledgerCategories, null),
+      ledgerFreq: readStored(STORAGE_KEYS.ledgerFreq, null),
       timeConfig: readStored(STORAGE_KEYS.timeConfig, null),
       semester: readStored(STORAGE_KEYS.semester, null),
       scheduleExceptions: readStored(STORAGE_KEYS.scheduleExceptions, []),
       theme: readStored(STORAGE_KEYS.theme, 'blue'),
+      customThemeColor: readStored(STORAGE_KEYS.customThemeColor, '#456fe8'),
       countdownShowPast: readStored(STORAGE_KEYS.countdownShowPast, false),
       foodPlaces: readStored(STORAGE_KEYS.foodPlaces, []),
       foodHistory: readStored(STORAGE_KEYS.foodHistory, []),
@@ -450,10 +489,13 @@ async function validateBackup(value) {
       checklists: Array.isArray(data.checklists) ? data.checklists : [],
       bills: Array.isArray(data.bills) ? data.bills : [],
       expenses: Array.isArray(data.expenses) ? data.expenses : [],
+      ledgerCategories: Array.isArray(data.ledgerCategories) ? data.ledgerCategories : null,
+      ledgerFreq: data.ledgerFreq && typeof data.ledgerFreq === 'object' ? data.ledgerFreq : null,
       timeConfig: data.timeConfig && typeof data.timeConfig === 'object' ? data.timeConfig : null,
       semester: data.semester && typeof data.semester === 'object' ? data.semester : null,
       scheduleExceptions: Array.isArray(data.scheduleExceptions) ? data.scheduleExceptions : [],
       theme: typeof data.theme === 'string' ? data.theme : 'blue',
+      customThemeColor: typeof data.customThemeColor === 'string' ? data.customThemeColor : '#456fe8',
       countdownShowPast: Boolean(data.countdownShowPast),
       foodPlaces: Array.isArray(data.foodPlaces) ? data.foodPlaces : [],
       foodHistory: Array.isArray(data.foodHistory) ? data.foodHistory : [],
@@ -505,52 +547,65 @@ async function restoreBackup() {
   if (!window.confirm('恢复后将覆盖当前浏览器中的课程、倒计时和待办数据，是否继续？')) return
 
   const { data } = backup
+  const restoredValues = {
+    [STORAGE_KEYS.courses]: data.courses,
+    [STORAGE_KEYS.countdowns]: data.countdowns,
+    [STORAGE_KEYS.tasks]: data.tasks,
+    [STORAGE_KEYS.courseTemplates]: data.courseTemplates,
+    [STORAGE_KEYS.checklists]: data.checklists,
+    [STORAGE_KEYS.bills]: data.bills,
+    [STORAGE_KEYS.expenses]: data.expenses,
+    ...(data.ledgerCategories ? { [STORAGE_KEYS.ledgerCategories]: data.ledgerCategories } : {}),
+    ...(data.ledgerFreq ? { [STORAGE_KEYS.ledgerFreq]: data.ledgerFreq } : {}),
+    ...(data.timeConfig ? { [STORAGE_KEYS.timeConfig]: data.timeConfig } : {}),
+    ...(data.semester ? { [STORAGE_KEYS.semester]: data.semester } : {}),
+    [STORAGE_KEYS.scheduleExceptions]: data.scheduleExceptions,
+    [STORAGE_KEYS.theme]: data.theme,
+    [STORAGE_KEYS.customThemeColor]: data.customThemeColor,
+    [STORAGE_KEYS.countdownShowPast]: data.countdownShowPast,
+    [STORAGE_KEYS.foodPlaces]: data.foodPlaces,
+    [STORAGE_KEYS.foodHistory]: data.foodHistory,
+    ...(data.appearance ? { [STORAGE_KEYS.appearance]: data.appearance } : {}),
+    ...(data.wallpaperConfig ? { [STORAGE_KEYS.wallpaperConfig]: data.wallpaperConfig } : {}),
+    [STORAGE_KEYS.autoWallpaperColor]: data.autoWallpaperColor,
+    [STORAGE_KEYS.wallpaperAccent]: data.wallpaperAccent,
+  }
+  const previous = Object.fromEntries(
+    Object.keys(restoredValues).map((key) => [key, localStorage.getItem(key)])
+  )
   const hasWallpapers = Boolean(data.__wallpaper_images && Object.keys(data.__wallpaper_images).length)
   if (hasWallpapers) {
     backupProgress.start({
       title: '正在恢复备份',
       steps: [
         { id: 'validate', label: '校验备份内容' },
+        { id: 'wallpapers', label: '创建恢复点并恢复壁纸' },
         { id: 'data', label: '恢复文字数据与设置' },
-        { id: 'wallpapers', label: '恢复壁纸图片' },
         { id: 'finish', label: '完成并重新载入' },
       ],
     })
     backupProgress.setStep('validate', 'completed', '备份格式和必要字段检查通过')
-    backupProgress.setStep('data', 'running', '正在写入本机数据')
   }
+  let wallpaperUndoReady = false
   try {
-    await restoreStoredValues({
-      [STORAGE_KEYS.courses]: data.courses,
-      [STORAGE_KEYS.countdowns]: data.countdowns,
-      [STORAGE_KEYS.tasks]: data.tasks,
-      [STORAGE_KEYS.courseTemplates]: data.courseTemplates,
-      [STORAGE_KEYS.checklists]: data.checklists,
-      [STORAGE_KEYS.bills]: data.bills,
-      [STORAGE_KEYS.expenses]: data.expenses,
-      ...(data.timeConfig ? { [STORAGE_KEYS.timeConfig]: data.timeConfig } : {}),
-      ...(data.semester ? { [STORAGE_KEYS.semester]: data.semester } : {}),
-      [STORAGE_KEYS.scheduleExceptions]: data.scheduleExceptions,
-      [STORAGE_KEYS.theme]: data.theme,
-      [STORAGE_KEYS.countdownShowPast]: data.countdownShowPast,
-      [STORAGE_KEYS.foodPlaces]: data.foodPlaces,
-      [STORAGE_KEYS.foodHistory]: data.foodHistory,
-      ...(data.appearance ? { [STORAGE_KEYS.appearance]: data.appearance } : {}),
-      ...(data.wallpaperConfig ? { [STORAGE_KEYS.wallpaperConfig]: data.wallpaperConfig } : {}),
-      [STORAGE_KEYS.autoWallpaperColor]: data.autoWallpaperColor,
-      [STORAGE_KEYS.wallpaperAccent]: data.wallpaperAccent,
-    })
     if (data.__wallpaper_images) {
-      backupProgress.setStep('data', 'completed', '文字数据与设置已恢复')
-      backupProgress.setStep('wallpapers', 'running', '正在解码壁纸图片')
+      backupProgress.setStep('wallpapers', 'running', '正在创建现有壁纸恢复点')
+      await backupWallpapersForUndo()
+      wallpaperUndoReady = true
       await importWallpapersFromTransfer(data.__wallpaper_images, 'replace', {
         onProgress: ({ current, total, stage }) => {
           backupProgress.setPartial({ 壁纸: `${current}/${total}` }, stage === 'committed' ? '壁纸已原子写入本机' : `已处理 ${current}/${total} 张壁纸`)
         },
       })
-    }
-    if (hasWallpapers) {
       backupProgress.setStep('wallpapers', 'completed', '壁纸恢复完成')
+      backupProgress.setStep('data', 'running', '正在写入文字数据与设置')
+    }
+    // 文字数据最后提交。它自身会同时回滚 localStorage 和已创建的响应式引用，
+    // 因此任一阶段失败都不会留下“半套备份”。
+    await restoreStoredValues(restoredValues)
+    if (hasWallpapers) {
+      try { await discardWallpaperUndo() } catch {}
+      backupProgress.setStep('data', 'completed', '文字数据与设置已恢复')
       backupProgress.setStep('finish', 'completed', '恢复完成，即将重新载入')
       backupProgress.finish('备份恢复完成')
       window.setTimeout(() => window.location.reload(), 700)
@@ -561,6 +616,9 @@ async function restoreBackup() {
     for (const [key, raw] of Object.entries(previous)) {
       if (raw === null) localStorage.removeItem(key)
       else localStorage.setItem(key, raw)
+    }
+    if (wallpaperUndoReady) {
+      try { await restoreWallpaperUndo() } catch {}
     }
     error.value = '恢复失败，浏览器可能已禁止本地存储或存储空间不足'
     if (hasWallpapers) {
@@ -703,6 +761,11 @@ async function restoreBackup() {
               <span class="ops-label">同步操作（均需手动确认）</span>
               <div class="sync-actions">
                 <button
+                  class="btn btn-primary"
+                  :disabled="isSyncing || ['synced', 'both-changed', 'unknown'].includes(syncRelationship)"
+                  @click="requestRecommendedSync"
+                >{{ recommendedSyncLabel }}</button>
+                <button
                   class="btn btn-pull"
                   :disabled="isSyncing || !cloudExists"
                   :title="cloudExists ? '下载云端数据应用到本机（会先弹确认）' : '云端还没有数据，等首次推送后再拉取'"
@@ -711,6 +774,9 @@ async function restoreBackup() {
                 <button class="btn btn-push" :disabled="isSyncing" @click="requestPushConfirm">↑ 推送到云端</button>
               </div>
               <div class="sync-actions secondary">
+                <button class="btn" :disabled="isSyncing || refreshingCloud" @click="refreshCloudStatus">
+                  {{ refreshingCloud ? '正在刷新…' : '刷新云端状态' }}
+                </button>
                 <button class="btn" :disabled="isSyncing || !canUndoPull" :title="undoTitle" @click="undoLastPull">撤销上次拉取</button>
                 <button class="btn btn-danger" :disabled="isSyncing" @click="doDisconnect">断开同步</button>
               </div>
@@ -735,7 +801,7 @@ async function restoreBackup() {
       </section>
 
       <!-- 拉取 / 推送 确认框（取消为默认焦点） -->
-      <Modal :open="Boolean(confirmBox)" :title="confirmBox?.title ?? ''" @close="closeConfirm">
+      <Modal v-if="confirmBox" :open="Boolean(confirmBox)" :title="confirmBox?.title ?? ''" @close="closeConfirm">
         <div v-if="confirmBox" class="confirm-body">
           <div v-for="[label, value] in confirmBox.lines" :key="label" class="confirm-row">
             <span>{{ label }}</span>

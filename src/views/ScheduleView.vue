@@ -1,5 +1,5 @@
 <script setup>
-import { defineAsyncComponent, ref, reactive, computed, watch, onBeforeUnmount } from 'vue'
+import { defineAsyncComponent, ref, reactive, computed, watch, onBeforeUnmount, onDeactivated } from 'vue'
 import Modal from '../components/Modal.vue'
 import { appearance } from '../composables/appearance.js'
 import {
@@ -1119,7 +1119,17 @@ function showToast(message) {
   window.clearTimeout(settingsToastTimer)
   settingsToastTimer = window.setTimeout(() => { settingsToast.value = '' }, 3200)
 }
-onBeforeUnmount(() => window.clearTimeout(settingsToastTimer))
+function stopBackgroundWork() {
+  window.clearTimeout(settingsToastTimer)
+  // KeepAlive 离开页面不会卸载组件；此时主动取消 OCR，避免它继续占用新页面的 CPU。
+  if (scheduleOcrProgress.state.status === 'running') void scheduleOcrProgress.cancel()
+  else scheduleOcrController?.abort()
+  if (batchOcrProgress.state.status === 'running') void batchOcrProgress.cancel()
+  else batchOcrController?.abort()
+}
+
+onDeactivated(stopBackgroundWork)
+onBeforeUnmount(stopBackgroundWork)
 
 // 在当前编辑课程的时间格子里，追加另一门不同周次的课程
 function addAnotherInCell() {
@@ -1632,54 +1642,41 @@ function exceptionLabel(item) {
   return item.type === 'makeup' ? `补${DAYS[item.sourceDay] ?? '课'}` : '停课'
 }
 
-const conflictIds = computed(() => {
+const conflictSummary = computed(() => {
   const ids = new Set()
-  const list = visibleCourses.value
-  for (let i = 0; i < list.length; i++) {
-    for (let j = i + 1; j < list.length; j++) {
-      const a = list[i]
-      const b = list[j]
-      const aStart = periodIndex(a.start)
-      const aEnd = periodIndex(a.end)
-      const bStart = periodIndex(b.start)
-      const bEnd = periodIndex(b.end)
-      if (
-        a.displayDay === b.displayDay &&
-        aStart >= 0 && aEnd >= 0 && bStart >= 0 && bEnd >= 0 &&
-        aStart <= bEnd &&
-        bStart <= aEnd
-      ) {
-        ids.add(courseInstanceKey(a))
-        ids.add(courseInstanceKey(b))
+  let count = 0
+  const positions = new Map(timeConfig.value.periods.map((period, index) => [period.id, index]))
+  const byDay = new Map()
+  for (const course of visibleCourses.value) {
+    const start = positions.get(course.start) ?? -1
+    const end = positions.get(course.end) ?? -1
+    if (start < 0 || end < 0) continue
+    const day = course.displayDay
+    if (!byDay.has(day)) byDay.set(day, [])
+    byDay.get(day).push({
+      course,
+      start: Math.min(start, end),
+      end: Math.max(start, end),
+    })
+  }
+  for (const dayCourses of byDay.values()) {
+    dayCourses.sort((left, right) => left.start - right.start || left.end - right.end)
+    for (let i = 0; i < dayCourses.length; i++) {
+      const left = dayCourses[i]
+      for (let j = i + 1; j < dayCourses.length; j++) {
+        const right = dayCourses[j]
+        if (right.start > left.end) break
+        count++
+        ids.add(courseInstanceKey(left.course))
+        ids.add(courseInstanceKey(right.course))
       }
     }
   }
-  return ids
+  return { ids, count }
 })
 
-const conflictCount = computed(() => {
-  let count = 0
-  const list = visibleCourses.value
-  for (let i = 0; i < list.length; i++) {
-    for (let j = i + 1; j < list.length; j++) {
-      const a = list[i]
-      const b = list[j]
-      const aStart = periodIndex(a.start)
-      const aEnd = periodIndex(a.end)
-      const bStart = periodIndex(b.start)
-      const bEnd = periodIndex(b.end)
-      if (
-        a.displayDay === b.displayDay &&
-        aStart >= 0 && aEnd >= 0 && bStart >= 0 && bEnd >= 0 &&
-        aStart <= bEnd &&
-        bStart <= aEnd
-      ) {
-        count++
-      }
-    }
-  }
-  return count
-})
+const conflictIds = computed(() => conflictSummary.value.ids)
+const conflictCount = computed(() => conflictSummary.value.count)
 
 function openAdd(day = null, period = null) {
   editingId.value = null
@@ -1763,11 +1760,7 @@ function templateDate(value) {
 
 const todayIdx = computed(() => todayIndex())
 
-// 只取消当前页面任务；OCR Worker 是模块级单例，跨路由复用，避免每次返回课表都重新加载模型。
-onBeforeUnmount(() => {
-  scheduleOcrController?.abort()
-  batchOcrController?.abort()
-})
+// OCR Worker 是模块级单例，返回课表时仍可复用已经加载的模型。
 </script>
 
 <template>
@@ -1910,7 +1903,7 @@ onBeforeUnmount(() => {
       点击空白格子快速添加，点击课程卡片可编辑
     </p>
 
-    <Modal :open="showForm" :title="editingId ? '编辑课程' : '添加课程'" @close="showForm = false">
+    <Modal v-if="showForm" :open="showForm" :title="editingId ? '编辑课程' : '添加课程'" @close="showForm = false">
       <div class="form">
         <label>课程名称 *</label>
         <input v-model="form.name" placeholder="例如：高等数学" />
@@ -2007,7 +2000,7 @@ onBeforeUnmount(() => {
       </div>
     </Modal>
 
-    <Modal :open="showCourseManager" title="课程批量管理" wide @close="showCourseManager = false">
+    <Modal v-if="showCourseManager" :open="showCourseManager" title="课程批量管理" wide @close="showCourseManager = false">
       <div class="course-manager">
         <section class="manager-section">
           <div class="manager-head">
@@ -2094,7 +2087,7 @@ onBeforeUnmount(() => {
       </div>
     </Modal>
 
-    <Modal :open="showBatch" title="批量录入课程" wide @close="showBatch = false">
+    <Modal v-if="showBatch" :open="showBatch" title="批量录入课程" wide @close="showBatch = false">
       <div class="batch-import">
         <div class="batch-help">
           <b>方式一：粘贴文字</b>（字段顺序不限，分隔符随意）
@@ -2224,7 +2217,7 @@ onBeforeUnmount(() => {
       </div>
     </Modal>
 
-    <Modal :open="showImportConflict" title="课程导入冲突处理" wide @close="cancelCourseImportReview">
+    <Modal v-if="showImportConflict" :open="showImportConflict" title="课程导入冲突处理" wide @close="cancelCourseImportReview">
       <div v-if="importDraft" class="import-conflict-review">
         <p class="import-conflict-summary">
           导入检查完成：本次 {{ importSummary.total }} 门课程，<b>{{ importSummary.direct }} 门可直接导入</b>，
@@ -2263,7 +2256,7 @@ onBeforeUnmount(() => {
       </div>
     </Modal>
 
-    <Modal :open="showExceptions" title="🗓 节假日与补课" wide @close="showExceptions = false">
+    <Modal v-if="showExceptions" :open="showExceptions" title="🗓 节假日与补课" wide @close="showExceptions = false">
       <div class="exception-editor">
         <p class="muted-tip">特殊日期只影响指定的一天，不会修改原来的每周课程。补课可以让某天临时按照指定星期显示课程。</p>
         <div class="exception-form">
@@ -2284,7 +2277,7 @@ onBeforeUnmount(() => {
       </div>
     </Modal>
 
-    <Modal :open="showSemester" title="📅 学期设置" @close="showSemester = false">
+    <Modal v-if="showSemester" :open="showSemester" title="📅 学期设置" @close="showSemester = false">
       <div class="form">
         <label>本学期第一周的周一日期 *</label>
         <input v-model="semStart" type="date" />
@@ -2300,7 +2293,7 @@ onBeforeUnmount(() => {
       </div>
     </Modal>
 
-    <Modal :open="showTimeEditor" title="🕐 作息与时间设置" @close="tryCloseTimeEditor">
+    <Modal v-if="showTimeEditor" :open="showTimeEditor" title="🕐 作息与时间设置" @close="tryCloseTimeEditor">
       <div class="settings">
         <div class="tab-bar" role="tablist">
           <button
@@ -2718,6 +2711,7 @@ onBeforeUnmount(() => {
 
     <!-- 第二级：某一组识别结果的详细编辑（大弹窗，底部固定操作栏） -->
     <Modal
+      v-if="schemeDetailOpen && !!activeScheme"
       :open="schemeDetailOpen && !!activeScheme"
       :title="activeScheme ? `编辑识别结果 · ${schemeDisplayName(activeScheme, timeConfig)}` : '编辑识别结果'"
       wide
@@ -2831,6 +2825,7 @@ onBeforeUnmount(() => {
 
     <!-- 第三级：导入计划确认 / 执行进度 -->
     <Modal
+      v-if="importPlanOpen"
       :open="importPlanOpen"
       :title="importRunning ? '正在导入' : '本次导入计划'"
       medium

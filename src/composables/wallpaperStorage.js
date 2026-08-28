@@ -275,3 +275,16 @@ export async function restoreWallpaperUndo() {
     db.close()
   }
 }
+
+// 备份恢复成功提交后不再需要回滚图片；及时清理，避免在 IndexedDB 中
+// 长期保留一整份旧壁纸而使移动端存储占用翻倍。
+export async function discardWallpaperUndo() {
+  const db = await openDb()
+  try {
+    const transaction = db.transaction(UNDO_STORE, 'readwrite')
+    transaction.objectStore(UNDO_STORE).clear()
+    await transactionDone(transaction)
+  } finally {
+    db.close()
+  }
+}

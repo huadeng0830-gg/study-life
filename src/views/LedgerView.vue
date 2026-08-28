@@ -9,11 +9,13 @@ import {
   activeCategories,
   billCategoryToKey,
   catInfo,
-  computeFrequent,
+  computeFrequentFromIndex,
   detectCategory,
   expenses,
   freqPrefs,
+  ledgerIndex,
   ledgerCategories,
+  ledgerPeriodStatsFromIndex,
   parseNatural,
 } from '../composables/ledger.js'
 
@@ -90,7 +92,12 @@ const filteredExpenses = computed(() => {
   const kw = q.value.trim().toLowerCase()
   const min = fMin.value === '' ? null : Number(fMin.value)
   const max = fMax.value === '' ? null : Number(fMax.value)
-  return expenses.value.filter((e) => {
+  const sorted = ledgerIndex.value.sortedExpenses
+  if (
+    !kw && min === null && max === null && !fCat.value
+    && fKind.value === 'all' && fRange.value === 'all'
+  ) return sorted
+  return sorted.filter((e) => {
     if (kw) {
       const hay = `${e.name} ${e.note ?? ''} ${catInfo(e.cat).name}`.toLowerCase()
       if (!hay.includes(kw)) return false
@@ -102,7 +109,7 @@ const filteredExpenses = computed(() => {
     if (max !== null && Number(e.amount) > max) return false
     if (!inRange(e.date)) return false
     return true
-  }).sort((a, b) => (b.date + (b.time ?? '')).localeCompare(a.date + (a.time ?? '')))
+  })
 })
 
 const filtersActive = computed(() =>
@@ -112,32 +119,14 @@ function clearFilters() {
   fRange.value = 'all'; fFrom.value = ''; fTo.value = ''; fCat.value = ''; fMin.value = ''; fMax.value = ''; fKind.value = 'all'
 }
 
-// 已经按日期排序，扁平化后供虚拟列表使用；只在日期变化处渲染一个小标题。
-const feedItems = computed(() => {
-  let previousDate = ''
-  return filteredExpenses.value.map((expense) => {
-    const showDay = expense.date !== previousDate
-    previousDate = expense.date
-    return { ...expense, showDay, dayLabel: showDay ? dayLabel(expense.date) : '' }
-  })
-})
+// 虚拟列表直接使用排序后的原记录，日期标题只对可见项按索引判断。
+// 避免进入页面时为每笔消费 `{ ...expense }` 克隆一个新对象。
+const feedItems = filteredExpenses
 
-const periodStats = computed(() => {
-  const ym = todayStr().slice(0, 7)
-  const today = todayStr()
-  let monthTotal = 0
-  let monthCount = 0
-  let todayTotal = 0
-  for (const expense of expenses.value) {
-    const amount = Number(expense.amount || 0)
-    if (expense.date.slice(0, 7) === ym) { monthTotal += amount; monthCount++ }
-    if (expense.date === today) todayTotal += amount
-  }
-  return { monthTotal, monthCount, todayTotal }
-})
+const periodStats = computed(() => ledgerPeriodStatsFromIndex(ledgerIndex.value, todayStr()))
 
 /* ---------- 常记 ---------- */
-const frequent = computed(() => computeFrequent(expenses.value, freqPrefs.value))
+const frequent = computed(() => computeFrequentFromIndex(ledgerIndex.value, freqPrefs.value))
 
 function useFrequent(item) {
   openQuick({ name: item.name, amount: String(item.amount || ''), cat: item.cat })
@@ -730,9 +719,9 @@ function createBillFromSuggest() {
         </div>
         <div v-else class="feed">
           <VirtualList :items="feedItems" item-key="id" :estimated-height="62" :gap="0" :threshold="80" fixed-height>
-            <template #default="{ item: e }">
+            <template #default="{ item: e, index }">
               <div class="feed-virtual-item">
-                <h4 v-if="e.showDay" class="feed-day">{{ e.dayLabel }}</h4>
+                <h4 v-if="index === 0 || feedItems[index - 1]?.date !== e.date" class="feed-day">{{ dayLabel(e.date) }}</h4>
                 <div class="feed-item" @click="openDetail(e.id)">
                   <div class="fi-main">
                     <b>{{ e.name }}</b>
@@ -884,7 +873,7 @@ function createBillFromSuggest() {
     </div>
 
     <!-- ================= 记一笔 弹窗 ================= -->
-    <Modal :open="showQuick" :title="editingId ? '编辑记录' : keepAdding ? '再记一笔' : '记一笔'" @close="closeQuick">
+    <Modal v-if="showQuick" :open="showQuick" :title="editingId ? '编辑记录' : keepAdding ? '再记一笔' : '记一笔'" @close="closeQuick">
       <div class="quick-form">
         <input
           ref="amountEl"
@@ -950,7 +939,7 @@ function createBillFromSuggest() {
     </Modal>
 
     <!-- ================= 记录详情 ================= -->
-    <Modal :open="Boolean(detailExpense)" :title="detailExpense?.name ?? '记录详情'" @close="closeDetail">
+    <Modal v-if="detailExpense" :open="Boolean(detailExpense)" :title="detailExpense?.name ?? '记录详情'" @close="closeDetail">
       <div v-if="detailExpense" class="detail-body">
         <div class="detail-amount">{{ moneyRow(detailExpense.amount) }}</div>
         <div class="detail-meta">
@@ -974,7 +963,7 @@ function createBillFromSuggest() {
     </Modal>
 
     <!-- ================= 添加/编辑 固定账单 ================= -->
-    <Modal :open="showBillForm" :title="editingBillId ? '编辑固定账单' : '添加固定账单'" medium @close="showBillForm = false">
+    <Modal v-if="showBillForm" :open="showBillForm" :title="editingBillId ? '编辑固定账单' : '添加固定账单'" medium @close="showBillForm = false">
       <div class="bill-form">
         <p class="bill-form-intro">设置一次，之后会按周期提醒你。</p>
         <label class="bill-field bill-field-wide">
@@ -1035,7 +1024,7 @@ function createBillFromSuggest() {
     </Modal>
 
     <!-- ================= 分类管理 ================= -->
-    <Modal :open="showCatManage" title="分类管理" @close="showCatManage = false">
+    <Modal v-if="showCatManage" :open="showCatManage" title="分类管理" @close="showCatManage = false">
       <div class="cat-manage">
         <div v-for="c in ledgerCategories" :key="c.key" class="cat-row" :class="{ hidden: c.hidden }">
           <button class="cat-icon" title="换个图标" @click="cycleIcon(c)">{{ c.icon }}</button>

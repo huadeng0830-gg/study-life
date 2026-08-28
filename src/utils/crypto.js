@@ -45,11 +45,12 @@ async function decompress(data) {
 
 // 加密：明文对象 → base64url 密文（含 salt/iv/ciphertext）
 export async function encryptData(plainObj, code) {
+  // 先固定本次快照，再等待密钥派生；避免加密期间页面修改同一响应式对象。
+  const json = JSON.stringify(plainObj)
   const salt = crypto.getRandomValues(new Uint8Array(SALT_LENGTH))
   const iv = crypto.getRandomValues(new Uint8Array(IV_LENGTH))
   const key = await deriveKey(code, salt)
 
-  const json = JSON.stringify(plainObj)
   const compressed = await compress(encoder.encode(json))
   const cipher = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, compressed)
 
@@ -59,7 +60,12 @@ export async function encryptData(plainObj, code) {
   combined.set(iv, SALT_LENGTH)
   combined.set(new Uint8Array(cipher), SALT_LENGTH + IV_LENGTH)
 
-  return btoa(String.fromCharCode(...combined))
+  let binary = ''
+  // 大数组一次 spread 会超过 Safari/JavaScript 的函数参数上限。
+  for (let offset = 0; offset < combined.length; offset += 0x8000) {
+    binary += String.fromCharCode(...combined.subarray(offset, offset + 0x8000))
+  }
+  return btoa(binary)
     .replace(/\+/g, '-')
     .replace(/\//g, '_')
     .replace(/=+$/, '')

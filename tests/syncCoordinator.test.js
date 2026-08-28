@@ -8,6 +8,7 @@ function createCoordinator() {
       get: async (key) => values.get(key),
       put: async (key, value) => values.set(key, value),
       setAlarm: async () => {},
+      deleteAlarm: async () => {},
       deleteAll: async () => values.clear(),
     },
   }

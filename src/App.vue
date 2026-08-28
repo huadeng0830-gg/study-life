@@ -5,6 +5,7 @@ import Sidebar from './components/Sidebar.vue'
 import QuickLedgerPanel from './components/QuickLedgerPanel.vue'
 import WallpaperLayer from './components/WallpaperLayer.vue'
 import { useStoredRef } from './composables/store.js'
+import { isIOSDevice } from './composables/performanceMode.js'
 import {
   RELEASE_HISTORY_KEY,
   RELEASE_SEEN_KEY,
@@ -80,7 +81,10 @@ const WIDTH_BY_PATH = {
   '/food': 'content-wide',
 }
 const widthClass = computed(() => WIDTH_BY_PATH[route.path] ?? '')
-const cachedPageNames = ['HomeView', 'TasksView', 'ExamsView', 'ListsView']
+const cachedPageNames = ['HomeView', 'ScheduleView', 'TasksView', 'ExamsView', 'ListsView', 'LedgerView', 'FoodView']
+// 视觉降级与页面缓存分开处理。移动 Safari 保留“当前页 + 上一页”，
+// 避免每次返回都重建复杂页面；桌面保留更多常用页面以提高来回切换速度。
+const pageCacheSize = isIOSDevice() ? 2 : 4
 </script>
 
 <template>
@@ -95,7 +99,7 @@ const cachedPageNames = ['HomeView', 'TasksView', 'ExamsView', 'ListsView']
         <QuickLedgerPanel v-if="showQuickLedger" @close="showQuickLedger = false" />
       </Transition>
       <router-view v-slot="{ Component, route: activeRoute }">
-        <KeepAlive :include="cachedPageNames" :max="3">
+        <KeepAlive :include="cachedPageNames" :max="pageCacheSize">
           <component :is="Component" :key="activeRoute.name" />
         </KeepAlive>
       </router-view>

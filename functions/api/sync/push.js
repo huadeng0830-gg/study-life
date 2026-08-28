@@ -55,9 +55,7 @@ export async function onRequestPost(context) {
     updatedAt,
     updatedByDeviceId: body.deviceId.trim().slice(0, 80),
     updatedByDeviceName: body.deviceName.trim().slice(0, 30),
-  }), {
-    expirationTtl: 30 * 86400, // 30 天
-  })
+  }))
 
   return json({ ok: true, revision, updatedAt, updatedByDeviceId: body.deviceId.trim().slice(0, 80), updatedByDeviceName: body.deviceName.trim().slice(0, 30) })
 }

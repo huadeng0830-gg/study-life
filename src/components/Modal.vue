@@ -1,5 +1,5 @@
 <script setup>
-import { onBeforeUnmount, watch } from 'vue'
+import { onActivated, onBeforeUnmount, onDeactivated, watch } from 'vue'
 
 const emit = defineEmits(['close'])
 
@@ -14,26 +14,55 @@ function onKeydown(event) {
   if (event.key === 'Escape' && props.open) emit('close')
 }
 
+let bodyLocked = false
+
+function lockBody() {
+  if (bodyLocked) return
+  bodyLocked = true
+  const count = Number(document.body.dataset.modalLockCount) || 0
+  document.body.dataset.modalLockCount = String(count + 1)
+  document.body.dataset.modalOpen = 'true'
+  document.body.style.overflow = 'hidden'
+}
+
+function unlockBody() {
+  if (!bodyLocked) return
+  bodyLocked = false
+  const nextCount = Math.max(0, (Number(document.body.dataset.modalLockCount) || 1) - 1)
+  if (nextCount > 0) {
+    document.body.dataset.modalLockCount = String(nextCount)
+    return
+  }
+  delete document.body.dataset.modalLockCount
+  delete document.body.dataset.modalOpen
+  document.body.style.overflow = ''
+}
+
+function activate() {
+  document.addEventListener('keydown', onKeydown)
+  lockBody()
+}
+
+function cleanup() {
+  document.removeEventListener('keydown', onKeydown)
+  unlockBody()
+}
+
 watch(
   () => props.open,
   (open) => {
     if (open) {
-      document.addEventListener('keydown', onKeydown)
-      document.body.style.overflow = 'hidden'
-      document.body.dataset.modalOpen = 'true'
+      activate()
     } else {
-      document.removeEventListener('keydown', onKeydown)
-      document.body.style.overflow = ''
-      delete document.body.dataset.modalOpen
+      cleanup()
     }
   },
   { immediate: true }
 )
 
-onBeforeUnmount(() => {
-  document.removeEventListener('keydown', onKeydown)
-  document.body.style.overflow = ''
-})
+onActivated(() => { if (props.open) activate() })
+onDeactivated(cleanup)
+onBeforeUnmount(cleanup)
 </script>
 
 <template>

@@ -368,7 +368,7 @@ function clearBought() {
       </section>
     </div>
 
-    <Modal :open="showListForm" :title="editingListId ? '编辑清单' : '新建清单'" @close="showListForm = false">
+    <Modal v-if="showListForm" :open="showListForm" :title="editingListId ? '编辑清单' : '新建清单'" @close="showListForm = false">
       <div class="form">
         <label>清单名称 *</label>
         <input v-model="listName" placeholder="例如：本周采购" @input="listError = ''" />
@@ -379,7 +379,7 @@ function clearBought() {
       </div>
     </Modal>
 
-    <Modal :open="showItemForm" :title="editingItemId ? '编辑物品' : '添加物品'" @close="showItemForm = false">
+    <Modal v-if="showItemForm" :open="showItemForm" :title="editingItemId ? '编辑物品' : '添加物品'" @close="showItemForm = false">
       <div class="form">
         <label>物品名称 *</label>
         <input v-model="itemForm.name" placeholder="例如：洗衣液" />

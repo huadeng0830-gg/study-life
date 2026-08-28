@@ -12,17 +12,18 @@ export const TRANSFER_MODULES = {
   countdowns: { label: '考试与倒计时', keys: ['sl_exams', 'sl_countdown_show_past'] },
   lists: { label: '生活清单', keys: ['sl_checklists'] },
   bills: { label: '固定账单', keys: ['sl_bills'] },
-  expenses: { label: '消费记录', keys: ['sl_expenses'] },
+  expenses: { label: '消费记录与账本偏好', keys: ['sl_expenses', 'sl_ledger_categories', 'sl_ledger_freq'] },
   food: { label: '吃什么选择库', keys: ['sl_food_places', 'sl_food_history'] },
   appearance: { label: '励志语、首页布局与页面皮肤', keys: ['sl_appearance'] },
   wallpapers: { label: '壁纸图片（可选，二维码较多）', keys: ['sl_wallpaper_config', 'sl_auto_wallpaper_color', 'sl_wallpaper_accent'] },
-  preferences: { label: '主题与显示偏好', keys: ['sl_theme'] },
+  preferences: { label: '主题与显示偏好', keys: ['sl_theme', 'sl_custom_theme_color'] },
 }
 
 const ARRAY_KEYS = new Set([
   'sl_courses', 'sl_course_templates', 'sl_schedule_exceptions', 'sl_tasks', 'sl_exams', 'sl_checklists',
   'sl_bills', 'sl_expenses', 'sl_food_places', 'sl_food_history',
 ])
+const KEYED_ARRAY_KEYS = new Map([['sl_ledger_categories', 'key']])
 const UNDO_KEY = 'sl_transfer_undo'
 
 const encoder = new TextEncoder()
@@ -195,6 +196,20 @@ function mergeArray(current, incoming, key) {
   return { value: result, added, key }
 }
 
+function mergeKeyedArray(current, incoming, key, identityKey) {
+  const result = Array.isArray(current) ? JSON.parse(JSON.stringify(current)) : []
+  const identities = new Set(result.map((item) => item?.[identityKey]).filter(Boolean))
+  let added = 0
+  for (const item of Array.isArray(incoming) ? incoming : []) {
+    const identity = item?.[identityKey]
+    if (!identity || identities.has(identity)) continue
+    result.push(JSON.parse(JSON.stringify(item)))
+    identities.add(identity)
+    added++
+  }
+  return { value: result, added, key }
+}
+
 function periodMapping(incomingConfig, currentConfig) {
   const current = currentConfig?.periods ?? []
   const map = new Map()
@@ -253,8 +268,10 @@ export async function importTransferPackage(pkg, mode = 'merge', { signal = null
         }))
       }
 
-      if (mode === 'merge' && ARRAY_KEYS.has(key)) {
-        const result = mergeArray(readStored(key), incoming, key)
+      if (mode === 'merge' && (ARRAY_KEYS.has(key) || KEYED_ARRAY_KEYS.has(key))) {
+        const result = KEYED_ARRAY_KEYS.has(key)
+          ? mergeKeyedArray(readStored(key), incoming, key, KEYED_ARRAY_KEYS.get(key))
+          : mergeArray(readStored(key), incoming, key)
         localStorage.setItem(key, JSON.stringify(result.value))
         added += result.added
         details.push({ key, added: result.added })

@@ -1,10 +1,9 @@
-const TTL_MS = 30 * 86400 * 1000
-
 // 每个 codeHash 映射到一个对象。Durable Object 对同一对象的请求串行执行，
 // 因此 expectedRevision 的比较与持久化写入天然是原子 compare-and-swap。
 export class SyncCoordinator {
   constructor(state) {
     this.state = state
+    this.retentionReady = false
   }
 
   async fetch(request) {
@@ -12,12 +11,16 @@ export class SyncCoordinator {
     let body
     try { body = await request.json() } catch { return json({ error: '请求体必须是 JSON' }, 400) }
 
+    // 旧版本曾设置 30 天删除闹钟；新版本永久保留同步数据，并在对象唤醒时取消旧闹钟。
+    if (!this.retentionReady) {
+      await this.state.storage.deleteAlarm()
+      this.retentionReady = true
+    }
     let stored = await this.state.storage.get('record')
     // 首次调用时惰性迁移旧 KV 记录；之后只使用强一致的 DO 存储。
     if (!stored && validStoredRecord(body.legacyRecord)) {
       stored = body.legacyRecord
       await this.state.storage.put('record', stored)
-      await this.state.storage.setAlarm(Date.now() + TTL_MS)
     }
 
     if (body.operation === 'metadata') return json(metadataOf(stored))
@@ -38,12 +41,11 @@ export class SyncCoordinator {
       updatedByDeviceName: body.deviceName,
     }
     await this.state.storage.put('record', record)
-    await this.state.storage.setAlarm(Date.now() + TTL_MS)
     return json({ ok: true, ...metadataOf(record) })
   }
 
   async alarm() {
-    await this.state.storage.deleteAll()
+    // 兼容旧版本已经排队的闹钟：不再删除用户数据。
   }
 }
 

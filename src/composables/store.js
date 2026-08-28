@@ -48,7 +48,7 @@ function writeNow(key, makeRaw) {
     const raw = makeRaw()
     localStorage.setItem(key, raw)
     void mirrorLocalValue(key, raw)
-    markLocalChanged(key)
+    markLocalChanged(key, raw)
   } catch {
     // 浏览器禁用或存储空间不足时，仍保留当前会话内的数据。
   }
@@ -86,8 +86,14 @@ function scheduleWrite(key, makeRaw) {
 }
 
 function flushAllWrites() {
+  flushPendingWatcherInstalls()
   if (pendingWrites.size) writePendingBatch()
   else cancelScheduledBatch()
+}
+
+// 云同步等需要立即取得稳定快照的流程可先冲刷延迟监听和写入队列。
+export function flushStoredWrites() {
+  flushAllWrites()
 }
 
 // 其他标签页写入了新值时，取消本地排队中的旧值回写，避免旧数据覆盖新数据。
@@ -107,6 +113,54 @@ if (typeof document !== 'undefined') {
 // 监听器会绑定到那个组件的作用域，组件卸载后监听器随之销毁，
 // 导致后续所有修改都不再落盘。统一挂到永不停止的模块级作用域上。
 const persistenceScope = effectScope()
+const pendingWatcherInstalls = new Map()
+
+function installPersistenceWatcher(key) {
+  const pending = pendingWatcherInstalls.get(key)
+  if (!pending) return
+  pendingWatcherInstalls.delete(key)
+  if (pending.timer !== null && typeof window !== 'undefined') window.clearTimeout(pending.timer)
+  if (pending.idle !== null && typeof window !== 'undefined' && 'cancelIdleCallback' in window) {
+    window.cancelIdleCallback(pending.idle)
+  }
+
+  // 先建立监听，再比较延迟期间的数据，避免“刚打开页面就编辑”的修改落在空档里。
+  persistenceScope.run(() => {
+    watch(
+      pending.state,
+      () => {
+        scheduleWrite(key, () => JSON.stringify(pending.state.value))
+      },
+      { deep: true }
+    )
+  })
+  try {
+    if (JSON.stringify(pending.state.value) !== pending.baselineRaw) {
+      scheduleWrite(key, () => JSON.stringify(pending.state.value))
+    }
+  } catch {
+    // 无法序列化时保留会话内数据；后续正常修改仍会再次尝试保存。
+  }
+}
+
+function schedulePersistenceWatcher(key, state, baselineRaw) {
+  const pending = { state, baselineRaw, timer: null, idle: null }
+  pendingWatcherInstalls.set(key, pending)
+  const install = () => installPersistenceWatcher(key)
+  // 深层 watcher 第一次收集依赖会遍历整棵数据。放到首帧后的空闲阶段，
+  // 让账本、清单和课程表先完成页面绘制；最迟 800ms 内仍会建立监听。
+  if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+    pending.idle = window.requestIdleCallback(install, { timeout: 800 })
+  } else if (typeof window !== 'undefined') {
+    pending.timer = window.setTimeout(install, 120)
+  } else {
+    install()
+  }
+}
+
+function flushPendingWatcherInstalls() {
+  for (const key of [...pendingWatcherInstalls.keys()]) installPersistenceWatcher(key)
+}
 
 function isPlainObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
@@ -139,10 +193,13 @@ export function useStoredRef(key, defaultValue) {
   if (storedRefs.has(key)) return storedRefs.get(key)
 
   let saved = null
+  let savedRaw = null
   try {
-    saved = JSON.parse(localStorage.getItem(key))
+    savedRaw = localStorage.getItem(key)
+    saved = savedRaw === null ? null : JSON.parse(savedRaw)
   } catch {
     saved = null
+    savedRaw = null
   }
   const normalized = saved === null
     ? { value: JSON.parse(JSON.stringify(defaultValue)), repaired: false }
@@ -153,20 +210,13 @@ export function useStoredRef(key, defaultValue) {
       const raw = JSON.stringify(normalized.value)
       localStorage.setItem(key, raw)
       void mirrorLocalValue(key, raw)
+      savedRaw = raw
     } catch {
       // 无法落盘时仍使用修复后的内存值，确保页面能够打开。
     }
   }
   storedRefs.set(key, state)
-  persistenceScope.run(() => {
-    watch(
-      state,
-      () => {
-        scheduleWrite(key, () => JSON.stringify(state.value))
-      },
-      { deep: true }
-    )
-  })
+  schedulePersistenceWatcher(key, state, savedRaw ?? JSON.stringify(normalized.value))
   return state
 }
 
@@ -177,6 +227,11 @@ export async function restoreStoredValues(values) {
   if (!entries.length) return
   const rawValues = Object.fromEntries(entries.map(([key, value]) => [key, JSON.stringify(value)]))
   const previous = Object.fromEntries(entries.map(([key]) => [key, localStorage.getItem(key)]))
+  const previousStates = new Map(entries.flatMap(([key]) => (
+    storedRefs.has(key)
+      ? [[key, JSON.parse(JSON.stringify(storedRefs.get(key).value))]]
+      : []
+  )))
   try {
     for (const [key, raw] of Object.entries(rawValues)) localStorage.setItem(key, raw)
     for (const [key, value] of entries) {
@@ -189,6 +244,8 @@ export async function restoreStoredValues(values) {
       if (raw === null) localStorage.removeItem(key)
       else localStorage.setItem(key, raw)
     }
+    // localStorage 回滚的同时恢复已经创建的响应式引用，避免失败后界面仍显示半套新数据。
+    for (const [key, value] of previousStates) storedRefs.get(key).value = value
     throw error
   }
 }
@@ -464,13 +521,20 @@ function loadTimeConfig() {
 // 保证每个 季×校区 的时间数组与节次数量对齐，并统一补零为 HH:MM。
 // 未设置（空）的时间保持为空，绝不静默填充 08:00-08:45 之类的默认值。
 export function normalizeTimes(cfg) {
+  let changed = false
   const pad = (value) => {
     const [h = '0', m = '00'] = String(value ?? '').split(':')
     return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
   }
-  cfg.times = cfg.times ?? {}
+  if (!cfg.times || typeof cfg.times !== 'object' || Array.isArray(cfg.times)) {
+    cfg.times = {}
+    changed = true
+  }
   for (const season of cfg.seasons) {
-    cfg.times[season.id] = cfg.times[season.id] ?? {}
+    if (!cfg.times[season.id] || typeof cfg.times[season.id] !== 'object' || Array.isArray(cfg.times[season.id])) {
+      cfg.times[season.id] = {}
+      changed = true
+    }
     for (const campus of cfg.campuses) {
       const list = Array.isArray(cfg.times[season.id][campus.id])
         ? cfg.times[season.id][campus.id]
@@ -482,9 +546,16 @@ export function normalizeTimes(cfg) {
         }
         return { start: pad(source.start), end: pad(source.end) }
       })
-      cfg.times[season.id][campus.id] = fixed
+      const same = list.length === fixed.length && fixed.every((row, index) =>
+        list[index]?.start === row.start && list[index]?.end === row.end
+      )
+      if (!same) {
+        cfg.times[season.id][campus.id] = fixed
+        changed = true
+      }
     }
   }
+  return changed
 }
 
 // ---------- 作息季适用范围（sparse 方案：某季可只适用部分校区） ----------

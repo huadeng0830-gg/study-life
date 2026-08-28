@@ -59,15 +59,16 @@ export const appearance = useStoredRef('sl_appearance', defaultAppearanceValue()
 
 function normalize() {
   const config = wallpaperConfig.value ?? {}
-  config.targets = config.targets ?? {}
+  const targets = {}
   for (const key of Object.keys(WALLPAPER_TARGETS)) {
-    config.targets[key] = {
+    targets[key] = {
       ...(key === 'global' ? { enabled: false } : { mode: 'inherit' }),
       ...DEFAULT_EFFECTS,
-      ...(config.targets[key] ?? {}),
+      ...(config.targets?.[key] ?? {}),
     }
   }
-  wallpaperConfig.value = config
+  const normalizedConfig = { ...config, targets }
+  if (JSON.stringify(normalizedConfig) !== JSON.stringify(config)) wallpaperConfig.value = normalizedConfig
 
   const current = appearance.value ?? {}
   const existing = Array.isArray(current.homeModules) ? current.homeModules : []
@@ -82,7 +83,7 @@ function normalize() {
       right: current.swipeActions?.lists?.right ?? 'edit',
     },
   }
-  appearance.value = {
+  const normalizedAppearance = {
     quoteMode: 'daily',
     fixedQuoteIndex: 0,
     signature: '',
@@ -94,6 +95,7 @@ function normalize() {
     homeModules,
     swipeActions,
   }
+  if (JSON.stringify(normalizedAppearance) !== JSON.stringify(current)) appearance.value = normalizedAppearance
 }
 
 normalize()

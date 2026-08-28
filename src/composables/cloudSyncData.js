@@ -10,9 +10,22 @@ export const SYNC_DEFAULTS = {
   sl_checklists: [],
   sl_bills: [],
   sl_expenses: [],
+  sl_ledger_categories: [
+    { key: 'food', name: '餐饮', icon: '🍜', hidden: false },
+    { key: 'transit', name: '出行', icon: '🚇', hidden: false },
+    { key: 'shop', name: '购物', icon: '🛍️', hidden: false },
+    { key: 'life', name: '生活', icon: '🏠', hidden: false },
+    { key: 'study', name: '学习', icon: '📚', hidden: false },
+    { key: 'fun', name: '娱乐', icon: '🎮', hidden: false },
+    { key: 'health', name: '健康', icon: '💊', hidden: false },
+    { key: 'sub', name: '订阅', icon: '📺', hidden: false },
+    { key: 'other', name: '其他', icon: '📦', hidden: false },
+  ],
+  sl_ledger_freq: { pinned: [], hidden: [] },
   sl_food_places: [],
   sl_food_history: [],
   sl_theme: 'blue',
+  sl_custom_theme_color: '#456fe8',
   sl_auto_wallpaper_color: false,
   sl_wallpaper_accent: '#456fe8',
   sl_appearance: {},
@@ -75,6 +88,16 @@ export function validateSyncPayload(payload) {
     throw new Error(`云端数据中的 ${result.invalidKeys.join('、')} 格式异常`)
   }
   return result.values
+}
+
+// 推送只需要验证当前内存快照，不需要再深拷贝一次整库数据。
+export function assertValidSyncPayload(payload) {
+  if (!isPlainObject(payload)) throw new Error('云端数据格式异常，已取消推送')
+  const invalidKeys = SYNC_KEYS.filter(
+    (key) => payload[key] !== undefined && !isValidKeyValue(key, payload[key])
+  )
+  if (invalidKeys.length) throw new Error(`云端数据中的 ${invalidKeys.join('、')} 格式异常`)
+  return payload
 }
 
 function itemKey(item, index) {
