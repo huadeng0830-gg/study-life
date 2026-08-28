@@ -1,5 +1,6 @@
 <script setup>
-import { ref, computed } from 'vue'
+import { computed, ref, onBeforeUnmount } from 'vue'
+import EmptyState from '../components/EmptyState.vue'
 import Modal from '../components/Modal.vue'
 import {
   useStoredRef,
@@ -81,74 +82,166 @@ function remove() {
   showForm.value = false
 }
 
-function togglePin(event, id) {
-  event.stopPropagation()
-  const target = exams.value.find((item) => item.id === id)
-  if (target) target.pinned = !target.pinned
-}
-
 const sorted = computed(() => sortCountdowns(exams.value))
 
 const visibleItems = computed(() =>
   showPast.value ? sorted.value : sorted.value.filter((item) => !item.countdown.isPast)
 )
+
+// ---------- 卡片展示辅助：日期牌 / 短日期 / 时间轴 ----------
+const WEEKDAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
+const pad2 = (v) => String(v).padStart(2, '0')
+const todayMid = new Date(new Date().toDateString())
+
+// 日期牌：目标月 / 日（无法解析时显示 --）
+function tileOf(item) {
+  const t = item.countdown.target
+  if (!t) return { month: '--', day: '--' }
+  return { month: pad2(t.getMonth() + 1), day: pad2(t.getDate()) }
+}
+
+// 短日期行：8月30日 · 周日（含时间时追加），不再与「本周日」等信息重复
+function shortDateOf(item) {
+  const t = item.countdown.target
+  if (!t) return fmtCountdownDate(item, null)
+  let text = `${t.getMonth() + 1}月${t.getDate()}日 · ${WEEKDAYS[t.getDay()]}`
+  if (item.time) text += ` ${item.time}`
+  return text
+}
+
+// 底部轻量时间轴：今天 ─── ● 目标日
+function timelineOf(item) {
+  const t = item.countdown.target
+  if (!t) return null
+  const start = `${todayMid.getMonth() + 1}/${todayMid.getDate()}`
+  const end = `${t.getMonth() + 1}/${t.getDate()}`
+  const sameDay = t.toDateString() === todayMid.toDateString()
+  return { start, end, sameDay }
+}
+
+// ---------- 卡片右上 ··· 菜单：置顶 / 编辑 / 删除 ----------
+const openMenuId = ref(null)
+
+function toggleMenu(item, event) {
+  event.stopPropagation()
+  openMenuId.value = openMenuId.value === item.id ? null : item.id
+}
+
+function closeMenu() {
+  openMenuId.value = null
+}
+
+function menuPin(item) {
+  const target = exams.value.find((entry) => entry.id === item.id)
+  if (target) target.pinned = !target.pinned
+  closeMenu()
+}
+
+function menuEdit(item) {
+  closeMenu()
+  openEdit(item)
+}
+
+function menuDelete(item) {
+  closeMenu()
+  if (!window.confirm(`确定删除倒计时「${item.name}」吗？`)) return
+  exams.value = exams.value.filter((entry) => entry.id !== item.id)
+}
+
+if (typeof document !== 'undefined') {
+  document.addEventListener('click', closeMenu)
+}
+onBeforeUnmount(() => {
+  if (typeof document !== 'undefined') document.removeEventListener('click', closeMenu)
+})
 </script>
 
 <template>
   <div class="page">
-    <div class="head">
-      <div>
-        <h2>⏳ 我的倒计时</h2>
-        <p>考试、生日、纪念日和项目节点都可以放在这里</p>
+    <header class="page-head">
+      <div class="page-head-main">
+        <h1 class="page-title">我的倒计时</h1>
+        <p class="page-desc">考试、生日、纪念日等重要节点都可以放在这里。</p>
       </div>
-      <div class="head-actions">
+      <div class="page-actions">
         <label class="past-toggle">
           <input v-model="showPast" type="checkbox" />
           显示已结束
         </label>
         <button class="btn btn-primary" @click="openAdd">＋ 添加倒计时</button>
       </div>
-    </div>
+    </header>
 
-    <div v-if="exams.length === 0" class="card empty">
-      还没有倒计时，点击右上角「添加倒计时」开始吧 🎯
-    </div>
+    <EmptyState
+      v-if="exams.length === 0"
+      class="card empty-box"
+      icon="⏳"
+      title="还没有倒计时"
+      description="添加一个重要日期，未来的自己会感谢你。"
+      primary-label="＋ 添加倒计时"
+      @primary="openAdd"
+    />
 
-    <div v-else-if="visibleItems.length === 0" class="card empty">
-      已结束的倒计时已隐藏，可在右上角重新显示
-    </div>
+    <EmptyState
+      v-else-if="visibleItems.length === 0"
+      class="card empty-box"
+      icon="✦"
+      title="已结束的倒计时已隐藏"
+      description="可在右上角重新显示已结束的项目。"
+    />
 
     <div v-else class="list">
       <div
         v-for="item in visibleItems"
         :key="item.id"
         class="card exam"
-        :class="{ finished: item.countdown.isPast, pinned: item.pinned }"
+        :class="{ finished: item.countdown.isPast, pinned: item.pinned, hot: item.countdown.cls === 'hot' && !item.countdown.isPast }"
         @click="openEdit(item)"
       >
-        <div class="count" :class="item.countdown.cls">
-          <span class="num">{{ item.countdown.text }}</span>
-          <span class="unit">{{ item.countdown.label }}</span>
-        </div>
-        <div class="info">
+        <!-- 顶部：轻量标签 + 操作菜单 -->
+        <div class="exam-top">
           <div class="meta-row">
             <span class="category">{{ item.category ?? '其他' }}</span>
             <span v-if="item.repeat === 'yearly'" class="repeat-tag">每年重复</span>
           </div>
-          <div class="name">{{ item.name }}</div>
-          <div class="date">{{ fmtCountdownDate(item, item.countdown.target) }}</div>
-          <div v-if="item.location" class="loc">📝 {{ item.location }}</div>
+          <button
+            type="button"
+            class="menu-btn"
+            aria-label="更多操作"
+            @click="toggleMenu(item, $event)"
+          >···</button>
+          <div v-if="openMenuId === item.id" class="card-menu" @click.stop>
+            <button @click="menuPin(item)">{{ item.pinned ? '取消置顶' : '置顶' }}</button>
+            <button @click="menuEdit(item)">编辑</button>
+            <button class="danger" @click="menuDelete(item)">删除</button>
+          </div>
         </div>
-        <button
-          type="button"
-          class="pin-button"
-          :class="{ on: item.pinned }"
-          :aria-label="item.pinned ? '取消置顶' : '置顶倒计时'"
-          :title="item.pinned ? '取消置顶' : '置顶'"
-          @click="togglePin($event, item.id)"
-        >
-          ◆
-        </button>
+
+        <!-- 主体：日期牌 + 事件 + 剩余天数 -->
+        <div class="exam-main">
+          <div class="date-tile" aria-hidden="true">
+            <small>{{ tileOf(item).month }}</small>
+            <b>{{ tileOf(item).day }}</b>
+          </div>
+          <div class="exam-info">
+            <div class="name">{{ item.name }}</div>
+            <div class="date">{{ shortDateOf(item) }}</div>
+            <div v-if="item.location" class="loc">{{ item.location }}</div>
+          </div>
+          <div class="count" :class="item.countdown.cls">
+            <small v-if="!item.countdown.isPast && /^\d+$/.test(String(item.countdown.text))">还有</small>
+            <span class="num" :class="{ tiny: !/^\d+$/.test(String(item.countdown.text)) }">{{ item.countdown.text }}</span>
+            <span v-if="item.countdown.label && /^\d+$/.test(String(item.countdown.text))" class="unit">{{ item.countdown.label }}</span>
+          </div>
+        </div>
+
+        <!-- 底部轻量时间轴 -->
+        <div v-if="timelineOf(item)" class="timeline" aria-hidden="true">
+          <span class="tl-label">{{ timelineOf(item).start }}</span>
+          <span class="tl-track"><i></i></span>
+          <span class="tl-label strong">{{ timelineOf(item).end }}</span>
+          <span class="tl-dot" :class="{ on: timelineOf(item).sameDay }"></span>
+        </div>
       </div>
     </div>
 
@@ -209,30 +302,15 @@ const visibleItems = computed(() =>
   flex-direction: column;
   gap: 16px;
 }
-.head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-.head h2 {
-  font-size: 22px;
-}
-.head > div:first-child p {
-  margin-top: 5px;
-  color: var(--muted);
-  font-size: 13px;
-}
-.head-actions {
-  display: flex;
-  align-items: center;
-  gap: 10px;
+.page-actions {
+  gap: 14px;
 }
 .past-toggle {
   display: flex;
   align-items: center;
   gap: 6px;
-  color: var(--muted);
-  font-size: 13px;
+  color: var(--ink-soft);
+  font-size: 12.5px;
   cursor: pointer;
   white-space: nowrap;
 }
@@ -240,11 +318,12 @@ const visibleItems = computed(() =>
 .pin-option input {
   accent-color: var(--primary);
 }
-.empty {
-  color: var(--muted);
-  text-align: center;
-  padding: 60px 20px;
+.empty-box {
+  max-width: 640px;
+  width: 100%;
+  margin: 0 auto;
 }
+/* ---------- 倒计时卡：日期牌 + 主体 + 大数字 + 轻量时间轴 ---------- */
 .list {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
@@ -253,107 +332,171 @@ const visibleItems = computed(() =>
 .exam {
   position: relative;
   display: flex;
-  align-items: center;
-  gap: 18px;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px 20px 16px;
   cursor: pointer;
-  transition: transform 0.12s, box-shadow 0.12s;
+  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+  animation: exam-in 0.2s ease-out both;
+}
+@keyframes exam-in {
+  from { opacity: 0; transform: translateY(4px); }
 }
 .exam:hover {
   transform: translateY(-2px);
-  box-shadow: 0 4px 14px rgba(30, 40, 80, 0.1);
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-md);
 }
-.exam.finished {
-  opacity: 0.55;
+.exam.finished { opacity: 0.6; }
+.exam.pinned { border-color: #cfd8fb; background: linear-gradient(180deg, #fbfcff, #fff); }
+.exam.hot { border-color: #f3c2c2; }
+
+/* 顶部标签：小号浅色，不抢标题 */
+.exam-top { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.meta-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.category,
+.repeat-tag {
+  padding: 2.5px 8px;
+  color: var(--ink-faint);
+  font-size: 10.5px;
+  font-weight: 650;
+  border-radius: 6px;
+  background: var(--bg-tint);
 }
-.exam.pinned {
-  border-color: #cfd8fb;
+.category { color: var(--primary); background: var(--primary-soft); }
+.repeat-tag { color: #8b6ad4; background: #f3eeff; }
+.menu-btn {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 22px;
+  flex: 0 0 auto;
+  color: #aab2c2;
+  font-size: 13px;
+  font-weight: 900;
+  letter-spacing: 0.05em;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
 }
+.menu-btn:hover { color: var(--ink-soft); background: var(--bg); }
+.card-menu {
+  position: absolute;
+  top: 26px;
+  right: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  min-width: 118px;
+  padding: 5px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fff;
+  box-shadow: var(--shadow-md);
+}
+.card-menu button {
+  padding: 8px 11px;
+  color: var(--text);
+  font-size: 12.5px;
+  text-align: left;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  cursor: pointer;
+  transition: background 0.14s;
+}
+.card-menu button:hover { background: var(--bg); }
+.card-menu button.danger { color: var(--danger); }
+.card-menu button.danger:hover { background: #feecec; }
+
+/* 主体：日期牌 / 标题 / 剩余天数 同一横向视觉区 */
+.exam-main {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+}
+.date-tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 60px;
+  height: 68px;
+  flex: 0 0 60px;
+  border-radius: 16px;
+  background: linear-gradient(160deg, #eef2ff 0%, #f4f0ff 100%);
+}
+.date-tile small { color: #8a94d8; font-size: 11px; font-weight: 700; line-height: 1.2; }
+.date-tile b { color: #3d4ec0; font-size: 23px; font-weight: 900; line-height: 1.15; letter-spacing: 0.01em; }
+.exam-info { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.name {
+  overflow: hidden;
+  font-size: clamp(19px, 1.6vw, 23px);
+  font-weight: 750;
+  letter-spacing: -0.01em;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.date { color: var(--ink-soft); font-size: 13px; font-variant-numeric: tabular-nums; }
+.loc { overflow: hidden; color: var(--ink-faint); font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 剩余天数：整张卡最显眼的信息 */
 .count {
   display: flex;
   flex-direction: column;
   align-items: center;
-  min-width: 74px;
-  padding: 10px 8px;
-  border-radius: 12px;
-  background: var(--primary-soft);
+  min-width: 84px;
+  flex: 0 0 auto;
   color: var(--primary);
 }
+.count small { color: var(--ink-faint); font-size: 11px; font-weight: 700; }
 .count .num {
-  font-size: 26px;
-  font-weight: 800;
-  line-height: 1.15;
+  font-size: clamp(42px, 3.6vw, 50px);
+  font-weight: 900;
+  line-height: 1.02;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  transition: opacity 0.2s ease;
 }
-.count .unit {
-  font-size: 12px;
-}
-.count.hot {
-  background: #fee2e2;
-  color: var(--danger);
-}
-.count.past {
-  background: #f3f4f6;
-  color: var(--muted);
-}
-.count.past .num {
-  font-size: 15px;
-}
-.info {
-  flex: 1;
-  min-width: 0;
-}
-.meta-row {
+.count .num.tiny { font-size: 22px; letter-spacing: 0; }
+.count .unit { margin-top: 2px; color: var(--ink-soft); font-size: 12px; font-weight: 700; }
+.count.hot { color: var(--danger); }
+.count.hot .unit { color: var(--danger); }
+.count.past { color: var(--ink-faint); }
+.count.past .num { font-size: 17px; }
+
+/* 底部轻量时间轴：今天 ── ● 目标日 */
+.timeline {
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin-bottom: 5px;
-}
-.category,
-.repeat-tag {
-  padding: 3px 7px;
-  color: var(--primary);
-  font-size: 10px;
-  font-weight: 700;
-  border-radius: 5px;
-  background: var(--primary-soft);
-}
-.repeat-tag {
-  color: #7b55d4;
-  background: #f1ebff;
-}
-.name {
-  font-size: 16px;
-  font-weight: 600;
-  margin-bottom: 4px;
-}
-.date {
-  font-size: 13px;
-  color: var(--muted);
-}
-.loc {
-  font-size: 13px;
-  color: var(--muted);
+  gap: 8px;
   margin-top: 2px;
 }
-.pin-button {
-  position: absolute;
-  top: 11px;
-  right: 11px;
-  display: grid;
-  place-items: center;
-  width: 28px;
-  height: 28px;
-  color: #b6bdcb;
-  border: none;
-  border-radius: 8px;
-  background: transparent;
+.tl-label { color: var(--ink-faint); font-size: 10.5px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.tl-label.strong { color: var(--ink-soft); font-weight: 700; margin-right: 10px; }
+.tl-track {
+  position: relative;
+  flex: 1;
+  height: 3px;
+  border-radius: 999px;
+  background: #e7ecf6;
 }
-.pin-button:hover {
-  background: var(--bg);
+.tl-track i { position: absolute; inset: 0; border-radius: inherit; background: linear-gradient(90deg, rgba(69,111,232,.32), rgba(120,100,220,.32)); }
+.exam.finished .tl-track i { background: #eef1f6; }
+.tl-dot {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 7px;
+  margin-left: -12px;
+  border-radius: 50%;
+  background: var(--primary);
+  box-shadow: 0 0 0 3px rgba(69, 111, 232, 0.14);
 }
-.pin-button.on {
-  color: #7a55e8;
-  background: #f1ebff;
-}
+.tl-dot.on { background: var(--danger); box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.15); }
 .form {
   display: flex;
   flex-direction: column;
@@ -361,7 +504,7 @@ const visibleItems = computed(() =>
 }
 .form label {
   font-size: 13px;
-  color: var(--muted);
+  color: var(--ink-soft);
   margin-top: 6px;
 }
 .form-row {
@@ -402,34 +545,37 @@ const visibleItems = computed(() =>
   margin-right: auto;
 }
 
-@media (max-width: 620px) {
-  .head {
+@media (max-width: 720px) {
+  .page-head {
     align-items: flex-start;
     flex-direction: column;
     gap: 12px;
   }
 
-  .head-actions {
+  .page-actions {
     width: 100%;
     justify-content: space-between;
   }
 
-  .head-actions .btn {
-    width: 100%;
+  .page-actions .btn {
+    flex: 1;
   }
 
   .list {
     grid-template-columns: 1fr;
+    gap: 12px;
   }
 
-  .exam {
-    gap: 14px;
-    padding: 16px;
-  }
-
-  .count {
-    min-width: 66px;
-  }
+  /* 手机端保持横向三段（日期牌/标题/数字），仅按比例收紧，不做纵向堆叠 */
+  .exam { padding: 16px 16px 14px; gap: 12px; }
+  .exam-main { gap: 12px; }
+  .date-tile { width: 50px; height: 58px; flex-basis: 50px; border-radius: 13px; }
+  .date-tile small { font-size: 10px; }
+  .date-tile b { font-size: 19px; }
+  .name { font-size: 18px; }
+  .date { font-size: 12px; }
+  .count { min-width: 72px; }
+  .count .num { font-size: 38px; }
 
   .form-row {
     grid-template-columns: 1fr;

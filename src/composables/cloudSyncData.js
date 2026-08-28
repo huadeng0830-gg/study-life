@@ -9,6 +9,7 @@ export const SYNC_DEFAULTS = {
   sl_countdown_show_past: false,
   sl_checklists: [],
   sl_bills: [],
+  sl_expenses: [],
   sl_food_places: [],
   sl_food_history: [],
   sl_theme: 'blue',

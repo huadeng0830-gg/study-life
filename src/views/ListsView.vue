@@ -1,5 +1,6 @@
 <script setup>
 import { computed, ref } from 'vue'
+import EmptyState from '../components/EmptyState.vue'
 import Modal from '../components/Modal.vue'
 import SwipeActionItem from '../components/SwipeActionItem.vue'
 import VirtualList from '../components/VirtualList.vue'
@@ -23,11 +24,48 @@ const itemForm = ref(emptyItem())
 const CATEGORIES = ['食品', '日用品', '学习用品', '数码', '衣物', '其他']
 const UNITS = ['件', '个', '份', '袋', '盒', '瓶', '斤', 'kg']
 const LIST_TYPES = {
-  general: '通用清单',
-  shopping: '购物采购',
-  travel: '出行准备',
-  chores: '家务整理',
-  packing: '物品准备',
+  general: { label: '通用清单', icon: '🗒️' },
+  shopping: { label: '购物采购', icon: '🛒' },
+  travel: { label: '出行准备', icon: '🧳' },
+  chores: { label: '家务整理', icon: '🧹' },
+  packing: { label: '物品准备', icon: '🎒' },
+}
+const LIST_TYPE_KEYS = Object.keys(LIST_TYPES)
+
+function typeLabel(key) {
+  return LIST_TYPES[key]?.label ?? LIST_TYPES.general.label
+}
+
+function typeIcon(key) {
+  return LIST_TYPES[key]?.icon ?? LIST_TYPES.general.icon
+}
+
+function listProgress(list) {
+  const count = list.items?.length ?? 0
+  const done = list.items?.filter((item) => item.done).length ?? 0
+  return { count, done, percent: count ? Math.round((done / count) * 100) : 0 }
+}
+
+function listUpdatedText(list) {
+  if (!list.items?.length) return '还没有条目'
+  return `${listProgress(list).done} / ${listProgress(list).count} 已完成`
+}
+
+// 记录清单最近变动时间（新增元信息字段，不影响既有数据）
+function touchList() {
+  if (!activeList.value) return
+  activeList.value.updatedAt = new Date().toISOString()
+}
+
+function updatedAgoText(list) {
+  if (!list.updatedAt) return ''
+  const minutes = Math.floor((Date.now() - new Date(list.updatedAt).getTime()) / 60000)
+  if (minutes < 1) return '刚刚更新'
+  if (minutes < 60) return `${minutes} 分钟前更新`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours} 小时前更新`
+  const days = Math.floor(hours / 24)
+  return `${days} 天前更新`
 }
 
 function emptyItem() {
@@ -101,6 +139,7 @@ function deleteList() {
 function addQuickItem() {
   const name = quickName.value.trim()
   if (!name || !activeList.value) return
+  touchList()
   activeList.value.items.push({
     id: 'item' + Date.now(),
     name,
@@ -155,12 +194,14 @@ function saveItem() {
   } else if (activeList.value) {
     activeList.value.items.push({ id: 'item' + Date.now(), done: false, ...data })
   }
+  touchList()
   showItemForm.value = false
 }
 
 function removeItem() {
   if (!activeList.value) return
   activeList.value.items = activeList.value.items.filter((item) => item.id !== editingItemId.value)
+  touchList()
   showItemForm.value = false
 }
 
@@ -171,7 +212,10 @@ function toggleItem(event, id) {
 }
 
 function toggleListItem(item) {
-  if (item) item.done = !item.done
+  if (item) {
+    item.done = !item.done
+    touchList()
+  }
 }
 
 function swipeLabel(item, direction) {
@@ -193,8 +237,9 @@ function handleItemSwipe(direction, item) {
   const action = appearance.value.swipeActions.lists[direction]
   if (action === 'complete') toggleListItem(item)
   else if (action === 'edit') openEditItem(item)
-  else if (action === 'delete' && window.confirm(`确定删除“${item.name}”吗？`)) {
+    else if (action === 'delete' && window.confirm(`确定删除“${item.name}”吗？`)) {
     activeList.value.items = activeList.value.items.filter((entry) => entry.id !== item.id)
+    touchList()
   }
 }
 
@@ -203,28 +248,34 @@ function clearBought() {
   const count = list?.items.filter((item) => item.done).length ?? 0
   if (!list || !count || !window.confirm(`确定清除 ${count} 个已完成事项吗？`)) return
   list.items = list.items.filter((item) => !item.done)
+  touchList()
 }
 </script>
 
 <template>
   <div class="page">
-    <div class="head">
-      <div>
-        <h2>☑ 我的清单</h2>
-        <p>购物、出行、家务和各种准备事项，都可以拆成逐项完成的清单</p>
+    <header class="page-head">
+      <div class="page-head-main">
+        <h1 class="page-title">我的清单</h1>
+        <p class="page-desc">购物、出行、杂物和各种准备事项，都可以快速建立清单。</p>
       </div>
-      <button class="btn btn-primary" @click="openCreateList">＋ 新建清单</button>
-    </div>
+      <div class="page-actions">
+        <button class="btn btn-primary" @click="openCreateList">＋ 新建清单</button>
+      </div>
+    </header>
 
-    <div v-if="lists.length === 0" class="card empty-state">
-      <span>📋</span>
-      <h3>还没有清单</h3>
-      <p>可以从“本周采购”“返校准备”或“房间整理”开始。</p>
-      <button class="btn btn-primary" @click="openCreateList">新建第一份清单</button>
-    </div>
+    <EmptyState
+      v-if="lists.length === 0"
+      class="card empty-box"
+      icon="📋"
+      title="还没有清单"
+      description="可以从「本周采购」「返校准备」或「房间整理」开始。"
+      primary-label="新建第一份清单"
+      @primary="openCreateList"
+    />
 
     <div v-else class="shopping-layout">
-      <aside class="list-sidebar">
+      <aside class="list-sidebar" aria-label="清单分类">
         <button
           v-for="list in lists"
           :key="list.id"
@@ -232,15 +283,19 @@ function clearBought() {
           :class="{ active: activeList?.id === list.id }"
           @click="activeId = list.id"
         >
-          <span>{{ list.name }}</span>
-          <small>{{ LIST_TYPES[list.type ?? 'general'] }} · {{ list.items.filter((item) => !item.done).length }} 项待完成</small>
+          <span class="tab-line">
+            <i class="tab-icon">{{ typeIcon(list.type ?? 'general') }}</i>
+            <b>{{ list.name }}</b>
+          </span>
+          <small>{{ listProgress(list).done }} / {{ listProgress(list).count }} 已完成</small>
+          <span class="tab-progress"><i :style="{ width: listProgress(list).percent + '%' }"></i></span>
         </button>
       </aside>
 
       <section v-if="activeList" class="card shopping-card">
         <div class="list-head">
           <div>
-            <span class="section-code">CHECKLIST · {{ LIST_TYPES[activeList.type ?? 'general'] }}</span>
+            <span class="section-code">{{ typeIcon(activeList.type ?? 'general') }} CHECKLIST · {{ typeLabel(activeList.type ?? 'general') }}</span>
             <h3>{{ activeList.name }}</h3>
           </div>
           <div class="list-menu">
@@ -253,8 +308,9 @@ function clearBought() {
           <div><span>完成进度</span><b>{{ listStats.done }} / {{ listStats.count }}</b></div>
           <div><span>待完成</span><b>{{ listStats.remaining }}</b></div>
           <div v-if="activeList.type === 'shopping'"><span>预计总额</span><b>{{ money(listStats.total) }}</b></div>
-          <div v-else><span>清单类型</span><b class="type-summary">{{ LIST_TYPES[activeList.type ?? 'general'] }}</b></div>
+          <div v-else><span>清单类型</span><b class="type-summary">{{ typeLabel(activeList.type ?? 'general') }}</b></div>
         </div>
+        <p v-if="updatedAgoText(activeList)" class="updated-note">{{ updatedAgoText(activeList) }}</p>
 
         <form class="quick-add" @submit.prevent="addQuickItem">
           <input v-model="quickName" placeholder="快速添加一项，例如：带充电器" />
@@ -308,7 +364,7 @@ function clearBought() {
         <label>清单名称 *</label>
         <input v-model="listName" placeholder="例如：本周采购" @input="listError = ''" />
         <label>清单类型</label>
-        <select v-model="listType"><option v-for="(label, key) in LIST_TYPES" :key="key" :value="key">{{ label }}</option></select>
+        <select v-model="listType"><option v-for="key in LIST_TYPE_KEYS" :key="key" :value="key">{{ typeLabel(key) }}</option></select>
         <p v-if="listError" class="error">{{ listError }}</p>
         <div class="actions"><button class="btn btn-primary" @click="saveList">保存</button></div>
       </div>
@@ -340,56 +396,60 @@ function clearBought() {
 </template>
 
 <style scoped>
-.page { display: flex; flex-direction: column; gap: 16px; }
-.head { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
-.head h2 { font-size: 22px; }
-.head p { margin-top: 5px; color: var(--muted); font-size: 13px; }
-.empty-state { display: flex; align-items: center; flex-direction: column; gap: 8px; padding: 58px 20px; text-align: center; }
-.empty-state > span { font-size: 34px; }
-.empty-state p { color: var(--muted); font-size: 13px; }
-.empty-state .btn { margin-top: 8px; }
-.shopping-layout { display: grid; grid-template-columns: 210px minmax(0, 1fr); gap: 12px; }
-.list-sidebar { display: flex; flex-direction: column; gap: 6px; }
-.list-tab { display: flex; align-items: flex-start; flex-direction: column; gap: 3px; width: 100%; padding: 12px 14px; color: var(--text); text-align: left; border: 1px solid var(--border); border-radius: 11px; background: #fff; }
-.list-tab span { overflow: hidden; width: 100%; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
-.list-tab small { color: var(--muted); font-size: 11px; }
-.list-tab.active { color: var(--primary); border-color: #cbd7fb; background: var(--primary-soft); }
+.page { display: flex; flex-direction: column; gap: 14px; }
+.empty-box { max-width: 640px; width: 100%; margin: 0 auto; }
+.shopping-layout { display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 12px; align-items: start; }
+.list-sidebar { position: sticky; top: 20px; display: flex; flex-direction: column; gap: 6px; }
+.list-tab { position: relative; display: flex; align-items: flex-start; flex-direction: column; gap: 4px; width: 100%; padding: 11px 13px; color: var(--text); text-align: left; border: 1px solid var(--border); border-radius: 11px; background: #fff; transition: border-color 0.15s, background 0.15s, box-shadow 0.15s; }
+.list-tab:hover { border-color: var(--border-strong); background: #fdfdff; }
+.list-tab .tab-line { display: flex; align-items: center; gap: 7px; overflow: hidden; width: 100%; }
+.tab-icon { font-style: normal; font-size: 14px; }
+.list-tab b { overflow: hidden; font-size: 13.5px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.list-tab small { color: var(--ink-soft); font-size: 11px; font-variant-numeric: tabular-nums; }
+.tab-progress { width: 100%; height: 4px; border-radius: 999px; background: #eef1f6; overflow: hidden; }
+.tab-progress i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--primary), var(--brand-grad-b)); transition: width 0.3s ease; }
+.list-tab.active { color: var(--primary); border-color: var(--primary); box-shadow: inset 0 0 0 1px var(--primary), var(--shadow-sm); background: var(--primary-soft); }
 .shopping-card { padding: 0; overflow: hidden; }
-.list-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 20px 22px 14px; }
+.list-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 18px 22px 12px; }
 .section-code { color: var(--primary); font-size: 9px; font-weight: 900; letter-spacing: .16em; }
 .list-head h3 { margin-top: 2px; font-size: 19px; }
 .list-menu { display: flex; gap: 6px; }
-.list-menu button, .clear-bought { padding: 6px 9px; color: var(--muted); font-size: 12px; border: none; border-radius: 7px; background: var(--bg); }
-.list-menu .danger-link { color: var(--danger); }
+.list-menu button, .clear-bought { padding: 6px 9px; color: var(--ink-soft); font-size: 12px; border: none; border-radius: 7px; background: transparent; transition: background 0.14s, color 0.14s; }
+.list-menu button:hover, .clear-bought:hover:not(:disabled) { background: var(--bg); color: var(--text); }
+.list-menu .danger-link:hover { color: var(--danger); background: #feecec; }
 .summary-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; margin: 0 22px; overflow: hidden; border: 1px solid var(--border); border-radius: 11px; background: var(--border); }
-.summary-grid div { display: flex; flex-direction: column; gap: 3px; padding: 12px 14px; background: #fafbfd; }
-.summary-grid span { color: var(--muted); font-size: 11px; }
-.summary-grid b { font-size: 18px; }
+.summary-grid div { display: flex; flex-direction: column; gap: 3px; padding: 11px 14px; background: var(--bg-tint); }
+.summary-grid span { color: var(--ink-faint); font-size: 11px; }
+.summary-grid b { font-size: 19px; font-weight: 800; font-variant-numeric: tabular-nums; }
 .summary-grid .type-summary { font-size: 14px; }
-.quick-add { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; padding: 16px 22px 12px; }
+.updated-note { margin: 8px 24px 0; color: var(--ink-faint); font-size: 10.5px; }
+.quick-add { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; padding: 14px 22px 12px; }
 .item-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 0 22px 10px; border-bottom: 1px solid var(--border); }
-.item-toolbar > div { display: flex; gap: 5px; }
-.item-toolbar > div button { padding: 6px 9px; color: var(--muted); font-size: 12px; border: none; border-radius: 7px; background: transparent; }
-.item-toolbar > div button.on { color: var(--primary); font-weight: 700; background: var(--primary-soft); }
-.clear-bought:disabled { opacity: .45; }
+.item-toolbar > div { display: inline-flex; gap: 3px; padding: 3px; border: 1px solid var(--border); border-radius: 8px; background: #eef1f7; }
+.item-toolbar > div button { padding: 5px 10px; color: var(--ink-soft); font-size: 12px; font-weight: 600; border: none; border-radius: 6px; background: transparent; transition: background 0.14s, color 0.14s; }
+.item-toolbar > div button:hover { background: rgba(255,255,255,.85); color: var(--text); }
+.item-toolbar > div button.on { color: var(--primary); font-weight: 700; background: #fff; box-shadow: 0 1px 3px rgba(22,34,64,.12); }
+.clear-bought:disabled { opacity: .45; cursor: not-allowed; }
 .item-list { display: flex; flex-direction: column; }
-.item-list :deep(.swipe-item) { border-radius: 0; }
-.shopping-item { display: flex; align-items: center; gap: 12px; padding: 13px 22px; cursor: pointer; border-bottom: 1px solid var(--border); }
+.item-list :deep(.swipe-item) { border-radius: 0; background: #fff; }
+.item-list :deep(.swipe-content) { background: #fff; }
+.shopping-item { display: flex; align-items: center; gap: 12px; padding: 11px 22px; cursor: pointer; border-bottom: 1px solid var(--border); transition: background 0.13s; }
 .shopping-item:last-child { border-bottom: none; }
-.shopping-item:hover { background: #fafbfd; }
+.shopping-item:hover { background: var(--bg-tint); }
 .shopping-item.done { opacity: .55; }
 .shopping-item.done .item-copy b { text-decoration: line-through; }
-.item-check { display: grid; place-items: center; width: 25px; height: 25px; flex: 0 0 25px; color: #fff; font-weight: 800; border: 2px solid #cbd2df; border-radius: 7px; background: #fff; }
+.item-check { display: grid; place-items: center; width: 23px; height: 23px; flex: 0 0 23px; color: #fff; font-weight: 800; font-size: 12px; border: 2px solid #c3cbd9; border-radius: 7px; background: #fff; transition: background 0.14s, border-color 0.14s; }
+.item-check:hover { border-color: #19a878; }
 .item-check.checked { border-color: #19a878; background: #19a878; }
 .item-copy { flex: 1; min-width: 0; }
 .item-copy > div { display: flex; align-items: center; gap: 7px; }
-.item-copy b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.item-copy b { overflow: hidden; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
 .item-copy span { padding: 3px 6px; color: var(--primary); font-size: 9px; font-weight: 700; border-radius: 5px; background: var(--primary-soft); }
-.item-copy small { display: block; overflow: hidden; margin-top: 3px; color: var(--muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-.item-price { color: var(--text); font-size: 13px; white-space: nowrap; }
-.items-empty { padding: 34px 20px; color: var(--muted); font-size: 13px; text-align: center; }
+.item-copy small { display: block; overflow: hidden; margin-top: 3px; color: var(--ink-soft); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.item-price { color: var(--text); font-size: 13px; font-weight: 750; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.items-empty { padding: 30px 20px; color: var(--ink-soft); font-size: 13px; text-align: center; }
 .form { display: flex; flex-direction: column; gap: 8px; }
-.form label { margin-top: 6px; color: var(--muted); font-size: 13px; }
+.form label { margin-top: 6px; color: var(--ink-soft); font-size: 13px; }
 .form input, .form select { width: 100%; }
 .form-row { display: grid; gap: 9px; }
 .form-row.three { grid-template-columns: .7fr .8fr 1fr; }
@@ -397,12 +457,16 @@ function clearBought() {
 .error { color: var(--danger); font-size: 13px; }
 .actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 14px; }
 .actions .btn-danger { margin-right: auto; }
+@media (max-width: 900px) {
+  .list-sidebar { position: static; }
+}
 @media (max-width: 760px) {
-  .head { align-items: flex-start; flex-direction: column; }
-  .head .btn { width: 100%; }
+  .page-head { align-items: flex-start; flex-direction: column; }
+  .page-actions { width: 100%; }
+  .page-actions .btn { flex: 1; }
   .shopping-layout { grid-template-columns: 1fr; }
-  .list-sidebar { flex-direction: row; overflow-x: auto; padding-bottom: 2px; }
-  .list-tab { min-width: 150px; }
+  .list-sidebar { flex-direction: row; overflow-x: auto; padding-bottom: 4px; }
+  .list-tab { min-width: 168px; }
 }
 @media (max-width: 520px) {
   .summary-grid { grid-template-columns: 1fr; }
@@ -411,6 +475,7 @@ function clearBought() {
   .item-toolbar { align-items: flex-start; flex-direction: column; }
   .shopping-item { padding-inline: 14px; }
   .list-head, .quick-add, .item-toolbar { padding-left: 14px; padding-right: 14px; }
+  .updated-note { margin-inline: 16px; }
   .summary-grid { margin-inline: 14px; }
   .form-row.three { grid-template-columns: 1fr; }
 }

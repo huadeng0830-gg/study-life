@@ -7,6 +7,7 @@ const props = defineProps({
   open: Boolean,
   title: String,
   wide: Boolean,
+  medium: Boolean,
 })
 
 function onKeydown(event) {
@@ -40,7 +41,7 @@ onBeforeUnmount(() => {
     <div v-if="open" class="overlay" @click.self="emit('close')">
       <div
         class="modal"
-        :class="{ wide }"
+        :class="{ wide, medium }"
         role="dialog"
         aria-modal="true"
         :aria-labelledby="title ? 'modal-title' : undefined"
@@ -83,6 +84,9 @@ onBeforeUnmount(() => {
 }
 .modal.wide {
   width: min(920px, 100%);
+}
+.modal.medium {
+  width: min(540px, 100%);
 }
 .modal-head {
   position: relative;

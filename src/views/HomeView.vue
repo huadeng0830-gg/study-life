@@ -6,7 +6,6 @@ import {
   dayName,
   fmtCountdownDate,
   sortCountdowns,
-  timeConfig,
   courseTimeRange,
   campusName,
   seasonName,
@@ -64,7 +63,25 @@ const EXP_PER_TASK = 20
 const totalDone = computed(() => tasks.value.filter((task) => task.done).length)
 const playerLevel = computed(() => Math.floor((totalDone.value * EXP_PER_TASK) / 100) + 1)
 const expPercent = computed(() => (totalDone.value * EXP_PER_TASK) % 100)
+const totalXp = computed(() => totalDone.value * EXP_PER_TASK)
 const expToNext = computed(() => Math.max(1, Math.ceil((100 - expPercent.value) / EXP_PER_TASK)))
+
+// 本周完成情况：统计周一至今完成的待办，用于 Hero 右侧徽章
+const weekProgress = computed(() => {
+  const nowDate = new Date(now.value)
+  const day = nowDate.getDay() === 0 ? 7 : nowDate.getDay()
+  const monday = new Date(nowDate.getFullYear(), nowDate.getMonth(), nowDate.getDate() - (day - 1))
+  const mondayTs = monday.getTime()
+  const isSameWeek = (iso) => {
+    if (!iso) return false
+    const t = new Date(iso)
+    return t.getTime() >= mondayTs && t.getTime() <= nowDate.getTime() + 60000
+  }
+  const doneThisWeek = tasks.value.filter((task) => task.done && isSameWeek(task.completedAt)).length
+  const createdThisWeek = tasks.value.filter((task) => isSameWeek(task.createdAt)).length
+  const total = createdThisWeek + pendingTasks.value.length
+  return { done: doneThisWeek, total, percent: total ? Math.round((doneThisWeek / total) * 100) : 0 }
+})
 
 const LEVEL_TITLES = [
   [1, '新手冒险者'],
@@ -81,31 +98,6 @@ const levelTitle = computed(() => {
   return title
 })
 
-function isSameDay(iso, d) {
-  if (!iso) return false
-  const t = new Date(iso)
-  return (
-    t.getFullYear() === d.getFullYear() &&
-    t.getMonth() === d.getMonth() &&
-    t.getDate() === d.getDate()
-  )
-}
-
-const todayProgress = computed(() => {
-  const d = now.value
-  const doneToday = tasks.value.filter(
-    (task) => task.done && isSameDay(task.completedAt, d)
-  ).length
-  const pending = pendingTasks.value.length
-  const total = doneToday + pending
-  return {
-    doneToday,
-    pending,
-    total,
-    percent: total ? Math.round((doneToday / total) * 100) : 100,
-  }
-})
-
 function minutesOf(value) {
   if (!value) return null
   const [hour, minute] = value.split(':').map(Number)
@@ -119,88 +111,43 @@ function dateFromOffset(offset) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
 }
 
-const nextUpcomingCourse = computed(() => {
-  const currentMinutes = now.value.getHours() * 60 + now.value.getMinutes()
-  return todayCourses.value.find((course) => {
-    const start = minutesOf(currentTimes()[periodIndex(course.start)]?.start)
-    return start !== null && start !== undefined && start > currentMinutes
-  }) ?? null
-})
-
-const currentCourse = computed(() => todayCourses.value.find((course) => courseState(course) === 'live') ?? null)
-
-const nextClassCard = computed(() => {
-  if (!todayCourses.value.length) return { value: '今日没有课程', detail: '可以自由安排时间', state: 'free' }
-  if (nextUpcomingCourse.value) {
-    return {
-      value: startTimeOf(nextUpcomingCourse.value),
-      detail: nextUpcomingCourse.value.name,
-      state: 'upcoming',
-    }
-  }
-  if (currentCourse.value) {
-    const end = currentTimes()[periodIndex(currentCourse.value.end)]?.end ?? ''
-    return { value: '正在上课', detail: `${currentCourse.value.name}${end ? ` · ${end}结束` : ''}`, state: 'live' }
-  }
-  return { value: '今日课程已结束', detail: '今天的课程已经完成', state: 'done' }
-})
-
+// 风险提示：不再占用主卡位，紧急时在 Hero 显示警示 chip
 const riskCard = computed(() => {
   const today = todayStr()
   const nowTime = now.value.getTime()
   const overdue = pendingTasks.value.filter((task) => task.dueDate && taskTimestamp(task) < nowTime).length
   const dueToday = pendingTasks.value.filter((task) => task.dueDate === today && taskTimestamp(task) >= nowTime).length
-  const nearExams = upcomingExams.value.filter((item) => {
-    const date = item.countdown.target
-    if (!date) return false
-    const days = Math.floor((date.getTime() - new Date(today + 'T00:00:00').getTime()) / 86400000)
-    return days >= 0 && days <= 3
-  }).length
-  const nearBills = bills.value.filter((bill) => {
-    if (bill.active === false || !bill.nextDate) return false
-    const days = Math.round((new Date(bill.nextDate + 'T00:00:00') - new Date(today + 'T00:00:00')) / 86400000)
-    return days >= 0 && days <= 3
-  }).length
-  const total = overdue + dueToday + nearExams + nearBills
-  const detail = [
-    overdue ? `${overdue}项逾期` : '',
-    dueToday ? `${dueToday}项今天截止` : '',
-    nearExams ? `${nearExams}个近期事件` : '',
-    nearBills ? `${nearBills}笔近期账单` : '',
-  ].filter(Boolean).join(' · ')
-  return {
-    value: total ? `${total} 项` : '暂无风险',
-    detail: detail || '目前没有紧急事项',
-    urgent: total > 0,
-  }
+  const total = overdue + dueToday
+  return { count: total, urgent: total > 0, label: total ? `${total} 项需注意` : '' }
 })
 
-const weeklyPeak = computed(() => {
-  const days = Array.from({ length: 7 }, (_, offset) => {
+// 卡片三：未来七天 —— 按真实数据动态统计
+const weeklyAhead = computed(() => {
+  let taskCount = 0
+  let examCount = 0
+  let billCount = 0
+  for (let offset = 0; offset < 7; offset++) {
     const date = dateFromOffset(offset)
-    const courseCount = coursesForDate(courses.value, date).length
-    const taskCount = pendingTasks.value.filter((task) => task.dueDate === date).length
-    const examCount = upcomingExams.value.filter((item) => {
+    taskCount += pendingTasks.value.filter((task) => task.dueDate === date).length
+    examCount += upcomingExams.value.filter((item) => {
       const target = item.countdown.target
       if (!target) return false
       const pad = (value) => String(value).padStart(2, '0')
-      const targetDate = `${target.getFullYear()}-${pad(target.getMonth() + 1)}-${pad(target.getDate())}`
-      return targetDate === date
+      return `${target.getFullYear()}-${pad(target.getMonth() + 1)}-${pad(target.getDate())}` === date
     }).length
-    const billCount = bills.value.filter((bill) => bill.active !== false && bill.nextDate === date).length
-    return { date, offset, courseCount, taskCount, examCount, billCount, total: courseCount + taskCount + examCount + billCount }
-  })
-  const peak = days.sort((a, b) => b.total - a.total || a.offset - b.offset)[0]
-  if (!peak?.total) return { value: '本周较轻松', detail: '未来七天没有固定安排' }
-  const date = new Date(peak.date + 'T00:00:00')
-  const label = peak.offset === 0 ? '今天' : ['周日', '周一', '周二', '周三', '周四', '周五', '周六'][date.getDay()]
+    billCount += bills.value.filter((bill) => bill.active !== false && bill.nextDate === date).length
+  }
+  const important = taskCount + examCount + billCount
   const detail = [
-    peak.courseCount ? `${peak.courseCount}节课` : '',
-    peak.taskCount ? `${peak.taskCount}项截止` : '',
-    peak.examCount ? `${peak.examCount}个事件` : '',
-    peak.billCount ? `${peak.billCount}笔账单` : '',
+    taskCount ? `${taskCount} 个待办` : '',
+    examCount ? `${examCount} 个倒计时` : '',
+    billCount ? `${billCount} 笔账单` : '',
   ].filter(Boolean).join(' · ')
-  return { value: `${label}最忙`, detail }
+  return {
+    count: important,
+    value: important ? `${important} 项` : '暂无紧迫事项',
+    detail: detail || '未来七天没有固定安排',
+  }
 })
 
 function taskTimestamp(task) {
@@ -288,137 +235,104 @@ function moduleOrder(id) {
 <template>
   <div class="page">
     <section v-if="moduleVisible('hero')" class="hero wide-module" :style="{ order: moduleOrder('hero') }">
+      <div class="hero-deco" aria-hidden="true">
+        <span class="deco-glow"></span>
+        <span class="deco-ring"></span>
+        <span class="deco-orb"></span>
+      </div>
+
       <div class="hero-copy">
         <p class="eyebrow">STUDY QUEST · WEEK {{ weekNum }}</p>
         <h1>{{ greeting() }}，<br />{{ currentQuote }}</h1>
         <p v-if="appearance.signature" class="hero-signature">— {{ appearance.signature }}</p>
         <p class="hero-date">{{ dateText }}</p>
         <div class="hero-meta">
+          <span v-if="riskCard.urgent" class="meta-alert">⚠ {{ riskCard.label }}</span>
           <span>📍 {{ campusName(currentCampusId()) }}</span>
-          <span>◷ {{ seasonName(currentSeasonId()) }}<template v-if="timeConfig.autoSeason">（自动）</template></span>
-        </div>
-        <div class="xp-block">
-          <div class="xp-head">
-            <span class="lv-badge">LV.{{ playerLevel }}</span>
-            <span class="lv-title">{{ levelTitle }}</span>
-            <span class="xp-rest">再完成 {{ expToNext }} 项升级</span>
-          </div>
-          <div class="xp-bar">
-            <div class="xp-fill" :style="{ width: expPercent + '%' }"></div>
-          </div>
+          <span>◷ {{ seasonName(currentSeasonId()) }}</span>
         </div>
       </div>
 
       <div class="hero-visual" aria-hidden="true">
-        <div class="level-orbit"></div>
         <img :src="heroArt" alt="" />
-        <div class="mission-core" :class="{ cleared: pendingTasks.length === 0 }">
+        <div class="level-panel">
           <div
-            class="mission-ring"
-            :style="{ '--p': todayProgress.percent }"
+            class="level-ring"
+            :style="{ '--p': expPercent }"
           >
-            <div class="mission-number">
-              <strong>{{ pendingTasks.length }}</strong>
-              <span>项</span>
+            <div class="level-core">
+              <strong>LV.{{ playerLevel }}</strong>
+              <span>{{ levelTitle }}</span>
             </div>
           </div>
-          <div class="mission-copy">
-            <p>{{ pendingTasks.length === 0 ? '全部清空，完美通关！' : '今日通关进度' }}</p>
-            <small>{{ todayProgress.doneToday }}/{{ todayProgress.total }} 已完成</small>
+          <div class="level-info">
+            <div class="xp-row">
+              <span>总经验</span>
+              <b>{{ totalXp }} XP</b>
+            </div>
+            <div class="level-bar"><i :style="{ width: expPercent + '%' }"></i></div>
+            <small>再完成 {{ expToNext }} 项待办升级</small>
+            <div class="week-divider"></div>
+            <div v-if="weekProgress.total === 0" class="week-empty">今天还没有任务</div>
+            <template v-else>
+              <div class="xp-row">
+                <span>本周完成</span>
+                <b>{{ weekProgress.done }}/{{ weekProgress.total }}</b>
+              </div>
+              <div class="level-bar week"><i :style="{ width: weekProgress.percent + '%' }"></i></div>
+            </template>
           </div>
         </div>
       </div>
     </section>
 
-    <div v-if="moduleVisible('stats')" class="stats wide-module" :style="{ order: moduleOrder('stats') }">
-      <div class="stat stat-blue" :class="{ urgent: riskCard.urgent }">
-        <div class="stat-icon">!</div>
-        <div>
-          <span class="stat-label">当前风险</span>
-          <span class="stat-num">{{ riskCard.value }}</span>
-          <span class="stat-detail">{{ riskCard.detail }}</span>
-        </div>
-      </div>
-      <div class="stat stat-violet" :class="`state-${nextClassCard.state}`">
-        <div class="stat-icon">→</div>
-        <div>
-          <span class="stat-label">下一节课</span>
-          <span class="stat-num">{{ nextClassCard.value }}</span>
-          <span class="stat-detail">{{ nextClassCard.detail }}</span>
-        </div>
-      </div>
-      <div class="stat stat-orange">
-        <div class="stat-icon">7D</div>
-        <div>
-          <span class="stat-label">未来七天</span>
-          <span class="stat-num">{{ weeklyPeak.value }}</span>
-          <span class="stat-detail">{{ weeklyPeak.detail }}</span>
-        </div>
-      </div>
-    </div>
-
     <section v-if="moduleVisible('focus')" class="focus-grid wide-module" :style="{ order: moduleOrder('focus') }" aria-label="近期重点">
-      <router-link to="/bills" class="focus-card focus-bill">
-        <span class="focus-icon">¥</span>
-        <div class="focus-copy">
-          <span class="focus-label">NEXT BILL · 最近账单</span>
-          <template v-if="nextBill">
-            <strong>{{ nextBill.name }}</strong>
-            <small>{{ billBrief(nextBill) }}</small>
-          </template>
-          <template v-else>
-            <strong>近期没有固定账单</strong>
-            <small>可以添加订阅或生活缴费</small>
-          </template>
-        </div>
-        <span class="focus-enter">›</span>
-      </router-link>
-
       <router-link to="/tasks" class="focus-card focus-task">
         <span class="focus-icon">✓</span>
         <div class="focus-copy">
-          <span class="focus-label">NEXT TASK · 最近待办</span>
+          <span class="focus-label">最近任务</span>
           <template v-if="nextTask">
             <strong>{{ nextTask.title }}</strong>
             <small>{{ taskDeadline(nextTask) }}<template v-if="nextTask.course"> · {{ nextTask.course }}</template></small>
           </template>
           <template v-else>
-            <strong>待办已经清空</strong>
-            <small>目前没有未完成事项</small>
+            <strong class="is-empty">待办已清空</strong>
+            <small>目前没有未完成事项 · 去添加一个</small>
           </template>
         </div>
         <span class="focus-enter">›</span>
       </router-link>
 
-      <router-link to="/exams" class="focus-card focus-countdown">
-        <span class="focus-icon">◷</span>
+      <router-link to="/bills" class="focus-card focus-bill">
+        <span class="focus-icon">¥</span>
         <div class="focus-copy">
-          <span class="focus-label">COUNTDOWN · 最近倒计时</span>
-          <template v-if="upcomingExams[0]">
-            <strong>{{ upcomingExams[0].name }}</strong>
-            <small>{{ fmtCountdownDate(upcomingExams[0], upcomingExams[0].countdown.target) }}</small>
+          <span class="focus-label">下一笔账单</span>
+          <template v-if="nextBill">
+            <strong>{{ nextBill.name }}</strong>
+            <small>{{ billBrief(nextBill) }}</small>
           </template>
           <template v-else>
-            <strong>暂无倒计时</strong>
-            <small>可以添加考试或生活事件</small>
+            <strong class="is-empty">暂无账单</strong>
+            <small>近期没有需要支付的账单</small>
           </template>
         </div>
         <span class="focus-enter">›</span>
       </router-link>
+
     </section>
 
-    <template>
-      <section v-if="moduleVisible('courses')" class="panel mission-panel" :class="{ 'single-panel': !moduleVisible('countdowns') }" :style="{ order: moduleOrder('courses') }">
+    <section v-if="moduleVisible('courses')" class="panel mission-panel" :class="{ 'single-panel': !moduleVisible('countdowns'), 'is-empty': todayCourses.length === 0 }" :style="{ order: moduleOrder('courses') }">
         <div class="panel-head">
           <div>
             <span class="panel-code">DAILY MISSION</span>
-            <h2>今日课程</h2>
+            <router-link to="/schedule" class="panel-title-link"><h2>今日课程</h2></router-link>
           </div>
           <span class="panel-count">{{ todayCourses.length }} 项</span>
         </div>
         <p v-if="todayCourses.length === 0" class="empty">
           <span class="empty-icon">✓</span>
-          今日任务已清空，可以自由安排时间
+          <span>今天没有课程，可以自由安排时间</span>
+          <router-link to="/schedule" class="empty-action">查看课表 →</router-link>
         </p>
         <div v-else class="course-list">
           <div
@@ -445,17 +359,18 @@ function moduleOrder(id) {
         </div>
       </section>
 
-      <section v-if="moduleVisible('countdowns')" class="panel exam-panel" :class="{ 'single-panel': !moduleVisible('courses') }" :style="{ order: moduleOrder('countdowns') }">
+      <section v-if="moduleVisible('countdowns')" class="panel exam-panel" :class="{ 'single-panel': !moduleVisible('courses'), 'is-empty': previewExams.length === 0 }" :style="{ order: moduleOrder('countdowns') }">
         <div class="panel-head">
           <div>
             <span class="panel-code">COUNTDOWN</span>
-            <h2>近期倒计时</h2>
+            <router-link to="/exams" class="panel-title-link"><h2>近期倒计时</h2></router-link>
           </div>
           <span class="panel-count">最近 {{ previewExams.length }} 项</span>
         </div>
         <p v-if="previewExams.length === 0" class="empty">
           <span class="empty-icon">✦</span>
-          暂无即将到来的倒计时
+          <span>暂无即将到来的倒计时</span>
+          <router-link to="/exams" class="empty-action">添加倒计时 →</router-link>
         </p>
         <div v-else class="exam-list">
           <div v-for="e in previewExams" :key="e.id" class="exam-item">
@@ -468,8 +383,15 @@ function moduleOrder(id) {
             </span>
           </div>
         </div>
+        <div class="week-ahead-inline" aria-label="未来七天概况">
+          <span class="week-ahead-icon" aria-hidden="true">7D</span>
+          <div>
+            <span>未来七天</span>
+            <strong>{{ weeklyAhead.value }}</strong>
+            <small>{{ weeklyAhead.detail }}</small>
+          </div>
+        </div>
       </section>
-    </template>
   </div>
 </template>
 
@@ -482,275 +404,258 @@ function moduleOrder(id) {
 .wide-module {
   grid-column: 1 / -1;
 }
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* ---------- Hero：柔和渐变 + 极淡噪点 + 右缘单一柔光（方向 A+C，克制不抢文字） ---------- */
 .hero {
   position: relative;
-  min-height: 284px;
+  min-height: 216px;
   overflow: hidden;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  gap: 30px;
-  padding: 38px 44px;
+  gap: 26px;
+  padding: 26px 34px;
   color: #fff;
-  border: 1px solid rgba(145, 161, 255, 0.24);
-  border-radius: 24px;
-  background:
-    radial-gradient(circle at 78% 32%, rgba(117, 90, 255, 0.36), transparent 27%),
-    linear-gradient(130deg, #111a36 0%, #1a2050 54%, #26205d 100%);
-  box-shadow: 0 20px 50px rgba(31, 35, 88, 0.2);
+  border: 1px solid rgba(148, 160, 226, 0.28);
+  border-radius: var(--radius-lg, 20px);
+  background: linear-gradient(126deg, #10173a 0%, #151d44 46%, #1d2454 78%, #232a5c 100%);
+  box-shadow: 0 14px 36px rgba(26, 32, 74, 0.16);
 }
+/* 单一柔光：贴右上角边缘，弱透明度，位置避开主标题区 */
+.hero-deco {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.deco-glow {
+  position: absolute;
+  top: -38%;
+  right: -12%;
+  width: 62%;
+  height: 150%;
+  background: radial-gradient(closest-side, rgba(129, 118, 255, 0.2), rgba(96, 130, 255, 0.07) 58%, transparent 76%);
+  filter: blur(6px);
+}
+.deco-ring {
+  position: absolute;
+  right: 196px;
+  bottom: -128px;
+  width: 264px;
+  height: 264px;
+  border: 1px solid rgba(168, 178, 240, 0.16);
+  border-radius: 50%;
+}
+.deco-orb {
+  position: absolute;
+  right: 42px;
+  top: -64px;
+  width: 132px;
+  height: 132px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 34% 30%, rgba(158, 148, 255, 0.24), transparent 66%);
+  opacity: 0.55;
+}
+/* 极轻噪点：仅提升质感，不可见颗粒 */
+.hero::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  opacity: 0.05;
+  pointer-events: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E");
+}
+/* 文字区左侧轻微压暗，保证标题对比度 */
 .hero::before {
   content: '';
   position: absolute;
   inset: 0;
-  opacity: 0.34;
-  background-image:
-    linear-gradient(rgba(132, 151, 255, 0.12) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(132, 151, 255, 0.12) 1px, transparent 1px);
-  background-size: 32px 32px;
-  mask-image: linear-gradient(90deg, #000, transparent 80%);
+  z-index: 0;
+  background: linear-gradient(94deg, rgba(9, 13, 33, 0.5) 8%, rgba(9, 13, 33, 0.16) 40%, transparent 62%);
 }
 .hero-copy {
   position: relative;
   z-index: 2;
-  max-width: 620px;
+  max-width: 600px;
 }
 .eyebrow {
-  margin-bottom: 16px;
-  color: #aebcff;
-  font-size: 12px;
+  margin-bottom: 10px;
+  color: #a7b4ea;
+  font-size: 11px;
   font-weight: 800;
   letter-spacing: 0.18em;
 }
 .hero h1 {
-  font-size: clamp(30px, 4vw, 46px);
-  line-height: 1.18;
-  letter-spacing: -0.04em;
+  font-size: clamp(25px, 2.8vw, 34px);
+  line-height: 1.24;
+  letter-spacing: -0.02em;
+  text-shadow: 0 1px 14px rgba(6, 10, 28, 0.35);
 }
 .hero-date {
-  margin-top: 14px;
-  color: #cbd3f7;
-  font-size: 14px;
+  margin-top: 9px;
+  color: #c3cbf2;
+  font-size: 13.5px;
 }
 .hero-signature {
-  margin-top: 9px;
-  color: #aebcff;
+  margin-top: 7px;
+  color: #a7b4ea;
   font-size: 12px;
 }
 .hero-meta {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin-top: 22px;
+  margin-top: 15px;
 }
 .hero-meta span {
-  padding: 7px 12px;
-  color: #e3e8ff;
-  font-size: 12px;
+  padding: 6px 11px;
+  color: #dde3fb;
+  font-size: 11.5px;
   font-weight: 600;
-  border: 1px solid rgba(174, 188, 255, 0.24);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.06);
-  backdrop-filter: blur(8px);
+  border: 1px solid rgba(174, 188, 255, 0.2);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.05);
 }
-.hero-visual {
-  position: relative;
-  z-index: 1;
-  flex: 0 0 290px;
-  height: 220px;
-}
-.hero-visual img {
-  position: absolute;
-  z-index: 2;
-  top: 50%;
-  left: 50%;
-  width: 205px;
-  transform: translate(-50%, -50%) rotate(-5deg);
-  filter: drop-shadow(0 20px 22px rgba(7, 8, 30, 0.45));
-  animation: hero-float 6s ease-in-out infinite;
-}
-@keyframes hero-float {
-  0%,
-  100% {
-    transform: translate(-50%, -50%) rotate(-5deg);
-  }
-  50% {
-    transform: translate(-50%, -56%) rotate(-3deg);
-  }
-}
-.level-orbit {
-  position: absolute;
-  inset: 22px 40px;
-  border: 1px solid rgba(143, 117, 255, 0.5);
-  border-radius: 50%;
-  transform: rotate(-18deg);
-  box-shadow: 0 0 50px rgba(125, 92, 255, 0.25);
-}
-.level-orbit::after {
-  content: '';
-  position: absolute;
-  top: 18px;
-  right: 14px;
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background: #9f8cff;
-  box-shadow: 0 0 18px #9f8cff;
-  animation: orbit-pulse 2.4s ease-in-out infinite;
-}
-@keyframes orbit-pulse {
-  50% {
-    opacity: 0.35;
-    transform: scale(0.7);
-  }
-}
-.mission-core {
-  position: absolute;
-  z-index: 3;
-  right: 0;
-  bottom: 8px;
-  display: flex;
-  align-items: center;
-  gap: 11px;
-  min-width: 196px;
-  padding: 10px 16px 10px 10px;
-  border: 1px solid rgba(185, 196, 255, 0.34);
-  border-radius: 999px 14px 14px 999px;
-  background: rgba(14, 19, 52, 0.72);
-  backdrop-filter: blur(10px);
-}
-.mission-ring {
-  display: grid;
-  place-items: center;
-  width: 54px;
-  height: 54px;
-  flex: 0 0 54px;
-  border-radius: 50%;
-  background: conic-gradient(
-    #9f8cff calc(var(--p) * 1%),
-    rgba(255, 255, 255, 0.14) 0
-  );
-  box-shadow: 0 0 16px rgba(125, 92, 255, 0.28);
-}
-.mission-number {
-  display: flex;
-  align-items: baseline;
-  justify-content: center;
-  width: 44px;
-  height: 44px;
-  border-radius: 50%;
-  background: #141a40;
-}
-.mission-number strong {
-  color: #fff;
-  font-size: 19px;
-  line-height: 42px;
-}
-.mission-number span {
-  margin-left: 1px;
-  color: #aebcff;
-  font-size: 8px;
-  font-weight: 700;
-}
-.mission-copy {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-.mission-copy p {
-  color: #dfe4ff;
-  font-size: 11px;
-  font-weight: 700;
-  white-space: nowrap;
-}
-.mission-copy small {
-  color: #9aa6e8;
-  font-size: 10px;
-  white-space: nowrap;
-}
-.mission-core.cleared .mission-ring {
-  background: conic-gradient(
-    #3fd6a8 calc(var(--p) * 1%),
-    rgba(255, 255, 255, 0.14) 0
-  );
-  box-shadow: 0 0 16px rgba(55, 210, 166, 0.25);
-}
-.mission-core.cleared p {
-  color: #a8ead7;
+.hero-meta .meta-alert {
+  color: #ffd9cf;
+  border-color: rgba(255, 154, 130, 0.34);
+  background: rgba(240, 92, 68, 0.16);
 }
 
-/* ---------- 玩家等级 / 经验条 ---------- */
-.xp-block {
-  max-width: 430px;
-  margin-top: 24px;
-}
-.xp-head {
+/* ---------- 右侧等级徽章面板 ---------- */
+.hero-visual {
+  position: relative;
+  z-index: 2;
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-bottom: 8px;
+  gap: 18px;
 }
-.lv-badge {
-  padding: 4px 10px;
-  color: #fff;
-  font-size: 11px;
-  font-weight: 900;
-  letter-spacing: 0.04em;
-  border-radius: 8px;
-  background: linear-gradient(135deg, #ffb84d, #ff7a45);
-  box-shadow: 0 4px 12px rgba(255, 150, 60, 0.35);
+.hero-visual > img {
+  width: 128px;
+  transform: rotate(-4deg);
+  filter: drop-shadow(0 12px 20px rgba(6, 9, 26, 0.4));
+  animation: hero-float 8s ease-in-out infinite;
 }
-.lv-title {
-  color: #e6ebff;
-  font-size: 13px;
-  font-weight: 800;
-  letter-spacing: 0.04em;
+@keyframes hero-float {
+  0%, 100% { transform: rotate(-4deg); }
+  50% { transform: translateY(-5px) rotate(-3deg); }
 }
-.xp-rest {
-  margin-left: auto;
-  color: #aebcff;
-  font-size: 11px;
-}
-.xp-bar {
+.level-panel {
   position: relative;
-  height: 10px;
-  overflow: hidden;
-  border: 1px solid rgba(174, 188, 255, 0.28);
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.08);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 18px 14px 14px;
+  border: 1px solid rgba(190, 200, 250, 0.2);
+  border-radius: var(--radius-m, 14px);
+  background: rgba(12, 17, 44, 0.44);
 }
-.xp-fill {
+.level-ring {
+  --p: 0;
   position: relative;
-  height: 100%;
-  overflow: hidden;
-  border-radius: inherit;
-  background: linear-gradient(90deg, #6ea8ff, #9f8cff, #c99cff);
-  box-shadow: 0 0 12px rgba(140, 120, 255, 0.5);
-  transition: width 0.6s ease;
+  display: grid;
+  place-items: center;
+  width: 86px;
+  height: 86px;
+  flex: 0 0 86px;
+  border-radius: 50%;
+  background:
+    conic-gradient(from -90deg, #8f97ff calc(var(--p) * 1%), rgba(255, 255, 255, 0.09) 0);
 }
-.xp-fill::after {
+.level-ring::before {
   content: '';
   position: absolute;
-  inset: 0;
-  transform: translateX(-120%);
-  background: linear-gradient(
-    115deg,
-    transparent 30%,
-    rgba(255, 255, 255, 0.55) 50%,
-    transparent 70%
-  );
-  animation: xp-shine 2.8s ease-in-out infinite;
+  inset: 5px;
+  border-radius: 50%;
+  background: #131a3e;
 }
-@keyframes xp-shine {
-  to {
-    transform: translateX(220%);
-  }
+.level-core {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  line-height: 1.15;
+}
+.level-core strong {
+  font-size: 19px;
+  font-weight: 900;
+  letter-spacing: 0.01em;
+}
+.level-core span {
+  max-width: 62px;
+  overflow: hidden;
+  margin-top: 1px;
+  color: #a7b4ea;
+  font-size: 9.5px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.level-info {
+  display: flex;
+  flex-direction: column;
+  min-width: 128px;
+}
+.xp-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+.xp-row span {
+  color: #a7b4ea;
+  font-size: 10.5px;
+}
+.xp-row b {
+  font-size: 15px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+.level-bar {
+  overflow: hidden;
+  height: 5px;
+  margin-top: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+}
+.level-bar i {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #7f9cff, #a99bff);
+  transition: width 0.5s ease;
+}
+.level-bar.week i {
+  background: linear-gradient(90deg, #5ed0a8, #7fe3c4);
+}
+.level-info small {
+  margin-top: 5px;
+  color: #8e9ad0;
+  font-size: 10px;
+}
+.week-divider {
+  height: 1px;
+  margin: 10px 0;
+  background: rgba(190, 200, 250, 0.14);
+}
+.week-empty {
+  padding: 2px 0;
+  color: #aab5e6;
+  font-size: 11.5px;
 }
 .stats {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 12px;
+  grid-template-columns: 1fr;
+  gap: 14px;
 }
 .stat {
   position: relative;
@@ -758,16 +663,17 @@ function moduleOrder(id) {
   display: flex;
   align-items: center;
   gap: 14px;
-  min-height: 104px;
-  padding: 18px 20px;
+  min-height: 96px;
+  padding: 16px 20px;
   border: 1px solid var(--border);
   border-radius: 16px;
   background: #fff;
   box-shadow: var(--shadow-sm);
-  transition: transform 0.15s, box-shadow 0.15s;
+  transition: transform 0.15s, box-shadow 0.15s, border-color 0.15s;
 }
 .stat:hover {
   transform: translateY(-2px);
+  border-color: var(--border-strong);
   box-shadow: var(--shadow-md);
 }
 .stat::after {
@@ -784,11 +690,11 @@ function moduleOrder(id) {
 .stat-icon {
   display: grid;
   place-items: center;
-  width: 42px;
-  height: 42px;
-  flex: 0 0 42px;
+  width: 44px;
+  height: 44px;
+  flex: 0 0 44px;
   color: currentColor;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 900;
   border: 1px solid currentColor;
   border-radius: 12px 4px 12px 4px;
@@ -802,33 +708,57 @@ function moduleOrder(id) {
 .stat-blue { color: #456fe8; }
 .stat-violet { color: #7a55e8; }
 .stat-orange { color: #ef7b45; }
-.stat.urgent { color: var(--danger); border-color: #f3c2c2; }
+.stat.urgent { color: var(--danger); border-color: #f3c2c2; box-shadow: inset 3px 0 0 var(--danger), var(--shadow-sm); }
 .stat-label {
-  color: var(--muted);
+  color: var(--ink-faint);
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 700;
+  letter-spacing: 0.02em;
 }
 .stat-num {
   overflow: hidden;
+  margin-top: 2px;
   color: var(--text);
-  font-size: clamp(19px, 2vw, 25px);
+  font-size: clamp(22px, 2.1vw, 28px);
   font-weight: 900;
-  line-height: 1.1;
+  line-height: 1.12;
+  letter-spacing: -0.01em;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.state-upcoming .stat-num,
+.state-live .stat-num {
+  font-variant-numeric: tabular-nums;
+}
+.state-live .stat-num {
+  background: linear-gradient(120deg, #456fe8, #7a55e8);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
 }
 .stat-detail {
   overflow: hidden;
   margin-top: 5px;
-  color: var(--muted);
-  font-size: 10px;
+  color: var(--ink-soft);
+  font-size: 11.5px;
   line-height: 1.35;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.stat-link {
+  align-self: flex-start;
+  margin-top: 6px;
+  color: var(--primary);
+  font-size: 11.5px;
+  font-weight: 700;
+  text-decoration: none;
+}
+.stat-link:hover {
+  text-decoration: underline;
+}
 .focus-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
 }
 .focus-card {
@@ -837,11 +767,11 @@ function moduleOrder(id) {
   align-items: center;
   gap: 12px;
   min-width: 0;
-  padding: 16px;
+  padding: 13px 14px;
   color: var(--text);
   text-decoration: none;
   border: 1px solid var(--border);
-  border-radius: 16px;
+  border-radius: 14px;
   background: #fff;
   box-shadow: var(--shadow-sm);
   transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s;
@@ -854,11 +784,11 @@ function moduleOrder(id) {
 .focus-icon {
   display: grid;
   place-items: center;
-  width: 38px;
-  height: 38px;
-  flex: 0 0 38px;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
   color: var(--primary);
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 900;
   border-radius: 11px;
   background: var(--primary-soft);
@@ -879,8 +809,8 @@ function moduleOrder(id) {
 }
 .focus-label {
   overflow: hidden;
-  color: var(--muted);
-  font-size: 8px;
+  color: var(--ink-faint);
+  font-size: 9px;
   font-weight: 900;
   letter-spacing: 0.1em;
   text-overflow: ellipsis;
@@ -890,20 +820,25 @@ function moduleOrder(id) {
   overflow: hidden;
   margin-top: 3px;
   font-size: 14px;
+  font-weight: 700;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.focus-card .is-empty strong {
+  color: var(--ink-faint);
+  font-weight: 600;
 }
 .focus-copy small {
   overflow: hidden;
   margin-top: 2px;
-  color: var(--muted);
+  color: var(--ink-soft);
   font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .focus-enter {
   color: #aab2c2;
-  font-size: 20px;
+  font-size: 18px;
 }
 
 .grid {
@@ -925,7 +860,7 @@ function moduleOrder(id) {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 18px;
+  margin-bottom: 14px;
 }
 .panel-code {
   color: var(--primary);
@@ -940,6 +875,8 @@ function moduleOrder(id) {
   margin-top: 2px;
   font-size: 18px;
 }
+.panel-title-link { color: inherit; text-decoration: none; }
+.panel-title-link:hover { color: var(--primary); }
 .panel-count {
   padding: 5px 9px;
   color: var(--muted);
@@ -952,24 +889,44 @@ function moduleOrder(id) {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
-  color: var(--muted);
-  padding: 30px 0;
+  gap: 7px;
+  color: var(--ink-soft);
+  padding: 20px 0;
   text-align: center;
-  font-size: 14px;
+  font-size: 13px;
 }
 .empty-icon {
   display: grid;
   place-items: center;
-  width: 38px;
-  height: 38px;
+  width: 36px;
+  height: 36px;
   color: var(--primary);
-  font-size: 18px;
+  font-size: 17px;
   font-weight: 800;
   border: 1px solid #dbe3fa;
   border-radius: 10px;
-  background: var(--primary-soft);
+  background: var(--bg-tint);
 }
+.panel.is-empty .panel-head { margin-bottom: 7px; }
+.panel.is-empty .empty {
+  flex-direction: row;
+  justify-content: flex-start;
+  padding: 8px 0 2px;
+}
+.panel.is-empty .empty-icon {
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+}
+.empty-action {
+  color: var(--primary);
+  font-size: 12px;
+  font-weight: 750;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.empty-action:hover { text-decoration: underline; }
+.panel.is-empty .empty .empty-action { margin-left: auto; }
 .course-list {
   display: flex;
   flex-direction: column;
@@ -1004,7 +961,7 @@ function moduleOrder(id) {
 }
 .course-copy span,
 .ei-info span {
-  color: var(--muted);
+  color: var(--ink-soft);
   font-size: 12px;
 }
 .room {
@@ -1080,6 +1037,54 @@ function moduleOrder(id) {
   background: #fee2e2;
   color: var(--danger);
 }
+.week-ahead-inline {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 15px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+.week-ahead-icon {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  flex: 0 0 38px;
+  color: #ef7b45;
+  font-size: 11px;
+  font-weight: 900;
+  border: 1px solid #f1c8b3;
+  border-radius: 11px 4px 11px 4px;
+  background: #fff8f3;
+}
+.week-ahead-inline > div {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: baseline;
+  column-gap: 8px;
+  min-width: 0;
+}
+.week-ahead-inline span {
+  color: var(--ink-faint);
+  font-size: 10px;
+  font-weight: 750;
+}
+.week-ahead-inline strong {
+  overflow: hidden;
+  font-size: 15px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.week-ahead-inline small {
+  grid-column: 1 / -1;
+  overflow: hidden;
+  margin-top: 2px;
+  color: var(--ink-soft);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 @media (max-width: 1100px) {
   .page {
@@ -1087,9 +1092,6 @@ function moduleOrder(id) {
   }
   .wide-module {
     grid-column: 1;
-  }
-  .hero-visual {
-    flex-basis: 240px;
   }
 
   .grid {
@@ -1100,57 +1102,39 @@ function moduleOrder(id) {
     grid-template-columns: 1fr 1fr;
   }
 
-  .focus-countdown {
-    grid-column: 1 / -1;
+}
+
+@media (max-width: 860px) {
+  .hero-visual {
+    display: none;
   }
 }
 
 @media (max-width: 760px) {
-  .hero-visual img {
-    animation: none;
-    filter: none;
-  }
-
-  .level-orbit::after,
-  .xp-fill::after {
-    animation: none;
-  }
-
-  .hero-meta span,
-  .mission-core {
-    backdrop-filter: none;
-  }
-
   .hero {
     min-height: 0;
-    padding: 30px;
-  }
-
-  .hero-visual {
-    position: absolute;
-    right: -70px;
-    width: 250px;
-    opacity: 0.34;
+    padding: 26px 24px;
   }
 
   .hero-copy {
     max-width: 520px;
   }
 
-  .stats { grid-template-columns: repeat(3, minmax(230px, 1fr)); overflow-x: auto; padding-bottom: 3px; scroll-snap-type: x proximity; }
+  .stats {
+    grid-template-columns: 1fr;
+    overflow: visible;
+    padding-bottom: 0;
+  }
 
   .focus-grid {
     grid-template-columns: 1fr;
   }
 
-  .focus-countdown {
-    grid-column: auto;
-  }
 
   .stat {
     min-height: 84px;
-    scroll-snap-align: start;
   }
+
 }
 
 @media (max-width: 520px) {
@@ -1159,12 +1143,12 @@ function moduleOrder(id) {
   }
 
   .hero {
-    padding: 26px 22px;
+    padding: 24px 20px;
     border-radius: 18px;
   }
 
   .hero h1 {
-    font-size: 29px;
+    font-size: 27px;
   }
 
   .hero-date {
@@ -1174,10 +1158,6 @@ function moduleOrder(id) {
   .hero-meta {
     align-items: flex-start;
     flex-direction: column;
-  }
-
-  .mission-core {
-    display: none;
   }
 
   .panel {

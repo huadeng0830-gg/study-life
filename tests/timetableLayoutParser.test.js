@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseTimetableColumns, parseTimetableLayout } from '../src/composables/timetableLayoutParser.js'
+import { parseTimetableColumns, parseTimetableLayout, selectBestTimetableExtraction } from '../src/composables/timetableLayoutParser.js'
 
 const periods = Array.from({ length: 12 }, (_, index) => ({
   id: `p${index + 1}`,
@@ -71,5 +71,27 @@ describe('教务系统表格课表识别', () => {
     expect(result.courses).toHaveLength(2)
     expect(result.courses[0]).toMatchObject({ day: 4, start: 'p5', end: 'p8', startWeek: 13, endWeek: 16 })
     expect(result.courses[1]).toMatchObject({ name: '普通化学实验', startWeek: 5, endWeek: 12 })
+  })
+
+  it('按结构完整性选择结果，而不是只比较课程数量', () => {
+    const noisy = {
+      courses: [
+        { name: '课程甲', day: 0, start: 'p1', end: 'p2', startWeek: 1, endWeek: 16, confidence: 42 },
+        { name: '课程甲粘连', day: 0, start: 'p1', end: 'p2', startWeek: 1, endWeek: 16, confidence: 39 },
+        { name: '', day: 9, start: null, end: null, startWeek: 16, endWeek: 1, confidence: 20 },
+      ],
+      batchText: 'noisy',
+    }
+    const structured = {
+      courses: [
+        { name: '课程甲', day: 0, start: 'p1', end: 'p2', startWeek: 1, endWeek: 16, confidence: 88 },
+        { name: '课程乙', day: 2, start: 'p3', end: 'p4', startWeek: 1, endWeek: 16, confidence: 90 },
+      ],
+      batchText: 'structured',
+      detectedHeaders: 7,
+    }
+    const selected = selectBestTimetableExtraction(noisy, structured)
+    expect(selected.batchText).toBe('structured')
+    expect(selected.diagnostics).toMatchObject({ invalid: 0, duplicateSlots: 0, reviewCount: 0 })
   })
 })

@@ -54,7 +54,7 @@ async function bootstrap() {
 
   const { default: App } = await import('./App.vue')
 
-  // 每次冷启动都从"今日总览"开始，不恢复上次的页面地址。
+  // 每次冷启动都从首页开始，不恢复上次的页面地址。
   if (window.location.hash) {
     history.replaceState(null, '', window.location.pathname + window.location.search)
   }
@@ -67,7 +67,7 @@ async function bootstrap() {
       { path: '/tasks', component: () => import('./views/TasksView.vue') },
       { path: '/exams', component: () => import('./views/ExamsView.vue') },
       { path: '/lists', component: () => import('./views/ListsView.vue') },
-      { path: '/bills', component: () => import('./views/BillsView.vue') },
+      { path: '/bills', component: () => import('./views/LedgerView.vue') },
       { path: '/food', component: () => import('./views/FoodView.vue') },
     ],
   })

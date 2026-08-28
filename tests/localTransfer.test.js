@@ -101,6 +101,32 @@ describe('导入与撤销', () => {
     expect(result.added).toBe(1)
   })
 
+  it('中途取消会自动恢复导入前数据，不留下半次导入', async () => {
+    localStorage.setItem('sl_tasks', JSON.stringify([{ id: 'old-task' }]))
+    localStorage.setItem('sl_exams', JSON.stringify([{ id: 'old-exam' }]))
+    const controller = new AbortController()
+    const pkg = {
+      app: 'study-life',
+      version: 2,
+      modules: ['tasks', 'countdowns'],
+      data: {
+        sl_tasks: [{ id: 'new-task' }],
+        sl_exams: [{ id: 'new-exam' }],
+      },
+    }
+
+    const pending = importTransferPackage(pkg, 'replace', {
+      signal: controller.signal,
+      onProgress: ({ stage, current }) => {
+        if (stage === 'data' && current === 1) controller.abort()
+      },
+    })
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' })
+    expect(JSON.parse(localStorage.getItem('sl_tasks'))).toEqual([{ id: 'old-task' }])
+    expect(JSON.parse(localStorage.getItem('sl_exams'))).toEqual([{ id: 'old-exam' }])
+    expect(localStorage.getItem('sl_transfer_undo')).toBeNull()
+  })
+
   it('非法包被拒绝', async () => {
     await expect(importTransferPackage({ app: 'other', version: 2 }, 'replace')).rejects.toThrow()
   })

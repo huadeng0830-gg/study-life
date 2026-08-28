@@ -1,10 +1,9 @@
-export const APP_RELEASE = '2026.08.27-9'
+import { RELEASE_NOTES as CURRENT_RELEASE_NOTES } from '../../release.config.js'
 
-export const RELEASE_NOTES = Object.freeze([
-  '个性化和数据管理已加入离线预缓存，更新完成后首次打开也无需等待网络。',
-  '二维码迁移的大体积代码不参与预缓存，仅在真正打开该功能时按需加载。',
-  '课表识图继续支持星期分列、长截图和本地中文识别，图片不会上传服务器。',
-])
+// 由构建阶段根据实际发布源码自动注入，不再依赖人工或 Agent 记得修改版本号。
+export const APP_RELEASE = globalThis.__STUDY_LIFE_RELEASE__ || 'development'
+
+export const RELEASE_NOTES = Object.freeze([...CURRENT_RELEASE_NOTES])
 
 // 旧键继续保留用于兼容已经确认过更新说明的设备；历史键避免版本回滚时重复弹出。
 export const RELEASE_SEEN_KEY = 'study_life_seen_release'
@@ -26,17 +25,17 @@ function readSeenReleases() {
   return seen
 }
 
-export function shouldShowReleaseNotes() {
+export function shouldShowReleaseNotes(release = APP_RELEASE) {
   const seen = readSeenReleases()
   // 无法持久化时不弹出，避免隐私模式下每次启动都重复打扰。
-  return seen ? !seen.has(APP_RELEASE) : false
+  return seen ? !seen.has(release) : false
 }
 
-export function markReleaseSeen() {
+export function markReleaseSeen(release = APP_RELEASE) {
   try {
-    const history = [...(readSeenReleases()?.values() ?? [])].filter((version) => version !== APP_RELEASE)
-    history.push(APP_RELEASE)
-    localStorage.setItem(RELEASE_SEEN_KEY, APP_RELEASE)
+    const history = [...(readSeenReleases()?.values() ?? [])].filter((version) => version !== release)
+    history.push(release)
+    localStorage.setItem(RELEASE_SEEN_KEY, release)
     localStorage.setItem(RELEASE_HISTORY_KEY, JSON.stringify(history.slice(-MAX_SEEN_RELEASES)))
   } catch {}
 }

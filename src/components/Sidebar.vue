@@ -11,7 +11,7 @@ const navGroups = [
   {
     label: '学习与计划',
     items: [
-      { path: '/', label: '今日总览', icon: '🏠' },
+      { path: '/', label: '首页', icon: '🏠' },
       { path: '/schedule', label: '课程表', icon: '📅' },
       { path: '/tasks', label: '作业与待办', icon: '✅' },
       { path: '/exams', label: '倒计时', icon: '⏳' },
@@ -21,7 +21,7 @@ const navGroups = [
     label: '生活管理',
     items: [
       { path: '/lists', label: '我的清单', icon: '☑️' },
-      { path: '/bills', label: '固定账单', icon: '💳' },
+      { path: '/bills', label: '账本', icon: '📒' },
       { path: '/food', label: '今天吃什么', icon: '🍽️' },
     ],
   },
@@ -31,6 +31,8 @@ const showDataManager = ref(false)
 const showAppearance = ref(false)
 const checkingUpdate = ref(false)
 const updateNotice = ref('')
+const props = defineProps({ quickLedgerOpen: Boolean })
+const emit = defineEmits(['toggle-quick-ledger'])
 let noticeTimer = 0
 
 async function checkUpdate() {
@@ -82,36 +84,6 @@ function chooseTheme(key) {
       </section>
     </nav>
 
-    <div class="sidebar-tools">
-      <span class="tools-title">工具</span>
-      <button type="button" class="nav-item data-item" @click="showAppearance = true">
-        <span class="icon">🎨</span>
-        <span class="nav-label">个性化</span>
-      </button>
-      <button type="button" class="nav-item data-item" @click="showDataManager = true">
-        <span class="icon">💾<i v-if="needsBackup" class="backup-dot"></i></span>
-        <span class="nav-label">数据管理</span>
-      </button>
-      <button type="button" class="nav-item data-item" :disabled="checkingUpdate" @click="checkUpdate">
-        <span class="icon" aria-hidden="true">↻</span>
-        <span class="nav-label">{{ checkingUpdate ? '检查中…' : '更新' }}</span>
-      </button>
-    </div>
-
-    <div class="theme-row" role="group" aria-label="主题色切换">
-      <button
-        v-for="(theme, key) in THEMES"
-        :key="key"
-        type="button"
-        class="theme-dot"
-        :class="{ on: themeKey === key }"
-        :style="{ background: theme.primary }"
-        :title="`${theme.name}主题`"
-        :aria-label="`${theme.name}主题`"
-        @click="chooseTheme(key)"
-      ></button>
-    </div>
-
     <button
       type="button"
       class="collapse-btn"
@@ -122,11 +94,57 @@ function chooseTheme(key) {
       {{ collapsed ? '»' : '«' }}
     </button>
 
-    <div class="footer">
-      本地存储 · 可随时备份
-      <span class="kbd-hint">按 1-7 快速切换页面</span>
-    </div>
+    <div class="sidebar-foot">
+      <span class="tools-title">设置与工具</span>
+      <div class="sidebar-action-row">
+        <button type="button" class="nav-item data-item appearance-item" @click="showAppearance = true">
+          <span class="icon">🎨</span>
+          <span class="nav-label">个性化</span>
+        </button>
+        <button
+          type="button"
+          class="quick-add-button"
+          :class="{ active: props.quickLedgerOpen }"
+          :aria-expanded="props.quickLedgerOpen"
+          aria-label="记账"
+          title="记账"
+          @click="emit('toggle-quick-ledger')"
+        >
+          <span class="quick-add-symbol" aria-hidden="true">＋</span>
+          <span class="quick-add-label">记账</span>
+        </button>
+      </div>
+      <button type="button" class="nav-item data-item" @click="showDataManager = true">
+        <span class="icon">💾<i v-if="needsBackup" class="backup-dot"></i></span>
+        <span class="nav-label">数据管理</span>
+      </button>
+      <button type="button" class="nav-item data-item" :disabled="checkingUpdate" @click="checkUpdate">
+        <span class="icon" aria-hidden="true">↻</span>
+        <span class="nav-label">{{ checkingUpdate ? '检查中…' : '检查更新' }}</span>
+      </button>
 
+      <div class="theme-row" role="group" aria-label="主题色切换">
+        <span class="theme-label nav-label">主题色</span>
+        <div class="theme-dots">
+          <button
+            v-for="(theme, key) in THEMES"
+            :key="key"
+            type="button"
+            class="theme-dot"
+            :class="{ on: themeKey === key }"
+            :style="{ background: theme.primary }"
+            :title="`${theme.name}主题`"
+            :aria-label="`${theme.name}主题`"
+            @click="chooseTheme(key)"
+          ></button>
+        </div>
+      </div>
+
+      <div class="footer">
+        本地存储 · 可随时备份
+        <span class="kbd-hint">按 1-7 快速切换页面</span>
+      </div>
+    </div>
   </aside>
 
   <div v-if="updateNotice" class="update-toast" role="status" aria-live="polite">{{ updateNotice }}</div>
@@ -210,15 +228,16 @@ function chooseTheme(key) {
   letter-spacing: 0.1em;
 }
 .nav-item {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 11px 14px;
+  padding: 10px 14px;
   border-radius: 10px;
-  color: var(--text);
+  color: var(--ink-soft);
   text-decoration: none;
-  font-size: 15px;
-  transition: background 0.15s;
+  font-size: 14.5px;
+  transition: background 0.15s, color 0.15s;
   white-space: nowrap;
 }
 .data-item {
@@ -226,20 +245,14 @@ function chooseTheme(key) {
   border: none;
   background: transparent;
 }
-.sidebar-tools {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  margin-top: auto;
-  padding-top: 18px;
-}
 .nav-item:hover {
   background: var(--bg);
+  color: var(--text);
 }
 .nav-item.active {
   background: var(--primary-soft);
   color: var(--primary);
-  font-weight: 600;
+  font-weight: 650;
 }
 .icon {
   font-size: 17px;
@@ -268,8 +281,7 @@ function chooseTheme(key) {
 .sidebar.collapsed .brand-copy,
 .sidebar.collapsed .nav-label,
 .sidebar.collapsed .nav-group-title,
-.sidebar.collapsed .tools-title,
-.sidebar.collapsed .footer {
+.sidebar.collapsed .tools-title {
   display: none;
 }
 .sidebar.collapsed .brand,
@@ -281,15 +293,114 @@ function chooseTheme(key) {
 }
 .footer {
   margin-top: 12px;
-  font-size: 12px;
-  color: var(--muted);
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+  font-size: 11px;
+  color: var(--ink-faint);
   text-align: center;
 }
 .kbd-hint {
   display: block;
-  margin-top: 4px;
+  margin-top: 3px;
   font-size: 10px;
-  opacity: 0.75;
+}
+.sidebar.collapsed .footer {
+  visibility: hidden;
+}
+
+/* ---------- 底部工具区：设置类操作 + 主题色 同属一个分组 ---------- */
+.sidebar-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: auto;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+.sidebar-action-row {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+}
+.sidebar-action-row .appearance-item {
+  flex: 1;
+}
+.quick-add-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  flex: 0 0 64px;
+  width: 64px;
+  min-height: 40px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--primary-soft);
+  color: var(--primary);
+  line-height: 1;
+  transition: background 0.15s, color 0.15s;
+}
+.quick-add-button:hover,
+.quick-add-button.active {
+  background: var(--primary);
+  color: #fff;
+}
+.quick-add-symbol {
+  font-size: 21px;
+  transition: transform 0.15s ease;
+}
+.quick-add-label {
+  font-size: 11px;
+  font-weight: 650;
+}
+.quick-add-button.active .quick-add-symbol {
+  transform: rotate(45deg);
+}
+.sidebar.collapsed .sidebar-action-row {
+  flex-direction: column;
+  align-items: center;
+}
+.theme-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 6px;
+  padding: 0 10px;
+}
+.theme-label {
+  color: #98a1b2;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+.theme-dots {
+  display: flex;
+  gap: 7px;
+}
+.theme-dot {
+  width: 18px;
+  height: 18px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px var(--border);
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+.theme-dot:hover {
+  transform: scale(1.14);
+}
+.theme-dot.on {
+  box-shadow: 0 0 0 2px var(--primary);
+  transform: scale(1.1);
+}
+.sidebar.collapsed .theme-row {
+  justify-content: center;
+}
+.sidebar.collapsed .theme-dots {
+  display: grid;
+  grid-template-columns: repeat(2, auto);
+  gap: 7px;
+  justify-items: center;
 }
 
 .update-toast {
@@ -305,34 +416,6 @@ function chooseTheme(key) {
   color: var(--text);
   font-size: 12px;
   box-shadow: var(--shadow-md);
-}
-
-.theme-row {
-  display: flex;
-  gap: 9px;
-  padding: 14px 12px 0;
-}
-.theme-dot {
-  width: 22px;
-  height: 22px;
-  border: 2px solid #fff;
-  border-radius: 50%;
-  box-shadow: 0 0 0 1px var(--border);
-  transition: transform 0.15s, box-shadow 0.15s;
-}
-.theme-dot:hover {
-  transform: scale(1.12);
-}
-.theme-dot.on {
-  box-shadow: 0 0 0 2px var(--primary);
-  transform: scale(1.08);
-}
-.sidebar.collapsed .theme-row {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 7px;
-  justify-items: center;
-  padding: 14px 0 0;
 }
 
 @media (max-width: 900px) {
@@ -368,10 +451,10 @@ function chooseTheme(key) {
   }
 
   .nav {
-    display: flex;
-    flex-direction: row;
-    gap: 2px;
-    overflow-x: auto;
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    gap: 4px;
+    overflow: visible;
     scrollbar-width: none;
     overscroll-behavior-x: contain;
     -webkit-overflow-scrolling: touch;
@@ -385,24 +468,44 @@ function chooseTheme(key) {
     display: none;
   }
 
-  .sidebar-tools {
+  .sidebar-foot {
     display: flex;
     flex-direction: row;
     gap: 6px;
     margin: 6px 0 0;
     padding: 6px 0 0;
-    border-left: none;
     border-top: 1px solid var(--border);
+  }
+
+  .sidebar-action-row {
+    flex: 2;
+    min-width: 0;
+  }
+
+  .sidebar-action-row .appearance-item {
+    min-width: 0;
+  }
+
+  .quick-add-button {
+    flex: 1;
+    width: auto;
+    min-height: 46px;
+    flex-direction: column;
+    gap: 2px;
   }
 
   .nav-item {
     justify-content: center;
     flex-direction: column;
     gap: 2px;
-    min-height: 46px;
-    padding: 6px 10px;
-    font-size: 12px;
-    flex: 0 0 auto;
+    width: 100%;
+    min-width: 0;
+    min-height: 52px;
+    padding: 6px 2px;
+    font-size: clamp(10px, 2.65vw, 12px);
+    line-height: 1.15;
+    white-space: normal;
+    text-align: center;
     touch-action: manipulation;
     -webkit-tap-highlight-color: transparent;
   }
@@ -410,6 +513,8 @@ function chooseTheme(key) {
   .sidebar.collapsed .nav-label,
   .nav-label {
     display: inline;
+    min-width: 0;
+    overflow-wrap: anywhere;
   }
 
   .data-item {
@@ -426,6 +531,19 @@ function chooseTheme(key) {
   .update-toast {
     right: 14px;
     bottom: calc(112px + env(safe-area-inset-bottom));
+  }
+}
+
+/* 320px 级别的极窄屏优先保证点按区域和文字可读，保持同样宽度并允许横向滑动。 */
+@media (max-width: 360px) {
+  .nav {
+    display: flex;
+    gap: 4px;
+    overflow-x: auto;
+  }
+
+  .nav-item {
+    flex: 0 0 62px;
   }
 }
 </style>

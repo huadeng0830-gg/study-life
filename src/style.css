@@ -12,6 +12,25 @@
   --brand-grad-b: #7855dc;
   --shadow-sm: 0 1px 2px rgba(22, 34, 64, 0.04);
   --shadow-md: 0 8px 24px rgba(35, 52, 93, 0.08);
+
+  /* ---------- v2 Design Tokens（本轮追加，课程表不引用，零影响） ---------- */
+  --border-strong: #d3dbea;
+  --ink-soft: #55607a;
+  --ink-faint: #7d879e;
+  --bg-tint: #f9fafd;
+  --card-radius: 14px;
+  --radius-s: 9px;
+  --radius-m: 12px;
+  --focus-ring: rgba(69, 111, 232, 0.16);
+
+  /* 字体层级 */
+  --fs-page-title: 23px;
+  --fs-module-title: 17px;
+  --fs-card-title: 15px;
+  --fs-num-hero: clamp(30px, 2.6vw, 38px);
+  --fs-num-big: 28px;
+  --fs-body: 14px;
+  --fs-aux: 12.5px;
 }
 
 /* ---------- 主题色切换 ---------- */
@@ -160,4 +179,122 @@ textarea:focus-visible {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
   }
+}
+
+/* ---------- v2 公共规范：页头 / 分段控件 / 筛选片（本轮追加） ---------- */
+
+/* 统一页面标题区：左侧标题+说明，右侧操作，贴身排列不留大空白 */
+.page-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 18px 24px;
+  margin-bottom: 20px;
+}
+.page-head-main {
+  min-width: 0;
+}
+.page-title {
+  font-size: var(--fs-page-title);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
+}
+.page-desc {
+  margin-top: 4px;
+  color: var(--ink-faint);
+  font-size: var(--fs-aux);
+  line-height: 1.5;
+}
+.page-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* Segmented Control */
+.segmented {
+  display: inline-flex;
+  gap: 3px;
+  width: fit-content;
+  max-width: 100%;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-s);
+  background: #eef1f7;
+}
+.segmented > button {
+  padding: 6px 13px;
+  color: var(--ink-soft);
+  font-size: 12.5px;
+  font-weight: 600;
+  border: none;
+  border-radius: calc(var(--radius-s) - 2px);
+  background: transparent;
+  transition: background 0.14s, color 0.14s, box-shadow 0.14s;
+}
+.segmented > button:hover {
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.85);
+}
+.segmented > button:active {
+  transform: translateY(0.5px);
+}
+.segmented > button.on {
+  color: var(--primary);
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(22, 34, 64, 0.12), 0 0 0 1px rgba(69, 111, 232, 0.16);
+}
+.segmented > button b {
+  margin-left: 4px;
+  font-weight: 800;
+}
+
+/* Chip（多选筛选片） */
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+.chip {
+  padding: 6px 12px;
+  color: var(--ink-soft);
+  font-size: 12.5px;
+  font-weight: 600;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: #fff;
+  transition: border-color 0.14s, background 0.14s, color 0.14s, box-shadow 0.14s;
+}
+.chip:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: var(--primary-soft);
+}
+.chip.on {
+  color: var(--primary);
+  border-color: var(--primary);
+  background: var(--primary-soft);
+  box-shadow: inset 0 0 0 1px var(--primary);
+}
+
+/* 次要文字按钮（清单内联操作等） */
+.link-btn {
+  padding: 5px 9px;
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 600;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  transition: background 0.14s, color 0.14s;
+}
+.link-btn:hover {
+  color: var(--primary);
+  background: var(--primary-soft);
+}
+.link-btn.danger:hover {
+  color: var(--danger);
+  background: #feecec;
 }

@@ -460,6 +460,102 @@ export function normalizeTimes(cfg) {
   }
 }
 
+// ---------- 作息季适用范围（sparse 方案：某季可只适用部分校区） ----------
+// season.campuses 缺省/为空 = 适用于全部校区（兼容旧数据，无需迁移）。
+export function seasonAppliesTo(season, campusId) {
+  if (!Array.isArray(season?.campuses) || season.campuses.length === 0) return true
+  return season.campuses.includes(campusId)
+}
+
+export function seasonsForCampus(campusId, cfg = timeConfig.value) {
+  return cfg.seasons.filter((season) => seasonAppliesTo(season, campusId))
+}
+
+// 当前配置下的有效「季×校区」方案组合（不产生无意义组合）
+export function validCombos(cfg = timeConfig.value) {
+  const out = []
+  for (const season of cfg.seasons) {
+    for (const campus of cfg.campuses) {
+      if (seasonAppliesTo(season, campus.id)) {
+        out.push({ season: season.id, campus: campus.id, seasonName: season.name, campusName: campus.name })
+      }
+    }
+  }
+  return out
+}
+
+const MONTH_DAY_RE = /^(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/
+
+export function isValidSeasonDate(value) {
+  const text = String(value ?? '')
+  if (!MONTH_DAY_RE.test(text)) return false
+  const [month, day] = text.split('-').map(Number)
+  return day <= new Date(2000, month, 0).getDate()
+}
+
+function monthDayOf(value) {
+  const date = value instanceof Date ? value : new Date(value)
+  if (Number.isNaN(date.getTime())) return null
+  const pad = (number) => String(number).padStart(2, '0')
+  return `${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+}
+
+// 起始日期冲突按校区检查：只有同时适用于同一校区的作息季才会互相冲突。
+export function seasonConflicts(cfg = timeConfig.value) {
+  const out = []
+  for (const campus of cfg.campuses) {
+    const byDate = new Map()
+    for (const season of seasonsForCampus(campus.id, cfg)) {
+      if (!isValidSeasonDate(season.startDate)) continue
+      if (!byDate.has(season.startDate)) byDate.set(season.startDate, [])
+      byDate.get(season.startDate).push(season)
+    }
+    for (const [date, list] of byDate.entries()) {
+      if (list.length > 1) {
+        out.push({
+          campusId: campus.id,
+          campusName: campus.name,
+          date,
+          seasonIds: list.map((season) => season.id),
+          names: list.map((season) => season.name),
+        })
+      }
+    }
+  }
+  return out
+}
+
+// 自动模式统一解析入口。多作息季时，日期必须完整且在当前校区内不冲突。
+// 当前日期早于本年度全部生效日时，取年度周期最后一个作息季，自然覆盖跨年场景。
+export function autoSeasonStatusFor(campusId, cfg = timeConfig.value, at = clock.value) {
+  const seasons = seasonsForCampus(campusId, cfg)
+  if (!seasons.length) return { available: false, seasonId: null, reason: 'no-season', seasons }
+  if (seasons.length === 1) return { available: true, seasonId: seasons[0].id, reason: 'single', seasons }
+
+  const missing = seasons.filter((season) => !isValidSeasonDate(season.startDate))
+  if (missing.length) {
+    return { available: false, seasonId: null, reason: 'missing-date', seasons, missing }
+  }
+
+  const conflicts = seasonConflicts(cfg).filter((item) => item.campusId === campusId)
+  if (conflicts.length) {
+    return { available: false, seasonId: null, reason: 'date-conflict', seasons, conflicts }
+  }
+
+  const today = monthDayOf(at)
+  if (!today) return { available: false, seasonId: null, reason: 'invalid-date', seasons }
+  const ordered = [...seasons].sort((a, b) => a.startDate.localeCompare(b.startDate))
+  let current = ordered[ordered.length - 1]
+  for (const season of ordered) {
+    if (season.startDate <= today) current = season
+  }
+  return { available: true, seasonId: current.id, reason: 'resolved', seasons: ordered }
+}
+
+export function autoSeasonIdFor(campusId, cfg = timeConfig.value, at = clock.value) {
+  return autoSeasonStatusFor(campusId, cfg, at).seasonId
+}
+
 export const timeConfig = useStoredRef('sl_timecfg', loadTimeConfig())
 normalizeTimes(timeConfig.value)
 
@@ -526,6 +622,11 @@ export function removeCampus(id) {
   cfg.campuses = cfg.campuses.filter((c) => c.id !== id)
   for (const season of cfg.seasons) {
     delete cfg.times[season.id]?.[id]
+    if (Array.isArray(season.campuses) && season.campuses.length) {
+      season.campuses = season.campuses.filter((campusId) => campusId !== id)
+      // 空数组在旧数据语义中代表“全部适用”，因此删除唯一适用校区后明确绑定到一个剩余校区。
+      if (!season.campuses.length && cfg.campuses[0]) season.campuses = [cfg.campuses[0].id]
+    }
   }
   if (cfg.currentCampus === id) cfg.currentCampus = cfg.campuses[0].id
   return true
@@ -539,7 +640,7 @@ export function seasonName(id) {
 
 export function addSeason(name, startDate) {
   const trimmed = (name ?? '').trim()
-  const date = /^\d{2}-\d{2}$/.test(startDate ?? '') ? startDate : '03-01'
+  const date = isValidSeasonDate(startDate) ? startDate : ''
   if (!trimmed) return false
   const id = 'season' + Date.now()
   const template = timeConfig.value.seasons[0]?.id
@@ -557,8 +658,8 @@ export function addSeason(name, startDate) {
 export function renameSeason(id, name, startDate) {
   const season = timeConfig.value.seasons.find((s) => s.id === id)
   if (!season) return
-  if (name.trim()) season.name = name.trim()
-  if (/^\d{2}-\d{2}$/.test(startDate ?? '')) season.startDate = startDate
+  if (typeof name === 'string' && name.trim()) season.name = name.trim()
+  if (startDate === '' || isValidSeasonDate(startDate)) season.startDate = startDate
 }
 
 export function removeSeason(id) {
@@ -627,25 +728,18 @@ export function currentCampusId() {
 }
 
 export function autoSeasonId() {
-  const seasons = [...timeConfig.value.seasons].sort((a, b) =>
-    String(a.startDate).localeCompare(String(b.startDate))
-  )
-  if (!seasons.length) return null
-  const today = todayStr().slice(5) // MM-DD
-  let current = seasons[seasons.length - 1].id // 早于最早起始日时，取最后一个（跨年）
-  for (const season of seasons) {
-    if (season.startDate <= today) current = season.id
-  }
-  return current
+  return autoSeasonIdFor(currentCampusId())
 }
 
 export function currentSeasonId() {
   const cfg = timeConfig.value
+  const campusId = currentCampusId()
+  const available = seasonsForCampus(campusId, cfg)
   if (!cfg.autoSeason) {
-    const found = cfg.seasons.find((s) => s.id === cfg.currentSeason)
-    if (found) return found.id
+    const manual = cfg.seasons.find((s) => s.id === cfg.currentSeason)
+    if (manual && seasonAppliesTo(manual, campusId)) return manual.id
   }
-  return autoSeasonId()
+  return autoSeasonIdFor(campusId) ?? available[0]?.id ?? null
 }
 
 export function currentTimes() {

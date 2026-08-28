@@ -1,9 +1,53 @@
 import vue from '@vitejs/plugin-vue'
+import { createHash } from 'node:crypto'
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
+import { relative, resolve } from 'node:path'
+import { env } from 'node:process'
+import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vite'
 import { VitePWA } from 'vite-plugin-pwa'
+import { RELEASE_NOTES, RELEASE_SOURCE_SIGNATURE } from './release.config.js'
+
+const projectRoot = fileURLToPath(new URL('.', import.meta.url))
+const releaseInputs = ['src', 'public', 'index.html', 'package.json', 'package-lock.json', 'vite.config.js']
+
+function collectReleaseFiles(target) {
+  if (!existsSync(target)) return []
+  if (!statSync(target).isDirectory()) return [target]
+  return readdirSync(target, { withFileTypes: true })
+    .flatMap((entry) => collectReleaseFiles(resolve(target, entry.name)))
+}
+
+// 相同源码永远得到相同版本；任何 Agent 修改发布源码后都会自动得到新版本。
+// CI 仍可用 VITE_APP_RELEASE 指定更易读的正式版本号。
+function createSourceSignature() {
+  const hash = createHash('sha256')
+  const files = releaseInputs
+    .flatMap((input) => collectReleaseFiles(resolve(projectRoot, input)))
+    .sort((a, b) => a.localeCompare(b))
+  for (const file of files) {
+    hash.update(relative(projectRoot, file).replaceAll('\\', '/'))
+    hash.update(readFileSync(file))
+  }
+  return hash.digest('hex').slice(0, 10)
+}
+
+const sourceSignature = createSourceSignature()
+// 开发与测试期间允许逐步修改；正式 build 必须通过说明一致性检查。
+if (env.NODE_ENV === 'production' && RELEASE_SOURCE_SIGNATURE !== sourceSignature) {
+  throw new Error(
+    `发布源码已经变化，但更新说明尚未同步。请先修改 release.config.js 中的 RELEASE_NOTES，` +
+    `确认内容与本次修改一致后，将 RELEASE_SOURCE_SIGNATURE 更新为 '${sourceSignature}'。`
+  )
+}
+const notesSignature = createHash('sha256').update(JSON.stringify(RELEASE_NOTES)).digest('hex').slice(0, 4)
+const appRelease = env.VITE_APP_RELEASE?.trim() || `r-${sourceSignature}-${notesSignature}`
 
 // https://vite.dev/config/
 export default defineConfig({
+  define: {
+    'globalThis.__STUDY_LIFE_RELEASE__': JSON.stringify(appRelease),
+  },
   build: {
     target: 'es2019',
     cssTarget: 'safari13',
@@ -70,7 +114,6 @@ export default defineConfig({
           'assets/*View-*.{js,css}',
           'assets/Modal-*.{js,css}',
           'assets/VirtualList-*.{js,css}',
-          'assets/SwipeActionItem-*.{js,css}',
           'assets/UpdateNotes-*.{js,css}',
           'assets/hero-*.png',
           'assets/_plugin-vue_export-helper-*.js',

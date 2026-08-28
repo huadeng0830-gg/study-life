@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import QRCode from 'qrcode'
 import jsQR from 'jsqr'
 import Modal from './Modal.vue'
+import TaskProgress from './TaskProgress.vue'
 import { markBackedUp } from '../composables/backupReminder.js'
 import {
   TRANSFER_MODULES,
@@ -17,6 +18,7 @@ import {
   splitIntoFrames,
   transferSummary,
 } from '../composables/localTransfer.js'
+import { useTaskProgress } from '../composables/taskProgress.js'
 
 const props = defineProps({ open: Boolean })
 const emit = defineEmits(['close'])
@@ -45,6 +47,10 @@ const decrypting = ref(false)
 const importMode = ref('merge')
 const importMessage = ref('')
 const undoAvailable = ref(hasTransferUndo())
+const sendProgress = useTaskProgress()
+const receiveProgress = useTaskProgress()
+let scanController = null
+let importController = null
 let scanAnimation = null
 let lastScanAt = 0
 
@@ -58,12 +64,15 @@ watch(() => props.open, (open) => {
   } else {
     stopCamera()
     stopFrameAnimation()
+    if (receiveProgress.state.status === 'running' && receiveProgress.state.canCancel) void receiveProgress.cancel()
   }
 })
 
 onBeforeUnmount(() => {
   stopCamera()
   stopFrameAnimation()
+  scanController?.abort()
+  importController?.abort()
 })
 
 function toggleModule(name) {
@@ -96,22 +105,59 @@ async function generateCodes() {
     return
   }
   generating.value = true
+  sendProgress.start({
+    title: '正在生成加密二维码',
+    steps: [
+      { id: 'collect', label: '收集所选数据' },
+      { id: 'encrypt', label: '压缩并加密' },
+      { id: 'split', label: '拆分二维码片段' },
+      { id: 'render', label: '生成二维码图片' },
+    ],
+  })
   try {
-    const pkg = await createTransferPackage(selectedModules.value)
+    sendProgress.setStep('collect', 'running', '正在读取所选模块')
+    const pkg = await createTransferPackage(selectedModules.value, {
+      onProgress: ({ stage, current, total }) => {
+        if (stage === 'wallpapers') {
+          sendProgress.setPartial({ 壁纸: `${current}/${total}` }, `已处理 ${current}/${total} 张壁纸`)
+        } else {
+          sendProgress.setPartial({ 模块: `${current}/${total}` }, `已收集 ${current}/${total} 个模块`)
+        }
+      },
+    })
+    sendProgress.setStep('collect', 'completed', '所选数据已收集')
+    sendProgress.setStep('encrypt', 'running', '正在本机派生密钥并加密')
     const payload = await encryptTransfer(pkg, sendPassword.value)
+    sendProgress.setStep('encrypt', 'completed', '数据已加密，密码未写入二维码')
+    sendProgress.setStep('split', 'running', '正在按二维码容量拆分')
     const frames = splitIntoFrames(payload)
-    qrImages.value = await Promise.all(frames.map((frame) => QRCode.toDataURL(frame, {
-      errorCorrectionLevel: 'M', margin: 2, width: 360, color: { dark: '#172033', light: '#ffffff' },
-    })))
+    sendProgress.setStep('split', 'completed', `已拆分为 ${frames.length} 个片段`)
+    sendProgress.setStep('render', 'running', '正在生成二维码图片')
+    const images = []
+    for (const [index, frame] of frames.entries()) {
+      images.push(await QRCode.toDataURL(frame, {
+        errorCorrectionLevel: 'M', margin: 2, width: 360, color: { dark: '#172033', light: '#ffffff' },
+      }))
+      sendProgress.setPartial({ 二维码: `${index + 1}/${frames.length}` }, `已生成 ${index + 1}/${frames.length} 张二维码`)
+    }
+    qrImages.value = images
     packageInfo.value = { ...transferSummary(pkg), frames: frames.length, createdAt: pkg.createdAt }
     markBackedUp()
     currentFrame.value = 0
     startFrameAnimation()
+    sendProgress.setStep('render', 'completed', '二维码已生成并开始循环播放')
+    sendProgress.finish('加密二维码生成完成')
   } catch (reason) {
     sendError.value = reason instanceof Error ? reason.message : '无法生成二维码'
+    const running = sendProgress.state.steps.find((step) => step.status === 'running')?.id
+    sendProgress.fail(running, sendError.value, { retry: true })
   } finally {
     generating.value = false
   }
+}
+
+function continueSendResult() {
+  sendProgress.reset()
 }
 
 function resetReceive() {
@@ -230,21 +276,55 @@ async function fileDrawable(file) {
 async function scanFiles(event) {
   scanError.value = ''
   const files = [...(event.target.files ?? [])]
-  for (const file of files) {
-    try {
-      const bitmap = await fileDrawable(file)
-      const canvas = scanCanvas.value
-      canvas.width = bitmap.width
-      canvas.height = bitmap.height
-      const context = canvas.getContext('2d', { willReadFrequently: true })
-      context.drawImage(bitmap.drawable, 0, 0)
-      scanImageData(context, bitmap.width, bitmap.height)
-      bitmap.close()
-    } catch {
-      scanError.value = `无法读取图片“${file.name}”`
-    }
+  const showProgress = files.length > 1
+  const controller = new AbortController()
+  scanController = controller
+  let failures = 0
+  if (showProgress) {
+    receiveProgress.start({
+      title: `正在读取 ${files.length} 张二维码图片`,
+      steps: [
+        { id: 'read', label: '读取图片队列' },
+        { id: 'scan', label: '识别二维码片段' },
+        { id: 'assemble', label: '检查片段完整性' },
+      ],
+      cancel: () => controller.abort(),
+    })
+    receiveProgress.setStep('read', 'completed', `已选择 ${files.length} 张图片`)
+    receiveProgress.setStep('scan', 'running', '正在逐张识别')
   }
-  event.target.value = ''
+  try {
+    for (const [index, file] of files.entries()) {
+      if (controller.signal.aborted) break
+      let bitmap = null
+      try {
+        bitmap = await fileDrawable(file)
+        if (controller.signal.aborted) break
+        const canvas = scanCanvas.value
+        canvas.width = bitmap.width
+        canvas.height = bitmap.height
+        const context = canvas.getContext('2d', { willReadFrequently: true })
+        context.drawImage(bitmap.drawable, 0, 0)
+        scanImageData(context, bitmap.width, bitmap.height)
+      } catch {
+        failures++
+        scanError.value = `无法读取图片“${file.name}”`
+      } finally {
+        bitmap?.close()
+      }
+      if (showProgress) {
+        receiveProgress.setPartial({ 图片: `${index + 1}/${files.length}`, 片段: `${scanProgress.value.current}/${scanProgress.value.total || '?'}` }, `已检查 ${index + 1}/${files.length} 张图片`)
+      }
+    }
+    if (showProgress && !controller.signal.aborted) {
+      receiveProgress.setStep('scan', failures ? 'warning' : 'completed', failures ? `${failures} 张图片无法读取` : '图片识别完成')
+      receiveProgress.setStep('assemble', encryptedPayload.value ? 'completed' : 'warning', encryptedPayload.value ? '二维码片段已收集完整' : '仍缺少二维码片段')
+      receiveProgress.finish(encryptedPayload.value ? '二维码已收集完整，可以输入密码' : '已保留识别到的片段，请继续补充图片', encryptedPayload.value && !failures ? 'completed' : 'warning')
+    }
+  } finally {
+    if (scanController === controller) scanController = null
+    event.target.value = ''
+  }
 }
 
 async function decryptCodes() {
@@ -269,16 +349,68 @@ async function decryptCodes() {
 async function doImport() {
   if (!decodedPackage.value) return
   if (importMode.value === 'replace' && !window.confirm('覆盖会替换所选模块的本机数据，导入后仍可撤销。是否继续？')) return
+  const showProgress = Boolean(decodedSummary.value?.wallpapers)
+  const controller = new AbortController()
+  importController = controller
+  if (showProgress) {
+    receiveProgress.start({
+      title: '正在导入迁移数据',
+      steps: [
+        { id: 'snapshot', label: '创建回滚快照' },
+        { id: 'data', label: '合并文字数据' },
+        { id: 'wallpapers', label: '写入壁纸图片' },
+        { id: 'finish', label: '完成并重新载入' },
+      ],
+      cancel: () => controller.abort(),
+    })
+    receiveProgress.setStep('snapshot', 'running', '正在准备可撤销快照')
+  }
   try {
-    const result = await importTransferPackage(decodedPackage.value, importMode.value)
+    const result = await importTransferPackage(decodedPackage.value, importMode.value, {
+      signal: controller.signal,
+      onProgress: ({ stage, current, total, message: progressMessage }) => {
+        if (!showProgress) return
+        if (stage === 'snapshot') receiveProgress.setStep('snapshot', 'running', progressMessage)
+        else if (stage === 'data') {
+          receiveProgress.setStep('snapshot', 'completed', '回滚快照已创建')
+          receiveProgress.setStep('data', 'running', '正在合并所选模块')
+          receiveProgress.setPartial({ 数据模块: `${current}/${total}` }, `已处理 ${current}/${total} 个数据模块`)
+        } else if (stage === 'wallpapers') {
+          receiveProgress.setStep('data', 'completed', '文字数据处理完成')
+          receiveProgress.setStep('wallpapers', 'running', '正在原子写入壁纸')
+          receiveProgress.setPartial({ 壁纸: `${current}/${total}` }, `已处理 ${current}/${total} 张壁纸`)
+        }
+      },
+    })
+    if (controller.signal.aborted) return
     importMessage.value = importMode.value === 'merge'
       ? `已完成合并，新增 ${result.added} 项数据。页面即将刷新。`
       : '已完成覆盖导入。页面即将刷新。'
     undoAvailable.value = true
+    if (showProgress) {
+      receiveProgress.setStep('wallpapers', 'completed', '壁纸写入完成')
+      receiveProgress.setStep('finish', 'completed', '迁移完成，即将重新载入')
+      receiveProgress.finish('迁移数据导入完成')
+    }
     window.setTimeout(() => window.location.reload(), 900)
   } catch (reason) {
+    if (reason?.name === 'AbortError') return
     scanError.value = reason instanceof Error ? reason.message : '导入失败'
+    if (showProgress) {
+      const running = receiveProgress.state.steps.find((step) => step.status === 'running')?.id
+      receiveProgress.fail(running, `${scanError.value}；已自动恢复导入前数据`, { retry: true })
+    }
+  } finally {
+    if (importController === controller) importController = null
   }
+}
+
+function retryReceiveTask() {
+  if (decodedPackage.value) void doImport()
+}
+
+function continueReceiveResult() {
+  receiveProgress.reset()
 }
 
 async function undoImport() {
@@ -307,6 +439,16 @@ const decodedSummary = computed(() => decodedPackage.value ? transferSummary(dec
         <p class="hint">接收设备需要输入相同密码。二维码和密码不会发送到服务器。</p>
         <button class="btn btn-primary" :disabled="generating" @click="generateCodes">{{ generating ? '正在加密…' : '生成加密二维码' }}</button>
         <p v-if="sendError" class="error">{{ sendError }}</p>
+        <TaskProgress
+          :task="sendProgress.state"
+          :elapsed-seconds="sendProgress.elapsedSeconds.value"
+          :activity-age-seconds="sendProgress.activityAgeSeconds.value"
+          :stalled="sendProgress.isStalled.value"
+          compact
+          @retry="generateCodes"
+          @continue="continueSendResult"
+          @wait="sendProgress.continueWaiting"
+        />
       </section>
 
       <section class="qr-panel">
@@ -335,6 +477,17 @@ const decodedSummary = computed(() => decodedPackage.value ? transferSummary(dec
       </section>
 
       <section class="import-panel">
+        <TaskProgress
+          :task="receiveProgress.state"
+          :elapsed-seconds="receiveProgress.elapsedSeconds.value"
+          :activity-age-seconds="receiveProgress.activityAgeSeconds.value"
+          :stalled="receiveProgress.isStalled.value"
+          compact
+          @cancel="receiveProgress.cancel"
+          @retry="retryReceiveTask"
+          @continue="continueReceiveResult"
+          @wait="receiveProgress.continueWaiting"
+        />
         <template v-if="!encryptedPayload"><div class="import-empty"><span>1</span><p>完成二维码扫描后，可以在这里输入密码并预览数据。</p></div></template>
         <template v-else-if="!decodedPackage">
           <h4>二维码已收集完整</h4><p class="hint">输入发送设备设置的传输密码。</p>

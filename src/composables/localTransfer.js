@@ -4,6 +4,7 @@ import {
   importWallpapersFromTransfer,
   restoreWallpaperUndo,
 } from './wallpaperStorage.js'
+import { throwIfAborted } from './asyncTask.js'
 
 export const TRANSFER_MODULES = {
   courses: { label: '课程、课表模板、作息与特殊日期', keys: ['sl_courses', 'sl_course_templates', 'sl_timecfg', 'sl_semester', 'sl_schedule_exceptions'] },
@@ -11,6 +12,7 @@ export const TRANSFER_MODULES = {
   countdowns: { label: '考试与倒计时', keys: ['sl_exams', 'sl_countdown_show_past'] },
   lists: { label: '生活清单', keys: ['sl_checklists'] },
   bills: { label: '固定账单', keys: ['sl_bills'] },
+  expenses: { label: '消费记录', keys: ['sl_expenses'] },
   food: { label: '吃什么选择库', keys: ['sl_food_places', 'sl_food_history'] },
   appearance: { label: '励志语、首页布局与页面皮肤', keys: ['sl_appearance'] },
   wallpapers: { label: '壁纸图片（可选，二维码较多）', keys: ['sl_wallpaper_config', 'sl_auto_wallpaper_color', 'sl_wallpaper_accent'] },
@@ -19,7 +21,7 @@ export const TRANSFER_MODULES = {
 
 const ARRAY_KEYS = new Set([
   'sl_courses', 'sl_course_templates', 'sl_schedule_exceptions', 'sl_tasks', 'sl_exams', 'sl_checklists',
-  'sl_bills', 'sl_food_places', 'sl_food_history',
+  'sl_bills', 'sl_expenses', 'sl_food_places', 'sl_food_history',
 ])
 const UNDO_KEY = 'sl_transfer_undo'
 
@@ -131,17 +133,22 @@ function readStored(key) {
   }
 }
 
-export async function createTransferPackage(selectedModules) {
+export async function createTransferPackage(selectedModules, { signal = null, onProgress = null } = {}) {
   const data = {}
   const modules = selectedModules.filter((name) => TRANSFER_MODULES[name])
-  for (const moduleName of modules) {
+  for (const [index, moduleName] of modules.entries()) {
+    throwIfAborted(signal)
     for (const key of TRANSFER_MODULES[moduleName].keys) {
       const value = readStored(key)
       if (value !== null) data[key] = value
     }
+    onProgress?.({ stage: 'collecting', current: index + 1, total: modules.length, moduleName })
   }
   if (modules.includes('wallpapers')) {
-    data.__wallpaper_images = await exportWallpapersForTransfer()
+    data.__wallpaper_images = await exportWallpapersForTransfer({
+      signal,
+      onProgress: (progress) => onProgress?.({ ...progress, stage: 'wallpapers' }),
+    })
   }
   return {
     app: 'study-life',
@@ -207,56 +214,70 @@ function remapCourses(list, map, currentIds) {
   })
 }
 
-export async function importTransferPackage(pkg, mode = 'merge') {
+export async function importTransferPackage(pkg, mode = 'merge', { signal = null, onProgress = null } = {}) {
   if (!pkg || pkg.app !== 'study-life' || pkg.version !== 2 || !pkg.data) throw new Error('迁移数据格式不正确')
+  throwIfAborted(signal)
   const wallpaperImages = pkg.data.__wallpaper_images
   const keys = Object.keys(pkg.data).filter((key) => key !== '__wallpaper_images')
-  const undo = { createdAt: new Date().toISOString(), values: {}, hadWallpapers: Boolean(wallpaperImages) }
+  const undo = { createdAt: new Date().toISOString(), values: {}, hadWallpapers: false }
   for (const key of keys) undo.values[key] = localStorage.getItem(key)
   localStorage.setItem(UNDO_KEY, JSON.stringify(undo))
-  if (wallpaperImages) {
-    await backupWallpapersForUndo()
-  }
-
-  let added = 0
-  const details = []
-  const localCourses = readStored('sl_courses') ?? []
-  const incomingConfig = pkg.data.sl_timecfg
-  const currentConfig = readStored('sl_timecfg')
-  const shouldRemapCourses = mode === 'merge' && localCourses.length && incomingConfig && currentConfig
-  const courseMap = shouldRemapCourses
-    ? periodMapping(incomingConfig, currentConfig)
-    : new Map()
-  const currentPeriodIds = new Set((currentConfig?.periods ?? []).map((period) => period.id))
-
-  for (const [key, incomingRaw] of Object.entries(pkg.data)) {
-    if (key === '__wallpaper_images') continue
-    let incoming = incomingRaw
-    if (shouldRemapCourses && key === 'sl_courses') incoming = remapCourses(incoming, courseMap, currentPeriodIds)
-    if (shouldRemapCourses && key === 'sl_course_templates') {
-      incoming = (incoming ?? []).map((template) => ({
-        ...template,
-        courses: remapCourses(template.courses, courseMap, currentPeriodIds),
-      }))
+  try {
+    if (wallpaperImages) {
+      onProgress?.({ stage: 'snapshot', message: '正在创建壁纸回滚快照' })
+      await backupWallpapersForUndo()
+      undo.hadWallpapers = true
+      localStorage.setItem(UNDO_KEY, JSON.stringify(undo))
     }
 
-    if (mode === 'merge' && ARRAY_KEYS.has(key)) {
-      const result = mergeArray(readStored(key), incoming, key)
-      localStorage.setItem(key, JSON.stringify(result.value))
-      added += result.added
-      details.push({ key, added: result.added })
-    } else if (mode === 'merge' && localStorage.getItem(key) !== null) {
-      // 合并时保留本机的作息、学期和主题设置。
-      details.push({ key, keptLocal: true })
-    } else {
-      localStorage.setItem(key, JSON.stringify(incoming))
-      details.push({ key, replaced: true })
+    let added = 0
+    const details = []
+    const localCourses = readStored('sl_courses') ?? []
+    const incomingConfig = pkg.data.sl_timecfg
+    const currentConfig = readStored('sl_timecfg')
+    const shouldRemapCourses = mode === 'merge' && localCourses.length && incomingConfig && currentConfig
+    const courseMap = shouldRemapCourses
+      ? periodMapping(incomingConfig, currentConfig)
+      : new Map()
+    const currentPeriodIds = new Set((currentConfig?.periods ?? []).map((period) => period.id))
+
+    const dataEntries = Object.entries(pkg.data).filter(([key]) => key !== '__wallpaper_images')
+    for (const [index, [key, incomingRaw]] of dataEntries.entries()) {
+      throwIfAborted(signal)
+      let incoming = incomingRaw
+      if (shouldRemapCourses && key === 'sl_courses') incoming = remapCourses(incoming, courseMap, currentPeriodIds)
+      if (shouldRemapCourses && key === 'sl_course_templates') {
+        incoming = (incoming ?? []).map((template) => ({
+          ...template,
+          courses: remapCourses(template.courses, courseMap, currentPeriodIds),
+        }))
+      }
+
+      if (mode === 'merge' && ARRAY_KEYS.has(key)) {
+        const result = mergeArray(readStored(key), incoming, key)
+        localStorage.setItem(key, JSON.stringify(result.value))
+        added += result.added
+        details.push({ key, added: result.added })
+      } else if (mode === 'merge' && localStorage.getItem(key) !== null) {
+        // 合并时保留本机的作息、学期和主题设置。
+        details.push({ key, keptLocal: true })
+      } else {
+        localStorage.setItem(key, JSON.stringify(incoming))
+        details.push({ key, replaced: true })
+      }
+      onProgress?.({ stage: 'data', current: index + 1, total: dataEntries.length, key })
     }
+    if (wallpaperImages) {
+      await importWallpapersFromTransfer(wallpaperImages, mode, {
+        signal,
+        onProgress: (progress) => onProgress?.({ ...progress, stage: 'wallpapers' }),
+      })
+    }
+    return { added, details, affected: keys.length }
+  } catch (reason) {
+    try { await restoreTransferUndo() } catch {}
+    throw reason
   }
-  if (wallpaperImages) {
-    await importWallpapersFromTransfer(wallpaperImages, mode)
-  }
-  return { added, details, affected: keys.length }
 }
 
 export function hasTransferUndo() {

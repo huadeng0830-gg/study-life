@@ -1,6 +1,7 @@
 <script setup>
-import { ref, reactive, computed } from 'vue'
+import { ref, reactive, computed, watch, onBeforeUnmount } from 'vue'
 import Modal from '../components/Modal.vue'
+import TaskProgress from '../components/TaskProgress.vue'
 import { appearance } from '../composables/appearance.js'
 import {
   useStoredRef,
@@ -27,6 +28,13 @@ import {
   removePeriod,
   resetTimesToDefault,
   normalizeTimes,
+  seasonAppliesTo,
+  seasonsForCampus,
+  validCombos,
+  autoSeasonIdFor,
+  autoSeasonStatusFor,
+  isValidSeasonDate,
+  seasonConflicts,
   MAX_WEEK,
   semester,
   weekOf,
@@ -39,8 +47,14 @@ import {
   coursesForDate,
 } from '../composables/store.js'
 import { parseBatchLine as newParseBatchLine } from '../composables/courseParser.js'
-import { performOCR, getOCRState, cleanupOCR } from '../composables/ocrService.js'
-import { parseTimetableColumns, parseTimetableLayout } from '../composables/timetableLayoutParser.js'
+import { buildImportPlan, classifyImportItems } from '../composables/courseImport.js'
+import { performOCR } from '../composables/ocrService.js'
+import {
+  performOCR as performAccurateOCR,
+} from '../composables/ocrPipeline.js'
+import { parseTimetableColumns, parseTimetableLayout, selectBestTimetableExtraction } from '../composables/timetableLayoutParser.js'
+import { normalizePeriod, parseScheduleOCR } from '../composables/scheduleOcrParser.js'
+import { useTaskProgress } from '../composables/taskProgress.js'
 
 const DAYS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
 
@@ -58,6 +72,16 @@ const batchText = ref('')
 const batchError = ref('')
 const ocrSummary = ref('')
 const message = ref('')
+const showImportConflict = ref(false)
+const importDraft = ref(null)
+const importCommitBusy = ref(false)
+const lastImportUndo = ref(null)
+const scheduleOcrProgress = useTaskProgress()
+const batchOcrProgress = useTaskProgress()
+let scheduleOcrController = null
+let batchOcrController = null
+let lastScheduleMode = 'auto'
+let lastBatchFiles = []
 const selectedCourseIds = ref([])
 const templateName = ref('')
 const managerMessage = ref('')
@@ -79,15 +103,6 @@ const form = reactive({
   weekType: 'all',
 })
 
-const combos = computed(() => {
-  const list = []
-  for (const season of timeConfig.value.seasons) {
-    for (const campus of timeConfig.value.campuses) {
-      list.push({ season: season.id, campus: campus.id, seasonName: season.name, campusName: campus.name, startDate: season.startDate })
-    }
-  }
-  return list
-})
 
 // 设置弹窗的临时输入
 const newCampusName = ref('')
@@ -104,12 +119,20 @@ function onAddCampus() {
 
 function onRemoveCampus(id) {
   settingError.value = ''
-  if (!removeCampus(id)) settingError.value = '至少保留一个校区'
+  const cfg = timeConfig.value
+  if (cfg.campuses.length <= 1) { settingError.value = '至少保留一个校区'; return }
+  const campus = cfg.campuses.find((c) => c.id === id)
+  const planCount = cfg.seasons.filter((s) => seasonAppliesTo(s, id)).length
+  const isCurrent = currentCampusId() === id
+  const lines = [`确定删除校区「${campus?.name}」？`, `将同时删除 ${planCount} 个作息季在该校区的时间方案。`]
+  if (isCurrent) lines.push('该校区是当前查看的校区，删除后会切换到其他校区。')
+  if (!window.confirm(lines.join('\n'))) return
+  removeCampus(id)
 }
 
 function onAddSeason() {
   settingError.value = ''
-  if (!/^\d{2}-\d{2}$/.test(newSeasonDate.value)) {
+  if (newSeasonDate.value && !isValidSeasonDate(newSeasonDate.value)) {
     settingError.value = '起始日期格式应为 MM-DD，例如 05-01'
     return
   }
@@ -123,8 +146,85 @@ function onAddSeason() {
 
 function onRemoveSeason(id) {
   settingError.value = ''
-  if (!removeSeason(id)) settingError.value = '至少保留一个作息季'
+  const cfg = timeConfig.value
+  if (cfg.seasons.length <= 1) { settingError.value = '至少保留一个作息季'; return }
+  const season = cfg.seasons.find((s) => s.id === id)
+  const campusCount = cfg.campuses.filter((c) => seasonAppliesTo(season, c.id)).length
+  const activeId = timeConfig.value.autoSeason ? autoSeasonIdFor(currentCampusId()) : currentSeasonId()
+  const lines = [`确定删除作息季「${season?.name}」？`, `将同时删除 ${campusCount} 个校区在该季的时间方案。`]
+  if (activeId === id) lines.push('该季是当前生效的作息季，删除后会自动切换到其他作息季。')
+  if (!window.confirm(lines.join('\n'))) return
+  removeSeason(id)
 }
+
+// 作息季适用校区（多校区时显示；空 = 全部适用，兼容旧数据）
+function seasonCampusOn(season, campusId) {
+  return seasonAppliesTo(season, campusId)
+}
+function toggleSeasonCampus(season, campusId) {
+  const current = Array.isArray(season.campuses) ? [...season.campuses] : timeConfig.value.campuses.map((c) => c.id)
+  const idx = current.indexOf(campusId)
+  if (idx >= 0) {
+    if (current.length <= 1) { settingError.value = '作息季至少需要一个适用校区'; return }
+    current.splice(idx, 1)
+  } else {
+    current.push(campusId)
+  }
+  season.campuses = current
+  settingError.value = ''
+}
+const seasonDateConflicts = computed(() => seasonConflicts(timeConfig.value))
+
+// 当前生效季在当前校区的有效选择（供主页作息按钮渲染）
+const seasonsForCurrentCampus = computed(() =>
+  seasonsForCampus(currentCampusId(), timeConfig.value)
+)
+const showCampusSwitcher = computed(() => timeConfig.value.campuses.length > 1)
+const showSeasonSwitcher = computed(() => seasonsForCurrentCampus.value.length > 1)
+const currentAutoStatus = computed(() => autoSeasonStatusFor(currentCampusId(), timeConfig.value))
+
+function selectScheduleCampus(campusId) {
+  timeConfig.value.currentCampus = campusId
+  if (timeConfig.value.autoSeason) return
+  const available = seasonsForCampus(campusId, timeConfig.value)
+  if (!available.some((season) => season.id === timeConfig.value.currentSeason)) {
+    timeConfig.value.currentSeason = available[0]?.id ?? null
+  }
+}
+
+function enableAutoSeason() {
+  if (currentAutoStatus.value.available) timeConfig.value.autoSeason = true
+}
+
+const autoModeInfo = computed(() => {
+  if (!showSeasonSwitcher.value) return null
+  if (timeConfig.value.autoSeason) {
+    const status = currentAutoStatus.value
+    if (!status.available) {
+      const reason = status.reason === 'missing-date'
+        ? `请完善「${status.missing.map((season) => season.name).join(' / ')}」的生效日期`
+        : status.reason === 'date-conflict'
+          ? '当前校区存在相同生效日期，请在基础设置中调整'
+          : '当前校区没有可用作息季'
+      return {
+        mode: 'unavailable',
+        text: '自动模式暂不可用',
+        hint: `${reason}；当前暂用「${seasonName(currentSeasonId()) || '—'}」`,
+      }
+    }
+    return {
+      mode: 'auto',
+      text: `自动模式 · 当前使用「${seasonName(status.seasonId) || '—'}」`,
+      hint: '根据作息季生效日期自动选择',
+    }
+  }
+  const manual = timeConfig.value.seasons.find((s) => s.id === timeConfig.value.currentSeason)
+  return {
+    mode: 'manual',
+    text: `当前手动使用「${manual?.name ?? '—'}」`,
+    hint: '自动切换暂时关闭，点击「自动」恢复',
+  }
+})
 
 function onAddPeriod() {
   settingError.value = ''
@@ -153,7 +253,7 @@ function openTimeSettings() {
   if (gen.lunchAfterIdx >= periods.length - 1) gen.lunchAfterIdx = Math.max(1, periods.length - 3)
   if (gen.dinnerAfterIdx >= periods.length - 1) gen.dinnerAfterIdx = Math.max(2, periods.length - 2)
   settingError.value = ''
-  settingsTab.value = 'times'
+  settingsTab.value = 'plans'
   showTimeEditor.value = true
 }
 
@@ -186,15 +286,219 @@ function toHHMM(minutes) {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
 }
 
-function generateTimes() {
+/* ==================================================================
+   作息方案编辑器：一次只编辑一个「季×校区」组合，草稿模式
+   ================================================================== */
+const planSeasonId = ref(null)
+const planCampusId = ref(null)
+const draft = ref([]) // [{start,end}] 与 periods 对齐
+const draftDirty = ref(false)
+
+const settingsCombos = computed(() => validCombos(timeConfig.value))
+
+function planKeyOf(seasonId, campusId) {
+  return `${seasonId}::${campusId}`
+}
+const currentPlanKey = computed(() =>
+  planSeasonId.value && planCampusId.value ? planKeyOf(planSeasonId.value, planCampusId.value) : ''
+)
+
+// 当前编辑季适用于的校区（用于校区选择与适用性开关）
+const seasonsForPlanCampus = computed(() =>
+  planCampusId.value
+    ? timeConfig.value.seasons.filter((s) => seasonAppliesTo(s, planCampusId.value))
+    : []
+)
+const campusesForPlanSeason = computed(() =>
+  planSeasonId.value
+    ? timeConfig.value.campuses.filter((c) => {
+        const season = timeConfig.value.seasons.find((s) => s.id === planSeasonId.value)
+        return seasonAppliesTo(season, c.id)
+      })
+    : []
+)
+
+function loadPlanDraft(seasonId, campusId) {
+  planSeasonId.value = seasonId
+  planCampusId.value = campusId
+  const list = timeConfig.value.times[seasonId]?.[campusId] ?? []
+  draft.value = timeConfig.value.periods.map((_, i) => ({
+    start: list[i]?.start ?? '08:00',
+    end: list[i]?.end ?? '08:45',
+  }))
+  draftDirty.value = false
+  batchOpen.value = false
+  copyOpen.value = false
+  importOpen.value = false
+  genPreview.value = null
+}
+
+// 打开设置时初始化：优先当前生效组合，否则第一个有效组合
+function initPlanSelection() {
+  const combos = settingsCombos.value
+  if (!combos.length) return
+  const activeKey = planKeyOf(currentSeasonId(), currentCampusId())
+  const found = combos.find((c) => planKeyOf(c.season, c.campus) === activeKey) ?? combos[0]
+  if (planKeyOf(planSeasonId.value, planCampusId.value) !== planKeyOf(found.season, found.campus)) {
+    loadPlanDraft(found.season, found.campus)
+  }
+}
+
+// 切换组合前检查未保存修改
+function guardDraft() {
+  if (!draftDirty.value) return true
+  return window.confirm('当前方案有未保存的修改，确定放弃这些修改吗？')
+}
+
+function switchPlan(seasonId, campusId) {
+  if (planKeyOf(seasonId, campusId) === currentPlanKey.value) return
+  if (!guardDraft()) return
+  loadPlanDraft(seasonId, campusId)
+}
+
+function markDirty() {
+  draftDirty.value = true
+}
+
+function saveDraft() {
+  if (!planSeasonId.value || !planCampusId.value) return
+  if (planHasError.value) {
+    settingError.value = '存在时间问题（结束需晚于开始、不能重叠等），请先修正后再保存'
+    return
+  }
+  normalizeTimes(timeConfig.value)
+  const list = timeConfig.value.times[planSeasonId.value][planCampusId.value]
+  timeConfig.value.periods.forEach((_, i) => {
+    if (draft.value[i]) list[i] = { start: draft.value[i].start, end: draft.value[i].end }
+  })
+  draftDirty.value = false
+  settingError.value = ''
+  showToast('作息方案已保存')
+}
+
+function discardDraft() {
+  loadPlanDraft(planSeasonId.value, planCampusId.value)
+}
+
+watch(showTimeEditor, (open) => {
+  if (open) initPlanSelection()
+})
+
+// 关闭弹窗时守卫（确认放弃则重置草稿）
+function tryCloseTimeEditor() {
+  if (!draftDirty.value) { showTimeEditor.value = false; return }
+  if (window.confirm('当前方案有未保存的修改，确定放弃这些修改吗？')) {
+    loadPlanDraft(planSeasonId.value, planCampusId.value)
+    showTimeEditor.value = false
+  }
+}
+
+// ---------- 上午/下午/晚上 视觉分组（按开始时间自动划分，不写死节次区间） ----------
+const planSections = computed(() => {
+  const groups = [
+    { key: 'morning', label: '上午', rows: [] },
+    { key: 'afternoon', label: '下午', rows: [] },
+    { key: 'evening', label: '晚上', rows: [] },
+  ]
+  timeConfig.value.periods.forEach((period, i) => {
+    const row = { period, index: i, ...draft.value[i] }
+    const minutes = toMinutes(row.start)
+    if (minutes < 12 * 60) groups[0].rows.push(row)
+    else if (minutes < 18 * 60) groups[1].rows.push(row)
+    else groups[2].rows.push(row)
+  })
+  return groups.filter((g) => g.rows.length)
+})
+
+// ---------- 行级错误检查 ----------
+function rowError(index) {
+  const row = draft.value[index]
+  if (!row) return ''
+  if (!row.start || !row.end) return '时间尚未设置'
+  if (toMinutes(row.end) <= toMinutes(row.start)) return '结束时间需要晚于开始时间'
+  const prev = draft.value[index - 1]
+  if (index > 0 && prev?.end && toMinutes(row.start) < toMinutes(prev.end)) {
+    return `与「${timeConfig.value.periods[index - 1].label}」时间重叠`
+  }
+  return ''
+}
+const planHasError = computed(() =>
+  draft.value.some((_, i) => rowError(i) !== '')
+)
+
+// ---------- 批量调整（±分钟，先预览） ----------
+const batchOpen = ref(false)
+const batchFrom = ref(0)
+const batchTo = ref(0)
+const batchDelta = ref(10)
+const batchCustom = ref('')
+const batchPreview = computed(() => {
+  const delta = batchDelta.value === 0 ? Number(batchCustom.value || 0) : Number(batchDelta.value)
+  if (!Number.isFinite(delta) || delta === 0) return null
+  const rows = []
+  for (let i = batchFrom.value; i <= batchTo.value && i < draft.value.length; i++) {
+    const row = draft.value[i]
+    if (!row?.start || !row?.end) continue
+    rows.push({
+      index: i,
+      label: timeConfig.value.periods[i].label,
+      from: `${row.start}–${row.end}`,
+      to: `${toHHMM(toMinutes(row.start) + delta)}–${toHHMM(toMinutes(row.end) + delta)}`,
+    })
+  }
+  return rows.length ? { delta, rows } : null
+})
+function openTimeShift() {
+  batchFrom.value = 0
+  batchTo.value = Math.max(0, timeConfig.value.periods.length - 1)
+  batchDelta.value = 10
+  batchCustom.value = ''
+  batchOpen.value = true
+  copyOpen.value = false
+  importOpen.value = false
+  genPreview.value = null
+}
+function applyBatch() {
+  const preview = batchPreview.value
+  if (!preview) return
+  for (const row of preview.rows) {
+    const [s, e] = row.to.split('–')
+    draft.value[row.index] = { start: s, end: e }
+  }
+  draftDirty.value = true
+  batchOpen.value = false
+}
+
+// ---------- 复制已有方案（拷贝进草稿，独立不联动） ----------
+const copyOpen = ref(false)
+const otherPlans = computed(() =>
+  settingsCombos.value.filter((c) => planKeyOf(c.season, c.campus) !== currentPlanKey.value)
+)
+function toggleCopy() {
+  copyOpen.value = !copyOpen.value
+  batchOpen.value = false
+  importOpen.value = false
+  genPreview.value = null
+}
+function copyFrom(seasonId, campusId) {
+  const source = timeConfig.value.times[seasonId]?.[campusId] ?? []
+  draft.value = timeConfig.value.periods.map((_, i) => ({
+    start: source[i]?.start ?? '08:00',
+    end: source[i]?.end ?? '08:45',
+  }))
+  draftDirty.value = true
+  copyOpen.value = false
+  showToast(`已复制「${seasonName(seasonId)} · ${campusName(campusId)}」到当前方案（未保存）`)
+}
+
+// ---------- 快速生成：预览制（填充空白 / 覆盖 / 取消） ----------
+const genPreview = ref(null) // { rows: [{index,label,from,to}], targetKeys: [] }
+function previewGenerate() {
   settingError.value = ''
   const cfg = timeConfig.value
   const periods = cfg.periods
   const startIdx = periodIndex(gen.startId ?? periods[1]?.id ?? periods[0]?.id)
-  if (startIdx < 0) {
-    settingError.value = '请选择起始节次'
-    return
-  }
+  if (startIdx < 0) { settingError.value = '请选择起始节次'; return }
   const lunchIdx = gen.lunchMin > 0 ? gen.lunchAfterIdx : -1
   const dinnerIdx = gen.dinnerMin > 0 ? gen.dinnerAfterIdx : -1
   if (lunchIdx < startIdx || lunchIdx >= periods.length - 1) {
@@ -205,8 +509,6 @@ function generateTimes() {
     settingError.value = '晚休位置无效（需在起始节次之后、且后面还有节次）'
     return
   }
-
-  // 计算从起始节次开始的每个节次时间
   let cursor = toMinutes(gen.startTime)
   const generated = periods.map((_, i) => {
     if (i < startIdx) return null
@@ -220,20 +522,408 @@ function generateTimes() {
     cursor += Number(gen.duration) || 45
     return { start, end: toHHMM(cursor) }
   })
+  const rows = []
+  for (let i = startIdx; i < periods.length; i++) {
+    if (!generated[i]) continue
+    rows.push({
+      index: i,
+      label: periods[i].label,
+      from: draft.value[i] ? `${draft.value[i].start}–${draft.value[i].end}` : '',
+      to: `${generated[i].start}–${generated[i].end}`,
+      blank: !draft.value[i] || (draft.value[i].start === '08:00' && draft.value[i].end === '08:45'),
+    })
+  }
+  genPreview.value = { rows }
+}
+function applyGenerate(mode) {
+  const preview = genPreview.value
+  if (!preview) return
+  for (const row of preview.rows) {
+    if (mode === 'fill' && !row.blank) continue
+    const [s, e] = row.to.split('–')
+    draft.value[row.index] = { start: s, end: e }
+  }
+  draftDirty.value = true
+  genPreview.value = null
+}
+function toggleGenPreview() {
+  if (genPreview.value) genPreview.value = null
+  else previewGenerate()
+  copyOpen.value = false
+  batchOpen.value = false
+  importOpen.value = false
+}
 
-  const seasons = gen.allSeasons ? cfg.seasons.map((s) => s.id) : [currentSeasonId()]
-  const campuses = gen.allCampuses ? cfg.campuses.map((c) => c.id) : [currentCampusId()]
-  normalizeTimes(cfg)
-  for (const seasonId of seasons) {
-    for (const campusId of campuses) {
-      const list = cfg.times[seasonId]?.[campusId]
-      if (!list) continue
-      for (let i = startIdx; i < periods.length; i++) {
-        if (generated[i]) list[i] = { ...generated[i] }
+/* ---------- 新建 / 导入作息（图片 OCR + 粘贴文本，统一预览确认） ---------- */
+const importOpen = ref(false)
+const importTab = ref('paste') // paste | image
+const pasteText = ref('')
+const importRows = ref([]) // [{label,start,end}]
+const importError = ref('')
+const importTargetSeason = ref('')
+const importTargetCampus = ref('')
+const detectedSeasonName = ref('')
+const detectedCampusName = ref('')
+const importAnalysis = ref(null)
+const importSchemeIndex = ref(0)
+const importAssignments = ref([])
+const lastScheduleImage = ref(null)
+const importNormalCount = computed(() => importRows.value.filter((row) => !row.needsReview || row.confirmed).length)
+const importReviewCount = computed(() => importRows.value.length - importNormalCount.value)
+const importSeasonsForCampus = computed(() =>
+  importTargetCampus.value ? seasonsForCampus(importTargetCampus.value, timeConfig.value) : []
+)
+const importAssignmentState = computed(() => {
+  const assignment = importAssignments.value[importSchemeIndex.value]
+  if (!importTargetCampus.value) return { type: 'missing', text: '无法确定归属，请选择校区和作息季。' }
+  if (!importTargetSeason.value) {
+    if (assignment?.mismatch) {
+      return {
+        type: 'error',
+        text: `识别结果与基础设置不一致：「${assignment.detectedSeasonName}」目前不适用于「${assignment.detectedCampusName}」。`,
       }
     }
+    return { type: 'missing', text: '无法确定作息季，请从当前校区的有效作息季中选择。' }
+  }
+  if (assignment?.userConfirmed) {
+    return { type: 'confirmed', text: `将保存到「${seasonName(importTargetSeason.value)} · ${campusName(importTargetCampus.value)}」` }
+  }
+  if (assignment?.preselected) {
+    return { type: 'matched', text: `已根据图片内容预选「${seasonName(importTargetSeason.value)} · ${campusName(importTargetCampus.value)}」` }
+  }
+  return { type: 'bound', text: `归属「${seasonName(importTargetSeason.value)} · ${campusName(importTargetCampus.value)}」` }
+})
+
+const SCHEDULE_OCR_STEPS = [
+  { id: 'read', label: '读取并检查图片' },
+  { id: 'engine', label: '准备识别引擎' },
+  { id: 'structure', label: '识别表格结构' },
+  { id: 'extract', label: '提取节次与时间' },
+  { id: 'validate', label: '校验异常' },
+  { id: 'preview', label: '生成可编辑预览' },
+]
+
+const TIMETABLE_OCR_STEPS = [
+  { id: 'read', label: '读取图片队列' },
+  { id: 'engine', label: '准备识别引擎' },
+  { id: 'recognize', label: '识别课程文字' },
+  { id: 'structure', label: '恢复星期与节次结构' },
+  { id: 'validate', label: '校验课程字段' },
+  { id: 'preview', label: '生成导入预览' },
+]
+
+function handleOcrActivity(progress, event, recognizeStep = 'structure') {
+  const stage = String(event?.stage || '').replace(/\.\.\./g, '…')
+  if (!stage) return
+  if (/检查图片|处理图片/.test(stage)) progress.setStep('read', 'running', stage)
+  else if (/初始化|加载|模型|内核|接口|就绪/.test(stage)) {
+    progress.setStep('read', 'completed', '图片读取完成')
+    progress.setStep('engine', 'running', stage)
+  } else if (/识别|核对|分列/.test(stage)) {
+    progress.setStep('engine', 'completed', '识别引擎已就绪')
+    progress.setStep(recognizeStep, 'running', stage)
+  } else progress.activity(stage)
+}
+
+function isOcrEngineFailure(progress, message) {
+  if (/未识别到文字|图片(?:尺寸)?太小|图片格式|请选择图片/.test(message)) return false
+  const engineStep = progress.state.steps.find((step) => step.id === 'engine')
+  return engineStep?.status === 'running'
+    || /初始化|语言模型|OCR 内核|Worker|Failed to fetch|NetworkError|script load|动态导入/i.test(message)
+}
+
+function toggleImport() {
+  importOpen.value = !importOpen.value
+  batchOpen.value = false
+  copyOpen.value = false
+  genPreview.value = null
+  if (importOpen.value) {
+    importTab.value = 'paste'
+    importRows.value = []
+    importError.value = ''
+    pasteText.value = ''
+    importAnalysis.value = null
+    importAssignments.value = []
   }
 }
+
+// 解析作息文本：行 → {label,start,end}；同时嗅探「夏季时间 / 南校区」等标题
+function parseScheduleText(text) {
+  return parseScheduleOCR(text, {
+    campuses: timeConfig.value.campuses,
+    seasons: timeConfig.value.seasons,
+  })
+}
+
+function createImportAssignment(scheme = {}, index = 0) {
+  const cfg = timeConfig.value
+  const detectedCampus = cfg.campuses.find((campus) => campus.id === scheme.campusId)
+    || cfg.campuses.find((campus) => campus.name === scheme.campus)
+  const detectedSeason = cfg.seasons.find((season) => season.id === scheme.seasonId)
+    || cfg.seasons.find((season) => season.name === scheme.season)
+  const campusReliable = Boolean(detectedCampus && Number(scheme.campusScore || 0) >= 0.82)
+  const seasonReliable = Boolean(detectedSeason && Number(scheme.seasonScore || 0) >= 0.82)
+  const campusId = campusReliable ? detectedCampus.id : cfg.campuses.length === 1 ? cfg.campuses[0].id : ''
+  const available = campusId ? seasonsForCampus(campusId, cfg) : []
+  const mismatch = Boolean(campusReliable && seasonReliable && !seasonAppliesTo(detectedSeason, campusId))
+  let seasonId = seasonReliable && !mismatch && available.some((season) => season.id === detectedSeason.id)
+    ? detectedSeason.id
+    : ''
+  if (!seasonId && !mismatch && available.length === 1) seasonId = available[0].id
+  return {
+    index,
+    campusId,
+    seasonId,
+    mismatch,
+    preselected: Boolean(campusId && seasonId && (campusReliable || seasonReliable)),
+    userConfirmed: false,
+    imported: false,
+    detectedCampusName: scheme.campus || detectedCampus?.name || '',
+    detectedSeasonName: scheme.season || detectedSeason?.name || '',
+  }
+}
+
+function ensureImportAssignments(analysis) {
+  const schemes = analysis?.schemes?.length ? analysis.schemes : [{ index: 0 }]
+  importAssignments.value = schemes.map((scheme, index) => createImportAssignment(scheme, index))
+}
+
+function syncActiveImportAssignment(patch = {}) {
+  const current = importAssignments.value[importSchemeIndex.value]
+  if (!current) return
+  Object.assign(current, {
+    campusId: importTargetCampus.value,
+    seasonId: importTargetSeason.value,
+    ...patch,
+  })
+}
+
+function selectImportCampus(campusId) {
+  importTargetCampus.value = campusId
+  const available = seasonsForCampus(campusId, timeConfig.value)
+  if (!available.some((season) => season.id === importTargetSeason.value)) {
+    importTargetSeason.value = available.length === 1 ? available[0].id : ''
+  }
+  syncActiveImportAssignment({ mismatch: false, preselected: false, userConfirmed: true })
+}
+
+function selectImportSeason(seasonId) {
+  importTargetSeason.value = seasonId
+  syncActiveImportAssignment({ mismatch: false, preselected: false, userConfirmed: true })
+}
+
+function applyImportScheme(index = 0) {
+  const analysis = importAnalysis.value
+  const scheme = analysis?.schemes?.[Number(index)]
+  importSchemeIndex.value = Number(index) || 0
+  importRows.value = (scheme?.rows || analysis?.rows || []).map((row) => ({
+    ...row,
+    confirmed: !row.needsReview,
+  }))
+  if (!importAssignments.value.length) ensureImportAssignments(analysis)
+  const assignment = importAssignments.value[importSchemeIndex.value] || createImportAssignment(scheme, importSchemeIndex.value)
+  importTargetCampus.value = assignment.campusId
+  importTargetSeason.value = assignment.seasonId
+  detectedSeasonName.value = scheme?.season || analysis?.seasons?.[0]?.value || ''
+  detectedCampusName.value = scheme?.campus || analysis?.campuses?.[0]?.value || ''
+}
+
+function importSchemeLabel(scheme) {
+  const assignment = importAssignments.value[scheme.index]
+  if (assignment?.imported) return `✓ 已导入 · ${seasonName(assignment.seasonId)} · ${campusName(assignment.campusId)}`
+  if (assignment?.campusId && assignment?.seasonId) return `✓ ${seasonName(assignment.seasonId)} · ${campusName(assignment.campusId)}`
+  if (assignment?.mismatch) return `⚠ ${assignment.detectedSeasonName} · ${assignment.detectedCampusName}（不适用）`
+  return '⚠ 尚未确定归属'
+}
+
+function acceptImportRow(row) {
+  row.confirmed = true
+}
+
+function runParsePaste() {
+  importError.value = ''
+  const analysis = parseScheduleText(pasteText.value)
+  if (!analysis.rows.length) {
+    importError.value = '没有解析到「节次名称 + 时间段」行，示例：第一节 8:00-8:45'
+    return
+  }
+  importAnalysis.value = analysis
+  ensureImportAssignments(analysis)
+  applyImportScheme(0)
+}
+
+async function runParseImage(file, mode = 'auto') {
+  importError.value = ''
+  if (!file) return
+  if (scheduleOcrProgress.state.status === 'running') return
+  lastScheduleImage.value = file
+  lastScheduleMode = mode
+  const controller = new AbortController()
+  scheduleOcrController = controller
+  scheduleOcrProgress.start({
+    title: mode === 'accurate' ? '正在精准识别作息表' : '正在识别作息表',
+    steps: SCHEDULE_OCR_STEPS,
+    cancel: () => controller.abort(),
+  })
+  scheduleOcrProgress.setStep('read', 'running', `正在读取 ${file.name}`)
+  try {
+    const onProgress = (event) => handleOcrActivity(scheduleOcrProgress, event, 'structure')
+    const result = mode === 'accurate'
+      ? await performAccurateOCR(file, onProgress, { kind: 'schedule', mode: 'accurate', signal: controller.signal })
+      : await performOCR(file, onProgress, { signal: controller.signal })
+    scheduleOcrProgress.setStep('read', 'completed', '图片读取完成')
+    scheduleOcrProgress.setStep('engine', 'completed', '识别引擎已就绪')
+    scheduleOcrProgress.setStep('structure', 'completed', result.structure?.valid ? '表格网格与行结构已恢复' : '已提取文字位置与结构')
+    scheduleOcrProgress.setStep('extract', 'running', '正在提取校区、作息季、节次与时间')
+    const analysis = parseScheduleOCR(result, {
+      campuses: timeConfig.value.campuses,
+      seasons: timeConfig.value.seasons,
+    })
+    scheduleOcrProgress.setPartial({
+      校区: analysis.campuses?.length || 0,
+      作息季: analysis.seasons?.length || 0,
+      节次: analysis.rows?.length || 0,
+    }, `提取到 ${analysis.rows.length} 个节次`)
+    if (!analysis.rows.length) {
+      throw new Error('节次时间提取失败：已识别文字，但未能可靠恢复“节次—时间”结构')
+    }
+    scheduleOcrProgress.setStep('extract', 'completed', `已提取 ${analysis.rows.length} 个节次`)
+    scheduleOcrProgress.setStep('validate', 'running', '正在检查时间顺序、缺失节次和列对应')
+    importAnalysis.value = analysis
+    ensureImportAssignments(analysis)
+    scheduleOcrProgress.setStep('validate', analysis.reviewCount ? 'warning' : 'completed', analysis.reviewCount ? `${analysis.reviewCount} 项建议确认` : '结构与时间顺序检查通过')
+    scheduleOcrProgress.setStep('preview', 'running', '正在生成可编辑结果')
+    applyImportScheme(0)
+    scheduleOcrProgress.setStep('preview', 'completed', '可编辑预览已生成')
+    scheduleOcrProgress.finish(
+      analysis.reviewCount ? `识别完成，${analysis.reviewCount} 项建议确认` : '识别完成，可检查后保存',
+      analysis.reviewCount ? 'warning' : 'completed',
+    )
+    if (result.quality?.warnings?.length) importError.value = `图片质量提示：${result.quality.warnings.join('、')}。精准模式已比较原图、增强图和表格行。`
+  } catch (e) {
+    if (e?.name === 'AbortError') return
+    importError.value = e.message ?? '图片识别失败'
+    const engineFailed = isOcrEngineFailure(scheduleOcrProgress, importError.value)
+    if (!engineFailed) {
+      scheduleOcrProgress.setStep('read', 'completed', '图片读取完成')
+      scheduleOcrProgress.setStep('engine', 'completed', '识别引擎已启动')
+    }
+    const extractionStarted = scheduleOcrProgress.state.steps.some((step) => step.id === 'extract' && step.status === 'running')
+    scheduleOcrProgress.fail(engineFailed ? 'engine' : extractionStarted ? 'extract' : 'structure', importError.value, { retainedResult: importRows.value.length > 0 })
+  } finally {
+    if (scheduleOcrController === controller) scheduleOcrController = null
+  }
+}
+
+function onSeasonDateChange(season, value, input) {
+  const date = String(value ?? '').trim()
+  settingError.value = ''
+  if (date && !isValidSeasonDate(date)) {
+    settingError.value = '生效日期无效，请使用 MM-DD，例如 05-01'
+    if (input) input.value = season.startDate || ''
+    return
+  }
+  renameSeason(season.id, null, date)
+}
+function onImportImage(event) {
+  const file = event.target.files?.[0]
+  event.target.value = ''
+  void runParseImage(file)
+}
+
+function addImportRow() {
+  importRows.value.push({ label: '', start: '08:00', end: '08:45' })
+}
+function removeImportRow(index) {
+  importRows.value.splice(index, 1)
+}
+
+function importTargetIndex(row, fallbackIndex, periods, rowCount) {
+  const exact = periods.findIndex((period) => period.label.trim() === row.label.trim())
+  if (exact >= 0) return exact
+  const parsedRow = normalizePeriod(row.label)
+  if (parsedRow) {
+    const normalized = periods.findIndex((period) => {
+      const parsedPeriod = normalizePeriod(period.label)
+      return parsedPeriod?.key === parsedRow.key || parsedPeriod?.label === parsedRow.label
+    })
+    if (normalized >= 0) return normalized
+  }
+  return rowCount === periods.length ? fallbackIndex : -1
+}
+
+// 确认导入只写入用户选定的真实「校区 × 作息季」，不会创建规则或改变课程表模式。
+function confirmImport() {
+  importError.value = ''
+  const rows = importRows.value.filter((row) => row.label.trim() && row.start && row.end)
+  if (!rows.length) { importError.value = '至少保留一行有效数据'; return }
+  const invalidTime = rows.find((row) => row.start >= row.end)
+  if (invalidTime) { importError.value = `${invalidTime.label}的开始时间必须早于结束时间`; return }
+  const unconfirmed = rows.filter((row) => row.needsReview && !row.confirmed)
+  if (unconfirmed.length) { importError.value = `还有 ${unconfirmed.length} 项低置信度结果未确认，请先修改或点击“确认无误”`; return }
+
+  const cfg = timeConfig.value
+  const seasonId = importTargetSeason.value
+  const campusId = importTargetCampus.value
+  const season = cfg.seasons.find((item) => item.id === seasonId)
+  const campus = cfg.campuses.find((item) => item.id === campusId)
+  if (!campus || !season) { importError.value = '请先选择识别结果所属的校区和作息季'; return }
+  if (!seasonAppliesTo(season, campusId)) {
+    importError.value = `识别结果与基础设置不一致：「${season.name}」目前不适用于「${campus.name}」`
+    return
+  }
+
+  const mapped = rows.map((row, index) => ({
+    row,
+    index: importTargetIndex(row, index, cfg.periods, rows.length),
+  }))
+  const unmapped = mapped.filter((item) => item.index < 0)
+  if (unmapped.length) {
+    importError.value = `以下节次在基础设置中不存在：${unmapped.map((item) => item.row.label).join('、')}。请先完善基础设置中的节次。`
+    return
+  }
+  if (new Set(mapped.map((item) => item.index)).size !== mapped.length) {
+    importError.value = '识别结果中有多个条目指向同一节次，请检查节次名称'
+    return
+  }
+
+  normalizeTimes(cfg)
+  const existing = cfg.times[seasonId]?.[campusId]
+  if (!existing) { importError.value = '目标方案不存在，请返回基础设置检查适用校区'; return }
+  if (!window.confirm(`「${campus.name} · ${season.name}」已有节次设置。\n是否使用本次识别结果替换对应节次时间？`)) return
+
+  const targetIsCurrent = seasonId === planSeasonId.value && campusId === planCampusId.value
+  const target = targetIsCurrent ? draft.value : existing
+  while (target.length < cfg.periods.length) target.push({ start: '08:00', end: '08:45' })
+  for (const item of mapped) target[item.index] = { start: item.row.start, end: item.row.end }
+  if (targetIsCurrent) draftDirty.value = true
+  else cfg.updatedAt = new Date().toISOString()
+
+  const assignment = importAssignments.value[importSchemeIndex.value]
+  if (assignment) Object.assign(assignment, { imported: true, campusId, seasonId })
+  const next = importAssignments.value.find((item) => !item.imported)
+  if (importAnalysis.value?.schemes?.length > 1 && next) {
+    showToast(`已导入「${season.name} · ${campus.name}」，请继续核对下一组`)
+    applyImportScheme(next.index)
+    return
+  }
+
+  importOpen.value = false
+  importRows.value = []
+  pasteText.value = ''
+  if (targetIsCurrent) showToast('已导入到当前方案草稿，点击“保存”后生效')
+  else showToast(`已保存到「${season.name} · ${campus.name}」方案`)
+}
+
+/* ---------- 轻量 toast（设置弹窗内） ---------- */
+const settingsToast = ref('')
+let settingsToastTimer = 0
+function showToast(message) {
+  settingsToast.value = message
+  window.clearTimeout(settingsToastTimer)
+  settingsToastTimer = window.setTimeout(() => { settingsToast.value = '' }, 3200)
+}
+onBeforeUnmount(() => window.clearTimeout(settingsToastTimer))
 
 // 在当前编辑课程的时间格子里，追加另一门不同周次的课程
 function addAnotherInCell() {
@@ -298,14 +988,12 @@ function formOverlapsWith(course) {
 const formCellClash = computed(() => formCellCourses.value.find((c) => formOverlapsWith(c)))
 
 // ---------- 设置弹窗标签页 ----------
-const settingsTab = ref('times')
+const settingsTab = ref('plans')
 const tabHints = {
-  times: '选择作息季和校区后编辑上下课时间，也可以用「一键生成」按规则快速填充全部节次。',
-  campus: '添加、重命名或删除校区，至少保留一个。删除校区会同时删除其时间配置。',
-  season: '设置每种作息的名称和生效起始日期，网站会按日期自动切换到最新的一季。',
-  period: '增删或重命名节次，时间表的行数会跟着变化。被课程占用的节次无法删除。',
+  plans: '一次只编辑一个「作息季 × 校区」方案。支持导入、复制与批量平移，修改需点击保存才会生效。',
+  base: '管理校区、作息季与节次。删除前会检查影响范围；作息季可设置生效日期与适用校区。',
 }
-const TAB_ICONS = { times: '⏰ 时间表', campus: '🏫 校区', season: '📅 作息季', period: '📋 节次' }
+const TAB_ICONS = { plans: '⏰ 作息方案', base: '⚙️ 基础设置' }
 function tabLabel(tab) {
   return TAB_ICONS[tab] ?? tab
 }
@@ -395,8 +1083,7 @@ function importCourseTemplate(template) {
     ...JSON.parse(JSON.stringify(course)),
     id: `c${stamp}_tpl_${index}`,
   }))
-  courses.value.push(...copies)
-  managerMessage.value = `已导入 ${copies.length} 门课程`
+  beginCourseImport(copies, { source: 'template' })
 }
 
 function deleteCourseTemplate(template) {
@@ -404,12 +1091,24 @@ function deleteCourseTemplate(template) {
   courseTemplates.value = courseTemplates.value.filter((item) => item.id !== template.id)
 }
 
-function openBatch() {
+function openBatchShift() {
   batchText.value = ''
   batchError.value = ''
   ocrSummary.value = ''
   message.value = ''
   showBatch.value = true
+}
+
+function retryScheduleAccurate() {
+  if (lastScheduleImage.value) void runParseImage(lastScheduleImage.value, 'accurate')
+}
+
+function retryScheduleOCR() {
+  if (lastScheduleImage.value) void runParseImage(lastScheduleImage.value, lastScheduleMode)
+}
+
+function continueScheduleResults() {
+  scheduleOcrProgress.reset()
 }
 
 const batchRows = computed(() => {
@@ -440,25 +1139,101 @@ function importBatch() {
   }
 
   const stamp = Date.now()
-  const initialCount = courses.value.length
-  let importedCount = 0
+  const incoming = batchRows.value
+    .filter((row) => row.data)
+    .map((row, index) => ({
+      id: `c${stamp}_${index}`,
+      color: PALETTE[(courses.value.length + index) % PALETTE.length],
+      ...row.data,
+    }))
+  beginCourseImport(incoming, { source: 'batch', reviewCount: needsReviewCount.value })
+}
 
-  batchRows.value.forEach((row, index) => {
-    if (row.data) {
-      courses.value.push({
-        id: `c${stamp}_${index}`,
-        color: PALETTE[(initialCount + index) % PALETTE.length],
-        ...row.data,
-      })
-      importedCount++
-    }
-  })
+const courseConflictOptions = computed(() => ({ maxWeek: MAX_WEEK, periodIndex: (id) => periodIndex(id) }))
+const importSummary = computed(() => {
+  const items = importDraft.value?.items || []
+  return {
+    total: items.length,
+    direct: items.filter((item) => item.type === 'direct').length,
+    conflicts: items.filter((item) => item.type === 'conflict').length,
+    duplicates: items.filter((item) => item.type === 'duplicate').length,
+  }
+})
+const actionableImportItems = computed(() => (importDraft.value?.items || []).filter((item) => item.type !== 'direct'))
 
-  batchText.value = ''
-  batchError.value = ''
+function beginCourseImport(incoming, meta = {}) {
+  const existing = meta.existingCourses ?? courses.value
+  const items = classifyImportItems(incoming, existing, courseConflictOptions.value)
+  importDraft.value = {
+    source: meta.source || 'batch', reviewCount: meta.reviewCount || 0, editingId: meta.editingId || null, existing,
+    snapshot: JSON.parse(JSON.stringify(courses.value)), items,
+    decisions: Object.fromEntries(items.filter((item) => item.type === 'direct').map((item) => [item.index, 'add'])),
+  }
+  if (!items.some((item) => item.type !== 'direct')) { commitCourseImport(); return }
+  showImportConflict.value = true
+}
 
-  const reviewMsg = needsReviewCount.value > 0 ? `（${needsReviewCount.value} 门课程建议确认）` : ''
-  message.value = `成功导入 ${importedCount} 门课程${reviewMsg}`
+function setImportDecision(index, decision) { if (importDraft.value) importDraft.value.decisions[index] = decision }
+function cancelCourseImportReview() { showImportConflict.value = false; importDraft.value = null; batchError.value = '' }
+function applyAllImportDecisions(action) {
+  const draft = importDraft.value
+  if (!draft) return
+  for (const item of draft.items) {
+    if (item.type === 'direct') continue
+    if (action === 'replace') draft.decisions[item.index] = item.type === 'duplicate' ? 'skip' : 'replace'
+    if (action === 'keep') draft.decisions[item.index] = 'keep'
+    if (action === 'skip') draft.decisions[item.index] = 'skip'
+  }
+}
+function commitWholeScheduleReplacement() {
+  const draft = importDraft.value
+  if (!draft || !window.confirm(`确认替换当前整张课表？\n将移除现有 ${courses.value.length} 门课程，仅保留本次导入的 ${draft.items.length} 门课程。`)) return
+  commitCourseImport('replace-all')
+}
+function commitCourseImport(mode = 'smart') {
+  const draft = importDraft.value
+  if (!draft || importCommitBusy.value) return
+  const plan = buildImportPlan({ existingCourses: draft.existing, items: draft.items, decisions: draft.decisions, mode, options: courseConflictOptions.value })
+  if (!plan) { batchError.value = '请先为每一门冲突课程选择处理方式'; return }
+  if (plan.unsafe.length) {
+    batchError.value = `有 ${new Set(plan.unsafe.map(({ item }) => item.index)).size} 门课程仅部分重叠。为避免误删未冲突的周次或节次，当前只能选择“保留两门”或“跳过”。`
+    return
+  }
+  importCommitBusy.value = true
+  try {
+    courses.value = plan.courses
+    lastImportUndo.value = { snapshot: draft.snapshot, expiresAt: Date.now() + 30000 }
+    const summary = `新增 ${plan.added} 门，替换 ${plan.replaced} 门，跳过 ${plan.skipped} 门${plan.kept ? `，保留冲突 ${plan.kept} 门` : ''}`
+    if (draft.source === 'manual') { showForm.value = false; showToast(`课程已保存：${summary}`) }
+    else if (draft.source === 'template') { managerMessage.value = `模板导入完成：${summary}` }
+    else { batchText.value = ''; batchError.value = ''; message.value = `导入完成：${summary}${draft.reviewCount ? `（${draft.reviewCount} 门建议确认）` : ''}` }
+    showImportConflict.value = false
+    importDraft.value = null
+  } catch (e) {
+    courses.value = draft.snapshot
+    batchError.value = '写入失败，已自动恢复导入前课表'
+  } finally { importCommitBusy.value = false }
+}
+function undoLastCourseImport() {
+  const undo = lastImportUndo.value
+  if (!undo || Date.now() > undo.expiresAt) return
+  courses.value = JSON.parse(JSON.stringify(undo.snapshot))
+  lastImportUndo.value = null
+  message.value = '已撤销本次导入，课表已恢复'
+}
+function formatConflictWeeks(weeks) {
+  if (!weeks?.length) return ''
+  const ranges = []; let start = weeks[0]; let previous = weeks[0]
+  for (const week of weeks.slice(1)) {
+    if (week === previous + 1) previous = week
+    else { ranges.push(start === previous ? `${start}` : `${start}-${previous}`); start = previous = week }
+  }
+  ranges.push(start === previous ? `${start}` : `${start}-${previous}`)
+  return ranges.join('、')
+}
+function formatConflictPeriods(detail) {
+  const periods = timeConfig.value.periods.slice(detail.periodStart, detail.periodEnd + 1).map((period) => period.label)
+  return periods.length === 1 ? periods[0] : `${periods[0]}至${periods.at(-1)}`
 }
 
 function continueBatchImport() {
@@ -473,29 +1248,107 @@ function finishBatchImport() {
 }
 
 async function ocrImage(event) {
-  const file = event.target.files?.[0]
-  if (!file) return
-  if (!file.type.startsWith('image/')) {
+  const files = [...(event.target.files || [])]
+  if (!files.length) return
+  if (files.some((file) => !file.type.startsWith('image/'))) {
     batchError.value = '请选择图片文件'
     return
   }
   event.target.value = ''
+  await runTimetableOCR(files)
+}
 
+async function runTimetableOCR(files) {
+  if (!files.length) return
+  if (batchOcrProgress.state.status === 'running') return
+  lastBatchFiles = files
+  const controller = new AbortController()
+  batchOcrController = controller
+  batchOcrProgress.start({
+    title: files.length > 1 ? `正在识别 ${files.length} 张课程表` : '正在识别课程表',
+    steps: TIMETABLE_OCR_STEPS,
+    cancel: () => controller.abort(),
+  })
+  batchOcrProgress.setStep('read', 'running', `已选择 ${files.length} 张图片`)
+
+  const summaries = []
+  const failures = []
   try {
-    const result = await performOCR(file)
-    const columnTable = parseTimetableColumns(result.columns, timeConfig, MAX_WEEK)
-    const layoutTable = parseTimetableLayout(result.layout, timeConfig, MAX_WEEK)
-    const table = columnTable.courses.length >= layoutTable.courses.length ? columnTable : layoutTable
-    const recognizedText = table.batchText || result.text
-    // 追加到现有文本，避免覆盖用户已经修改过的内容。
-    batchText.value = (batchText.value ? batchText.value + '\n' : '') + recognizedText
-    ocrSummary.value = table.courses.length
-      ? `已按星期分列识别 ${table.courses.length} 门课程${table.detectedHeaders ? `，定位到 ${table.detectedHeaders} 个星期标题` : ''}。请检查预览后再导入。`
-      : '已提取图片文字，但没有可靠识别出表格位置。建议裁掉页面顶部和空白区域后重试，或在文本框中补充星期与节次。'
-    console.log(`[OCR] result: confidence=${result.confidence?.toFixed?.(2)}, words=${result.wordCount}`)
-  } catch (e) {
-    batchError.value = e.message
+    for (const [index, file] of files.entries()) {
+      if (controller.signal.aborted) break
+      try {
+      ocrSummary.value = files.length > 1 ? `正在识别第 ${index + 1}/${files.length} 张：${file.name}` : ''
+      batchOcrProgress.setStep('read', 'completed', `图片队列已读取，共 ${files.length} 张`)
+      batchOcrProgress.activity(`开始处理第 ${index + 1}/${files.length} 张：${file.name}`)
+      let result
+      try {
+        result = await performAccurateOCR(
+          file,
+          (event) => handleOcrActivity(batchOcrProgress, event, 'recognize'),
+          { kind: 'timetable', mode: 'auto', signal: controller.signal },
+        )
+      } catch (accurateError) {
+        if (accurateError?.name === 'AbortError') throw accurateError
+        if (import.meta.env.DEV) console.warn('[OCR] 精准课表识别降级为兼容模式', accurateError)
+        batchOcrProgress.activity('精准识别不可用，正在切换兼容引擎')
+        result = await performOCR(
+          file,
+          (event) => handleOcrActivity(batchOcrProgress, event, 'recognize'),
+          { signal: controller.signal },
+        )
+      }
+      batchOcrProgress.setStep('engine', 'completed', '识别引擎已就绪')
+      batchOcrProgress.setStep('recognize', 'completed', `第 ${index + 1}/${files.length} 张文字识别完成`)
+      batchOcrProgress.setStep('structure', 'running', '正在恢复星期列、节次行与合并单元格')
+      const columnTable = parseTimetableColumns(result.columns, timeConfig, MAX_WEEK)
+      const layoutTable = parseTimetableLayout(result.layout, timeConfig, MAX_WEEK)
+      const table = selectBestTimetableExtraction(columnTable, layoutTable)
+      batchOcrProgress.setStep('structure', 'completed', `恢复 ${table.courses.length} 门课程的表格位置`)
+      batchOcrProgress.setStep('validate', 'running', '正在检查课程字段与行列对应')
+      const recognizedText = table.batchText || result.text
+      batchText.value = (batchText.value ? batchText.value + '\n' : '') + recognizedText
+      summaries.push({ name: file.name, table, result })
+      const currentCourses = summaries.reduce((sum, item) => sum + item.table.courses.length, 0)
+      const currentReviews = summaries.reduce((sum, item) => sum + item.table.diagnostics.reviewCount, 0)
+      batchOcrProgress.setPartial({ 图片: `${summaries.length}/${files.length}`, 课程: currentCourses, 建议确认: currentReviews }, `第 ${index + 1}/${files.length} 张处理完成`)
+      if (import.meta.env.DEV) console.log(`[OCR] result: file=${file.name}, confidence=${result.confidence?.toFixed?.(2)}, words=${result.wordCount}, structureScore=${table.diagnostics.score.toFixed(1)}`)
+      } catch (e) {
+        if (e?.name === 'AbortError') return
+        failures.push(`${file.name}：${e.message}`)
+        batchOcrProgress.activity(`第 ${index + 1}/${files.length} 张失败，已保留此前结果`)
+      }
+    }
+    if (!summaries.length && failures.length) {
+      batchError.value = `图片识别失败：${failures.join('；')}`
+      const engineFailed = isOcrEngineFailure(batchOcrProgress, failures.join('；'))
+      if (!engineFailed) batchOcrProgress.setStep('engine', 'completed', '识别引擎已启动')
+      batchOcrProgress.fail(engineFailed ? 'engine' : 'recognize', batchError.value, { retry: true })
+      return
+    }
+    batchOcrProgress.setStep('validate', failures.length ? 'warning' : 'completed', failures.length ? `${failures.length} 张图片需要重试` : '课程字段与结构检查完成')
+    batchOcrProgress.setStep('preview', 'running', '正在生成可编辑导入预览')
+    const courseCount = summaries.reduce((sum, item) => sum + item.table.courses.length, 0)
+    const reviewCount = summaries.reduce((sum, item) => sum + item.table.diagnostics.reviewCount, 0)
+    ocrSummary.value = courseCount
+      ? `已从 ${summaries.length} 张图片恢复 ${courseCount} 门课程${reviewCount ? `，其中 ${reviewCount} 门建议确认` : ''}。请检查预览后再导入。`
+      : '已提取图片文字，但没有可靠恢复表格位置。可裁剪到课表区域后重试，或在文本框补充星期与节次。'
+    batchError.value = failures.length ? `部分图片未识别：${failures.join('；')}` : ''
+    batchOcrProgress.setStep('preview', 'completed', '导入预览已生成，尚未写入课表')
+    batchOcrProgress.finish(
+      failures.length ? `已保留 ${summaries.length} 张图片的结果，${failures.length} 张需要重试` : '全部图片识别完成，请确认预览',
+      failures.length || reviewCount ? 'warning' : 'completed',
+    )
+  } finally {
+    if (batchOcrController === controller) batchOcrController = null
   }
+}
+
+function retryBatchOCR() {
+  if (lastBatchFiles.length) void runTimetableOCR(lastBatchFiles)
+}
+
+function continueBatchResults() {
+  batchOcrProgress.reset()
 }
 
 const curWeek = computed(() => Math.min(Math.max(currentWeek(), 1), MAX_WEEK))
@@ -672,13 +1525,9 @@ function save() {
     endWeek: ew,
     weekType: form.weekType,
   }
-  if (editingId.value) {
-    const c = courses.value.find((c) => c.id === editingId.value)
-    Object.assign(c, data)
-  } else {
-    courses.value.push({ id: 'c' + Date.now(), ...data })
-  }
-  showForm.value = false
+  const id = editingId.value || `c${Date.now()}`
+  const existing = editingId.value ? courses.value.filter((course) => course.id !== editingId.value) : courses.value
+  beginCourseImport([{ id, ...data }], { source: 'manual', editingId: editingId.value, existingCourses: existing })
 }
 
 function remove() {
@@ -703,10 +1552,11 @@ function templateDate(value) {
 }
 
 const todayIdx = computed(() => todayIndex())
-import { onUnmounted } from 'vue'
 
-onUnmounted(() => {
-  cleanupOCR()
+// 只取消当前页面任务；OCR Worker 是模块级单例，跨路由复用，避免每次返回课表都重新加载模型。
+onBeforeUnmount(() => {
+  scheduleOcrController?.abort()
+  batchOcrController?.abort()
 })
 </script>
 
@@ -731,29 +1581,34 @@ onUnmounted(() => {
           <button :class="{ on: appearance.scheduleSkin === 'timeline' }" @click="appearance.scheduleSkin = 'timeline'">极简</button>
         </div>
       </div>
-      <div class="seg-group">
+      <div v-if="showCampusSwitcher" class="seg-group">
         <span class="seg-label">校区</span>
         <div class="seg">
           <button
             v-for="campus in timeConfig.campuses"
             :key="campus.id"
             :class="{ on: currentCampusId() === campus.id }"
-            @click="timeConfig.currentCampus = campus.id"
+            @click="selectScheduleCampus(campus.id)"
           >
             {{ campus.name }}
           </button>
         </div>
       </div>
-      <div class="seg-group">
+      <div v-if="showSeasonSwitcher" class="seg-group">
         <span class="seg-label">作息</span>
         <div class="seg">
-          <button :class="{ on: timeConfig.autoSeason }" @click="timeConfig.autoSeason = true">
+          <button
+            :class="{ on: timeConfig.autoSeason && currentAutoStatus.available }"
+            :disabled="!currentAutoStatus.available"
+            :title="currentAutoStatus.available ? '根据当前日期自动选择' : '完善生效日期并解决冲突后可用'"
+            @click="enableAutoSeason"
+          >
             自动
           </button>
           <button
-            v-for="season in timeConfig.seasons"
+            v-for="season in seasonsForCurrentCampus"
             :key="season.id"
-            :class="{ on: !timeConfig.autoSeason && timeConfig.currentSeason === season.id }"
+            :class="{ on: !timeConfig.autoSeason && currentSeasonId() === season.id }"
             @click="timeConfig.autoSeason = false; timeConfig.currentSeason = season.id"
           >
             {{ season.name }}
@@ -773,8 +1628,16 @@ onUnmounted(() => {
           回到本周
         </button>
       </div>
+
+      <!-- 自动/手动作息模式提示（仅在多作息季时出现） -->
+      <p v-if="autoModeInfo" class="auto-mode-hint" :class="autoModeInfo.mode">
+        <template v-if="autoModeInfo.mode === 'auto'">⏱ {{ autoModeInfo.text }}<small>{{ autoModeInfo.hint }}</small></template>
+        <template v-else-if="autoModeInfo.mode === 'unavailable'">⚠ {{ autoModeInfo.text }}<small>{{ autoModeInfo.hint }}</small></template>
+        <template v-else>✋ {{ autoModeInfo.text }}<small>{{ autoModeInfo.hint }}</small></template>
+      </p>
+
       <div class="add-actions">
-        <button class="btn btn-ghost" @click="openBatch">⇩ 批量录入</button>
+        <button class="btn btn-ghost" @click="openBatchShift">⇩ 批量录入</button>
         <button class="btn btn-primary" @click="openAdd()">＋ 添加课程</button>
       </div>
     </div>
@@ -832,7 +1695,7 @@ onUnmounted(() => {
 
     <p class="tip">
       💡 正在查看：{{ campusName(currentCampusId()) }} ·
-      {{ seasonName(currentSeasonId()) }}<template v-if="timeConfig.autoSeason">（自动）</template> ·
+      {{ seasonName(currentSeasonId()) }}<template v-if="showSeasonSwitcher && timeConfig.autoSeason && currentAutoStatus.available">（自动）</template> ·
       第 {{ viewWeek }} 周的课程；
       点击空白格子快速添加，点击课程卡片可编辑
     </p>
@@ -1044,19 +1907,26 @@ onUnmounted(() => {
             class="batch-textarea"
           ></textarea>
           <div class="batch-image-upload" @click.stop>
-            <label class="file-button" for="batch-ocr-input" :class="{ busy: getOCRState().status === 'initializing' || getOCRState().status === 'recognizing' }">
-              <input id="batch-ocr-input" type="file" accept="image/*" @change="ocrImage" hidden />
-              <span v-if="getOCRState().status === 'initializing' || getOCRState().status === 'recognizing'">🔄 {{ getOCRState().stage }}</span>
+            <label class="file-button" for="batch-ocr-input" :class="{ busy: batchOcrProgress.state.status === 'running' }">
+              <input id="batch-ocr-input" type="file" accept="image/*" multiple :disabled="batchOcrProgress.state.status === 'running'" @change="ocrImage" hidden />
+              <span v-if="batchOcrProgress.state.status === 'running'">🔄 {{ batchOcrProgress.state.latestActivity }}</span>
               <span v-else>📷 上传图片识别</span>
             </label>
-            <p class="ocr-hint">支持 PNG/JPG/WebP；长截图会保留小字清晰度，首次识别需加载约 2.5 MB 中文模型</p>
-            <div v-if="getOCRState().status === 'initializing' || getOCRState().status === 'recognizing'" class="ocr-progress">
-              <div class="ocr-progress-bar" :style="{ width: getOCRState().progress + '%' }"></div>
-            </div>
-            <p v-if="getOCRState().error" class="ocr-hint ocr-error-hint">⚠️ {{ getOCRState().error }}（重新选择图片即可重试）</p>
+            <p class="ocr-hint">支持一次选择多张 PNG/JPG/WebP；长截图会保留小字清晰度，结果逐张追加且不会覆盖已修改内容</p>
             <p v-if="ocrSummary" class="ocr-result-hint">{{ ocrSummary }}</p>
           </div>
         </div>
+
+        <TaskProgress
+          :task="batchOcrProgress.state"
+          :elapsed-seconds="batchOcrProgress.elapsedSeconds.value"
+          :activity-age-seconds="batchOcrProgress.activityAgeSeconds.value"
+          :stalled="batchOcrProgress.isStalled.value"
+          @cancel="batchOcrProgress.cancel"
+          @retry="retryBatchOCR"
+          @continue="continueBatchResults"
+          @wait="batchOcrProgress.continueWaiting"
+        />
 
         <div v-if="batchRows.length" class="batch-preview-wrap">
           <div class="batch-summary">
@@ -1129,17 +1999,56 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <p v-if="batchError" class="error">{{ batchError }}</p>
+        <p v-if="batchError && !(batchOcrProgress.state.active && batchOcrProgress.state.visible)" class="error">{{ batchError }}</p>
         <div v-if="message" class="batch-success">
           <b>✓ {{ message }}</b>
           <span>课程已经保存在本机，可以继续录入或返回课表检查。</span>
-          <div><button class="btn btn-ghost" @click="continueBatchImport">继续录入</button><button class="btn btn-primary" @click="finishBatchImport">完成并查看课表</button></div>
+          <div><button v-if="lastImportUndo" class="btn btn-ghost" @click="undoLastCourseImport">撤销本次导入</button><button class="btn btn-ghost" @click="continueBatchImport">继续录入</button><button class="btn btn-primary" @click="finishBatchImport">完成并查看课表</button></div>
         </div>
         <div v-else class="actions">
           <button class="btn btn-ghost" @click="batchText = ''">清空</button>
           <button class="btn btn-primary" :disabled="!validBatchCount || invalidBatchCount" @click="importBatch">
             导入 {{ validBatchCount }} 门课程
           </button>
+        </div>
+      </div>
+    </Modal>
+
+    <Modal :open="showImportConflict" title="课程导入冲突处理" wide @close="cancelCourseImportReview">
+      <div v-if="importDraft" class="import-conflict-review">
+        <p class="import-conflict-summary">
+          导入检查完成：本次 {{ importSummary.total }} 门课程，<b>{{ importSummary.direct }} 门可直接导入</b>，
+          <b v-if="importSummary.conflicts">{{ importSummary.conflicts }} 门存在真实时间冲突</b><b v-if="importSummary.duplicates">{{ importSummary.duplicates }} 门疑似重复</b>。
+        </p>
+        <div class="import-conflict-actions">
+          <button class="btn btn-primary" @click="applyAllImportDecisions('replace')">一键替换 {{ importSummary.conflicts }} 门冲突项</button>
+          <button class="btn" @click="applyAllImportDecisions('keep')">全部保留两门</button>
+          <button class="btn" @click="applyAllImportDecisions('skip')">全部跳过冲突项</button>
+        </div>
+        <div class="conflict-item-list">
+          <article v-for="item in actionableImportItems" :key="item.index" class="conflict-item">
+            <b>{{ item.type === 'duplicate' ? '疑似重复课程' : '时间冲突' }}</b>
+            <p>新课程：{{ item.course.name }} · {{ DAYS[item.course.day] }} · {{ coursePeriodText(item.course) }} · {{ weekLabel(item.course) }}</p>
+            <div v-for="match in item.matches" :key="match.existing.id" class="conflict-match">
+              当前课程：{{ match.existing.name }} · {{ DAYS[match.existing.day] }} · {{ coursePeriodText(match.existing) }} · {{ weekLabel(match.existing) }}
+              <small>实际冲突：第{{ formatConflictWeeks(match.detail.weeks) }}周 · {{ formatConflictPeriods(match.detail) }}</small>
+            </div>
+            <select :value="importDraft.decisions[item.index] || ''" @change="setImportDecision(item.index, $event.target.value)">
+              <option value="" disabled>请选择处理方式</option>
+              <option value="replace">替换原课程</option>
+              <option value="keep">两门都保留</option>
+              <option value="skip">跳过新课程</option>
+            </select>
+          </article>
+        </div>
+        <p v-if="batchError" class="error">{{ batchError }}</p>
+        <div class="import-conflict-footer">
+          <button class="btn btn-ghost" @click="cancelCourseImportReview">取消</button>
+          <button class="btn btn-primary" :disabled="importCommitBusy" @click="commitCourseImport">确认导入</button>
+        </div>
+        <div class="replace-all-schedule">
+          <b>高级操作</b><span>替换当前整张课表会移除原有全部课程，与“替换冲突项”不同。</span>
+          <button class="btn btn-danger" :disabled="importCommitBusy" @click="commitWholeScheduleReplacement">替换当前整张课表</button>
         </div>
       </div>
     </Modal>
@@ -1181,7 +2090,7 @@ onUnmounted(() => {
       </div>
     </Modal>
 
-    <Modal :open="showTimeEditor" title="🕐 作息与时间设置" @close="showTimeEditor = false">
+    <Modal :open="showTimeEditor" title="🕐 作息与时间设置" @close="tryCloseTimeEditor">
       <div class="settings">
         <div class="tab-bar" role="tablist">
           <button
@@ -1195,177 +2104,432 @@ onUnmounted(() => {
         </div>
         <p class="settings-hint">{{ tabHints[settingsTab] }}</p>
         <p v-if="settingError" class="error">{{ settingError }}</p>
+        <Transition name="toast">
+          <p v-if="settingsToast" class="settings-toast">✓ {{ settingsToast }}</p>
+        </Transition>
 
-        <section v-show="settingsTab === 'campus'" class="setting-section">
-          <div class="setting-head">
-            <h4>🏫 校区（{{ timeConfig.campuses.length }}）</h4>
+        <!-- ============ 作息方案 ============ -->
+        <section v-show="settingsTab === 'plans'" class="setting-section plan-section">
+          <!-- 方案选择器：按复杂度自动简化 -->
+          <div v-if="timeConfig.campuses.length > 1 || seasonsForPlanCampus.length > 1" class="plan-picker">
+            <div v-if="timeConfig.campuses.length > 1" class="plan-picker-row">
+              <span class="pp-label">校区</span>
+              <div class="seg">
+                <button
+                  v-for="campus in timeConfig.campuses"
+                  :key="campus.id"
+                  :class="{ on: planCampusId === campus.id }"
+                  @click="switchPlan(planSeasonId, campus.id)"
+                >{{ campus.name }}</button>
+              </div>
+            </div>
+            <div v-if="seasonsForPlanCampus.length > 1" class="plan-picker-row">
+              <span class="pp-label">作息季</span>
+              <div class="seg">
+                <button
+                  v-for="season in seasonsForPlanCampus"
+                  :key="season.id"
+                  :class="{ on: planSeasonId === season.id }"
+                  @click="switchPlan(season.id, planCampusId)"
+                >{{ season.name }}</button>
+              </div>
+            </div>
           </div>
-          <div v-for="campus in timeConfig.campuses" :key="campus.id" class="setting-row">
-            <input
-              :value="campus.name"
-              @change="renameCampus(campus.id, $event.target.value)"
-            />
-            <button
-              class="setting-del"
-              :disabled="timeConfig.campuses.length <= 1"
-              title="删除校区"
-              @click="onRemoveCampus(campus.id)"
-            >✕</button>
-          </div>
-          <div class="setting-add">
-            <input v-model="newCampusName" placeholder="新校区名称，例如：东校区" @keyup.enter="onAddCampus" />
-            <button class="btn btn-ghost" @click="onAddCampus">＋ 添加</button>
-          </div>
-        </section>
 
-        <section v-show="settingsTab === 'season'" class="setting-section">
-          <div class="setting-head">
-            <h4>☀️ 作息季（{{ timeConfig.seasons.length }}）</h4>
-            <span class="setting-note">按起始日期自动切换（晚于今日的最新一季生效）</span>
+          <!-- 方案标题 + 工具条 -->
+          <div class="plan-head">
+            <b class="plan-title">{{ seasonName(planSeasonId) }} · {{ campusName(planCampusId) }}</b>
+            <span v-if="draftDirty" class="dirty-dot">● 有未保存修改</span>
           </div>
-          <div v-for="season in timeConfig.seasons" :key="season.id" class="setting-row season">
-            <input
-              class="grow"
-              :value="season.name"
-              @change="renameSeason(season.id, $event.target.value, null)"
-            />
-            <input
-              class="date"
-              :value="season.startDate"
-              placeholder="05-01"
-              @change="renameSeason(season.id, null, $event.target.value)"
-            />
-            <button
-              class="setting-del"
-              :disabled="timeConfig.seasons.length <= 1"
-              title="删除作息季"
-              @click="onRemoveSeason(season.id)"
-            >✕</button>
+          <div class="plan-tools">
+            <button class="btn btn-sm btn-ghost" @click="toggleImport">＋ 新建 / 导入</button>
+            <button v-if="otherPlans.length" class="btn btn-sm" @click="toggleCopy">⧉ 复制已有方案</button>
+            <button class="btn btn-sm" @click="openTimeShift">± 批量调整</button>
+            <button class="btn btn-sm" @click="onResetTimes">↺ 恢复默认</button>
           </div>
-          <div class="setting-add">
-            <input v-model="newSeasonName" class="grow" placeholder="新作息季名称，例如：春季时间" @keyup.enter="onAddSeason" />
-            <input v-model="newSeasonDate" class="date" placeholder="03-01" />
-            <button class="btn btn-ghost" @click="onAddSeason">＋ 添加</button>
-          </div>
-        </section>
 
-        <section v-show="settingsTab === 'period'" class="setting-section">
-          <div class="setting-head">
-            <h4>📋 节次（{{ timeConfig.periods.length }}）</h4>
-            <span class="setting-note">被课程占用的节次无法删除</span>
+          <!-- 复制方案面板 -->
+          <div v-if="copyOpen" class="tool-panel">
+            <div class="tool-panel-title">从哪个方案复制？（复制后两套方案互相独立）</div>
+            <div class="copy-list">
+              <button
+                v-for="plan in otherPlans"
+                :key="plan.season + plan.campus"
+                class="copy-item"
+                @click="copyFrom(plan.season, plan.campus)"
+              >{{ plan.seasonName }} · {{ plan.campusName }}</button>
+            </div>
           </div>
-          <div class="period-grid">
-            <div v-for="period in timeConfig.periods" :key="period.id" class="setting-row">
+
+          <!-- 批量调整面板（先预览） -->
+          <div v-if="batchOpen" class="tool-panel">
+            <div class="tool-panel-title">批量调整时间（先预览，确认后应用到草稿）</div>
+            <div class="batch-controls">
+              <select v-model.number="batchFrom">
+                <option v-for="(p, i) in timeConfig.periods" :key="p.id" :value="i">{{ p.label }}</option>
+              </select>
+              <i>至</i>
+              <select v-model.number="batchTo">
+                <option v-for="(p, i) in timeConfig.periods" :key="p.id" :value="i">{{ p.label }}</option>
+              </select>
+              <select v-model.number="batchDelta">
+                <option :value="-30">−30 分钟</option>
+                <option :value="-15">−15 分钟</option>
+                <option :value="-10">−10 分钟</option>
+                <option :value="-5">−5 分钟</option>
+                <option :value="5">+5 分钟</option>
+                <option :value="10">+10 分钟</option>
+                <option :value="15">+15 分钟</option>
+                <option :value="30">+30 分钟</option>
+                <option :value="0">自定义</option>
+              </select>
               <input
-                :value="period.label"
-                @change="renamePeriod(period.id, $event.target.value)"
+                v-if="batchDelta === 0"
+                v-model="batchCustom"
+                class="num"
+                type="number"
+                placeholder="±分钟"
+              />
+            </div>
+            <div v-if="batchPreview" class="diff-list">
+              <div v-for="row in batchPreview.rows" :key="row.index" class="diff-row">
+                <span class="diff-label">{{ row.label }}</span>
+                <s>{{ row.from }}</s>
+                <i>→</i>
+                <b>{{ row.to }}</b>
+              </div>
+              <button class="btn btn-primary btn-sm apply-btn" @click="applyBatch">应用 {{ batchPreview.rows.length }} 行</button>
+            </div>
+            <p v-else class="tool-tip">选择范围与调整幅度后自动预览。</p>
+          </div>
+
+          <!-- 快速生成（保留，改为预览制） -->
+          <div class="gen-box">
+            <button type="button" class="gen-title as-btn" @click="toggleGenPreview">
+              ⚡ 快速生成时间（辅助填充）<i>{{ genPreview ? '▴' : '▾' }}</i>
+            </button>
+            <div v-show="genPreview !== null || true" class="gen-body" v-if="1">
+              <div class="gen-grid">
+                <label class="gen-item">
+                  <span>从</span>
+                  <select v-model="gen.startId">
+                    <option v-for="p in genStartOptions" :key="p.id" :value="p.id">{{ p.label }}</option>
+                  </select>
+                  <span>开始</span>
+                </label>
+                <label class="gen-item">
+                  <input v-model="gen.startTime" type="time" />
+                  <span>上课</span>
+                </label>
+                <label class="gen-item">
+                  <span>每节</span>
+                  <input v-model.number="gen.duration" type="number" min="20" max="90" class="num" />
+                  <span>分钟</span>
+                </label>
+                <label class="gen-item">
+                  <span>节间休息</span>
+                  <input v-model.number="gen.breakMin" type="number" min="0" max="60" class="num" />
+                  <span>分钟</span>
+                </label>
+                <label class="gen-item">
+                  <span>午休：第</span>
+                  <select v-model.number="gen.lunchAfterIdx" class="num">
+                    <option v-for="(p, i) in genAfterOptions" :key="p.id" :value="i" :disabled="i >= timeConfig.periods.length - 1">{{ p.label }}</option>
+                  </select>
+                  <span>后</span>
+                  <input v-model.number="gen.lunchMin" type="number" min="0" max="300" class="num" />
+                  <span>分钟（0=不休）</span>
+                </label>
+                <label class="gen-item">
+                  <span>晚休：第</span>
+                  <select v-model.number="gen.dinnerAfterIdx" class="num">
+                    <option v-for="(p, i) in genAfterOptions" :key="p.id" :value="i" :disabled="i >= timeConfig.periods.length - 1">{{ p.label }}</option>
+                  </select>
+                  <span>后</span>
+                  <input v-model.number="gen.dinnerMin" type="number" min="0" max="300" class="num" />
+                  <span>分钟（0=不休）</span>
+                </label>
+              </div>
+              <button class="btn btn-sm btn-ghost" @click="toggleGenPreview">{{ genPreview ? '收起预览' : '生成预览' }}</button>
+
+              <!-- 生成预览：取消 / 填充空白 / 覆盖 -->
+              <div v-if="genPreview" class="diff-list">
+                <p class="tool-tip">预览：从「{{ timeConfig.periods[genPreview.rows[0]?.index ?? 0]?.label }}」起共 {{ genPreview.rows.length }} 节。生成只是辅助填充，生成后仍可逐节修改。</p>
+                <div v-for="row in genPreview.rows" :key="row.index" class="diff-row">
+                  <span class="diff-label">{{ row.label }}</span>
+                  <s>{{ row.from }}</s>
+                  <i>→</i>
+                  <b>{{ row.to }}</b>
+                </div>
+                <div class="gen-apply-row">
+                  <button class="btn btn-sm" @click="genPreview = null">取消</button>
+                  <button class="btn btn-sm" @click="applyGenerate('fill')">填充空白节次</button>
+                  <button class="btn btn-sm btn-primary" @click="applyGenerate('all')">覆盖当前方案</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 新建 / 导入 -->
+          <div v-if="importOpen" class="tool-panel import-panel">
+            <div class="tool-panel-title">新建 / 导入作息</div>
+            <div class="seg import-tabs">
+              <button :class="{ on: importTab === 'paste' }" @click="importTab = 'paste'">📋 粘贴时间表</button>
+              <button :class="{ on: importTab === 'image' }" @click="importTab = 'image'">📷 从图片识别</button>
+            </div>
+
+            <div v-if="importTab === 'paste'">
+              <textarea
+                v-model="pasteText"
+                class="paste-area"
+                rows="6"
+                placeholder="粘贴学校官网或通知里的作息时间，每行一条：&#10;第一节 8:00-8:45&#10;第二节 8:55-9:40&#10;夏季时间 / 南校区 等标题会被自动识别"
+              />
+              <button class="btn btn-sm btn-ghost" @click="runParsePaste">解析预览</button>
+            </div>
+
+            <div v-else class="image-import">
+              <label class="file-button" for="schedule-import-image" :class="{ busy: scheduleOcrProgress.state.status === 'running' }">
+                <span v-if="scheduleOcrProgress.state.status === 'running'">🔄 {{ scheduleOcrProgress.state.latestActivity }}</span>
+                <span v-else>📷 上传学校官方作息表图片</span>
+                <input id="schedule-import-image" type="file" accept="image/*" :disabled="scheduleOcrProgress.state.status === 'running'" @change="onImportImage" />
+              </label>
+              <p class="tool-tip">识别结果同样进入下方预览，确认前不会保存。</p>
+              <button v-if="lastScheduleImage && (importError || importReviewCount)" class="btn btn-sm btn-ghost accurate-retry" @click="retryScheduleAccurate">
+                使用精准模式重新识别
+              </button>
+            </div>
+
+            <TaskProgress
+              :task="scheduleOcrProgress.state"
+              :elapsed-seconds="scheduleOcrProgress.elapsedSeconds.value"
+              :activity-age-seconds="scheduleOcrProgress.activityAgeSeconds.value"
+              :stalled="scheduleOcrProgress.isStalled.value"
+              compact
+              @cancel="scheduleOcrProgress.cancel"
+              @retry="retryScheduleOCR"
+              @continue="continueScheduleResults"
+              @wait="scheduleOcrProgress.continueWaiting"
+            />
+
+            <p v-if="importError && !(scheduleOcrProgress.state.active && scheduleOcrProgress.state.visible)" class="error">{{ importError }}</p>
+
+            <!-- 识别预览 / 校对 -->
+            <div v-if="importRows.length" class="import-preview">
+              <div class="tool-panel-title">识别结果校对（可逐行修改）</div>
+              <div class="import-review-summary">
+                <span class="ok-text">✓ {{ importNormalCount }} 项正常</span>
+                <span v-if="importReviewCount" class="warning-text">⚠ {{ importReviewCount }} 项建议确认</span>
+              </div>
+              <div v-if="importAnalysis?.schemes?.length > 1" class="scheme-picker">
+                <b>已识别 {{ importAnalysis.schemes.length }} 组作息</b>
+                <div class="scheme-list">
+                  <button
+                    v-for="scheme in importAnalysis.schemes"
+                    :key="scheme.index"
+                    :class="{ on: importSchemeIndex === scheme.index, imported: importAssignments[scheme.index]?.imported }"
+                    @click="applyImportScheme(scheme.index)"
+                  >{{ importSchemeLabel(scheme) }}</button>
+                </div>
+              </div>
+
+              <div class="import-targets">
+                <div class="import-target-title">识别结果归属</div>
+                <div class="it-row">
+                  <span>校区</span>
+                  <b v-if="timeConfig.campuses.length === 1" class="bound-value">{{ timeConfig.campuses[0].name }}</b>
+                  <div v-else class="choice-chips">
+                    <button
+                      v-for="campus in timeConfig.campuses"
+                      :key="campus.id"
+                      :class="{ on: importTargetCampus === campus.id }"
+                      @click="selectImportCampus(campus.id)"
+                    >{{ campus.name }}</button>
+                  </div>
+                </div>
+                <div class="it-row">
+                  <span>作息季</span>
+                  <b v-if="importSeasonsForCampus.length === 1 && importTargetSeason === importSeasonsForCampus[0].id" class="bound-value">{{ importSeasonsForCampus[0].name }}</b>
+                  <div v-else-if="importTargetCampus" class="choice-chips">
+                    <button
+                      v-for="season in importSeasonsForCampus"
+                      :key="season.id"
+                      :class="{ on: importTargetSeason === season.id }"
+                      @click="selectImportSeason(season.id)"
+                    >{{ season.name }}</button>
+                  </div>
+                  <small v-else>请先选择校区</small>
+                </div>
+                <p v-if="detectedSeasonName || detectedCampusName" class="detected-title">
+                  识别到标题：{{ [detectedSeasonName, detectedCampusName].filter(Boolean).join(' / ') }}
+                </p>
+                <p class="assignment-message" :class="importAssignmentState.type">
+                  {{ importAssignmentState.type === 'matched' || importAssignmentState.type === 'confirmed' || importAssignmentState.type === 'bound' ? '✓' : '⚠' }}
+                  {{ importAssignmentState.text }}
+                </p>
+              </div>
+
+              <div class="import-rows">
+                <div v-for="(row, index) in importRows" :key="index" class="import-row-wrap" :class="{ review: row.needsReview && !row.confirmed }">
+                  <div class="import-row">
+                  <input v-model="row.label" class="grow" placeholder="节次名称" @input="row.confirmed = true" />
+                  <input v-model="row.start" type="time" @input="row.confirmed = true" />
+                  <i>—</i>
+                  <input v-model="row.end" type="time" @input="row.confirmed = true" />
+                  <button class="setting-del" title="删除该行" @click="removeImportRow(index)">✕</button>
+                  </div>
+                  <div v-if="row.needsReview && !row.confirmed" class="row-review-detail">
+                    <span>⚠ {{ row.issues.join('；') || '多次识别结果不一致' }}</span>
+                    <button class="btn btn-xs" @click="acceptImportRow(row)">确认无误</button>
+                  </div>
+                </div>
+              </div>
+              <div class="import-foot">
+                <button class="btn btn-sm" @click="addImportRow">＋ 加一行</button>
+                <button class="btn btn-sm btn-primary" @click="confirmImport">确认导入</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 时间编辑列表：上午/下午/晚上 自动分组 -->
+          <div class="plan-list">
+            <div v-for="section in planSections" :key="section.key" class="plan-section-group">
+              <div class="section-label">{{ section.label }}</div>
+              <div
+                v-for="row in section.rows"
+                :key="row.period.id"
+                class="plan-row"
+                :class="{ 'has-error': rowError(row.index) }"
+              >
+                <span class="plan-row-label">{{ row.period.label }}</span>
+                <div class="plan-row-times">
+                  <input
+                    type="time"
+                    v-model="draft[row.index].start"
+                    @input="markDirty"
+                  />
+                  <i>—</i>
+                  <input
+                    type="time"
+                    v-model="draft[row.index].end"
+                    @input="markDirty"
+                  />
+                </div>
+                <span v-if="rowError(row.index)" class="plan-row-error">{{ rowError(row.index) }}</span>
+              </div>
+            </div>
+            <p v-if="planHasError" class="plan-error-tip">存在时间问题，保存前请先修正。</p>
+          </div>
+        </section>
+
+        <!-- ============ 基础设置 ============ -->
+        <template v-if="settingsTab === 'base'">
+          <section class="setting-section">
+            <div class="setting-head">
+              <h4>🏫 校区（{{ timeConfig.campuses.length }}）</h4>
+            </div>
+            <div v-for="campus in timeConfig.campuses" :key="campus.id" class="setting-row">
+              <input
+                :value="campus.name"
+                @change="renameCampus(campus.id, $event.target.value)"
               />
               <button
                 class="setting-del"
-                :disabled="timeConfig.periods.length <= 1"
-                title="删除节次"
-                @click="onRemovePeriod(period.id)"
+                :disabled="timeConfig.campuses.length <= 1"
+                title="删除校区"
+                @click="onRemoveCampus(campus.id)"
               >✕</button>
             </div>
-          </div>
-          <div class="setting-add">
-            <input v-model="newPeriodLabel" placeholder="新节次名称，例如：第十三节课" @keyup.enter="onAddPeriod" />
-            <button class="btn btn-ghost" @click="onAddPeriod">＋ 添加</button>
-          </div>
-        </section>
-
-        <section v-show="settingsTab === 'times'" class="setting-section">
-          <div class="setting-head">
-            <h4>⏰ 各时段上下课时间</h4>
-          </div>
-
-          <div class="gen-box">
-            <div class="gen-title">⚡ 一键生成时间</div>
-            <div class="gen-grid">
-              <label class="gen-item">
-                <span>从</span>
-                <select v-model="gen.startId">
-                  <option v-for="p in genStartOptions" :key="p.id" :value="p.id">{{ p.label }}</option>
-                </select>
-                <span>开始</span>
-              </label>
-              <label class="gen-item">
-                <input v-model="gen.startTime" type="time" />
-                <span>上课</span>
-              </label>
-              <label class="gen-item">
-                <span>每节</span>
-                <input v-model.number="gen.duration" type="number" min="20" max="90" class="num" />
-                <span>分钟</span>
-              </label>
-              <label class="gen-item">
-                <span>节间休息</span>
-                <input v-model.number="gen.breakMin" type="number" min="0" max="60" class="num" />
-                <span>分钟</span>
-              </label>
-              <label class="gen-item">
-                <span>午休：第</span>
-                <select v-model.number="gen.lunchAfterIdx" class="num">
-                  <option v-for="(p, i) in genAfterOptions" :key="p.id" :value="i" :disabled="i >= timeConfig.periods.length - 1">{{ p.label }}</option>
-                </select>
-                <span>后</span>
-                <input v-model.number="gen.lunchMin" type="number" min="0" max="300" class="num" />
-                <span>分钟（0=不休）</span>
-              </label>
-              <label class="gen-item">
-                <span>晚休：第</span>
-                <select v-model.number="gen.dinnerAfterIdx" class="num">
-                  <option v-for="(p, i) in genAfterOptions" :key="p.id" :value="i" :disabled="i >= timeConfig.periods.length - 1">{{ p.label }}</option>
-                </select>
-                <span>后</span>
-                <input v-model.number="gen.dinnerMin" type="number" min="0" max="300" class="num" />
-                <span>分钟（0=不休）</span>
-              </label>
+            <div class="setting-add">
+              <input v-model="newCampusName" placeholder="新校区名称，例如：东校区" @keyup.enter="onAddCampus" />
+              <button class="btn btn-ghost" @click="onAddCampus">＋ 添加</button>
             </div>
-            <div class="gen-scope">
-              <label><input v-model="gen.allSeasons" type="checkbox" /> 应用到所有作息季</label>
-              <label><input v-model="gen.allCampuses" type="checkbox" /> 应用到所有校区</label>
-              <button class="btn btn-primary" @click="generateTimes">⚡ 生成</button>
+          </section>
+
+          <section class="setting-section">
+            <div class="setting-head">
+              <h4>☀️ 作息季（{{ timeConfig.seasons.length }}）</h4>
+              <span class="setting-note">按起始日期自动切换；同一天开始会无法判断先后</span>
             </div>
-            <p class="gen-tip">不勾选时只生成当前「{{ seasonName(currentSeasonId()) }} × {{ campusName(currentCampusId()) }}」组合；早自习等特殊节次可先从它之后生成，再单独手调。</p>
-          </div>
+            <p v-if="seasonDateConflicts.length" class="error conflict-tip">
+              ⚠ 生效日期冲突：{{ seasonDateConflicts.map((c) => `${c.campusName} · ${c.date}（${c.names.join(' / ')}）`).join('；') }} —— 对应校区的自动模式无法判断先后，请调整日期。
+            </p>
+            <div v-for="season in timeConfig.seasons" :key="season.id" class="season-block">
+              <div class="setting-row season">
+                <input
+                  class="grow"
+                  :value="season.name"
+                  @change="renameSeason(season.id, $event.target.value, null)"
+                />
+                <input
+                  class="date"
+                  :class="{ invalid: !isValidSeasonDate(season.startDate) }"
+                  :value="season.startDate"
+                  placeholder="05-01"
+                  @blur="onSeasonDateChange(season, $event.target.value, $event.target)"
+                />
+                <button
+                  class="setting-del"
+                  :disabled="timeConfig.seasons.length <= 1"
+                  title="删除作息季"
+                  @click="onRemoveSeason(season.id)"
+                >✕</button>
+              </div>
+              <small v-if="!isValidSeasonDate(season.startDate)" class="season-date-warning">
+                未配置有效生效日期；适用校区存在多个作息季时，自动模式将不可用。
+              </small>
+              <div v-if="timeConfig.campuses.length > 1" class="season-scope">
+                <span class="scope-label">适用校区</span>
+                <button
+                  v-for="campus in timeConfig.campuses"
+                  :key="campus.id"
+                  class="chip"
+                  :class="{ on: seasonCampusOn(season, campus.id) }"
+                  @click="toggleSeasonCampus(season, campus.id)"
+                >{{ campus.name }}</button>
+                <small class="scope-note">不勾选的校区不会使用该作息季（时间方案保留但不再参与自动切换）</small>
+              </div>
+            </div>
+            <div class="setting-add">
+              <input v-model="newSeasonName" class="grow" placeholder="新作息季名称，例如：春季时间" @keyup.enter="onAddSeason" />
+              <input v-model="newSeasonDate" class="date" placeholder="03-01" />
+              <button class="btn btn-ghost" @click="onAddSeason">＋ 添加</button>
+            </div>
+          </section>
 
-          <div class="time-table-wrap">
-            <table class="time-table">
-              <thead>
-                <tr>
-                  <th rowspan="2" class="pl-h">节次</th>
-                  <th v-for="season in timeConfig.seasons" :key="season.id" :colspan="timeConfig.campuses.length">
-                    {{ season.name }}（{{ season.startDate }} 起）
-                  </th>
-                </tr>
-                <tr>
-                  <th v-for="combo in combos" :key="combo.season + combo.campus">{{ combo.campusName }}</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="(period, pi) in timeConfig.periods" :key="period.id">
-                  <td class="pl">{{ period.label }}</td>
-                  <td v-for="combo in combos" :key="combo.season + combo.campus" class="tc">
-                    <input
-                      type="time"
-                      v-model="timeConfig.times[combo.season][combo.campus][pi].start"
-                    />
-                    <span class="dash">-</span>
-                    <input
-                      type="time"
-                      v-model="timeConfig.times[combo.season][combo.campus][pi].end"
-                    />
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </section>
+          <section class="setting-section">
+            <div class="setting-head">
+              <h4>📋 节次（{{ timeConfig.periods.length }}）</h4>
+              <span class="setting-note">被课程占用的节次无法删除</span>
+            </div>
+            <div class="period-grid">
+              <div v-for="period in timeConfig.periods" :key="period.id" class="setting-row">
+                <input
+                  :value="period.label"
+                  @change="renamePeriod(period.id, $event.target.value)"
+                />
+                <button
+                  class="setting-del"
+                  :disabled="timeConfig.periods.length <= 1"
+                  title="删除节次"
+                  @click="onRemovePeriod(period.id)"
+                >✕</button>
+              </div>
+            </div>
+            <div class="setting-add">
+              <input v-model="newPeriodLabel" placeholder="新节次名称，例如：第十三节课" @keyup.enter="onAddPeriod" />
+              <button class="btn btn-ghost" @click="onAddPeriod">＋ 添加</button>
+            </div>
+          </section>
+        </template>
 
-        <div class="actions">
-          <button class="btn btn-ghost" @click="onResetTimes">恢复默认时间</button>
-          <button class="btn btn-primary" @click="showTimeEditor = false">完成</button>
+        <!-- 底部操作栏：草稿模式 -->
+        <div class="draft-bar" :class="{ sticky: draftDirty }">
+          <span v-if="draftDirty" class="dirty-dot">● 有未保存修改</span>
+          <button v-if="draftDirty" class="btn" @click="discardDraft">放弃修改</button>
+          <button v-else class="btn btn-ghost" @click="onResetTimes">恢复默认时间</button>
+          <button v-if="draftDirty" class="btn btn-primary" :disabled="planHasError" @click="saveDraft">保存</button>
+          <button v-else class="btn btn-primary" @click="tryCloseTimeEditor">完成</button>
         </div>
       </div>
     </Modal>
@@ -1401,6 +2565,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
 }
 .seg-label {
   font-size: 13px;
@@ -1408,12 +2573,15 @@ onUnmounted(() => {
 }
 .seg {
   display: flex;
+  max-width: 100%;
+  overflow-x: auto;
   background: #fff;
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 3px;
 }
 .seg button {
+  flex: 0 0 auto;
   border: none;
   background: transparent;
   padding: 7px 14px;
@@ -1687,47 +2855,148 @@ onUnmounted(() => {
   margin-right: auto;
 }
 
-.time-table-wrap {
-  overflow-x: auto;
-  border: 1px solid var(--border);
+/* ---------- 自动/手动作息提示（主页 toolbar 下） ---------- */
+.auto-mode-hint {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: -6px 0 0;
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.auto-mode-hint small { color: var(--ink-faint); font-size: 11px; }
+.auto-mode-hint.auto small::before { content: '·'; margin: 0 6px; }
+.auto-mode-hint.unavailable { color: #9a6414; }
+
+/* ---------- 作息方案编辑器（替换旧超宽表格） ---------- */
+.plan-picker { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 11px; background: var(--bg-tint); }
+.plan-picker-row { display: flex; align-items: center; gap: 10px; }
+.plan-picker-row .seg { flex-wrap: wrap; overflow-x: visible; }
+.pp-label { flex: 0 0 44px; color: var(--ink-faint); font-size: 11.5px; font-weight: 700; }
+.plan-head { display: flex; align-items: center; gap: 10px; margin-top: 4px; }
+.plan-title { font-size: 15px; font-weight: 800; }
+.dirty-dot { color: #b86b16; font-size: 11.5px; font-weight: 700; }
+.plan-tools { display: flex; flex-wrap: wrap; gap: 7px; }
+.plan-tools .btn-sm { padding: 6px 11px; font-size: 12px; }
+.tool-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 12px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 11px;
+  background: var(--bg-tint);
+}
+.tool-panel-title { color: var(--ink-soft); font-size: 12px; font-weight: 700; }
+.tool-tip { margin: 0; color: var(--ink-faint); font-size: 11px; line-height: 1.5; }
+.copy-list { display: flex; flex-wrap: wrap; gap: 7px; }
+.copy-item { padding: 7px 12px; font-size: 12.5px; border: 1px solid var(--border); border-radius: 9px; background: #fff; cursor: pointer; transition: border-color .14s, color .14s, background .14s; }
+.copy-item:hover { border-color: var(--primary); color: var(--primary); background: var(--primary-soft); }
+.batch-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.batch-controls select, .batch-controls input { width: auto; min-width: 0; }
+.batch-controls i { color: var(--ink-faint); font-size: 11px; }
+.diff-list { display: flex; flex-direction: column; gap: 5px; max-height: 240px; overflow-y: auto; }
+.diff-row { display: flex; align-items: center; gap: 8px; font-size: 12px; font-variant-numeric: tabular-nums; }
+.diff-label { flex: 0 0 76px; overflow: hidden; color: var(--text); white-space: nowrap; text-overflow: ellipsis; }
+.diff-row s { color: var(--ink-faint); }
+.diff-row i { color: var(--primary); font-style: normal; }
+.diff-row b { color: var(--primary); font-weight: 700; }
+.apply-btn { align-self: flex-start; }
+.gen-apply-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.gen-title.as-btn { width: 100%; text-align: left; background: none; border: none; cursor: pointer; font-size: 13px; font-weight: 750; color: var(--text); padding: 0; display: flex; justify-content: space-between; align-items: center; }
+.gen-title.as-btn:hover { color: var(--primary); }
+.gen-title.as-btn i { font-style: normal; color: var(--ink-faint); font-size: 11px; }
+.paste-area { width: 100%; resize: vertical; font-family: inherit; line-height: 1.55; }
+.image-import { display: flex; flex-direction: column; gap: 8px; }
+.import-tabs { align-self: flex-start; }
+.import-preview { display: flex; flex-direction: column; gap: 10px; padding-top: 4px; }
+.import-review-summary { display: flex; flex-wrap: wrap; gap: 12px; padding: 8px 10px; border-radius: 9px; background: var(--bg-tint); font-size: 12px; font-weight: 700; }
+.scheme-picker { display: flex; flex-direction: column; gap: 7px; color: var(--ink-faint); font-size: 11.5px; }
+.scheme-list { display: flex; flex-wrap: wrap; gap: 7px; }
+.scheme-list button, .choice-chips button { padding: 7px 11px; border: 1px solid var(--border); border-radius: 999px; background: #fff; color: var(--ink-soft); font-size: 12px; cursor: pointer; }
+.scheme-list button.on, .choice-chips button.on { border-color: var(--primary); background: var(--primary-soft); color: var(--primary); font-weight: 700; }
+.scheme-list button.imported { border-color: #9dd8c5; color: #08785a; }
+.import-targets { display: flex; flex-direction: column; gap: 8px; }
+.import-target-title { font-size: 12px; font-weight: 800; color: var(--text); }
+.it-row { display: grid; grid-template-columns: 54px minmax(0,1fr); align-items: center; gap: 8px; }
+.it-row > span { color: var(--ink-faint); font-size: 11.5px; font-weight: 700; }
+.choice-chips { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.bound-value { font-size: 12.5px; }
+.detected-title { margin: 2px 0 0; color: var(--ink-faint); font-size: 11px; }
+.assignment-message { margin: 0; padding: 8px 10px; border-radius: 8px; background: #e7f8f1; color: #08785a; font-size: 11.5px; line-height: 1.5; }
+.assignment-message.missing { background: #fff9e9; color: #9a6414; }
+.assignment-message.error { background: #fff0f0; color: var(--danger); }
+.import-rows { display: flex; flex-direction: column; gap: 6px; max-height: 260px; overflow-y: auto; }
+.import-row-wrap { padding: 3px; border-radius: 9px; }
+.import-row-wrap.review { padding: 7px; border: 1px solid #efd59d; background: #fff9e9; }
+.import-row { display: grid; grid-template-columns: minmax(0,1fr) 96px 14px 96px 26px; align-items: center; gap: 6px; }
+.import-row i { color: var(--muted); font-style: normal; text-align: center; }
+.import-row input[type='time'] { padding: 6px 6px; font-size: 12.5px; }
+.row-review-detail { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 5px; color: #9a6414; font-size: 11px; line-height: 1.45; }
+.btn-xs { flex: 0 0 auto; padding: 4px 8px; font-size: 10.5px; }
+.import-foot { display: flex; justify-content: space-between; gap: 8px; }
+
+/* 时间行：上午/下午/晚上分组 */
+.plan-list { display: flex; flex-direction: column; gap: 14px; }
+.section-label { color: var(--ink-faint); font-size: 11px; font-weight: 800; letter-spacing: .06em; margin-bottom: 6px; }
+.plan-section-group { display: flex; flex-direction: column; gap: 6px; }
+.plan-row {
+  display: grid;
+  grid-template-columns: minmax(88px, 132px) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
   border-radius: 10px;
 }
-.time-table {
-  border-collapse: collapse;
-  width: 100%;
+.plan-row:nth-child(odd) { background: var(--bg-tint); }
+.plan-row.has-error { background: #fff7f0; box-shadow: inset 2px 0 0 var(--danger); }
+.plan-row-label { overflow: hidden; font-size: 13px; font-weight: 600; white-space: nowrap; text-overflow: ellipsis; }
+.plan-row-times { display: flex; align-items: center; gap: 6px; justify-content: flex-end; }
+.plan-row-times input[type='time'] { width: 104px; padding: 6px 7px; font-size: 13px; border-radius: 8px; }
+.plan-row-times i { color: var(--muted); font-style: normal; }
+.plan-row-error { color: var(--danger); font-size: 11px; }
+.plan-error-tip { margin: 4px 0 0; color: var(--danger); font-size: 11.5px; }
+
+/* 草稿操作栏 */
+.draft-bar {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 10px;
+  margin-top: 16px;
+}
+.draft-bar.sticky {
+  position: sticky;
+  bottom: 0;
+  z-index: 3;
+  margin-top: 18px;
+  padding: 10px 2px 4px;
+  background: linear-gradient(180deg, rgba(255,255,255,0), #fff 34%);
+}
+.settings-toast {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  margin: 0;
+  padding: 7px 12px;
+  color: #07805d;
   font-size: 12px;
-  min-width: 480px;
+  border-radius: 8px;
+  background: #e7f8f1;
 }
-.time-table th,
-.time-table td {
-  border: 1px solid var(--border);
-  padding: 6px 8px;
-  text-align: center;
-}
-.time-table thead th {
-  background: var(--primary-soft);
-  color: var(--primary);
-  font-weight: 600;
-}
-.pl-h,
-.pl {
-  background: #fafbfd;
-  white-space: nowrap;
-  font-weight: 600;
-}
-.tc {
-  white-space: nowrap;
-}
-.tc input[type='time'] {
-  width: 86px;
-  padding: 4px 4px;
-  font-size: 12px;
-  border-radius: 6px;
-}
-.dash {
-  color: var(--muted);
-  margin: 0 2px;
-}
+.toast-enter-active, .toast-leave-active { transition: opacity .2s ease; }
+.toast-enter-from, .toast-leave-to { opacity: 0; }
+
+/* 季适用校区 chips */
+.season-block + .season-block { margin-top: 12px; }
+.season-scope { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 2px 0 2px 6px; }
+.scope-label { color: var(--ink-faint); font-size: 11px; font-weight: 700; }
+.scope-note { flex-basis: 100%; color: var(--ink-faint); font-size: 10.5px; }
+.conflict-tip { margin: 0 0 8px; }
+.season-date-warning { display: block; margin: 4px 0 0 6px; color: #9a6414; font-size: 10.5px; }
+.setting-row input.invalid { border-color: #e4b85b; background: #fffaf0; }
 
 .course-manager {
   display: flex;
@@ -1879,6 +3148,20 @@ onUnmounted(() => {
   flex-direction: column;
   gap: 14px;
 }
+.import-conflict-review { display: flex; flex-direction: column; gap: 12px; }
+.import-conflict-summary { margin: 0; line-height: 1.65; color: var(--ink-soft); }
+.import-conflict-summary b { margin-left: 4px; color: var(--text); }
+.import-conflict-actions, .import-conflict-footer { display: flex; flex-wrap: wrap; gap: 8px; }
+.conflict-item-list { display: flex; max-height: 42vh; flex-direction: column; gap: 9px; overflow: auto; }
+.conflict-item { padding: 12px; border: 1px solid #efd59d; border-radius: 10px; background: #fffaf0; }
+.conflict-item > b { color: #9a6414; font-size: 12px; }
+.conflict-item p { margin: 7px 0; font-size: 12px; line-height: 1.5; }
+.conflict-item select { width: 100%; margin-top: 8px; }
+.conflict-match { padding: 7px 9px; border-radius: 7px; background: rgba(255,255,255,.72); color: var(--ink-soft); font-size: 11.5px; line-height: 1.5; }
+.conflict-match small { display: block; color: #9a6414; font-weight: 700; }
+.replace-all-schedule { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding-top: 12px; border-top: 1px solid var(--border); color: var(--ink-faint); font-size: 11.5px; }
+.replace-all-schedule b { color: var(--text); }
+.replace-all-schedule span { flex: 1 1 240px; }
 .batch-help {
   display: flex;
   flex-direction: column;
@@ -1998,27 +3281,9 @@ onUnmounted(() => {
   font-size: 14px;
 }
 
-.ocr-progress {
-  margin-top: 8px;
-  height: 6px;
-  background: #e0e0e0;
-  border-radius: 3px;
-  overflow: hidden;
-}
-
 .file-button.busy {
   pointer-events: none;
   opacity: 0.7;
-}
-
-.ocr-error-hint {
-  color: #d32f2f;
-}
-
-.ocr-progress-bar {
-  height: 100%;
-  background: #4caf50;
-  transition: width 0.3s ease;
 }
 
 .ocr-hint {
@@ -2153,7 +3418,10 @@ onUnmounted(() => {
     align-items: flex-start;
     flex-direction: column;
     gap: 5px;
+    max-width: 100%;
   }
+
+  .toolbar .seg { max-width: calc(100vw - 40px); }
 
   .add-actions {
     width: 100%;
@@ -2222,7 +3490,12 @@ onUnmounted(() => {
   .batch-mobile-card dt { color: var(--muted); font-size: 9px; }
   .batch-mobile-card dd { overflow: hidden; margin: 1px 0 0; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
   .batch-mobile-card p { margin: 8px 0 0; color: var(--danger); font-size: 10px; line-height: 1.5; }
+  .import-conflict-actions .btn { width: 100%; }
+  .replace-all-schedule { align-items: flex-start; flex-direction: column; }
   .batch-success>div { display: grid; grid-template-columns: 1fr 1fr; }
+  .it-row { grid-template-columns: 48px minmax(0, 1fr); }
+  .import-row { grid-template-columns: minmax(0, 1fr) 86px 12px 86px 24px; gap: 4px; }
+  .row-review-detail { align-items: flex-start; flex-direction: column; }
 }
 
 /* ---------- 作息与时间设置 ---------- */

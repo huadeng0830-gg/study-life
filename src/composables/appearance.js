@@ -2,21 +2,20 @@ import { useStoredRef } from './store.js'
 
 export const WALLPAPER_TARGETS = {
   global: { label: '全站默认', path: '' },
-  home: { label: '今日总览', path: '/' },
+  home: { label: '首页', path: '/' },
   schedule: { label: '课程表', path: '/schedule' },
   tasks: { label: '作业与待办', path: '/tasks' },
   exams: { label: '倒计时', path: '/exams' },
   lists: { label: '我的清单', path: '/lists' },
-  bills: { label: '固定账单', path: '/bills' },
+  bills: { label: '账本', path: '/bills' },
   food: { label: '今天吃什么', path: '/food' },
 }
 
 export const HOME_MODULES = [
   { id: 'hero', label: '欢迎语与成长等级' },
-  { id: 'stats', label: '本周数据统计' },
-  { id: 'focus', label: '下一节课与最近待办' },
   { id: 'courses', label: '今日课程' },
-  { id: 'countdowns', label: '近期倒计时' },
+  { id: 'countdowns', label: '近期倒计时与未来七天' },
+  { id: 'focus', label: '待办与账单' },
 ]
 
 const DEFAULT_EFFECTS = {

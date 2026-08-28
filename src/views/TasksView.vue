@@ -1,5 +1,6 @@
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, ref } from 'vue'
+import EmptyState from '../components/EmptyState.vue'
 import Modal from '../components/Modal.vue'
 import NoticePaste from '../components/NoticePaste.vue'
 import SwipeActionItem from '../components/SwipeActionItem.vue'
@@ -15,6 +16,7 @@ const noticeMessage = ref('')
 const editingId = ref(null)
 const error = ref('')
 const filter = ref('todo')
+const sortKey = ref('due')
 const form = ref(emptyForm())
 
 const PRIORITIES = {
@@ -22,6 +24,12 @@ const PRIORITIES = {
   normal: { label: '普通', order: 1 },
   low: { label: '低优先级', order: 2 },
 }
+
+const SORTS = [
+  { key: 'due', label: '按截止时间' },
+  { key: 'priority', label: '按优先级' },
+  { key: 'created', label: '按创建时间' },
+]
 
 function emptyForm() {
   return {
@@ -141,12 +149,17 @@ function onNoticeCommit(payload) {
   }
 }
 
+let noticeMessageTimer = 0
+
 function showNoticeMessage(message) {
   noticeMessage.value = message
-  window.setTimeout(() => {
+  window.clearTimeout(noticeMessageTimer)
+  noticeMessageTimer = window.setTimeout(() => {
     if (noticeMessage.value === message) noticeMessage.value = ''
   }, 3500)
 }
+
+onBeforeUnmount(() => window.clearTimeout(noticeMessageTimer))
 
 function dueTimestamp(task) {
   if (!task.dueDate) return Infinity
@@ -175,11 +188,46 @@ const counts = computed(() => ({
 const sorted = computed(() =>
   [...tasks.value].sort((a, b) => {
     if (Boolean(a.done) !== Boolean(b.done)) return a.done ? 1 : -1
+    if (sortKey.value === 'priority') {
+      const priorityDiff = (PRIORITIES[a.priority]?.order ?? 1) - (PRIORITIES[b.priority]?.order ?? 1)
+      if (priorityDiff) return priorityDiff
+      return dueTimestamp(a) - dueTimestamp(b)
+    }
+    if (sortKey.value === 'created') {
+      const createdDiff = String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? ''))
+      if (createdDiff) return createdDiff
+      return dueTimestamp(a) - dueTimestamp(b)
+    }
     const dueDiff = dueTimestamp(a) - dueTimestamp(b)
     if (dueDiff) return dueDiff
     return (PRIORITIES[a.priority]?.order ?? 1) - (PRIORITIES[b.priority]?.order ?? 1)
   })
 )
+
+function deleteTask(task) {
+  if (!window.confirm(`确定删除待办“${task.title}”吗？`)) return
+  tasks.value = tasks.value.filter((item) => item.id !== task.id)
+}
+
+// 空状态文案按当前筛选变化
+const emptyInfo = computed(() => {
+  if (tasks.value.length === 0) {
+    return {
+      icon: '✓',
+      title: '今天很轻松',
+      description: '目前没有待办任务。',
+      hint: '新任务会自动出现在这里。',
+      action: '添加待办',
+    }
+  }
+  if (filter.value === 'todo') {
+    return { icon: '✓', title: '没有未完成的待办', description: '当前筛选下暂无任务。', hint: '', action: '' }
+  }
+  if (filter.value === 'done') {
+    return { icon: '◐', title: '还没有已完成的任务', description: '完成任务后会出现在这里。', hint: '', action: '' }
+  }
+  return { icon: '✦', title: '这个列表暂时是空的', description: '', hint: '', action: '' }
+})
 
 const visibleTasks = computed(() =>
   sorted.value.filter((task) => {
@@ -194,33 +242,43 @@ const courseNames = computed(() => [...new Set(courses.value.map((course) => cou
 
 <template>
   <div class="page">
-    <div class="head">
-      <div>
-        <h2>✅ 作业与待办</h2>
-        <p>把要完成的事情放在这里，按截止时间逐项清理</p>
+    <header class="page-head">
+      <div class="page-head-main">
+        <h1 class="page-title">作业与待办</h1>
+        <p class="page-desc">把要做的事情放这里，按截止时间轻松管理。</p>
       </div>
-      <div class="head-actions">
+      <div class="page-actions">
+        <label class="sort-select">
+          <span>排序</span>
+          <select v-model="sortKey">
+            <option v-for="s in SORTS" :key="s.key" :value="s.key">{{ s.label }}</option>
+          </select>
+        </label>
         <button class="btn btn-ghost" @click="showNotice = true">📋 粘贴通知</button>
         <button class="btn btn-primary" @click="openAdd">＋ 添加待办</button>
       </div>
-    </div>
+    </header>
 
     <p v-if="noticeMessage" class="notice-success">✓ {{ noticeMessage }}</p>
 
-    <div class="task-toolbar">
+    <div class="segmented task-toolbar" role="tablist" aria-label="待办筛选">
       <button :class="{ on: filter === 'todo' }" @click="filter = 'todo'">待完成 <b>{{ counts.todo }}</b></button>
       <button :class="{ on: filter === 'done' }" @click="filter = 'done'">已完成 <b>{{ counts.done }}</b></button>
       <button :class="{ on: filter === 'all' }" @click="filter = 'all'">全部 <b>{{ counts.all }}</b></button>
     </div>
 
-    <div v-if="tasks.length === 0" class="card empty">
-      还没有作业或待办，添加第一项后就可以开始安排 🎯
-    </div>
-    <div v-else-if="visibleTasks.length === 0" class="card empty">
-      这个列表暂时是空的
-    </div>
+    <EmptyState
+      v-if="visibleTasks.length === 0"
+      class="empty-box card"
+      :icon="emptyInfo.icon"
+      :title="emptyInfo.title"
+      :description="emptyInfo.description"
+      :hint="emptyInfo.hint"
+      :primary-label="emptyInfo.action"
+      @primary="openAdd"
+    />
 
-    <VirtualList v-else v-slot="{ item: task }" class="task-list" :items="visibleTasks" :estimated-height="92" :gap="10" :threshold="40">
+    <VirtualList v-else v-slot="{ item: task }" class="task-list" :items="visibleTasks" :estimated-height="62" :gap="8" :threshold="40">
       <SwipeActionItem
         :left-label="swipeLabel(task, 'left')"
         :right-label="swipeLabel(task, 'right')"
@@ -233,6 +291,8 @@ const courseNames = computed(() => [...new Set(courses.value.map((course) => cou
           :class="{ done: task.done }"
           @click="openEdit(task)"
         >
+          <span v-if="task.priority === 'high'" class="urgent-bar" aria-hidden="true"></span>
+
           <button
             type="button"
             class="check"
@@ -245,16 +305,21 @@ const courseNames = computed(() => [...new Set(courses.value.map((course) => cou
 
           <div class="task-main">
             <div class="task-topline">
+              <h3>{{ task.title }}</h3>
               <span class="priority" :class="task.priority ?? 'normal'">
                 {{ PRIORITIES[task.priority]?.label ?? '普通' }}
               </span>
               <span v-if="task.course" class="course-tag">{{ task.course }}</span>
             </div>
-            <h3>{{ task.title }}</h3>
             <p v-if="task.note">{{ task.note }}</p>
           </div>
 
           <span class="due" :class="dueInfo(task).cls">{{ dueInfo(task).text }}</span>
+
+          <div class="more" @click.stop>
+            <button class="link-btn" title="编辑待办" @click="openEdit(task)">✎</button>
+            <button class="link-btn danger" title="删除待办" @click="deleteTask(task)">🗑</button>
+          </div>
         </article>
       </SwipeActionItem>
     </VirtualList>
@@ -313,98 +378,82 @@ const courseNames = computed(() => [...new Set(courses.value.map((course) => cou
 .page {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 14px;
 }
-.head {
+.sort-select {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 16px;
+  gap: 7px;
+  color: var(--ink-faint);
+  font-size: 12px;
+  font-weight: 600;
 }
-.head h2 {
-  font-size: 22px;
-}
-.head p {
-  margin-top: 5px;
-  color: var(--muted);
-  font-size: 13px;
-}
-.head-actions {
-  display: flex;
-  gap: 8px;
+.sort-select select {
+  padding: 7px 9px;
+  font-size: 12.5px;
 }
 .notice-success {
-  padding: 9px 12px;
+  padding: 8px 12px;
   color: #087a58;
-  font-size: 12px;
+  font-size: 12.5px;
   border: 1px solid #b9e6d5;
   border-radius: 9px;
   background: #effaf6;
 }
-.task-toolbar {
-  display: flex;
-  gap: 6px;
-  width: fit-content;
-  padding: 4px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: #fff;
-}
-.task-toolbar button {
-  padding: 7px 12px;
-  color: var(--muted);
-  font-size: 13px;
-  border: none;
-  border-radius: 7px;
-  background: transparent;
-}
-.task-toolbar button.on {
-  color: var(--primary);
-  font-weight: 700;
-  background: var(--primary-soft);
-}
-.task-toolbar b {
-  margin-left: 4px;
-}
-.empty {
-  padding: 58px 20px;
-  color: var(--muted);
-  text-align: center;
-}
 .task-list {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
+}
+.task-list :deep(.swipe-item) {
+  border-radius: var(--card-radius);
+}
+.empty-box {
+  max-width: 640px;
+  width: 100%;
+  margin: 0 auto;
 }
 .task {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 16px 18px;
+  gap: 12px;
+  padding: 11px 14px;
   cursor: pointer;
-  transition: transform 0.15s, box-shadow 0.15s;
+  transition: transform 0.15s, box-shadow 0.15s, border-color 0.15s;
 }
 .task:hover {
-  transform: translateY(-1px);
+  border-color: var(--border-strong);
   box-shadow: var(--shadow-md);
 }
 .task.done {
-  opacity: 0.58;
+  opacity: 0.55;
 }
-.task.done h3 {
-  text-decoration: line-through;
+.urgent-bar {
+  position: absolute;
+  left: -1px;
+  top: 10px;
+  bottom: 10px;
+  width: 3px;
+  border-radius: 999px;
+  background: var(--danger);
 }
 .check {
   display: grid;
   place-items: center;
-  width: 26px;
-  height: 26px;
-  flex: 0 0 26px;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 24px;
   color: #fff;
   font-weight: 800;
-  border: 2px solid #cbd2df;
+  font-size: 13px;
+  border: 2px solid #c3cbd9;
   border-radius: 8px;
   background: #fff;
+  transition: background 0.14s, border-color 0.14s;
+}
+.check:hover {
+  border-color: #19a878;
 }
 .check.checked {
   border-color: #19a878;
@@ -417,13 +466,24 @@ const courseNames = computed(() => [...new Set(courses.value.map((course) => cou
 .task-topline {
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin-bottom: 5px;
+  gap: 7px;
+  min-width: 0;
+}
+.task-topline h3 {
+  overflow: hidden;
+  font-size: 14px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.task.done .task-topline h3 {
+  text-decoration: line-through;
 }
 .priority,
 .course-tag {
-  padding: 3px 7px;
-  font-size: 10px;
+  flex: 0 0 auto;
+  padding: 2px 7px;
+  font-size: 10.5px;
   font-weight: 700;
   border-radius: 5px;
 }
@@ -440,47 +500,59 @@ const courseNames = computed(() => [...new Set(courses.value.map((course) => cou
   background: #eef1f5;
 }
 .course-tag {
-  max-width: 180px;
+  max-width: 150px;
   overflow: hidden;
   color: #7b55d4;
   text-overflow: ellipsis;
   white-space: nowrap;
   background: #f1ebff;
 }
-.task h3 {
-  overflow: hidden;
-  font-size: 15px;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 .task-main p {
   overflow: hidden;
-  margin-top: 4px;
-  color: var(--muted);
-  font-size: 12px;
+  margin-top: 3px;
+  color: var(--ink-soft);
+  font-size: 11.5px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .due {
-  max-width: 200px;
-  color: var(--muted);
+  flex: 0 0 auto;
+  max-width: 170px;
+  color: var(--ink-soft);
   font-size: 12px;
+  font-weight: 600;
   text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 .due.today,
 .due.soon {
-  padding: 5px 8px;
+  padding: 4px 8px;
   color: #b86b16;
-  font-weight: 700;
+  font-weight: 800;
   border-radius: 6px;
   background: #fff5df;
 }
 .due.overdue {
-  padding: 5px 8px;
+  padding: 4px 8px;
   color: var(--danger);
-  font-weight: 700;
+  font-weight: 800;
   border-radius: 6px;
   background: #feecec;
+}
+.more {
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.14s;
+}
+.task:hover .more,
+.task:focus-within .more {
+  opacity: 1;
+}
+@media (hover: none) {
+  .more {
+    opacity: 1;
+  }
 }
 .form {
   display: flex;
@@ -489,7 +561,7 @@ const courseNames = computed(() => [...new Set(courses.value.map((course) => cou
 }
 .form label {
   margin-top: 6px;
-  color: var(--muted);
+  color: var(--ink-soft);
   font-size: 13px;
 }
 .form input,
@@ -521,28 +593,27 @@ const courseNames = computed(() => [...new Set(courses.value.map((course) => cou
   margin-right: auto;
 }
 
-@media (max-width: 620px) {
-  .head {
-    align-items: flex-start;
+@media (max-width: 720px) {
+  .page-head {
+    align-items: stretch;
     flex-direction: column;
   }
-  .head .btn {
-    flex: 1;
+  .page-actions {
+    justify-content: space-between;
   }
-  .head-actions { width: 100%; }
   .task {
     align-items: flex-start;
     flex-wrap: wrap;
-    padding: 15px;
+    padding: 12px 13px;
   }
   .task-main {
-    width: calc(100% - 42px);
+    width: calc(100% - 38px);
   }
   .due {
-    width: 100%;
-    max-width: none;
-    margin-left: 40px;
-    text-align: left;
+    margin-left: 36px;
+  }
+  .more {
+    margin-left: auto;
   }
   .form-row {
     grid-template-columns: 1fr;

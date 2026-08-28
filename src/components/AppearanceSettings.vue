@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, ref, watch, defineComponent } from 'vue'
+import { computed, defineComponent, h, onBeforeUnmount, ref, watch } from 'vue'
 import Modal from './Modal.vue'
 import { appearance, HOME_MODULES, resetAppearanceState, resetWallpapersOnly, WALLPAPER_TARGETS, wallpaperConfig } from '../composables/appearance.js'
 import { autoWallpaperColor, themeKey, wallpaperAccent, customThemeColor, THEMES } from '../composables/theme.js'
@@ -64,6 +64,7 @@ const error = ref('')
 const message = ref('')
 const quoteDraft = ref('')
 const draggedModule = ref('')
+let previewRequest = 0
 const SWIPE_OPTIONS = [
   { id: 'none', label: '无操作' },
   { id: 'complete', label: '完成 / 取消完成' },
@@ -90,21 +91,30 @@ watch(() => props.open, (open) => {
 })
 watch([selectedTarget, wallpaperRevision], loadPreview)
 
-onBeforeUnmount(() => previewUrl.value && URL.revokeObjectURL(previewUrl.value))
+onBeforeUnmount(() => {
+  previewRequest += 1
+  if (previewUrl.value) URL.revokeObjectURL(previewUrl.value)
+})
 
 async function loadPreview() {
+  const request = ++previewRequest
   const target = selectedTarget.value
   const source = target !== 'global' && targetConfig.value.mode === 'inherit' ? 'global' : target
   try {
-    const blob = await getWallpaper(source)
+    const [blob, ownBlob] = await Promise.all([getWallpaper(source), getWallpaper(target)])
+    if (request !== previewRequest) return
     const previous = previewUrl.value
     previewUrl.value = blob ? URL.createObjectURL(blob) : ''
-    hasOwnImage.value = Boolean(await getWallpaper(target))
+    hasOwnImage.value = Boolean(ownBlob)
     imageInfo.value = blob ? `${Math.max(1, Math.round(blob.size / 1024))} KB · 仅本机` : ''
     if (previous) URL.revokeObjectURL(previous)
   } catch {
+    if (request !== previewRequest) return
+    const previous = previewUrl.value
     previewUrl.value = ''
     hasOwnImage.value = false
+    imageInfo.value = ''
+    if (previous) URL.revokeObjectURL(previous)
   }
 }
 

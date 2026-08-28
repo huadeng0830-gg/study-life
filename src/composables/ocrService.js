@@ -6,6 +6,7 @@
 // 3) 状态对象必须 Vue reactive，否则 UI 永远停留在首帧文案
 import { reactive } from 'vue'
 import { normalizeText, correctOCRErrors } from './courseParser.js'
+import { raceWithControls, throwIfAborted } from './asyncTask.js'
 
 const INIT_TIMEOUT_MS = 45000      // Worker 初始化超时（首次需读取本地中文语言包）
 const RECOGNIZE_TIMEOUT_MS = 120000 // 单次识别超时兜底
@@ -56,7 +57,8 @@ function handleProgress(message) {
   if (mapped) setStage(mapped[0], mapped[1])
 }
 
-async function ensureWorker() {
+async function ensureWorker(signal = null) {
+  throwIfAborted(signal)
   if (worker) return worker
   if (initPromise) return initPromise
 
@@ -65,14 +67,7 @@ async function ensureWorker() {
   ocrState.error = null
 
   initPromise = (async () => {
-    let timedOut = false
-    let timeoutTimer = null
-    const timeoutPromise = new Promise((_, reject) => {
-      timeoutTimer = setTimeout(
-        () => { timedOut = true; reject(new Error('OCR 初始化超时（30 秒），请检查网络后重试')) },
-        INIT_TIMEOUT_MS,
-      )
-    })
+    let interrupted = false
 
     const created = (async () => {
       logInfo('createWorker start (langs=chi_sim, oem=1/LSTM_ONLY)')
@@ -98,18 +93,21 @@ async function ensureWorker() {
 
     // 超时后才成功创建的 Worker 必须立刻终止，避免泄漏
     created.then((w) => {
-      if (timedOut) { try { w.terminate() } catch {} }
+      if (interrupted) { try { w.terminate() } catch {} }
     }).catch(() => {})
 
     try {
-      worker = await Promise.race([created, timeoutPromise])
+      worker = await raceWithControls(created, {
+        signal,
+        timeoutMs: INIT_TIMEOUT_MS,
+        timeoutMessage: 'OCR 初始化超时，请检查语言模型后重试',
+        onInterrupt: () => { interrupted = true },
+      })
       return worker
     } catch (err) {
       // 清理脏状态：无论失败原因是什么，都允许下次重新创建
       worker = null
       throw err
-    } finally {
-      clearTimeout(timeoutTimer)
     }
   })()
 
@@ -131,7 +129,8 @@ async function ensureWorker() {
   }
 }
 
-async function preprocessImage(file) {
+async function preprocessImage(file, signal = null) {
+  throwIfAborted(signal)
   const startTime = performance.now()
   return new Promise((resolve, reject) => {
     const img = new Image()
@@ -151,7 +150,13 @@ async function preprocessImage(file) {
         ctx.fillRect(0, 0, canvas.width, canvas.height)
         ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
         canvas.toBlob(
-          (blob) => blob ? resolve({ blob, canvas, width: canvas.width, height: canvas.height }) : reject(new Error('图片处理失败')),
+          (blob) => {
+            try {
+              throwIfAborted(signal)
+              if (blob) resolve({ blob, canvas, width: canvas.width, height: canvas.height })
+              else reject(new Error('图片处理失败'))
+            } catch (error) { reject(error) }
+          },
           'image/png',
         )
         logInfo(`image preprocessed (${img.width}x${img.height} -> ${canvas.width}x${canvas.height}) in ${(performance.now() - startTime).toFixed(0)}ms`)
@@ -202,14 +207,19 @@ function cropDayColumn(source, day) {
   return canvas
 }
 
-async function recognizeTimetableColumns(w, source, rawText) {
+async function recognizeTimetableColumns(w, source, rawText, signal = null) {
   if (!/星期[一二三四五六日天]/.test(rawText) || !/(?:0?1\s*[-—]\s*0?2|0102)/.test(rawText)) return []
   const columns = []
   for (let day = 0; day < 7; day++) {
     const canvas = cropDayColumn(source, day)
     if (!canvas) continue
     setStage(`正在按星期分列识别... ${day + 1}/7`, 82 + day * 2.4)
-    const { data } = await w.recognize(canvas)
+    const { data } = await raceWithControls(w.recognize(canvas), {
+      signal,
+      timeoutMs: RECOGNIZE_TIMEOUT_MS,
+      timeoutMessage: '课表分列识别超时，请重试',
+      onInterrupt: destroyWorker,
+    })
     if (String(data.text || '').trim()) columns.push({ day, text: data.text, confidence: data.confidence })
     canvas.width = 1
     canvas.height = 1
@@ -233,16 +243,18 @@ function extractLayout(blocks, width, height) {
   return { width, height, lines, words }
 }
 
-export async function performOCR(file, onProgress = null) {
+export async function performOCR(file, onProgress = null, options = {}) {
   if (busy) throw new Error('OCR 正在进行中，请稍候')
   busy = true
   ocrState.error = null
+  const signal = options.signal || null
 
   try {
-    const prepared = await preprocessImage(file)
+    throwIfAborted(signal)
+    const prepared = await preprocessImage(file, signal)
     if (onProgress) onProgress({ stage: '正在处理图片...', progress: 5 })
 
-    const w = await ensureWorker()
+    const w = await ensureWorker(signal)
     if (onProgress) onProgress({ stage: ocrState.stage, progress: ocrState.progress })
 
     logInfo('recognition start')
@@ -250,20 +262,12 @@ export async function performOCR(file, onProgress = null) {
     setStage('正在识别文字...', 62)
 
     const task = w.recognize(prepared.blob, {}, { text: true, blocks: true })
-    let timedOut = false
-    let timer = null
-    const timeoutPromise = new Promise((_, reject) => {
-      timer = setTimeout(() => { timedOut = true; reject(new Error('OCR 识别超时，请重试')) }, RECOGNIZE_TIMEOUT_MS)
+    const { data } = await raceWithControls(task, {
+      signal,
+      timeoutMs: RECOGNIZE_TIMEOUT_MS,
+      timeoutMessage: 'OCR 识别超时，请重试',
+      onInterrupt: destroyWorker,
     })
-
-    let data
-    try {
-      ({ data } = await Promise.race([task, timeoutPromise]))
-    } finally {
-      clearTimeout(timer)
-      // 超时的识别任务无法取消：直接销毁 Worker 强制结束，并要求下次重建
-      if (timedOut) await destroyWorker()
-    }
 
     logInfo(`recognition finished, confidence=${data.confidence}`)
 
@@ -272,7 +276,7 @@ export async function performOCR(file, onProgress = null) {
 
     if (!text.trim()) throw new Error('未识别到文字，请换张清晰点的图')
 
-    const columns = await recognizeTimetableColumns(w, prepared.canvas, text)
+    const columns = await recognizeTimetableColumns(w, prepared.canvas, text, signal)
     ocrState.status = 'completed'
     setStage('识别完成', 100)
     return {
@@ -284,10 +288,10 @@ export async function performOCR(file, onProgress = null) {
     }
   } catch (err) {
     const cause = err instanceof Error ? err : new Error(String(err))
-    logError('performOCR failed', cause)
-    ocrState.status = 'error'
+    if (cause.name !== 'AbortError') logError('performOCR failed', cause)
+    ocrState.status = cause.name === 'AbortError' ? 'idle' : 'error'
     ocrState.error = cause.message
-    ocrState.stage = 'OCR 失败'
+    ocrState.stage = cause.name === 'AbortError' ? '识别已取消' : 'OCR 失败'
     throw cause
   } finally {
     busy = false

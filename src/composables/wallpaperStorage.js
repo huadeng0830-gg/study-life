@@ -1,4 +1,5 @@
 import { ref } from 'vue'
+import { throwIfAborted } from './asyncTask.js'
 
 const DB_NAME = 'study-life-wallpapers'
 const STORE_NAME = 'images'
@@ -23,6 +24,14 @@ function requestResult(request) {
   return new Promise((resolve, reject) => {
     request.onsuccess = () => resolve(request.result)
     request.onerror = () => reject(request.error)
+  })
+}
+
+function transactionDone(transaction) {
+  return new Promise((resolve, reject) => {
+    transaction.oncomplete = resolve
+    transaction.onerror = () => reject(transaction.error)
+    transaction.onabort = () => reject(transaction.error)
   })
 }
 
@@ -175,33 +184,49 @@ function blobToDataUrl(blob) {
   })
 }
 
-export async function exportWallpapersForTransfer() {
+export async function exportWallpapersForTransfer({ signal = null, onProgress = null } = {}) {
   const images = await listWallpapers()
   const result = {}
-  for (const [target, blob] of Object.entries(images)) {
+  const entries = Object.entries(images)
+  for (const [index, [target, blob]] of entries.entries()) {
+    throwIfAborted(signal)
+    onProgress?.({ current: index, total: entries.length, target, stage: 'compressing' })
     const reduced = await compressWallpaper(new File([blob], `${target}.webp`, { type: blob.type }), 720, 0.58)
+    throwIfAborted(signal)
     result[target] = await blobToDataUrl(reduced.blob)
+    onProgress?.({ current: index + 1, total: entries.length, target, stage: 'completed' })
   }
   return result
 }
 
-export async function importWallpapersFromTransfer(images, mode = 'merge') {
+export async function importWallpapersFromTransfer(images, mode = 'merge', { signal = null, onProgress = null } = {}) {
   const existing = await listWallpapers()
-  if (mode === 'replace') {
-    const db = await openDb()
-    try {
-      await requestResult(db.transaction(STORE_NAME, 'readwrite').objectStore(STORE_NAME).clear())
-    } finally {
-      db.close()
-    }
-  }
-  for (const [target, dataUrl] of Object.entries(images ?? {})) {
+  const sourceEntries = Object.entries(images ?? {}).filter(([target, dataUrl]) => (
+    /^data:image\//.test(dataUrl) && !(mode === 'merge' && existing[target])
+  ))
+  const decoded = []
+  for (const [index, [target, dataUrl]] of sourceEntries.entries()) {
+    throwIfAborted(signal)
+    onProgress?.({ current: index, total: sourceEntries.length, target, stage: 'decoding' })
     if (!/^data:image\//.test(dataUrl)) continue
-    if (mode === 'merge' && existing[target]) continue
-    const blob = await (await fetch(dataUrl)).blob()
-    await setWallpaper(target, blob)
+    const blob = await (await fetch(dataUrl, { signal })).blob()
+    decoded.push([target, blob])
+    onProgress?.({ current: index + 1, total: sourceEntries.length, target, stage: 'decoded' })
+  }
+  throwIfAborted(signal)
+
+  const db = await openDb()
+  try {
+    const transaction = db.transaction(STORE_NAME, 'readwrite')
+    const store = transaction.objectStore(STORE_NAME)
+    if (mode === 'replace') store.clear()
+    for (const [target, blob] of decoded) store.put(blob, target)
+    await transactionDone(transaction)
+  } finally {
+    db.close()
   }
   wallpaperRevision.value++
+  onProgress?.({ current: decoded.length, total: sourceEntries.length, stage: 'committed' })
 }
 
 async function storeEntries(db, storeName) {

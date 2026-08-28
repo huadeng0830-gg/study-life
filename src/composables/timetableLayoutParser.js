@@ -417,3 +417,37 @@ export function parseTimetableLayout(layout, timeConfig, maxWeek) {
     detectedHeaders: columns.detectedHeaders,
   }
 }
+
+export function scoreTimetableExtraction(table) {
+  const courses = table?.courses || []
+  const invalid = courses.filter((course) => (
+    !Number.isInteger(course.day)
+    || course.day < 0
+    || course.day > 6
+    || !course.start
+    || !course.end
+    || !course.name
+    || course.startWeek > course.endWeek
+  )).length
+  const slotKeys = courses.map((course) => `${course.day}:${course.start}:${course.end}:${course.startWeek}:${course.endWeek}`)
+  const duplicateSlots = slotKeys.length - new Set(slotKeys).size
+  const confidence = courses.length
+    ? courses.reduce((sum, course) => sum + (Number(course.confidence) || 0), 0) / courses.length
+    : 0
+  const reviewCount = courses.filter((course) => (Number(course.confidence) || 0) < 70).length
+  return {
+    score: courses.length * 10 + (Number(table?.detectedHeaders) || 0) * 1.5 + confidence * 0.08 - invalid * 12 - duplicateSlots * 5,
+    invalid,
+    duplicateSlots,
+    reviewCount,
+    confidence,
+  }
+}
+
+export function selectBestTimetableExtraction(...tables) {
+  return tables
+    .filter(Boolean)
+    .map((table) => ({ ...table, diagnostics: scoreTimetableExtraction(table) }))
+    .sort((left, right) => right.diagnostics.score - left.diagnostics.score)[0]
+    || { courses: [], batchText: '', detectedHeaders: 0, diagnostics: scoreTimetableExtraction(null) }
+}
