@@ -1,5 +1,5 @@
 import { computed, watchEffect } from 'vue'
-import { useStoredRef } from './store.js'
+import { useStoredRef } from './store'
 
 // auto 根据设备和用户的“减少动态效果”偏好降级；用户也可以强制开启或关闭。
 export const performanceMode = useStoredRef('sl_performance_mode', 'auto')

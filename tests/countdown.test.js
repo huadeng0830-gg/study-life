@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, expect, it } from 'vitest'
-import { countdownState, countdownTarget, sortCountdowns } from '../src/composables/store.js'
+import { countdownState, countdownTarget, sortCountdowns } from '../src/composables/store'
 
 const NOW = new Date('2026-06-15T10:00:00')
 

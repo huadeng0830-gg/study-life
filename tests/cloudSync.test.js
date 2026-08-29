@@ -106,7 +106,7 @@ describe('云同步长任务控制', () => {
   })
 
   it('拉取后立刻编辑同一模块仍会标记为本机修改', async () => {
-    const { flushStoredWrites, useStoredRef } = await import('../src/composables/store.js')
+    const { flushStoredWrites, useStoredRef } = await import('../src/composables/store')
     flushStoredWrites()
     localChanged.value = false
     code.value = '123456'

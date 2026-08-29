@@ -2,6 +2,7 @@ import { createApp } from 'vue'
 import { createRouter, createWebHashHistory } from 'vue-router'
 import './style.css'
 import { initializeDataVault, redirectPreviewOrigin } from './composables/dataVault.js'
+import { installGlobalErrorHandling } from './composables/globalError.js'
 import { routeLoaders } from './router/routePreload.js'
 
 // iPhone 上 IndexedDB 偶尔会延迟打开；安全副本继续后台检查，不阻塞首屏。
@@ -58,7 +59,8 @@ async function bootstrap() {
   const router = createRouter({
     history: createWebHashHistory(),
     routes: [
-      { path: '/', name: 'home', component: routeLoaders['/'] },
+      { path: '/', name: 'today', component: routeLoaders['/'] },
+      { path: '/today', redirect: '/' },
       { path: '/schedule', name: 'schedule', component: routeLoaders['/schedule'] },
       { path: '/tasks', name: 'tasks', component: routeLoaders['/tasks'] },
       { path: '/exams', name: 'exams', component: routeLoaders['/exams'] },
@@ -68,7 +70,9 @@ async function bootstrap() {
     ],
   })
 
-  createApp(App).use(router).mount('#app')
+  const app = createApp(App)
+  installGlobalErrorHandling(app)
+  app.use(router).mount('#app')
   sessionRemove(PRELOAD_RELOAD_KEY)
 
   // 更新检查不再阻塞手机首屏；浏览器空闲后再注册更新服务。

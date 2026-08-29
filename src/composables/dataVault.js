@@ -26,6 +26,8 @@ function openVault() {
       }
       settled = true
       window.clearTimeout(timer)
+      // 连接失败或被阻塞时重置，允许后续调用重试打开。
+      if (!value) vaultPromise = null
       resolve(value)
     }
     const timer = window.setTimeout(() => finish(null), DB_OPEN_TIMEOUT)

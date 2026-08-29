@@ -15,13 +15,26 @@ function maxPixelsFor(mode) {
   return requested
 }
 
-export const ocrState = reactive({ status: 'idle', progress: 0, stage: '', error: null })
+class OCRWorkerManager {
+  constructor() {
+    this.state = reactive({ status: 'idle', progress: 0, stage: '', error: null })
+    this.worker = null
+    this.initPromise = null
+    this.busy = false
+    this.tesseractModule = null
+    this.activeProgressCallback = null
+  }
 
-let worker = null
-let initPromise = null
-let busy = false
-let tesseractModule = null
-let activeProgressCallback = null
+  resetState() {
+    this.state.status = 'idle'
+    this.state.progress = 0
+    this.state.stage = ''
+    this.state.error = null
+  }
+}
+
+const ocrWorker = new OCRWorkerManager()
+export const ocrState = ocrWorker.state
 
 function logInfo(message, data) {
   if (import.meta.env.DEV) console.log(`[OCR] ${message}`, data ?? '')
@@ -32,9 +45,9 @@ function logError(message, error) {
 }
 
 function setStage(stage, progress) {
-  ocrState.stage = stage
-  if (progress !== undefined) ocrState.progress = Math.round(progress)
-  activeProgressCallback?.({ stage: ocrState.stage, progress: ocrState.progress })
+  ocrWorker.state.stage = stage
+  if (progress !== undefined) ocrWorker.state.progress = Math.round(progress)
+  ocrWorker.activeProgressCallback?.({ stage: ocrWorker.state.stage, progress: ocrWorker.state.progress })
 }
 
 const STAGE_MAP = {
@@ -48,33 +61,33 @@ const STAGE_MAP = {
 function handleProgress(message) {
   const mapped = STAGE_MAP[message.status]
   if (message.status === 'recognizing text') {
-    ocrState.status = 'recognizing'
+    ocrWorker.state.status = 'recognizing'
     setStage(`正在识别文字... ${Math.round(message.progress * 100)}%`, 60 + message.progress * 20)
   } else if (mapped) setStage(mapped[0], mapped[1])
 }
 
 async function ensureWorker(signal = null) {
   throwIfAborted(signal)
-  if (worker) return worker
-  if (initPromise) return initPromise
-  ocrState.status = 'initializing'
-  ocrState.error = null
+  if (ocrWorker.worker) return ocrWorker.worker
+  if (ocrWorker.initPromise) return ocrWorker.initPromise
+  ocrWorker.state.status = 'initializing'
+  ocrWorker.state.error = null
   setStage('正在初始化 OCR 引擎...', 5)
-  initPromise = (async () => {
+  ocrWorker.initPromise = (async () => {
     let interrupted = false
     const created = (async () => {
       const startedAt = performance.now()
-      tesseractModule = await import('tesseract.js')
+      ocrWorker.tesseractModule = await import('tesseract.js')
       const langPath = new URL('ocr', document.baseURI).href.replace(/\/$/, '')
       // chi_sim 同时覆盖中文、数字和常见拉丁字符；模型与图片均保持在本机。
-      const instance = await tesseractModule.createWorker('chi_sim', 1, {
+      const instance = await ocrWorker.tesseractModule.createWorker('chi_sim', 1, {
         langPath,
         gzip: false,
         logger: handleProgress,
         errorHandler: (error) => logError('worker error handler', error),
       })
       await instance.setParameters({
-        tessedit_pageseg_mode: tesseractModule.PSM.SPARSE_TEXT,
+        tessedit_pageseg_mode: ocrWorker.tesseractModule.PSM.SPARSE_TEXT,
         preserve_interword_spaces: '1',
         user_defined_dpi: '220',
       })
@@ -83,32 +96,32 @@ async function ensureWorker(signal = null) {
     })()
     created.then((instance) => { if (interrupted) void instance.terminate() }).catch(() => {})
     try {
-      worker = await raceWithControls(created, {
+      ocrWorker.worker = await raceWithControls(created, {
         signal,
         timeoutMs: INIT_TIMEOUT_MS,
         timeoutMessage: 'OCR 初始化超时，请检查语言模型是否可用后重试',
         onInterrupt: () => { interrupted = true },
       })
-      return worker
+      return ocrWorker.worker
     } catch (error) {
-      worker = null
+      ocrWorker.worker = null
       throw error
     }
   })()
   try {
-    const instance = await initPromise
-    ocrState.status = 'ready'
+    const instance = await ocrWorker.initPromise
+    ocrWorker.state.status = 'ready'
     setStage('OCR 已就绪', 60)
     return instance
   } catch (error) {
-    initPromise = null
-    ocrState.status = 'error'
-    ocrState.error = error?.message || String(error)
-    ocrState.stage = 'OCR 初始化失败'
-    ocrState.progress = 0
+    ocrWorker.initPromise = null
+    ocrWorker.state.status = 'error'
+    ocrWorker.state.error = error?.message || String(error)
+    ocrWorker.state.stage = 'OCR 初始化失败'
+    ocrWorker.state.progress = 0
     throw error instanceof Error ? error : new Error(String(error))
   } finally {
-    if (!worker) initPromise = null
+    if (!ocrWorker.worker) ocrWorker.initPromise = null
   }
 }
 
@@ -319,7 +332,7 @@ async function recognizeTimetableColumns(instance, source, bestResult, signal = 
   // assigning course blocks to invented columns.
   if (geometry.detectedHeaders < 2) return []
   const columns = []
-  await instance.setParameters({ tessedit_pageseg_mode: tesseractModule.PSM.SINGLE_BLOCK, preserve_interword_spaces: '1' })
+  await instance.setParameters({ tessedit_pageseg_mode: ocrWorker.tesseractModule.PSM.SINGLE_BLOCK, preserve_interword_spaces: '1' })
   try {
     for (let day = 0; day < 7; day++) {
       const canvas = cropColumn(source, geometry, day)
@@ -330,7 +343,7 @@ async function recognizeTimetableColumns(instance, source, bestResult, signal = 
       canvas.height = 1
     }
   } finally {
-    await instance.setParameters({ tessedit_pageseg_mode: tesseractModule.PSM.SPARSE_TEXT, preserve_interword_spaces: '1' }).catch(() => {})
+    await instance.setParameters({ tessedit_pageseg_mode: ocrWorker.tesseractModule.PSM.SPARSE_TEXT, preserve_interword_spaces: '1' }).catch(() => {})
   }
   return columns
 }
@@ -415,7 +428,7 @@ async function recognizeScheduleRows(instance, source, signal = null) {
     if (bottom - top >= Math.max(18, source.height * 0.025)) bands.push({ top, bottom })
   }
   const regions = []
-  await instance.setParameters({ tessedit_pageseg_mode: tesseractModule.PSM.SINGLE_LINE, preserve_interword_spaces: '1' })
+  await instance.setParameters({ tessedit_pageseg_mode: ocrWorker.tesseractModule.PSM.SINGLE_LINE, preserve_interword_spaces: '1' })
   try {
     for (let index = 0; index < bands.length; index++) {
       const band = bands[index]
@@ -435,16 +448,16 @@ async function recognizeScheduleRows(instance, source, signal = null) {
       canvas.height = 1
     }
   } finally {
-    await instance.setParameters({ tessedit_pageseg_mode: tesseractModule.PSM.SPARSE_TEXT, preserve_interword_spaces: '1' }).catch(() => {})
+    await instance.setParameters({ tessedit_pageseg_mode: ocrWorker.tesseractModule.PSM.SPARSE_TEXT, preserve_interword_spaces: '1' }).catch(() => {})
   }
   return { regions, grid }
 }
 
 export async function performOCR(file, onProgress = null, options = {}) {
-  if (busy) throw new Error('OCR 正在进行中，请稍候')
+  if (ocrWorker.busy) throw new Error('OCR 正在进行中，请稍候')
   if (!file?.type?.startsWith('image/')) throw new Error('请选择图片文件')
-  busy = true
-  activeProgressCallback = onProgress
+  ocrWorker.busy = true
+  ocrWorker.activeProgressCallback = onProgress
   ocrState.error = null
   const mode = ['fast', 'auto', 'accurate'].includes(options.mode) ? options.mode : 'auto'
   const kind = options.kind || 'generic'
@@ -515,8 +528,8 @@ export async function performOCR(file, onProgress = null, options = {}) {
       prepared.canvas.height = 1
       if (prepared.enhanced) { prepared.enhanced.width = 1; prepared.enhanced.height = 1 }
     }
-    busy = false
-    activeProgressCallback = null
+    ocrWorker.busy = false
+    ocrWorker.activeProgressCallback = null
   }
 }
 
@@ -525,7 +538,7 @@ export function getOCRState() {
 }
 
 export function resetOCRStatus() {
-  if (busy) return
+  if (ocrWorker.busy) return
   ocrState.status = 'idle'
   ocrState.progress = 0
   ocrState.stage = ''
@@ -533,9 +546,9 @@ export function resetOCRStatus() {
 }
 
 async function destroyWorker() {
-  const instance = worker
-  worker = null
-  initPromise = null
+  const instance = ocrWorker.worker
+  ocrWorker.worker = null
+  ocrWorker.initPromise = null
   if (instance) {
     try { await instance.terminate(); logInfo('worker terminated') } catch (error) { logError('terminate failed', error) }
   }
@@ -543,8 +556,8 @@ async function destroyWorker() {
 
 export async function cleanupOCR() {
   await destroyWorker()
-  busy = false
-  activeProgressCallback = null
+  ocrWorker.busy = false
+  ocrWorker.activeProgressCallback = null
   ocrState.status = 'idle'
   ocrState.progress = 0
   ocrState.stage = ''

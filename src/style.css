@@ -307,3 +307,18 @@ textarea:focus-visible {
   color: var(--danger);
   background: #feecec;
 }
+
+/* ---------- 移动端性能：屏幕外区块延迟渲染 ----------
+   content-visibility: auto 让视口外的面板与卡片跳过首屏绘制，
+   滚动接近时才真正渲染；contain-intrinsic-size 保证滚动条高度不跳动。
+   不支持的浏览器（旧 Safari）直接忽略，纯渐进增强。 */
+@supports (content-visibility: auto) {
+  .cvi-auto {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 220px;
+  }
+  .cvi-card {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 150px;
+  }
+}

@@ -1,4 +1,4 @@
-import { useStoredRef } from './store.js'
+import { useStoredRef } from './store'
 
 const MAX_TERMS_PER_FIELD = 160
 const EMPTY_VOCABULARY = { courses: [], teachers: [], rooms: [], campuses: [] }

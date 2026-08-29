@@ -14,7 +14,7 @@ const navGroups = [
   {
     label: '学习与计划',
     items: [
-      { path: '/', label: '首页', icon: '🏠' },
+      { path: '/', label: '首页', icon: '☀️' },
       { path: '/schedule', label: '课程表', icon: '📅' },
       { path: '/tasks', label: '作业与待办', icon: '✅' },
       { path: '/exams', label: '倒计时', icon: '⏳' },
@@ -29,7 +29,23 @@ const navGroups = [
     ],
   },
 ]
+const mobileLeadingItems = [
+  { path: '/', label: '首页', icon: '☀️' },
+]
+const mobileScheduleItems = [
+  { path: '/schedule', label: '课程', icon: '📅' },
+]
+const mobileTrailingItems = [
+  { path: '/tasks', label: '待办', icon: '✅' },
+]
+const mobileMoreItems = [
+  { path: '/exams', label: '倒计时', icon: '⏳' },
+  { path: '/lists', label: '清单', icon: '☑️' },
+  { path: '/bills', label: '账本', icon: '📒' },
+  { path: '/food', label: '吃什么', icon: '🍽️' },
+]
 const collapsed = ref(false)
+const showMobileMore = ref(false)
 const showDataManager = ref(false)
 const showAppearance = ref(false)
 const checkingUpdate = ref(false)
@@ -102,7 +118,7 @@ function chooseTheme(key) {
       </span>
     </div>
 
-    <nav class="nav" aria-label="主要导航">
+    <nav class="nav desktop-nav" aria-label="主要导航">
       <section v-for="group in navGroups" :key="group.label" class="nav-group">
         <span class="nav-group-title">{{ group.label }}</span>
         <router-link
@@ -120,6 +136,65 @@ function chooseTheme(key) {
         </router-link>
       </section>
     </nav>
+
+    <nav class="mobile-nav" aria-label="手机主要导航">
+      <router-link
+        v-for="item in mobileLeadingItems"
+        :key="item.path"
+        :to="item.path"
+        class="mobile-nav-item"
+        active-class="active"
+        @pointerdown="warmRoute(item.path)"
+      >
+        <span>{{ item.icon }}</span><small>{{ item.label }}</small>
+      </router-link>
+      <router-link
+        v-for="item in mobileScheduleItems"
+        :key="item.path"
+        :to="item.path"
+        class="mobile-nav-item"
+        active-class="active"
+        @pointerdown="warmRoute(item.path)"
+      >
+        <span>{{ item.icon }}</span><small>{{ item.label }}</small>
+      </router-link>
+      <button
+        class="mobile-nav-item mobile-ledger-trigger"
+        :class="{ active: props.quickLedgerOpen }"
+        type="button"
+        :aria-expanded="props.quickLedgerOpen"
+        @click="emit('toggle-quick-ledger')"
+      >
+        <span>＋</span><small>记账</small>
+      </button>
+      <router-link
+        v-for="item in mobileTrailingItems"
+        :key="item.path"
+        :to="item.path"
+        class="mobile-nav-item"
+        active-class="active"
+        @pointerdown="warmRoute(item.path)"
+      >
+        <span>{{ item.icon }}</span><small>{{ item.label }}</small>
+      </router-link>
+      <button class="mobile-nav-item more-trigger" :class="{ active: showMobileMore }" type="button" :aria-expanded="showMobileMore" @click="showMobileMore = !showMobileMore">
+        <span>⋯</span><small>更多</small>
+      </button>
+    </nav>
+
+    <Transition name="more-sheet">
+      <section v-if="showMobileMore" class="mobile-more-sheet" aria-label="更多功能">
+        <div class="mobile-more-head"><b>更多功能</b><button type="button" aria-label="关闭更多功能" @click="showMobileMore = false">×</button></div>
+        <div class="mobile-more-grid">
+          <router-link v-for="item in mobileMoreItems" :key="item.path" :to="item.path" class="mobile-more-item" @click="showMobileMore = false" @pointerdown="warmRoute(item.path)">
+            <span>{{ item.icon }}</span><small>{{ item.label }}</small>
+          </router-link>
+          <button type="button" class="mobile-more-item" @click="showMobileMore = false; showAppearance = true"><span>🎨</span><small>个性化</small></button>
+          <button type="button" class="mobile-more-item" @click="showMobileMore = false; showDataManager = true"><span>💾</span><small>数据管理</small></button>
+          <button type="button" class="mobile-more-item" :disabled="checkingUpdate" @click="showMobileMore = false; checkUpdate()"><span>↻</span><small>{{ checkingUpdate ? '检查中…' : '检查更新' }}</small></button>
+        </div>
+      </section>
+    </Transition>
 
     <button
       type="button"
@@ -179,7 +254,7 @@ function chooseTheme(key) {
 
       <div class="footer">
         本地存储 · 可随时备份
-        <span class="kbd-hint">按 1-7 快速切换页面</span>
+        <span class="kbd-hint">按 1-8 快速切换页面</span>
       </div>
     </div>
   </aside>
@@ -458,16 +533,16 @@ function chooseTheme(key) {
 @media (max-width: 900px) {
   .sidebar,
   .sidebar.collapsed {
-    position: sticky;
+    position: fixed;
     top: auto;
+    right: 0;
+    left: 0;
     bottom: 0;
-    order: 2;
-    flex: none;
     width: 100%;
     height: auto;
-    padding: 8px max(12px, env(safe-area-inset-right))
-      calc(8px + env(safe-area-inset-bottom))
-      max(12px, env(safe-area-inset-left));
+    padding: 6px max(10px, env(safe-area-inset-right))
+      calc(6px + env(safe-area-inset-bottom))
+      max(10px, env(safe-area-inset-left));
     border-right: none;
     border-top: 1px solid var(--border);
     box-shadow: 0 -8px 24px rgba(35, 52, 93, 0.08);
@@ -487,100 +562,53 @@ function chooseTheme(key) {
     display: block;
   }
 
-  .nav {
-    display: grid;
-    grid-template-columns: repeat(7, minmax(0, 1fr));
-    gap: 4px;
-    overflow: visible;
-    scrollbar-width: none;
-    overscroll-behavior-x: contain;
-    -webkit-overflow-scrolling: touch;
-  }
+  .desktop-nav,
+  .sidebar-foot { display: none; }
 
-  .nav-group {
-    display: contents;
-  }
-
-  .nav::-webkit-scrollbar {
-    display: none;
-  }
-
-  .sidebar-foot {
+  .mobile-nav { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 2px; width: 100%; min-width: 0; }
+  .mobile-nav-item,
+  .mobile-more-item {
     display: flex;
-    flex-direction: row;
-    gap: 6px;
-    margin: 6px 0 0;
-    padding: 6px 0 0;
-    border-top: 1px solid var(--border);
-  }
-
-  .sidebar-action-row {
-    flex: 2;
-    min-width: 0;
-  }
-
-  .sidebar-action-row .appearance-item {
-    min-width: 0;
-  }
-
-  .quick-add-button {
-    flex: 1;
-    width: auto;
-    min-height: 46px;
-    flex-direction: column;
-    gap: 2px;
-  }
-
-  .nav-item {
+    align-items: center;
     justify-content: center;
     flex-direction: column;
-    gap: 2px;
-    width: 100%;
     min-width: 0;
-    min-height: 52px;
-    padding: 6px 2px;
-    font-size: clamp(10px, 2.65vw, 12px);
-    line-height: 1.15;
-    white-space: normal;
-    text-align: center;
+    min-height: 54px;
+    gap: 2px;
+    padding: 4px 2px;
+    color: var(--ink-soft);
+    text-decoration: none;
+    border: 0;
+    border-radius: 10px;
+    background: transparent;
     touch-action: manipulation;
     -webkit-tap-highlight-color: transparent;
   }
-
-  .sidebar.collapsed .nav-label,
-  .nav-label {
-    display: inline;
-    min-width: 0;
-    overflow-wrap: anywhere;
-  }
-
-  .data-item {
-    height: auto;
-    flex: 1;
-    min-width: 0;
-    padding: 6px 8px;
-  }
-
-  .data-item .nav-label {
-    font-size: 11px;
-  }
+  .mobile-nav-item > span { height: 22px; font-size: 20px; line-height: 22px; }
+  .mobile-nav-item small,
+  .mobile-more-item small { overflow: hidden; max-width: 100%; font-size: 11px; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
+  .mobile-nav-item.active { color: var(--primary); font-weight: 800; background: var(--primary-soft); }
+  .mobile-ledger-trigger { width: 100%; min-width: 0; margin: -11px 0 0; min-height: 64px; color: #fff; border: 3px solid var(--card); border-radius: 18px; background: var(--primary); box-shadow: 0 7px 18px rgba(69, 111, 232, .28); }
+  .mobile-ledger-trigger > span { display: grid; place-items: center; height: 25px; font-size: 30px; line-height: 25px; }
+  .mobile-ledger-trigger.active { color: var(--primary); background: var(--primary-soft); box-shadow: none; }
+  .more-trigger > span { font-size: 25px; font-weight: 800; line-height: 18px; }
+  .mobile-more-sheet { position: absolute; right: 10px; bottom: calc(70px + env(safe-area-inset-bottom)); left: 10px; padding: 14px; border: 1px solid var(--border); border-radius: 16px; background: var(--card); box-shadow: 0 -10px 34px rgba(29, 48, 93, 0.16); }
+  .mobile-more-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+  .mobile-more-head button { width: 30px; height: 30px; color: var(--muted); font-size: 22px; border: 0; border-radius: 50%; background: var(--bg); }
+  .mobile-more-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .mobile-more-item { min-height: 66px; color: var(--text); background: var(--bg); }
+  .mobile-more-item > span { font-size: 21px; }
+  .more-sheet-enter-active,.more-sheet-leave-active { transition: opacity .16s ease, transform .16s ease; }
+  .more-sheet-enter-from,.more-sheet-leave-to { opacity: 0; transform: translateY(8px); }
 
   .update-toast {
     right: 14px;
-    bottom: calc(112px + env(safe-area-inset-bottom));
+    bottom: calc(76px + env(safe-area-inset-bottom));
   }
 }
 
-/* 320px 级别的极窄屏优先保证点按区域和文字可读，保持同样宽度并允许横向滑动。 */
-@media (max-width: 360px) {
-  .nav {
-    display: flex;
-    gap: 4px;
-    overflow-x: auto;
-  }
-
-  .nav-item {
-    flex: 0 0 62px;
-  }
+@media (min-width: 901px) {
+  .mobile-nav,
+  .mobile-more-sheet { display: none; }
 }
 </style>

@@ -2,19 +2,23 @@
 import { computed, ref, onBeforeUnmount } from 'vue'
 import EmptyState from '../components/EmptyState.vue'
 import Modal from '../components/Modal.vue'
+import ConfirmDialog from '../components/ConfirmDialog.vue'
+import VirtualList from '../components/VirtualList.vue'
 import {
   useStoredRef,
   fmtCountdownDate,
   sortCountdowns,
-} from '../composables/store.js'
+} from '../composables/store'
 
 const CATEGORIES = ['学习', '生活', '纪念日', '项目', '其他']
 const exams = useStoredRef('sl_exams', [])
+const courses = useStoredRef('sl_courses', [])
 const showPast = useStoredRef('sl_countdown_show_past', false)
 const showForm = ref(false)
 const editingId = ref(null)
 const error = ref('')
 const form = ref(emptyForm())
+const deleteTarget = ref(null)
 
 function emptyForm() {
   return {
@@ -25,6 +29,8 @@ function emptyForm() {
     category: '学习',
     repeat: 'none',
     pinned: false,
+    courseId: '',
+    reviewProgress: 0,
   }
 }
 
@@ -46,6 +52,8 @@ function openEdit(item) {
     category: item.category ?? '其他',
     repeat: item.repeat ?? 'none',
     pinned: Boolean(item.pinned),
+    courseId: item.courseId ?? '',
+    reviewProgress: Number(item.reviewProgress ?? 0),
   }
   showForm.value = true
 }
@@ -59,6 +67,7 @@ function save() {
     error.value = '请选择目标日期'
     return
   }
+  const isStudyCountdown = form.value.category === '学习'
   const data = {
     name: form.value.name.trim(),
     date: form.value.date,
@@ -67,6 +76,9 @@ function save() {
     category: form.value.category,
     repeat: form.value.repeat,
     pinned: form.value.pinned,
+    courseId: isStudyCountdown ? form.value.courseId : '',
+    courseName: isStudyCountdown ? (courses.value.find((course) => course.id === form.value.courseId)?.name ?? '') : '',
+    reviewProgress: isStudyCountdown ? Math.max(0, Math.min(100, Number(form.value.reviewProgress) || 0)) : 0,
   }
   if (editingId.value) {
     const target = exams.value.find((item) => item.id === editingId.value)
@@ -78,8 +90,9 @@ function save() {
 }
 
 function remove() {
-  exams.value = exams.value.filter((item) => item.id !== editingId.value)
+  const item = exams.value.find((entry) => entry.id === editingId.value)
   showForm.value = false
+  if (item) deleteTarget.value = item
 }
 
 const sorted = computed(() => sortCountdowns(exams.value))
@@ -87,6 +100,21 @@ const sorted = computed(() => sortCountdowns(exams.value))
 const visibleItems = computed(() =>
   showPast.value ? sorted.value : sorted.value.filter((item) => !item.countdown.isPast)
 )
+
+// 窄屏（单列）下清单很长时做虚拟滚动；宽屏保持多列网格原样渲染。
+// 入场动画只对少量卡片有意义，长列表直接禁用，避免一次挂载几十个动画。
+const EXAM_LIST_THRESHOLD = 16
+const isNarrow = ref(typeof window !== 'undefined' && window.matchMedia('(max-width: 620px)').matches)
+let narrowMql = null
+let narrowMqlHandler = null
+if (typeof window !== 'undefined') {
+  narrowMql = window.matchMedia('(max-width: 620px)')
+  narrowMqlHandler = (event) => { isNarrow.value = event.matches }
+  narrowMql.addEventListener('change', narrowMqlHandler)
+}
+onBeforeUnmount(() => {
+  if (narrowMql && narrowMqlHandler) narrowMql.removeEventListener('change', narrowMqlHandler)
+})
 
 // ---------- 卡片展示辅助：日期牌 / 短日期 / 时间轴 ----------
 const WEEKDAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
@@ -144,8 +172,17 @@ function menuEdit(item) {
 
 function menuDelete(item) {
   closeMenu()
-  if (!window.confirm(`确定删除倒计时「${item.name}」吗？`)) return
-  exams.value = exams.value.filter((entry) => entry.id !== item.id)
+  deleteTarget.value = item
+}
+
+function confirmDelete() {
+  if (!deleteTarget.value) return
+  exams.value = exams.value.filter((entry) => entry.id !== deleteTarget.value.id)
+  deleteTarget.value = null
+}
+
+function courseLabel(item) {
+  return courses.value.find((course) => course.id === item.courseId)?.name ?? item.courseName ?? ''
 }
 
 if (typeof document !== 'undefined') {
@@ -190,14 +227,22 @@ onBeforeUnmount(() => {
       description="可在右上角重新显示已结束的项目。"
     />
 
-    <div v-else class="list">
-      <div
-        v-for="item in visibleItems"
-        :key="item.id"
-        class="card exam"
-        :class="{ finished: item.countdown.isPast, pinned: item.pinned, hot: item.countdown.cls === 'hot' && !item.countdown.isPast }"
-        @click="openEdit(item)"
-      >
+    <VirtualList
+      v-else
+      class="list"
+      :class="[isNarrow ? 'narrow' : 'grid', { 'no-anim': visibleItems.length > EXAM_LIST_THRESHOLD }]"
+      :items="visibleItems"
+      item-key="id"
+      :estimated-height="174"
+      :gap="14"
+      :threshold="isNarrow ? EXAM_LIST_THRESHOLD : Number.MAX_SAFE_INTEGER"
+    >
+      <template #default="{ item }">
+        <div
+          class="card exam cvi-card"
+          :class="{ finished: item.countdown.isPast, pinned: item.pinned, hot: item.countdown.cls === 'hot' && !item.countdown.isPast }"
+          @click="openEdit(item)"
+        >
         <!-- 顶部：轻量标签 + 操作菜单 -->
         <div class="exam-top">
           <div class="meta-row">
@@ -226,6 +271,7 @@ onBeforeUnmount(() => {
           <div class="exam-info">
             <div class="name">{{ item.name }}</div>
             <div class="date">{{ shortDateOf(item) }}</div>
+            <div v-if="item.category === '学习' && courseLabel(item)" class="loc">{{ courseLabel(item) }} · 复习 {{ item.reviewProgress || 0 }}%</div>
             <div v-if="item.location" class="loc">{{ item.location }}</div>
           </div>
           <div class="count" :class="item.countdown.cls">
@@ -243,7 +289,8 @@ onBeforeUnmount(() => {
           <span class="tl-dot" :class="{ on: timelineOf(item).sameDay }"></span>
         </div>
       </div>
-    </div>
+      </template>
+    </VirtualList>
 
     <Modal v-if="showForm" :open="showForm" :title="editingId ? '编辑倒计时' : '添加倒计时'" @close="showForm = false">
       <div class="form">
@@ -280,6 +327,11 @@ onBeforeUnmount(() => {
         <label>备注或地点</label>
         <input v-model="form.location" placeholder="选填，例如：教学楼 A101" />
 
+        <div v-if="form.category === '学习'" class="form-row">
+          <div><label>关联课程</label><select v-model="form.courseId"><option value="">暂不关联</option><option v-for="course in courses" :key="course.id" :value="course.id">{{ course.name }}</option></select></div>
+          <div><label>复习完成度 {{ form.reviewProgress }}%</label><input v-model.number="form.reviewProgress" type="range" min="0" max="100" step="5" /></div>
+        </div>
+
         <label class="pin-option">
           <input v-model="form.pinned" type="checkbox" />
           在列表顶部显示
@@ -293,6 +345,15 @@ onBeforeUnmount(() => {
         </div>
       </div>
     </Modal>
+
+    <ConfirmDialog
+      :open="Boolean(deleteTarget)"
+      title="删除倒计时"
+      :message="`确定删除倒计时“${deleteTarget?.name || ''}”吗？此操作无法撤销。`"
+      confirm-label="删除"
+      @close="deleteTarget = null"
+      @confirm="confirmDelete"
+    />
   </div>
 </template>
 
@@ -325,9 +386,16 @@ onBeforeUnmount(() => {
 }
 /* ---------- 倒计时卡：日期牌 + 主体 + 大数字 + 轻量时间轴 ---------- */
 .list {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.list.grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: 14px;
+}
+.list.no-anim .exam {
+  animation: none;
 }
 .exam {
   position: relative;

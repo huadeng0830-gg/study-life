@@ -2,11 +2,14 @@
 import { computed, onBeforeUnmount, ref } from 'vue'
 import EmptyState from '../components/EmptyState.vue'
 import Modal from '../components/Modal.vue'
+import ConfirmDialog from '../components/ConfirmDialog.vue'
 import NoticePaste from '../components/NoticePaste.vue'
 import SwipeActionItem from '../components/SwipeActionItem.vue'
 import VirtualList from '../components/VirtualList.vue'
 import { appearance } from '../composables/appearance.js'
-import { fmtDate, todayStr, useStoredRef } from '../composables/store.js'
+import { fmtDate, todayStr, useStoredRef } from '../composables/store'
+import { createNextWeeklyTask } from '../composables/taskRecurrence.js'
+import { findUniqueCourseByName } from '../composables/courseLinks.js'
 
 const tasks = useStoredRef('sl_tasks', [])
 const courses = useStoredRef('sl_courses', [])
@@ -18,6 +21,9 @@ const error = ref('')
 const filter = ref('todo')
 const sortKey = ref('due')
 const form = ref(emptyForm())
+const deleteTarget = ref(null)
+const undoToast = ref(null)
+let undoTimer = 0
 
 const PRIORITIES = {
   high: { label: '高优先级', order: 0 },
@@ -35,10 +41,13 @@ function emptyForm() {
   return {
     title: '',
     course: '',
+    courseId: '',
     dueDate: '',
     dueTime: '',
     priority: 'normal',
     note: '',
+    estimateMinutes: '',
+    repeat: 'none',
   }
 }
 
@@ -55,10 +64,13 @@ function openEdit(task) {
   form.value = {
     title: task.title,
     course: task.course ?? '',
+    courseId: task.courseId ?? '',
     dueDate: task.dueDate ?? '',
     dueTime: task.dueTime ?? '',
     priority: task.priority ?? 'normal',
     note: task.note ?? '',
+    estimateMinutes: task.estimateMinutes ?? '',
+    repeat: task.repeat ?? 'none',
   }
   showForm.value = true
 }
@@ -68,13 +80,17 @@ function save() {
     error.value = '请填写待办内容'
     return
   }
+  const linkedCourse = courses.value.find((course) => course.id === form.value.courseId)
   const data = {
     title: form.value.title.trim(),
-    course: form.value.course.trim(),
+    course: linkedCourse?.name ?? form.value.course.trim(),
+    courseId: linkedCourse?.id ?? '',
     dueDate: form.value.dueDate,
     dueTime: form.value.dueTime,
     priority: form.value.priority,
     note: form.value.note.trim(),
+    estimateMinutes: Math.max(0, Number(form.value.estimateMinutes) || 0),
+    repeat: form.value.repeat,
   }
   if (editingId.value) {
     const target = tasks.value.find((task) => task.id === editingId.value)
@@ -105,6 +121,11 @@ function toggleTask(task) {
   if (!task) return
   task.done = !task.done
   task.completedAt = task.done ? new Date().toISOString() : null
+  if (task.done && task.repeat === 'weekly' && task.dueDate && !task.repeatGeneratedAt) {
+    task.repeatGeneratedAt = new Date().toISOString()
+    const nextTask = createNextWeeklyTask(task)
+    if (nextTask) tasks.value.push(nextTask)
+  }
 }
 
 function swipeLabel(task, direction) {
@@ -126,26 +147,26 @@ function handleTaskSwipe(direction, task) {
   const action = appearance.value.swipeActions.tasks[direction]
   if (action === 'complete') toggleTask(task)
   else if (action === 'edit') openEdit(task)
-  else if (action === 'delete' && window.confirm(`确定删除待办“${task.title}”吗？`)) {
-    tasks.value = tasks.value.filter((item) => item.id !== task.id)
-  }
+  else if (action === 'delete') deleteTarget.value = task
 }
 
 function onNoticeCommit(payload) {
   const now = new Date().toISOString()
+  const course = findUniqueCourseByName(courses.value, payload.data.course)
+  const data = { ...payload.data, courseId: course?.id ?? '' }
   if (payload.type === 'update') {
     const target = tasks.value.find((task) => task.id === payload.id)
     if (!target) return
-    Object.assign(target, payload.data, { updatedAt: now })
-    showNoticeMessage(`已根据新通知更新“${payload.title}”`)
+    Object.assign(target, data, { updatedAt: now })
+    showNoticeMessage(course || !payload.data.course ? `已根据新通知更新“${payload.title}”` : `已更新“${payload.title}”；课程名称未唯一匹配，请检查关联`)
   } else {
     tasks.value.push({
       id: 't' + Date.now(),
       done: false,
       createdAt: now,
-      ...payload.data,
+      ...data,
     })
-    showNoticeMessage(`已创建待办“${payload.title}”`)
+    showNoticeMessage(course || !payload.data.course ? `已创建待办“${payload.title}”` : `已创建“${payload.title}”；课程名称未唯一匹配，请检查关联`)
   }
 }
 
@@ -159,7 +180,10 @@ function showNoticeMessage(message) {
   }, 3500)
 }
 
-onBeforeUnmount(() => window.clearTimeout(noticeMessageTimer))
+onBeforeUnmount(() => {
+  window.clearTimeout(noticeMessageTimer)
+  window.clearTimeout(undoTimer)
+})
 
 function dueTimestamp(task) {
   if (!task.dueDate) return Infinity
@@ -211,8 +235,27 @@ const taskView = computed(() => {
 const counts = computed(() => taskView.value.counts)
 
 function deleteTask(task) {
-  if (!window.confirm(`确定删除待办“${task.title}”吗？`)) return
-  tasks.value = tasks.value.filter((item) => item.id !== task.id)
+  deleteTarget.value = task
+}
+
+function confirmDelete() {
+  const target = deleteTarget.value
+  if (!target) return
+  const index = tasks.value.findIndex((item) => item.id === target.id)
+  if (index < 0) return
+  tasks.value.splice(index, 1)
+  deleteTarget.value = null
+  undoToast.value = { item: target, index }
+  window.clearTimeout(undoTimer)
+  undoTimer = window.setTimeout(() => { undoToast.value = null }, 6000)
+}
+
+function undoDelete() {
+  if (!undoToast.value) return
+  const { item, index } = undoToast.value
+  tasks.value.splice(Math.min(index, tasks.value.length), 0, item)
+  undoToast.value = null
+  window.clearTimeout(undoTimer)
 }
 
 // 空状态文案按当前筛选变化
@@ -238,6 +281,15 @@ const emptyInfo = computed(() => {
 const visibleTasks = computed(() => taskView.value.visible)
 
 const courseNames = computed(() => [...new Set(courses.value.map((course) => course.name).filter(Boolean))])
+
+function linkCourseFromName() {
+  const course = findUniqueCourseByName(courses.value, form.value.course)
+  form.value.courseId = course?.id ?? ''
+}
+
+function taskCourseName(task) {
+  return courses.value.find((course) => course.id === task.courseId)?.name ?? task.course
+}
 </script>
 
 <template>
@@ -309,7 +361,8 @@ const courseNames = computed(() => [...new Set(courses.value.map((course) => cou
               <span class="priority" :class="task.priority ?? 'normal'">
                 {{ PRIORITIES[task.priority]?.label ?? '普通' }}
               </span>
-              <span v-if="task.course" class="course-tag">{{ task.course }}</span>
+              <span v-if="taskCourseName(task)" class="course-tag">{{ taskCourseName(task) }}</span>
+              <span v-if="task.estimateMinutes" class="course-tag">{{ task.estimateMinutes }} 分钟</span>
             </div>
             <p v-if="task.note">{{ task.note }}</p>
           </div>
@@ -330,7 +383,7 @@ const courseNames = computed(() => [...new Set(courses.value.map((course) => cou
         <input v-model="form.title" placeholder="例如：完成高数第三章作业" />
 
         <label>所属课程或类别</label>
-        <input v-model="form.course" list="course-options" placeholder="选填，可直接输入" />
+        <input v-model="form.course" list="course-options" placeholder="选填，可直接输入" @change="linkCourseFromName" />
         <datalist id="course-options">
           <option v-for="name in courseNames" :key="name" :value="name"></option>
         </datalist>
@@ -353,6 +406,11 @@ const courseNames = computed(() => [...new Set(courses.value.map((course) => cou
           <option value="low">低优先级</option>
         </select>
 
+        <div class="form-row">
+          <div><label>预计时长（分钟）</label><input v-model="form.estimateMinutes" type="number" min="0" inputmode="numeric" placeholder="选填" /></div>
+          <div><label>重复</label><select v-model="form.repeat"><option value="none">不重复</option><option value="weekly">每周（完成后生成下周）</option></select></div>
+        </div>
+
         <label>备注</label>
         <textarea v-model="form.note" rows="3" placeholder="选填"></textarea>
 
@@ -371,6 +429,8 @@ const courseNames = computed(() => [...new Set(courses.value.map((course) => cou
       @close="showNotice = false"
       @commit="onNoticeCommit"
     />
+    <ConfirmDialog :open="Boolean(deleteTarget)" title="删除待办" :message="`确定删除待办“${deleteTarget?.title || ''}”吗？删除后可在短时间内撤销。`" confirm-label="删除" @close="deleteTarget = null" @confirm="confirmDelete" />
+    <div v-if="undoToast" class="undo-toast" role="status" aria-live="polite"><span>待办已删除</span><button type="button" @click="undoDelete">撤销</button></div>
   </div>
 </template>
 
@@ -592,6 +652,8 @@ const courseNames = computed(() => [...new Set(courses.value.map((course) => cou
 .actions .btn-danger {
   margin-right: auto;
 }
+.undo-toast { position: fixed; right: 18px; bottom: 18px; z-index: 110; display: flex; align-items: center; gap: 14px; max-width: calc(100vw - 28px); padding: 10px 12px 10px 14px; color: var(--text); border: 1px solid var(--border); border-radius: 10px; background: var(--card); box-shadow: var(--shadow-md); font-size: 13px; }
+.undo-toast button { padding: 5px 8px; color: var(--primary); font-weight: 800; border: 0; border-radius: 6px; background: var(--primary-soft); }
 
 @media (max-width: 720px) {
   .page-head {
@@ -618,5 +680,6 @@ const courseNames = computed(() => [...new Set(courses.value.map((course) => cou
   .form-row {
     grid-template-columns: 1fr;
   }
+  .undo-toast { right: 14px; bottom: calc(76px + env(safe-area-inset-bottom)); }
 }
 </style>

@@ -1,5 +1,5 @@
 import { watchEffect, ref } from 'vue'
-import { useStoredRef } from './store.js'
+import { useStoredRef } from './store'
 
 export const THEMES = {
   blue: { name: '蓝色', primary: '#456fe8' },

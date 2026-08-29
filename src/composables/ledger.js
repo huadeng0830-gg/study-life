@@ -1,7 +1,7 @@
 // 账本模块业务层：分类、消费记录存储、自然输入解析、常记推导。
 // 只新增存储键（sl_expenses / sl_ledger_categories / sl_ledger_freq），不触碰任何既有数据。
 import { computed } from 'vue'
-import { useStoredRef } from './store.js'
+import { useStoredRef } from './store'
 
 export const DEFAULT_CATEGORIES = [
   { key: 'food', name: '餐饮', icon: '🍜', hidden: false },

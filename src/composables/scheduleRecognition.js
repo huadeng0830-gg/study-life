@@ -4,7 +4,7 @@
 // 用户确认导入计划后被触碰，且全程可快照/撤销。
 
 import { normalizePeriod } from './scheduleOcrParser.js'
-import { seasonsForCampus, seasonAppliesTo } from './store.js'
+import { seasonsForCampus, seasonAppliesTo } from './store/timeConfig.js'
 
 export const RECOGNITION_ISSUE = {
   UNRECOGNIZED: 'unrecognized',     // 识别不确定：OCR 无法确认内容

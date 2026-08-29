@@ -1,9 +1,12 @@
 <script setup>
-import { computed, nextTick, ref } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import EmptyState from '../components/EmptyState.vue'
 import Modal from '../components/Modal.vue'
+import ConfirmDialog from '../components/ConfirmDialog.vue'
 import VirtualList from '../components/VirtualList.vue'
-import { todayStr, useStoredRef } from '../composables/store.js'
+import { todayStr, useStoredRef } from '../composables/store'
+import { ledgerTabFromQuery } from '../composables/routeState.js'
 import {
   DEFAULT_CATEGORIES,
   activeCategories,
@@ -20,8 +23,15 @@ import {
 } from '../composables/ledger.js'
 
 const bills = useStoredRef('sl_bills', [])
+const route = useRoute()
 
 const tab = ref('ledger') // ledger | bills | review
+const deleteBillTarget = ref(null)
+
+// 允许“今天”等聚合入口精确打开固定账单或回顾，不改变默认账本入口。
+watch(() => route.query.tab, (value) => {
+  tab.value = ledgerTabFromQuery(value)
+}, { immediate: true })
 
 /* ================= 通用 ================= */
 const pad2 = (v) => String(v).padStart(2, '0')
@@ -367,8 +377,13 @@ function saveBill() {
   showBillForm.value = false
 }
 function deleteBill(bill) {
-  if (!window.confirm(`确定删除固定账单「${bill.name}」吗？`)) return
-  bills.value = bills.value.filter((b) => b.id !== bill.id)
+  deleteBillTarget.value = bill
+}
+function confirmDeleteBill() {
+  const bill = deleteBillTarget.value
+  if (!bill) return
+  bills.value = bills.value.filter((entry) => entry.id !== bill.id)
+  deleteBillTarget.value = null
   showToast(`已删除「${bill.name}」`)
 }
 function toggleBillActive(bill) {
@@ -1022,6 +1037,15 @@ function createBillFromSuggest() {
         </div>
       </div>
     </Modal>
+
+    <ConfirmDialog
+      :open="Boolean(deleteBillTarget)"
+      title="删除固定账单"
+      :message="`确定删除固定账单“${deleteBillTarget?.name || ''}”吗？不会删除已经生成的历史记录。`"
+      confirm-label="删除"
+      @close="deleteBillTarget = null"
+      @confirm="confirmDeleteBill"
+    />
 
     <!-- ================= 分类管理 ================= -->
     <Modal v-if="showCatManage" :open="showCatManage" title="分类管理" @close="showCatManage = false">

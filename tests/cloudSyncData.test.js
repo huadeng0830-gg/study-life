@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { mergeSyncValue, sanitizeSyncPayload, validateSyncPayload } from '../src/composables/cloudSyncData.js'
-import { normalizeStoredValue } from '../src/composables/store.js'
+import { normalizeStoredValue } from '../src/composables/store'
 
 describe('云同步数据保护', () => {
   it('拒绝会让页面崩溃的错误字段类型', () => {

@@ -2,7 +2,9 @@
 import { computed, onBeforeUnmount, onDeactivated, ref } from 'vue'
 import EmptyState from '../components/EmptyState.vue'
 import Modal from '../components/Modal.vue'
-import { todayStr, useStoredRef } from '../composables/store.js'
+import ConfirmDialog from '../components/ConfirmDialog.vue'
+import VirtualList from '../components/VirtualList.vue'
+import { todayStr, useStoredRef } from '../composables/store'
 import { appearance } from '../composables/appearance.js'
 
 const places = useStoredRef('sl_food_places', [])
@@ -30,11 +32,27 @@ const error = ref('')
 const picked = ref(null)
 const meal = ref(currentMeal())
 const form = ref(emptyForm())
+const deleteTarget = ref(null)
 const spinDegrees = ref(0)
 const spinning = ref(false)
 const flashPlace = ref(null)
 let spinTimer = 0
 let shuffleSeq = 0
+
+// 窄屏（单列）下候选卡很多时做虚拟滚动；宽屏保持多列网格原样渲染。
+// 候选库是纯滚动场景，虚拟化只作用于真正吃力的手机端。
+const PLACE_LIST_THRESHOLD = 20
+const isNarrow = ref(typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches)
+let placeMql = null
+let placeMqlHandler = null
+if (typeof window !== 'undefined') {
+  placeMql = window.matchMedia('(max-width: 767px)')
+  placeMqlHandler = (event) => { isNarrow.value = event.matches }
+  placeMql.addEventListener('change', placeMqlHandler)
+}
+onBeforeUnmount(() => {
+  if (placeMql && placeMqlHandler) placeMql.removeEventListener('change', placeMqlHandler)
+})
 
 // 偏好读写桥：保持模板用 ref 习惯，同时写入持久层
 const skippedIds = computed({
@@ -182,11 +200,9 @@ function save() {
 }
 
 function remove() {
-  places.value = places.value.filter((item) => item.id !== editingId.value)
-  skippedIds.value = skippedIds.value.filter((id) => id !== editingId.value)
-  if (picked.value?.id === editingId.value) picked.value = null
-  if (lastSelectedId.value === editingId.value) lastSelectedId.value = ''
+  const place = places.value.find((item) => item.id === editingId.value)
   showForm.value = false
+  if (place) deleteTarget.value = place
 }
 
 function placeSource(place) {
@@ -292,12 +308,18 @@ function toggleSkipCard(place) {
 }
 
 function deletePlaceCard(place) {
-  if (!window.confirm(`确定删除候选「${place.name}」吗？`)) return
+  deleteTarget.value = place
+}
+
+function confirmDeletePlace() {
+  const place = deleteTarget.value
+  if (!place) return
   places.value = places.value.filter((item) => item.id !== place.id)
   skippedIds.value = skippedIds.value.filter((id) => id !== place.id)
   if (flashPlace.value?.id === place.id) flashPlace.value = null
   if (picked.value?.id === place.id) picked.value = null
   if (lastSelectedId.value === place.id) lastSelectedId.value = ''
+  deleteTarget.value = null
 }
 
 function toggleSkipCurrent() {
@@ -651,11 +673,19 @@ const wheelGradient = computed(() => {
         @primary="openAdd"
       />
 
-      <div v-else class="place-grid">
+      <VirtualList
+        v-else
+        class="place-grid"
+        :class="isNarrow ? 'narrow' : ''"
+        :items="places"
+        item-key="id"
+        :estimated-height="132"
+        :gap="12"
+        :threshold="isNarrow ? PLACE_LIST_THRESHOLD : Number.MAX_SAFE_INTEGER"
+      >
+        <template #default="{ place }">
         <article
-          v-for="place in places"
-          :key="place.id"
-          class="card place-card"
+          class="card place-card cvi-card"
           :class="{ inactive: place.active === false, skipped: isSkipped(place.id) }"
           @click="openEdit(place)"
         >
@@ -678,7 +708,8 @@ const wheelGradient = computed(() => {
             <button class="foot-btn danger" title="删除这条候选" @click.stop="deletePlaceCard(place)">删除</button>
           </footer>
         </article>
-      </div>
+        </template>
+      </VirtualList>
 
       <div v-if="recent.length" class="recent-strip">
         <span class="rs-label">最近吃过</span>
@@ -722,6 +753,14 @@ const wheelGradient = computed(() => {
         <div class="actions"><button v-if="editingId" class="btn btn-danger" @click="remove">删除</button><button class="btn btn-primary" @click="save">保存</button></div>
       </div>
     </Modal>
+    <ConfirmDialog
+      :open="Boolean(deleteTarget)"
+      title="删除候选"
+      :message="`确定删除候选“${deleteTarget?.name || ''}”吗？此操作无法撤销。`"
+      confirm-label="删除"
+      @close="deleteTarget = null"
+      @confirm="confirmDeletePlace"
+    />
   </div>
 </template>
 
@@ -897,6 +936,7 @@ h2.rolling { filter: blur(0.4px); opacity: .82; }
 .section-side span { color: var(--ink-faint); font-size: 11.5px; }
 .btn-sm { padding: 7px 13px; font-size: 12.5px; }
 .place-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(280px, 100%), 1fr)); gap: 12px; }
+.place-grid.narrow { display: flex; flex-direction: column; }
 .place-card { display: flex; flex-direction: column; gap: 10px; padding: 13px 14px 10px; cursor: pointer; transition: transform .15s, border-color .15s, box-shadow .15s; }
 .place-card:hover { transform: translateY(-2px); border-color: var(--border-strong); box-shadow: var(--shadow-md); }
 .place-card:active { transform: scale(0.99); }

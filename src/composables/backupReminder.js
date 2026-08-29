@@ -1,5 +1,5 @@
 import { computed } from 'vue'
-import { useStoredRef } from './store.js'
+import { useStoredRef } from './store'
 
 // iPhone 上主屏幕网页应用的本地存储可能被系统清空（杀后台/删除图标），
 // 用"距上次备份的天数"驱动红点提醒，降低数据丢失风险。

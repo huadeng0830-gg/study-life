@@ -1,7 +1,7 @@
 <script setup>
 import { computed, defineComponent, h, onBeforeUnmount, ref, watch } from 'vue'
 import Modal from './Modal.vue'
-import { appearance, HOME_MODULES, resetAppearanceState, resetWallpapersOnly, WALLPAPER_TARGETS, wallpaperConfig } from '../composables/appearance.js'
+import { appearance, resetAppearanceState, resetWallpapersOnly, WALLPAPER_TARGETS, wallpaperConfig } from '../composables/appearance.js'
 import { autoWallpaperColor, themeKey, wallpaperAccent, customThemeColor, THEMES } from '../composables/theme.js'
 import { performanceMode } from '../composables/performanceMode.js'
 import { clearAllWallpapers, compressWallpaper, getWallpaper, removeWallpaper, setWallpaper, wallpaperRevision } from '../composables/wallpaperStorage.js'
@@ -64,7 +64,6 @@ const busy = ref(false)
 const error = ref('')
 const message = ref('')
 const quoteDraft = ref('')
-const draggedModule = ref('')
 let previewRequest = 0
 const SWIPE_OPTIONS = [
   { id: 'none', label: '无操作' },
@@ -219,32 +218,6 @@ function saveQuotes() {
   message.value = `已保存 ${appearance.value.quotes.length} 条文字`
 }
 
-function moveModule(id, direction) {
-  const list = appearance.value.homeModules
-  const index = list.findIndex((item) => item.id === id)
-  const next = index + direction
-  if (index < 0 || next < 0 || next >= list.length) return
-  const copy = [...list]
-  ;[copy[index], copy[next]] = [copy[next], copy[index]]
-  appearance.value.homeModules = copy
-}
-
-function dropModule(targetId) {
-  const sourceId = draggedModule.value
-  if (!sourceId || sourceId === targetId) return
-  const list = [...appearance.value.homeModules]
-  const sourceIndex = list.findIndex((item) => item.id === sourceId)
-  const targetIndex = list.findIndex((item) => item.id === targetId)
-  const [item] = list.splice(sourceIndex, 1)
-  list.splice(targetIndex, 0, item)
-  appearance.value.homeModules = list
-  draggedModule.value = ''
-}
-
-function moduleLabel(id) {
-  return HOME_MODULES.find((item) => item.id === id)?.label ?? id
-}
-
 const previewStyle = computed(() => ({
   backgroundImage: previewUrl.value ? `url("${previewUrl.value}")` : 'none',
   backgroundPosition: previewSettings.value.position,
@@ -256,7 +229,7 @@ const previewStyle = computed(() => ({
 
 <template>
   <Modal :open="open" title="🎨 个性化外观" wide @close="emit('close')">
-    <div class="appearance-tabs"><button :class="{ on: tab === 'theme' }" @click="tab = 'theme'">主题色</button><button :class="{ on: tab === 'wallpaper' }" @click="tab = 'wallpaper'">本地壁纸</button><button :class="{ on: tab === 'quotes' }" @click="tab = 'quotes'">励志语与签名</button><button :class="{ on: tab === 'layout' }" @click="tab = 'layout'">页面布局</button><button :class="{ on: tab === 'swipe' }" @click="tab = 'swipe'">滑动操作</button></div>
+    <div class="appearance-tabs"><button :class="{ on: tab === 'theme' }" @click="tab = 'theme'">主题与课表</button><button :class="{ on: tab === 'wallpaper' }" @click="tab = 'wallpaper'">本地壁纸</button><button :class="{ on: tab === 'quotes' }" @click="tab = 'quotes'">今天页文字</button><button :class="{ on: tab === 'swipe' }" @click="tab = 'swipe'">滑动操作</button></div>
     <div v-if="tab === 'theme'" class="theme-editor">
       <div class="theme-grid">
         <label v-for="(theme, key) in THEMES" :key="key" :class="{ on: themeKey === key }">
@@ -277,6 +250,8 @@ const previewStyle = computed(() => ({
           <option value="off">保持完整效果</option>
         </select>
       </label>
+      <div class="divider"></div>
+      <div class="schedule-style"><div><b>课表显示</b><small>只改变课程表视觉，不影响课程数据。</small></div><div class="skin-options"><label v-for="skin in [{id:'classic',name:'经典表格',icon:'▦'},{id:'notebook',name:'校园笔记',icon:'📒'},{id:'timeline',name:'极简时间轴',icon:'⌁'}]" :key="skin.id" :class="{ on: appearance.scheduleSkin === skin.id }"><input v-model="appearance.scheduleSkin" type="radio" :value="skin.id" /><span>{{ skin.icon }}</span><b>{{ skin.name }}</b></label></div></div>
     </div>
 
     <div v-else-if="tab === 'wallpaper'" class="wallpaper-layout">
@@ -319,18 +294,11 @@ const previewStyle = computed(() => ({
     </div>
 
     <section v-else-if="tab === 'quotes'" class="quotes-editor">
-      <label class="enable-row"><input v-model="appearance.showQuote" type="checkbox" /> 在首页显示个性化文字</label>
+      <label class="enable-row"><input v-model="appearance.showQuote" type="checkbox" /> 在“今天”页显示个性化文字</label>
       <label>励志语（每行一条，最多 50 条）<textarea v-model="quoteDraft" rows="9" placeholder="今天也要漂亮通关。"></textarea></label>
       <div class="quote-row"><label>显示方式<select v-model="appearance.quoteMode"><option value="daily">每天轮换</option><option value="random">每次打开随机</option><option value="fixed">固定一条</option></select></label><label v-if="appearance.quoteMode === 'fixed'">固定显示<select v-model.number="appearance.fixedQuoteIndex"><option v-for="(quote, index) in appearance.quotes" :key="index" :value="index">{{ quote }}</option></select></label></div>
       <label>个人签名<input v-model="appearance.signature" maxlength="40" placeholder="例如：保持好奇，慢慢变强" /></label>
       <button class="btn btn-primary" @click="saveQuotes">保存文字</button>
-    </section>
-
-    <section v-else-if="tab === 'layout'" class="layout-editor">
-      <div><h4>首页模块</h4><p>拖动调整顺序；手机也可以使用上下按钮。</p></div>
-      <div class="module-sort"><div v-for="(module, index) in appearance.homeModules" :key="module.id" draggable="true" @dragstart="draggedModule = module.id" @dragover.prevent @drop="dropModule(module.id)"><span class="drag">⠿</span><b>{{ moduleLabel(module.id) }}</b><label><input v-model="module.visible" type="checkbox" /> 显示</label><button :disabled="index === 0" @click="moveModule(module.id, -1)">↑</button><button :disabled="index === appearance.homeModules.length - 1" @click="moveModule(module.id, 1)">↓</button></div></div>
-      <div><h4>课表皮肤</h4><p>只改变课表视觉，不影响课程数据。</p></div>
-      <div class="skin-options"><label v-for="skin in [{id:'classic',name:'经典表格',icon:'▦'},{id:'notebook',name:'校园笔记',icon:'📒'},{id:'timeline',name:'极简时间轴',icon:'⌁'}]" :key="skin.id" :class="{ on: appearance.scheduleSkin === skin.id }"><input v-model="appearance.scheduleSkin" type="radio" :value="skin.id" /><span>{{ skin.icon }}</span><b>{{ skin.name }}</b></label></div>
     </section>
 
     <section v-else class="swipe-editor">
@@ -400,4 +368,7 @@ const previewStyle = computed(() => ({
 .performance-row span { display: flex; flex-direction: column; gap: 3px; }
 .performance-row small { color: var(--muted); line-height: 1.45; }
 .performance-row select { flex: 0 0 auto; padding: 6px 8px; }
+.schedule-style { display: flex; flex-direction: column; gap: 10px; }
+.schedule-style > div:first-child { display: flex; flex-direction: column; gap: 3px; }
+.schedule-style small { color: var(--muted); font-size: 12px; }
 </style>

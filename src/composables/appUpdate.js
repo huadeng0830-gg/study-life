@@ -235,7 +235,16 @@ export async function checkForAppUpdate(showResult = true) {
       // 说明 sw.js 检查被缓存或跳过，直接强制同步，绝不误报“已是最新版本”。
       if (!foundWorker && !activeRegistration.installing && !activeRegistration.waiting) {
         const serverRelease = await fetchServerRelease()
-        if (serverRelease && serverRelease !== APP_RELEASE) {
+        if (!serverRelease) {
+          // version.txt 拉取失败（断网、CDN 抖动等）时不能断言“已是最新版本”。
+          if (showResult) {
+            updateMessage.value = '暂时无法确认服务器版本，请稍后再试'
+            appUpdateProgress.finish('暂时无法确认服务器版本')
+            window.setTimeout(() => {
+              if (updateMessage.value === '暂时无法确认服务器版本，请稍后再试') updateMessage.value = ''
+            }, 3000)
+          }
+        } else if (serverRelease !== APP_RELEASE) {
           const recovered = await forceRecoverToLatest()
           if (recovered) return true
         } else if (showResult && updateMessage.value === '正在检查新版本…') {

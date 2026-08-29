@@ -1,6 +1,7 @@
 // 路由组件保持懒加载；这里只保存加载函数，导入本模块本身不会下载任何页面代码。
 export const routeLoaders = Object.freeze({
-  '/': () => import('../views/HomeView.vue'),
+  '/': () => import('../views/TodayView.vue'),
+  '/today': () => import('../views/TodayView.vue'),
   '/schedule': () => import('../views/ScheduleView.vue'),
   '/tasks': () => import('../views/TasksView.vue'),
   '/exams': () => import('../views/ExamsView.vue'),

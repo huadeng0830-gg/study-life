@@ -2,27 +2,35 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { activeWallpaperSpec, wallpaperConfig } from '../composables/appearance.js'
-import { getWallpaper, wallpaperRevision } from '../composables/wallpaperStorage.js'
+import { getWallpaper, getWallpaperBlurVariant, wallpaperRevision } from '../composables/wallpaperStorage.js'
 import { isIOSDevice, reducedEffects } from '../composables/performanceMode.js'
 
 const route = useRoute()
 const imageUrl = ref('')
 const imageRatio = ref(0)
 const viewportRatio = ref(window.innerWidth / Math.max(1, window.innerHeight))
-const mobileViewport = window.matchMedia('(max-width: 900px)').matches
+const mobileViewport = ref(window.matchMedia('(max-width: 900px)').matches)
 const iOS = isIOSDevice()
-const maxCachedImages = mobileViewport ? 2 : 5
+const maxCachedImages = computed(() => (mobileViewport.value ? 2 : 5))
 let imageLoadTimer = null
 let imageLoadSequence = 0
+let viewportMql = null
+let viewportMqlHandler = null
 
 // 按 target 缓存 objectURL 与宽高比：路由切换不再重复读库，
 // 仅当壁纸被修改（revision 变化）时才重新加载。
 const imageCache = new Map()
 
+if (typeof window !== 'undefined') {
+  viewportMql = window.matchMedia('(max-width: 900px)')
+  viewportMqlHandler = (e) => { mobileViewport.value = e.matches }
+  viewportMql.addEventListener('change', viewportMqlHandler)
+}
+
 function rememberImage(target, entry) {
   imageCache.delete(target)
   imageCache.set(target, entry)
-  while (imageCache.size > maxCachedImages) {
+  while (imageCache.size > maxCachedImages.value) {
     const oldestTarget = imageCache.keys().next().value
     const oldest = imageCache.get(oldestTarget)
     if (oldest?.url) URL.revokeObjectURL(oldest.url)
@@ -110,13 +118,56 @@ function scheduleImageLoad() {
 }
 
 watch([sourceTarget, wallpaperRevision], scheduleImageLoad, { immediate: true })
+
+// 手机端模糊壁纸替身：低清放大代替实时整屏 CSS blur，减少移动 GPU 负担。
+// 变体就绪前仍走原图 + CSS blur，就绪后自动切换为 blur 0 + 低清图。
+const blurVariantUrl = ref('')
+let blurVariantSequence = 0
+let blurVariantTimer = null
+const blurEligible = computed(() => {
+  if (reducedEffects.value || !mobileViewport.value) return false
+  const settings = spec.value?.settings
+  return Boolean(settings && Number(settings.blur || 0) > 0)
+})
+
+async function loadBlurVariant() {
+  const target = sourceTarget.value
+  const sequence = ++blurVariantSequence
+  window.clearTimeout(blurVariantTimer)
+  if (!blurEligible.value || !target) {
+    blurVariantUrl.value = ''
+    return
+  }
+  blurVariantTimer = window.setTimeout(async () => {
+    blurVariantTimer = null
+    try {
+      const blob = await getWallpaperBlurVariant(target)
+      if (sequence !== blurVariantSequence || target !== sourceTarget.value) return
+      if (blob) {
+        if (blurVariantUrl.value) URL.revokeObjectURL(blurVariantUrl.value)
+        blurVariantUrl.value = URL.createObjectURL(blob)
+      } else {
+        blurVariantUrl.value = ''
+      }
+    } catch {
+      if (sequence === blurVariantSequence) blurVariantUrl.value = ''
+    }
+  }, 120)
+}
+
+watch([sourceTarget, wallpaperRevision, blurEligible], loadBlurVariant, { immediate: true })
+
 onMounted(() => window.addEventListener('resize', updateViewportRatio))
 onBeforeUnmount(() => {
   imageLoadSequence += 1
+  blurVariantSequence += 1
   window.clearTimeout(imageLoadTimer)
+  window.clearTimeout(blurVariantTimer)
   window.removeEventListener('resize', updateViewportRatio)
+  if (viewportMql && viewportMqlHandler) viewportMql.removeEventListener('change', viewportMqlHandler)
   for (const entry of imageCache.values()) URL.revokeObjectURL(entry.url)
   imageCache.clear()
+  if (blurVariantUrl.value) URL.revokeObjectURL(blurVariantUrl.value)
 })
 
 const effectiveFit = computed(() => {
@@ -132,9 +183,10 @@ const layerStyle = computed(() => {
   const settings = spec.value?.settings
   if (!settings || !imageUrl.value) return { display: 'none' }
   const requestedBlur = Math.max(0, Number(settings.blur) || 0)
-  const blur = reducedEffects.value ? 0 : mobileViewport ? Math.min(requestedBlur, 4) : requestedBlur
+  const useBlurVariant = Boolean(blurVariantUrl.value && blurEligible.value)
+  const blur = reducedEffects.value ? 0 : useBlurVariant ? 0 : mobileViewport.value ? Math.min(requestedBlur, 4) : requestedBlur
   return {
-    '--wallpaper-image': `url("${imageUrl.value}")`,
+    '--wallpaper-image': `url("${useBlurVariant ? blurVariantUrl.value : imageUrl.value}")`,
     '--wallpaper-blur': `${blur}px`,
     '--wallpaper-brightness': `${Number(settings.brightness) || 100}%`,
     '--wallpaper-opacity': `${(Number(settings.opacity) || 0) / 100}`,

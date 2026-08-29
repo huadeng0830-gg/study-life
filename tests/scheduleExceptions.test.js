@@ -5,7 +5,7 @@ import {
   dateForWeekDay,
   scheduleExceptions,
   semester,
-} from '../src/composables/store.js'
+} from '../src/composables/store/schedule.js'
 
 const courses = [
   { id: 'monday', name: '周一课程', day: 0, start: 'p1', end: 'p2', startWeek: 1, endWeek: 16, weekType: 'all' },

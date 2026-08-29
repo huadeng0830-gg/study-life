@@ -1,47 +1,15 @@
 import vue from '@vitejs/plugin-vue'
 import { createHash } from 'node:crypto'
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
-import { relative, resolve } from 'node:path'
 import { env } from 'node:process'
-import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vite'
 import { VitePWA } from 'vite-plugin-pwa'
 import { RELEASE_NOTES, RELEASE_SOURCE_SIGNATURE, RELEASE_VERSION } from './release.config.js'
-
-const projectRoot = fileURLToPath(new URL('.', import.meta.url))
-const releaseInputs = ['src', 'functions', 'sync-coordinator', 'public', 'index.html', 'package.json', 'package-lock.json', 'vite.config.js', 'release.config.js', 'wrangler.jsonc']
-
-function collectReleaseFiles(target) {
-  if (!existsSync(target)) return []
-  if (!statSync(target).isDirectory()) return [target]
-  return readdirSync(target, { withFileTypes: true })
-    .flatMap((entry) => collectReleaseFiles(resolve(target, entry.name)))
-}
+import { computeSourceSignature } from './scripts/source-signature.mjs'
 
 // 相同源码永远得到相同版本；任何 Agent 修改发布源码后都会自动得到新版本。
-// CI 可覆盖版本号；默认始终使用面向用户的“年-月-日-v序号”格式，不暴露源码哈希。
-function createSourceSignature() {
-  const hash = createHash('sha256')
-  const files = releaseInputs
-    .flatMap((input) => collectReleaseFiles(resolve(projectRoot, input)))
-    .sort((a, b) => a.localeCompare(b))
-  for (const file of files) {
-    const relativePath = relative(projectRoot, file).replaceAll('\\', '/')
-    hash.update(relativePath)
-    let content = readFileSync(file, 'utf8')
-    // release.config.js 同时保存说明与签名；对签名字段归一化，避免哈希自引用，
-    // 但说明正文仍参与签名，确保业务代码和更新说明必须一起更新。
-    if (relativePath === 'release.config.js') {
-      content = content
-        .replace(/signature: '[^']*'/g, "signature: '<source-signature>'")
-        .replace(/RELEASE_SOURCE_SIGNATURE = '[^']*'/, "RELEASE_SOURCE_SIGNATURE = '<source-signature>'")
-    }
-    hash.update(content)
-  }
-  return hash.digest('hex').slice(0, 10)
-}
-
-const sourceSignature = createSourceSignature()
+// 签名计算集中在 scripts/source-signature.mjs，与 scripts/bump-release.mjs 共用，
+// 保证 build 校验和“更新签名/说明”脚本看到的是同一套逻辑。
+const sourceSignature = computeSourceSignature()
 // 开发与测试期间允许逐步修改；正式 build 必须通过说明一致性检查。
 if (env.NODE_ENV === 'production' && RELEASE_SOURCE_SIGNATURE !== sourceSignature) {
   throw new Error(
@@ -60,12 +28,14 @@ export default defineConfig({
   build: {
     target: 'es2019',
     cssTarget: 'safari13',
-    rollupOptions: {
-      output: {
-        codeSplitting: {
-          groups: [
-            { name: 'vue-vendor', test: /[\\/]node_modules[\\/](@vue|vue|vue-router)[\\/]/ },
-          ],
+      rollupOptions: {
+        output: {
+          codeSplitting: {
+            groups: [
+              { name: 'vue-vendor', test: /[\\/]node_modules[\\/](@vue|vue|vue-router)[\\/]/ },
+              { name: 'ocr-vendor', test: /[\\/]node_modules[\\/]tesseract\.js[\\/]/ },
+              { name: 'transfer-vendor', test: /[\\/]node_modules[\\/](qrcode|jsqr)[\\/]/ },
+            ],
         },
       },
     },
@@ -118,21 +88,23 @@ export default defineConfig({
           'manifest.webmanifest',
           'favicon-v2.png',
           'apple-touch-icon-v2.png',
-          'assets/index-*.{js,css}',
-          'assets/vue-vendor-*.js',
-          'assets/App-*.{js,css}',
-          'assets/appearance-*.js',
-          'assets/appUpdate-*.js',
-          // 只预缓存应用壳和首页；其他页面首次访问时由运行时缓存保存，避免首屏下载全部业务页面。
-          'assets/HomeView-*.{js,css}',
-          'assets/Modal-*.{js,css}',
-          'assets/VirtualList-*.{js,css}',
-          'assets/UpdateNotes-*.{js,css}',
-          'assets/hero-*.png',
-          'assets/_plugin-vue_export-helper-*.js',
+          // 预缓存全部页面与共享代码：安装后点击任意入口都直接进入，不再现场下载。
+          'assets/*.{js,css}',
         ],
-        // 二维码编解码依赖体积大，继续在用户打开迁移功能时按需下载。
-        globIgnores: ['assets/LocalTransfer-*'],
+        // 体积大或极少用到的模块保持按需下载（首次访问由运行时缓存接管），
+        // 避免拖慢首次安装体积与流量。课程表弹窗已按需加载，同样不预缓存。
+        globIgnores: [
+          'assets/LocalTransfer-*',
+          'assets/transfer-vendor-*',
+          'assets/ocr-vendor-*',
+          'assets/TimeSettingsModal-*',
+          'assets/CourseEditorModal-*',
+          'assets/CourseManagerModal-*',
+          'assets/BatchImportModal-*',
+          'assets/ImportConflictModal-*',
+          'assets/ExceptionsModal-*',
+          'assets/SemesterModal-*',
+        ],
         maximumFileSizeToCacheInBytes: 3 * 1024 * 1024,
         skipWaiting: true,
         clientsClaim: true,

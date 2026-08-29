@@ -4,7 +4,7 @@ import {
   autoSeasonStatusFor,
   isValidSeasonDate,
   seasonConflicts,
-} from '../src/composables/store.js'
+} from '../src/composables/store/timeConfig.js'
 
 const campus = (id, name = id) => ({ id, name })
 const season = (id, startDate, campuses) => ({ id, name: id, startDate, campuses })

@@ -175,6 +175,32 @@ export async function compressWallpaper(file, maxSide = 1920, quality = 0.82) {
   return { blob, accent, width, height }
 }
 
+// 手机端模糊壁纸替身：把原图缩小成一张低清图，放大显示本身就有柔焦效果，
+// 免去移动 GPU 对整屏做实时 CSS blur。变体只缓存在内存，随会话丢弃。
+// 只在“手机 + 开了模糊 + 未开启减效果”时才会被请求，一次生成每会话复用。
+const blurVariantCache = new Map()
+const BLUR_VARIANT_MAX_SIDE = 720
+
+export async function getWallpaperBlurVariant(target) {
+  const cacheKey = `${target}:${wallpaperRevision.value}`
+  const cached = blurVariantCache.get(cacheKey)
+  if (cached) return cached
+  const full = await getWallpaper(target)
+  if (!full) return null
+  try {
+    const { blob } = await compressWallpaper(
+      new File([full], `${target}-blur.webp`, { type: full.type }),
+      BLUR_VARIANT_MAX_SIDE,
+      0.72
+    )
+    if (blurVariantCache.size >= 4) blurVariantCache.delete(blurVariantCache.keys().next().value)
+    blurVariantCache.set(cacheKey, blob)
+    return blob
+  } catch {
+    return null
+  }
+}
+
 function blobToDataUrl(blob) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()

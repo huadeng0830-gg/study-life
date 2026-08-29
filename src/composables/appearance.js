@@ -1,4 +1,4 @@
-import { useStoredRef } from './store.js'
+import { useStoredRef } from './store'
 
 export const WALLPAPER_TARGETS = {
   global: { label: '全站默认', path: '' },
@@ -12,10 +12,12 @@ export const WALLPAPER_TARGETS = {
 }
 
 export const HOME_MODULES = [
-  { id: 'hero', label: '欢迎语与成长等级' },
-  { id: 'courses', label: '今日课程' },
-  { id: 'countdowns', label: '近期倒计时与未来七天' },
-  { id: 'focus', label: '待办与账单' },
+  { id: 'next', label: '接下来' },
+  { id: 'tasks', label: '今日待办' },
+  { id: 'courses', label: '今天课程' },
+  { id: 'countdowns', label: '近期提醒' },
+  { id: 'week', label: '本周概况' },
+  { id: 'bills', label: '近期账单' },
 ]
 
 const DEFAULT_EFFECTS = {

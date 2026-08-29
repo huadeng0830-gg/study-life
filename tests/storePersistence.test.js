@@ -14,7 +14,7 @@ describe('useStoredRef 延迟持久化', () => {
   })
 
   it('不会漏掉深层监听建立前发生的修改', async () => {
-    const { useStoredRef } = await import('../src/composables/store.js')
+    const { useStoredRef } = await import('../src/composables/store')
     const state = useStoredRef('sl_delayed_persistence_test', [])
 
     state.value.push({ id: 'early-change' })
@@ -26,7 +26,7 @@ describe('useStoredRef 延迟持久化', () => {
   })
 
   it('页面立即退出时会先安装监听并同步冲刷修改', async () => {
-    const { useStoredRef } = await import('../src/composables/store.js')
+    const { useStoredRef } = await import('../src/composables/store')
     const state = useStoredRef('sl_pagehide_persistence_test', [])
 
     state.value.push({ id: 'before-pagehide' })

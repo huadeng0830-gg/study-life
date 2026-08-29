@@ -2,10 +2,11 @@
 import { computed, ref } from 'vue'
 import EmptyState from '../components/EmptyState.vue'
 import Modal from '../components/Modal.vue'
+import ConfirmDialog from '../components/ConfirmDialog.vue'
 import SwipeActionItem from '../components/SwipeActionItem.vue'
 import VirtualList from '../components/VirtualList.vue'
 import { appearance } from '../composables/appearance.js'
-import { useStoredRef } from '../composables/store.js'
+import { useStoredRef } from '../composables/store'
 
 const lists = useStoredRef('sl_checklists', [])
 const activeId = ref(lists.value[0]?.id ?? null)
@@ -20,6 +21,9 @@ const showItemForm = ref(false)
 const editingItemId = ref(null)
 const itemError = ref('')
 const itemForm = ref(emptyItem())
+const deleteTarget = ref(null)
+const undoToast = ref(null)
+let undoTimer = 0
 
 const CATEGORIES = ['食品', '日用品', '学习用品', '数码', '衣物', '其他']
 const UNITS = ['件', '个', '份', '袋', '盒', '瓶', '斤', 'kg']
@@ -140,9 +144,7 @@ function saveList() {
 
 function deleteList() {
   const list = activeList.value
-  if (!list || !window.confirm(`确定删除清单“${list.name}”吗？`)) return
-  lists.value = lists.value.filter((item) => item.id !== list.id)
-  activeId.value = lists.value[0]?.id ?? null
+  if (list) deleteTarget.value = { type: 'list', item: list }
 }
 
 function addQuickItem() {
@@ -208,10 +210,9 @@ function saveItem() {
 }
 
 function removeItem() {
-  if (!activeList.value) return
-  activeList.value.items = activeList.value.items.filter((item) => item.id !== editingItemId.value)
-  touchList()
+  const item = activeList.value?.items.find((entry) => entry.id === editingItemId.value)
   showItemForm.value = false
+  if (item) deleteTarget.value = { type: 'item', item }
 }
 
 function toggleItem(event, id) {
@@ -246,18 +247,57 @@ function handleItemSwipe(direction, item) {
   const action = appearance.value.swipeActions.lists[direction]
   if (action === 'complete') toggleListItem(item)
   else if (action === 'edit') openEditItem(item)
-    else if (action === 'delete' && window.confirm(`确定删除“${item.name}”吗？`)) {
-    activeList.value.items = activeList.value.items.filter((entry) => entry.id !== item.id)
-    touchList()
-  }
+  else if (action === 'delete') deleteTarget.value = { type: 'item', item }
 }
 
 function clearBought() {
   const list = activeList.value
   const count = list?.items.filter((item) => item.done).length ?? 0
-  if (!list || !count || !window.confirm(`确定清除 ${count} 个已完成事项吗？`)) return
-  list.items = list.items.filter((item) => !item.done)
-  touchList()
+  if (list && count) deleteTarget.value = { type: 'done', count }
+}
+
+function confirmDelete() {
+  const target = deleteTarget.value
+  if (!target) return
+  if (target.type === 'list') {
+    const index = lists.value.findIndex((item) => item.id === target.item.id)
+    lists.value = lists.value.filter((item) => item.id !== target.item.id)
+    activeId.value = lists.value[0]?.id ?? null
+    undoToast.value = { type: 'list', item: target.item, index }
+  } else if (target.type === 'item' && activeList.value) {
+    const index = activeList.value.items.findIndex((item) => item.id === target.item.id)
+    activeList.value.items = activeList.value.items.filter((item) => item.id !== target.item.id)
+    touchList()
+    undoToast.value = { type: 'item', item: target.item, index, listId: activeList.value.id }
+  } else if (target.type === 'done' && activeList.value) {
+    const removed = activeList.value.items.filter((item) => item.done)
+    const indexes = activeList.value.items.map((item, index) => item.done ? index : -1).filter((index) => index >= 0)
+    activeList.value.items = activeList.value.items.filter((item) => !item.done)
+    touchList()
+    undoToast.value = { type: 'done', items: removed, indexes, listId: activeList.value.id }
+  }
+  deleteTarget.value = null
+  window.clearTimeout(undoTimer)
+  undoTimer = window.setTimeout(() => { undoToast.value = null }, 6000)
+}
+
+function undoDelete() {
+  const toast = undoToast.value
+  if (!toast) return
+  if (toast.type === 'list') {
+    lists.value.splice(Math.min(toast.index, lists.value.length), 0, toast.item)
+    activeId.value = toast.item.id
+  } else {
+    const list = lists.value.find((item) => item.id === toast.listId)
+    if (list) {
+      const entries = toast.type === 'item' ? [{ item: toast.item, index: toast.index }] : toast.items.map((item, index) => ({ item, index: toast.indexes[index] }))
+      for (const entry of entries) list.items.splice(Math.min(entry.index, list.items.length), 0, entry.item)
+      activeId.value = list.id
+      touchList()
+    }
+  }
+  undoToast.value = null
+  window.clearTimeout(undoTimer)
 }
 </script>
 
@@ -401,6 +441,15 @@ function clearBought() {
         </div>
       </div>
     </Modal>
+    <ConfirmDialog
+      :open="Boolean(deleteTarget)"
+      :title="deleteTarget?.type === 'list' ? '删除清单' : '删除清单事项'"
+       :message="deleteTarget?.type === 'list' ? `确定删除清单“${deleteTarget.item.name}”吗？其中的全部事项也会删除。` : deleteTarget?.type === 'done' ? `确定清除 ${deleteTarget.count} 个已完成事项吗？` : `确定删除“${deleteTarget?.item?.name || ''}”吗？删除后可在短时间内撤销。`"
+      confirm-label="删除"
+      @close="deleteTarget = null"
+      @confirm="confirmDelete"
+    />
+    <div v-if="undoToast" class="undo-toast" role="status" aria-live="polite"><span>清单内容已删除</span><button type="button" @click="undoDelete">撤销</button></div>
   </div>
 </template>
 
@@ -466,6 +515,8 @@ function clearBought() {
 .error { color: var(--danger); font-size: 13px; }
 .actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 14px; }
 .actions .btn-danger { margin-right: auto; }
+.undo-toast { position: fixed; right: 18px; bottom: 18px; z-index: 110; display: flex; align-items: center; gap: 14px; max-width: calc(100vw - 28px); padding: 10px 12px 10px 14px; color: var(--text); border: 1px solid var(--border); border-radius: 10px; background: var(--card); box-shadow: var(--shadow-md); font-size: 13px; }
+.undo-toast button { padding: 5px 8px; color: var(--primary); font-weight: 800; border: 0; border-radius: 6px; background: var(--primary-soft); }
 @media (max-width: 900px) {
   .list-sidebar { position: static; }
 }

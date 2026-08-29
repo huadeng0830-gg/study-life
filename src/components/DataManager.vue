@@ -38,7 +38,7 @@ import {
   importWallpapersFromTransfer,
   restoreWallpaperUndo,
 } from '../composables/wallpaperStorage.js'
-import { restoreStoredValues } from '../composables/store.js'
+import { restoreStoredValues } from '../composables/store'
 import { useTaskProgress } from '../composables/taskProgress.js'
 
 // 二维码生成/扫描依赖体积较大，仅在用户真正打开迁移面板时下载和解析。
@@ -633,7 +633,13 @@ async function restoreBackup() {
   <Modal :open="open" title="数据备份与恢复" @close="emit('close')">
     <div class="data-manager">
       <p v-if="needsBackup" class="backup-hint">⚠️ 删除苹果桌面应用或清除 Safari 网站数据可能同时删除本地记录。已超过 7 天未备份，建议先导出一份。</p>
-      <section class="data-section">
+      <nav class="mobile-data-nav" aria-label="数据管理分区">
+        <a href="#data-backup">备份</a>
+        <a href="#data-sync">同步</a>
+        <a href="#data-transfer">迁移</a>
+        <a href="#data-restore">恢复</a>
+      </nav>
+      <section id="data-backup" class="data-section">
         <div class="section-icon">↓</div>
         <div class="section-copy">
           <h4>导出本地数据</h4>
@@ -655,7 +661,7 @@ async function restoreBackup() {
         @wait="backupProgress.continueWaiting"
       />
 
-      <section class="data-section">
+      <section id="data-update" class="data-section">
         <div class="section-icon update">↻</div>
         <div class="section-copy">
           <h4>电脑与手机更新</h4>
@@ -676,7 +682,7 @@ async function restoreBackup() {
         </div>
       </section>
 
-      <section class="data-section">
+      <section id="data-transfer" class="data-section">
         <div class="section-icon transfer">▦</div>
         <div class="section-copy">
           <h4>本地二维码迁移</h4>
@@ -685,7 +691,7 @@ async function restoreBackup() {
         </div>
       </section>
 
-      <section class="data-section">
+      <section id="data-health" class="data-section">
         <div class="section-icon health">⌁</div>
         <div class="section-copy health-copy">
           <div class="health-head"><div><h4>数据健康</h4><p>仅统计当前浏览器中的本地数据，不会上传任何内容。</p></div><button class="btn" @click="refreshDataHealth">刷新</button></div>
@@ -699,7 +705,7 @@ async function restoreBackup() {
         </div>
       </section>
 
-      <section class="data-section">
+      <section id="data-restore" class="data-section">
         <div class="section-icon restore">↑</div>
         <div class="section-copy">
           <h4>从备份恢复</h4>
@@ -711,7 +717,7 @@ async function restoreBackup() {
         </div>
       </section>
 
-      <section class="data-section">
+      <section id="data-sync" class="data-section">
         <div class="section-icon sync">☁</div>
         <div class="section-copy">
           <h4>云端同步（可选 · 手动模式）</h4>
@@ -859,6 +865,7 @@ async function restoreBackup() {
   font-size: 12px;
   line-height: 1.55;
 }
+.mobile-data-nav { display: none; }
 .data-section {
   display: flex;
   align-items: flex-start;
@@ -1097,6 +1104,9 @@ async function restoreBackup() {
   color: #a35e22;
 }
 @media (max-width: 520px) {
+  .mobile-data-nav { position: sticky; top: -14px; z-index: 3; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; margin: -14px -4px 0; padding: 6px 4px; border-bottom: 1px solid var(--border); background: #fff; }
+  .mobile-data-nav a { min-height: 40px; display: grid; place-items: center; color: var(--ink-soft); font-size: 12px; font-weight: 700; text-decoration: none; border-radius: 8px; background: var(--bg); }
+  .mobile-data-nav a:active { color: var(--primary); background: var(--primary-soft); }
   .data-section { gap: 10px; padding: 12px; }
   .section-icon { width: 32px; height: 32px; flex-basis: 32px; font-size: 17px; }
   .section-copy { min-width: 0; width: 100%; }
@@ -1104,7 +1114,7 @@ async function restoreBackup() {
   .device-name-row label { grid-column: 1 / -1; }
   .sync-input-row { flex-direction: column; width: 100%; }
   .sync-input-row .btn { width: 100%; }
-  .sync-actions { display: grid; grid-template-columns: 1fr 1fr; width: 100%; }
+  .sync-actions { display: grid; grid-template-columns: 1fr; width: 100%; }
 }
 </style>
 

@@ -227,7 +227,7 @@ function saveUndo(values) {
 }
 
 async function storedStates() {
-  const { useStoredRef } = await import('./store.js')
+  const { useStoredRef } = await import('./store')
   return Object.fromEntries(
     SYNC_KEYS.map((key) => [key, useStoredRef(key, cloneValue(SYNC_DEFAULTS[key]))])
   )
@@ -389,10 +389,10 @@ export async function pushToCloud({ signal = null, onProgress = null } = {}) {
 
   try {
     reportProgress(onProgress, 'collect', '正在收集本机可同步数据')
-    const storeModule = await import('./store.js')
-    storeModule.flushStoredWrites()
+    const { flushStoredWrites, useStoredRef } = await import('./store')
+    flushStoredWrites()
     const states = Object.fromEntries(
-      SYNC_KEYS.map((key) => [key, storeModule.useStoredRef(key, cloneValue(SYNC_DEFAULTS[key]))])
+      SYNC_KEYS.map((key) => [key, useStoredRef(key, cloneValue(SYNC_DEFAULTS[key]))])
     )
     const payload = currentStateValues(states)
     assertValidSyncPayload(payload)

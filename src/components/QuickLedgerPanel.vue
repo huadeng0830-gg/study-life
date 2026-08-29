@@ -1,7 +1,7 @@
 <script setup>
 import { nextTick, onMounted, ref } from 'vue'
 import { detectCategory, expenses, parseNatural } from '../composables/ledger.js'
-import { todayStr } from '../composables/store.js'
+import { todayStr } from '../composables/store'
 
 const emit = defineEmits(['close'])
 const name = ref('')
@@ -162,7 +162,7 @@ h2 { margin: 0; font-size: 16px; }
 }
 
 @media (max-width: 560px) {
-  .quick-ledger-panel { gap: 12px; margin-bottom: 14px; padding: 14px; border-radius: 14px; }
+  .quick-ledger-panel { position: fixed; right: 12px; bottom: calc(78px + env(safe-area-inset-bottom)); left: 12px; z-index: 60; gap: 12px; margin: 0; padding: 14px; border-radius: 16px; box-shadow: 0 14px 40px rgba(25, 42, 84, .2); }
   .panel-copy p { display: none; }
   .panel-form { grid-template-columns: minmax(0, 1fr) 104px; }
   .save-button { grid-column: 1 / -1; height: 40px; }
