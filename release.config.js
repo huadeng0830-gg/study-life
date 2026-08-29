@@ -7,6 +7,14 @@
 // 3. 更早的版本逐条下移，最多保留 3 个版本，超出即删除。
 export const RELEASE_UPDATES = Object.freeze([
   {
+    version: '2026年08月29日-版本19',
+    signature: '1a2a333fad',
+    notes: [
+      '快速记录补强中文金额与连续多笔消费拆分，避免将明确消费误归类为待办；账本结果支持按需修改分类和账户',
+      '输入框新增与麦克风并列的手动入口；快速笔记改为正文优先、标题可选的自由文本卡，保留原有笔记数据兼容',
+    ],
+  },
+  {
     version: '2026年08月29日-版本18',
     signature: '08e1f413a7',
     notes: [
@@ -183,7 +191,7 @@ export const RELEASE_UPDATES = Object.freeze([
 export const RELEASE_VERSION = RELEASE_UPDATES[0].version
 
 // 与第一条签名保持一致，交给 vite.config.js 校验源码一致性。
-export const RELEASE_SOURCE_SIGNATURE = '08e1f413a7'
+export const RELEASE_SOURCE_SIGNATURE = '1a2a333fad'
 
 // 兼容旧引用：当前版本的更新说明。
 export const RELEASE_NOTES = RELEASE_UPDATES[0].notes

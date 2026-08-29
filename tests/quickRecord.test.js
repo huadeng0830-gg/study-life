@@ -24,6 +24,15 @@ describe('quickRecord.parser', () => {
     expect(drafts.reduce((total, draft) => total + draft.amount, 0)).toBe(35)
   })
 
+  it('识别中文金额，并把一句话中的多笔消费拆开', () => {
+    const drafts = parseQuickRecord('今天坐公交车用了两块钱去吃了八块钱的兰州拉面。')
+    expect(drafts).toHaveLength(2)
+    expect(drafts.map((draft) => ({ title: draft.title, amount: draft.amount, type: draft.type }))).toEqual([
+      { title: '公交车', amount: 2, type: 'expense' },
+      { title: '兰州拉面', amount: 8, type: 'expense' },
+    ])
+  })
+
   it('识别周期账单', () => {
     const [draft] = parseQuickRecord('每月15号39元话费')
     expect(draft.type).toBe('bill')

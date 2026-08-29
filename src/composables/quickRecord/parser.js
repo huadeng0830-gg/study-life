@@ -27,7 +27,29 @@ function cleanTitle(source, parsed) {
     .replace(/[，,。；;]+$/g, '')
     .trim() || '未命名记录'
 }
+const CN_NUMBERS = { 零: 0, 〇: 0, 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 }
+function chineseAmount(value) {
+  const text = String(value || '')
+  if (/^\d+(?:\.\d+)?$/.test(text)) return Number(text)
+  if (!/^[零〇一二两三四五六七八九十百]+$/.test(text)) return 0
+  let total = 0; let current = 0
+  for (const char of text) {
+    if (char === '十') { total += (current || 1) * 10; current = 0 }
+    else if (char === '百') { total += (current || 1) * 100; current = 0 }
+    else current = CN_NUMBERS[char]
+  }
+  return total + current
+}
+function moneyMatches(text) {
+  const source = String(text || '')
+  const expression = /(?:¥|￥)?\s*(\d+(?:\.\d{1,2})?|[零〇一二两三四五六七八九十百]+)\s*(?:块钱|元|块|rmb)/gi
+  return [...source.matchAll(expression)].map((match) => ({
+    amount: chineseAmount(match[1]), start: match.index ?? 0, end: (match.index ?? 0) + match[0].length, raw: match[0],
+  })).filter((match) => match.amount > 0)
+}
 function amountOf(text) {
+  const explicit = moneyMatches(text)[0]
+  if (explicit) return explicit.amount
   const matches = [...String(text).matchAll(/(?:¥|￥)?\s*(\d+(?:\.\d{1,2})?)\s*(?:元|块|rmb)?/gi)]
   const hit = matches.find((item) => !/[年月日号点时]/.test(String(text).slice(item.index + item[0].length, item.index + item[0].length + 1)))
   return hit ? Number(hit[1]) : 0
@@ -54,6 +76,25 @@ function titleWithoutMoney(text, amount) {
     .replace(/[，,。；;]+/g, ' ')
     .trim()
 }
+function compactExpenseTitle(text) {
+  return String(text || '')
+    .replace(/(?:¥|￥)?\s*(?:\d+(?:\.\d{1,2})?|[零〇一二两三四五六七八九十百]+)\s*(?:块钱|元|块|rmb)/gi, '')
+    .replace(/^(今天|今日|刚刚|我|去|坐|乘坐|乘|搭乘)+/g, '')
+    .replace(/(用了|花了|花费|支付了|买了|去吃了|吃了|消费了)+$/g, '')
+    .replace(/^[的、，,\s]+|[的、，,。；;\s]+$/g, '')
+    .trim()
+}
+function moneyBatchStatements(source) {
+  const matches = moneyMatches(source)
+  if (matches.length < 2 || BILL_WORDS.test(source) || INCOME_WORDS.test(source)) return null
+  return matches.map((match, index) => {
+    const before = source.slice(index ? matches[index - 1].end : 0, match.start)
+    const after = source.slice(match.end, index + 1 < matches.length ? matches[index + 1].start : source.length)
+    const afterName = /^\s*的\s*([^，,。；;]+)/.exec(after)?.[1] || ''
+    const title = compactExpenseTitle(afterName || before)
+    return { statement: title || `支出 ${match.amount}元`, amount: match.amount, title: title || '未命名账目' }
+  })
+}
 function splitStatements(text) {
   const lines = String(text).split(/\n+/).map((item) => item.trim()).filter(Boolean)
   if (lines.length > 1) return lines
@@ -70,7 +111,10 @@ function inferType(source, forcedType, preferredType = '') {
   if (HOMEWORK_WORDS.test(source)) return 'homework'
   return preferredType || 'todo'
 }
-function questionsFor(type, parsed, source) {
+function questionsFor(type, parsed, source, amount = 0) {
+  if ((type === 'expense' || type === 'income' || type === 'bill') && !(Number(amount) > 0)) {
+    return [{ field: 'amount', label: '金额需要确认', choices: ['5', '10', '20'] }]
+  }
   if ((type === 'event' || type === 'homework') && /明晚/.test(source) && !parsed.dueTime) {
     return [{ field: 'time', label: '时间需要确认', choices: ['18:00', '20:00', '23:59'] }]
   }
@@ -80,21 +124,24 @@ function questionsFor(type, parsed, source) {
 export function parseQuickRecord(text, { courses = [], now = new Date(), forcedType = '', context = {} } = {}) {
   const source = String(text ?? '').trim()
   if (!source) return []
-  return splitStatements(source).map((statement) => {
+  const batch = moneyBatchStatements(source)
+  const statements = batch ?? splitStatements(source).map((statement) => ({ statement, amount: null, title: '' }))
+  return statements.map(({ statement, amount: knownAmount, title: knownTitle }) => {
     const parsed = parseNotice(statement, courses, now)
-    const type = inferType(statement, forcedType, context.preferredType)
-    const amount = amountOf(statement)
+    // 同一句中拆出的金额片段已经明确是独立消费，不能再因为片段标题里没有金额而退回待办。
+    const type = knownAmount ? (forcedType || 'expense') : inferType(statement, forcedType, context.preferredType)
+    const amount = knownAmount ?? amountOf(statement)
     const cycle = cycleOf(statement)
     const base = {
-      id: uid(), type, raw: statement, title: cleanTitle(statement, parsed),
+      id: uid(), type, raw: statement, title: knownTitle || cleanTitle(statement, parsed),
       course: parsed.course || context.courseName || '', courseId: context.courseId || '',
       date: parsed.dueDate || '', time: timeFrom(statement, parsed), priority: parsed.priority || 'normal',
       note: type === 'note' ? cleanTitle(statement, parsed) : parsed.note || '',
       amount, category: detectCategory(statement), account: paymentAccount(statement), cycle: cycle?.cycle || 'monthly',
-      questions: questionsFor(type, parsed, statement), confidence: 0.78,
+      questions: questionsFor(type, parsed, statement, amount), confidence: knownAmount ? 0.9 : 0.78,
     }
     if (type === 'expense' || type === 'income' || type === 'bill') {
-      base.title = titleWithoutMoney(statement, amount) || (type === 'income' ? '收入' : '未命名账目')
+      base.title = knownTitle || compactExpenseTitle(titleWithoutMoney(statement, amount)) || (type === 'income' ? '收入' : '未命名账目')
       base.date = parsed.dueDate || today(now)
       base.time = parsed.dueTime || currentTime(now)
       if (type === 'bill') {
