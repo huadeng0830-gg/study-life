@@ -17,6 +17,10 @@ dist-ssr
 preview.log
 /*.traineddata
 
+# 本地会话交接草稿：内容随协作过程变化，不作为项目源码或用户文档发布。
+HANDOFF.md
+NEXT_PROMPT.md
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
