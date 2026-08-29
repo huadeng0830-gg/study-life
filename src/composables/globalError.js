@@ -55,3 +55,24 @@ export function reloadAfterError() {
   dismissGlobalError()
   if (typeof window !== 'undefined') window.location.reload()
 }
+
+/* ---------- 静默失败的可观测性 ---------- */
+// 存储写入/镜像等路径刻意“catch 后继续”，不打扰用户；但完全无记录会让
+// 线上配额溢出、读写失败无从排查。这里只保留最近若干条到内存环形缓冲并
+// 输出 console.warn，不弹任何提示；导出数组仅供诊断脚本或未来诊断页读取。
+const SILENT_ERRORS_MAX = 20
+
+export const silentErrors = []
+
+export function recordSilentError(scope, error) {
+  try {
+    silentErrors.push({
+      scope: String(scope ?? 'unknown'),
+      message: error instanceof Error ? error.message : String(error ?? ''),
+      at: new Date().toISOString(),
+    })
+    if (silentErrors.length > SILENT_ERRORS_MAX) silentErrors.shift()
+    console.warn(`[SilentError:${scope}]`, error ?? '')
+  } catch {
+  }
+}

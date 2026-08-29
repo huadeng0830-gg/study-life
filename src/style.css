@@ -322,3 +322,52 @@ textarea:focus-visible {
     contain-intrinsic-size: auto 150px;
   }
 }
+
+/* ---------- 氛围装饰（模块 A）：雪 / 彩带 / 灯笼，纯 CSS 动画 ---------- */
+.atmo-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+.atmo-layer i {
+  position: absolute;
+  top: -8vh;
+  display: block;
+  will-change: transform, opacity;
+}
+.atmo-layer[data-decor='snow'] i {
+  border-radius: 50%;
+  box-shadow: 0 0 8px rgba(255, 255, 255, 0.7);
+  animation-name: atmo-fall;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+.atmo-layer[data-decor='confetti'] i {
+  opacity: 0.92;
+  animation-name: atmo-confetti;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+.atmo-layer[data-decor='lantern'] i {
+  border-radius: 50% 50% 45% 45%;
+  opacity: 0.75;
+  box-shadow: 0 0 14px var(--atmosphere-accent, #e23b3b);
+  animation-name: atmo-lantern;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+  animation-direction: alternate;
+}
+@keyframes atmo-fall {
+  from { transform: translate3d(-4px, -6vh, 0); }
+  to { transform: translate3d(4px, 108vh, 0); }
+}
+@keyframes atmo-confetti {
+  from { transform: translate3d(0, -6vh, 0) rotate(0deg); }
+  to { transform: translate3d(26px, 108vh, 0) rotate(720deg); }
+}
+@keyframes atmo-lantern {
+  from { transform: translateY(0) rotate(-2deg); }
+  to { transform: translateY(6vh) rotate(2deg); }
+}

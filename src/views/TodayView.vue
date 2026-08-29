@@ -1,8 +1,7 @@
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import {
   clock,
-  useStoredRef,
   MAX_WEEK,
   todayStr,
   dayName,
@@ -22,14 +21,47 @@ import {
 import {
   coursesForDate,
 } from '../composables/store/schedule.js'
-import { createNextWeeklyTask as nextWeekly } from '../composables/taskRecurrence.js'
 import { appearance } from '../composables/appearance.js'
+import { festiveFor } from '../composables/festive.js'
+import { festiveConfig, moodLog } from '../composables/atmosphereStore.js'
+import { moodOf, logMood as logMoodRecord } from '../composables/mood.js'
+import MemoryView from '../components/MemoryView.vue'
+import FestiveSettings from '../components/FestiveSettings.vue'
+import { useDomainCommands } from '../composables/domain/commands.js'
+import { selectActionCenter } from '../composables/domain/selectors.js'
 
-const courses = useStoredRef('sl_courses', [])
-const tasks = useStoredRef('sl_tasks', [])
-const exams = useStoredRef('sl_exams', [])
-const bills = useStoredRef('sl_bills', [])
+const domain = useDomainCommands()
+const { courses, tasks, milestones: exams, bills, events, notes: quickNotes } = domain
 const now = computed(() => clock.value)
+
+/* ---------- 氛围问候 + 心情记录（模块 A） ---------- */
+const todayISO = computed(() => {
+  const d = now.value
+  const pad = (value) => String(value).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+})
+const festive = computed(() => festiveFor(todayISO.value, festiveConfig.value))
+
+const showMemory = ref(false)
+const showFestive = ref(false)
+const MOOD_OPTIONS = ['😊', '😄', '😌', '😐', '😢', '😭', '😤', '😴']
+const todayMood = computed(() => moodOf(todayISO.value, moodLog.value))
+const moodNoteDraft = ref('')
+
+function logMood(emoji) {
+  const keepNote = todayMood.value?.mood === emoji ? (todayMood.value.note ?? '') : ''
+  moodLog.value = logMoodRecord(todayISO.value, emoji, keepNote, moodLog.value)
+  moodNoteDraft.value = keepNote
+}
+
+function saveMoodNote() {
+  if (!todayMood.value) return
+  moodLog.value = logMoodRecord(todayISO.value, todayMood.value.mood, moodNoteDraft.value.trim(), moodLog.value)
+}
+
+watch(todayMood, (mood) => {
+  moodNoteDraft.value = mood?.note ?? ''
+})
 const sessionQuoteIndex = Math.floor(Math.random() * 50)
 const weekNum = computed(() => Math.min(Math.max(weekOf(todayStr()), 1), MAX_WEEK))
 const dateText = computed(
@@ -195,20 +227,32 @@ function taskDeadline(task) {
 
 function toggleTask(task) {
   if (!task) return
-  task.done = !task.done
-  task.completedAt = task.done ? new Date().toISOString() : null
-  if (task.done && task.repeat === 'weekly' && task.dueDate && !task.repeatGeneratedAt) {
-    task.repeatGeneratedAt = new Date().toISOString()
-    const nextTask = nextWeekly(task)
-    if (nextTask) tasks.value.push(nextTask)
-  }
+  domain.toggleTask(task.id)
 }
 
 /* ---------- 倒计时 / 提醒 ---------- */
-const upcomingExams = computed(() =>
-  sortCountdowns(exams.value, now.value).filter((item) => !item.countdown.isPast)
+const previewEvents = computed(() =>
+  events.value.filter((item) => !item.date || item.date >= todayStr()).sort((a, b) => `${a.date}${a.time}`.localeCompare(`${b.date}${b.time}`)).slice(0, 3)
 )
-const previewExams = computed(() => upcomingExams.value.slice(0, 4))
+const previewNotes = computed(() => quickNotes.value.slice(0, 2))
+
+// 近期提醒不拥有数据，只是统一投影；今日待办已在主区域展示的项目不会再次出现。
+const unifiedReminders = computed(() => {
+  const shownTasks = new Set(displayTasks.value.map((item) => item.id))
+  const actionCenter = selectActionCenter({ tasks: tasks.value, bills: bills.value, milestones: exams.value, events: events.value }, now.value)
+  return [...actionCenter.urgent, ...actionCenter.today, ...actionCenter.soon]
+    .filter((item) => item.sourceType !== 'task' || !shownTasks.has(item.sourceId))
+    .slice(0, 4)
+})
+function reminderMeta(item) {
+  if (item.kind === 'overdue') return '已逾期'
+  if (item.sourceType === 'bill') return `${item.entity.nextDate?.slice(5).replace('-', '/')} · ¥${Number(item.entity.amount || 0).toFixed(2)}`
+  if (item.sourceType === 'event') return `${item.entity.date || '待安排'}${item.entity.time ? ` ${item.entity.time}` : ''}`
+  return item.entity.countdown?.text || countdownLabel(sortCountdowns([item.entity], now.value)[0])
+}
+function completeReminder(item) {
+  if (item.sourceType === 'task') domain.toggleTask(item.sourceId)
+}
 
 function countdownLabel(item) {
   const state = item.countdown
@@ -236,16 +280,6 @@ const weekReview = computed(() => {
   }
 })
 
-/* ---------- 近期账单 ---------- */
-const billsSoon = computed(() =>
-  bills.value
-    .filter((bill) => bill.active !== false && bill.nextDate)
-    .sort((a, b) => a.nextDate.localeCompare(b.nextDate))
-    .slice(0, 4)
-)
-function billDate(date) {
-  return date?.slice(5).replace('-', '/') ?? ''
-}
 </script>
 
 <template>
@@ -255,9 +289,31 @@ function billDate(date) {
       <div class="head-copy">
         <h1 class="greeting">{{ greeting() }}<template v-if="currentQuote">，{{ currentQuote }}</template></h1>
         <p class="page-desc">{{ dateText }} · 第 {{ weekNum }} 周 · {{ campusName(currentCampusId()) }} · {{ seasonName(currentSeasonId()) }}</p>
+        <p v-if="festive" class="fest-greet" :style="{ color: festive.accentColor }">🎉 {{ festive.name }} · {{ festive.message }}</p>
       </div>
-      <router-link class="btn btn-primary add-btn" to="/tasks">＋ 添加待办</router-link>
+      <div class="head-actions">
+        <button type="button" class="btn btn-ghost replay-btn" @click="showMemory = true">↺ 回放</button>
+      </div>
     </header>
+
+    <!-- 心情记录：轻量一排，点一下即可 -->
+    <section class="mood-strip" aria-label="记录今天心情">
+      <span class="mood-label">今天心情</span>
+      <div class="mood-options">
+        <button
+          v-for="emoji in MOOD_OPTIONS"
+          :key="emoji"
+          type="button"
+          class="mood-btn"
+          :class="{ on: todayMood?.mood === emoji }"
+          :aria-label="`记录心情 ${emoji}`"
+          @click="logMood(emoji)"
+        >{{ emoji }}</button>
+      </div>
+      <input v-if="todayMood" v-model="moodNoteDraft" class="mood-note" placeholder="加一句心情备注…" @change="saveMoodNote" />
+      <span v-else class="mood-hint">点一个表情，记录此刻</span>
+      <button type="button" class="btn btn-ghost festive-set-btn" @click="showFestive = true">🎯 节日</button>
+    </section>
 
     <!-- ② 接下来：首页最高优先级 -->
     <section class="next-panel" :class="nextUp.kind" aria-label="接下来">
@@ -338,17 +394,25 @@ function billDate(date) {
       </section>
     </div>
 
-    <!-- ⑤ 近期提醒 / 倒计时 -->
-    <section class="panel secondary-panel cvi-auto" v-if="previewExams.length">
+    <section v-if="previewEvents.length || previewNotes.length" class="panel secondary-panel cvi-auto quick-record-summary">
+      <div class="panel-head"><h2>快速记录</h2><span class="panel-progress">日程与笔记</span></div>
+      <div v-for="item in previewEvents" :key="item.id" class="quick-record-row"><b>📅 {{ item.title }}</b><span>{{ item.date || '待安排' }}{{ item.time ? ` ${item.time}` : '' }}</span></div>
+      <div v-for="item in previewNotes" :key="item.id" class="quick-record-row"><b>📝 {{ item.title }}</b><span>{{ item.content }}</span></div>
+    </section>
+
+    <!-- ⑤ 统一提醒：不保存业务数据，直接从待办/账单/节点/日程动态计算。 -->
+    <section class="panel secondary-panel cvi-auto" v-if="unifiedReminders.length">
       <div class="panel-head">
         <h2>近期提醒</h2>
-        <router-link to="/exams" class="panel-link">查看全部 →</router-link>
+        <router-link to="/exams" class="panel-link">查看节点 →</router-link>
       </div>
       <div class="exam-list">
-        <router-link v-for="exam in previewExams" :key="exam.id" to="/exams" class="exam-row">
-          <b>{{ exam.name }}</b>
-          <span :class="{ urgent: exam.countdown.days <= 7 }">{{ countdownLabel(exam) }}</span>
-        </router-link>
+        <div v-for="item in unifiedReminders" :key="item.key" class="exam-row">
+          <b>{{ item.sourceType === 'bill' ? '🧾 ' : item.sourceType === 'event' ? '📅 ' : item.sourceType === 'milestone' ? '⏳ ' : '✓ ' }}{{ item.title }}</b>
+          <span :class="{ urgent: item.priority === 'high' || item.kind === 'overdue' }">{{ reminderMeta(item) }}</span>
+          <button v-if="item.sourceType === 'task'" type="button" class="reminder-action" @click="completeReminder(item)">完成</button>
+          <router-link v-else-if="item.sourceType === 'bill'" :to="{ path: '/bills', query: { tab: 'bills' } }" class="reminder-action">处理</router-link>
+        </div>
       </div>
     </section>
 
@@ -359,20 +423,10 @@ function billDate(date) {
       <div :class="{ warn: weekReview.pending > 0 }"><b>{{ weekReview.pending }}</b><span>待处理</span></div>
     </section>
 
-    <!-- ⑦ 近期账单：无关注项时整块隐藏 -->
-    <section class="panel secondary-panel cvi-auto" v-if="billsSoon.length">
-      <div class="panel-head">
-        <h2>近期账单</h2>
-        <router-link :to="{ path: '/bills', query: { tab: 'bills' } }" class="panel-link">查看全部 →</router-link>
-      </div>
-      <div class="bill-list">
-        <router-link v-for="bill in billsSoon" :key="bill.id" :to="{ path: '/bills', query: { tab: 'bills' } }" class="bill-row">
-          <b>{{ bill.name }}</b>
-          <span>{{ billDate(bill.nextDate) }} · ¥{{ Number(bill.amount || 0).toFixed(2) }}</span>
-        </router-link>
-      </div>
-    </section>
     </template>
+
+    <MemoryView :open="showMemory" @close="showMemory = false" />
+    <FestiveSettings :open="showFestive" @close="showFestive = false" />
   </div>
 </template>
 
@@ -383,7 +437,45 @@ function billDate(date) {
 .page-head { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
 .greeting { font-size: clamp(19px, 2.2vw, 24px); letter-spacing: -0.01em; }
 .page-desc { margin-top: 5px; color: var(--ink-soft); font-size: 12.5px; }
-.add-btn { flex: 0 0 auto; padding: 9px 14px; font-size: 13px; white-space: nowrap; }
+.fest-greet { margin-top: 5px; font-size: 12.5px; font-weight: 700; }
+.head-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.replay-btn { flex: 0 0 auto; padding: 9px 13px; font-size: 13px; white-space: nowrap; min-height: 40px; }
+
+/* 心情记录：轻量一排 */
+.mood-strip {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--card-radius);
+  background: var(--card);
+}
+.mood-label { color: var(--ink-soft); font-size: 12.5px; font-weight: 700; white-space: nowrap; }
+.mood-options { display: flex; gap: 4px; flex-wrap: wrap; }
+.mood-btn {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  font-size: 20px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  transition: background 0.14s, border-color 0.14s, transform 0.14s;
+}
+.mood-btn:hover { background: var(--bg-tint); }
+.mood-btn.on { border-color: var(--primary); background: var(--primary-soft); transform: scale(1.05); }
+.mood-note { min-width: 160px; flex: 1; padding: 8px 10px; }
+.mood-hint { color: var(--ink-faint); font-size: 12px; }
+.festive-set-btn {
+  margin-left: auto;
+  min-height: 40px;
+  padding: 8px 12px;
+  font-size: 12.5px;
+  white-space: nowrap;
+}
 
 /* ② 接下来 */
 .next-panel {
@@ -458,6 +550,7 @@ function billDate(date) {
 .exam-row:hover b { color: var(--primary); }
 .exam-row span { flex: 0 0 auto; color: var(--ink-soft); font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .exam-row span.urgent { color: var(--danger); }
+.reminder-action { flex: 0 0 auto; padding: 4px 7px; color: var(--primary); font-size: 11px; font-weight: 750; text-decoration: none; border: 0; border-radius: 6px; background: var(--primary-soft); }
 
 /* ⑥ 本周概况 */
 .week-strip { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
@@ -472,6 +565,11 @@ function billDate(date) {
 .bill-row:first-child { border-top: 0; }
 .bill-row:hover b { color: var(--primary); }
 .bill-row span { flex: 0 0 auto; color: var(--ink-soft); font-size: 12px; font-variant-numeric: tabular-nums; }
+
+.quick-record-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-top: 1px solid var(--border); }
+.quick-record-row:first-of-type { border-top: 0; }
+.quick-record-row b { flex: 1; min-width: 0; overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.quick-record-row span { max-width: 46%; overflow: hidden; color: var(--ink-soft); font-size: 11.5px; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ---------- 手机端：单列，待办优先于课程 ---------- */
 @media (max-width: 860px) {

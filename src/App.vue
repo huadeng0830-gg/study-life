@@ -2,18 +2,21 @@
 import { defineAsyncComponent, computed, KeepAlive, onBeforeUnmount, onMounted, ref, watchEffect } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Sidebar from './components/Sidebar.vue'
-import QuickLedgerPanel from './components/QuickLedgerPanel.vue'
 import WallpaperLayer from './components/WallpaperLayer.vue'
-import { migrateTaskCourseLinks, useStoredRef } from './composables/store'
+import { clock, migrateTaskCourseLinks, useStoredRef } from './composables/store'
 import { isIOSDevice } from './composables/performanceMode.js'
+import { festiveFor, applyAtmosphere } from './composables/festive.js'
+import { festiveConfig } from './composables/atmosphereStore.js'
 import {
   RELEASE_HISTORY_KEY,
   RELEASE_SEEN_KEY,
   shouldShowReleaseNotes,
 } from './composables/releaseNotes.js'
 import { lastGlobalError, dismissGlobalError, reloadAfterError } from './composables/globalError.js'
+import { DOMAIN_SCHEMA_VERSION, migrateDomainData } from './composables/domain/migrations.js'
 
 const UpdateNotes = defineAsyncComponent(() => import('./components/UpdateNotes.vue'))
+const QuickRecordPanel = defineAsyncComponent(() => import('./components/QuickRecordPanel.vue'))
 
 const route = useRoute()
 const router = useRouter()
@@ -23,15 +26,69 @@ let tasks = null
 let courses = null
 let stopTitleWatcher = null
 const showReleaseNotes = ref(false)
-const showQuickLedger = ref(false)
+const showQuickRecord = ref(false)
 let releaseTimer = 0
+
+/* ---------- 氛围与情绪引擎（模块 A） ---------- */
+const todayISO = computed(() => {
+  const d = clock.value
+  const pad = (value) => String(value).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+})
+const festiveToday = computed(() => festiveFor(todayISO.value, festiveConfig.value))
+const atmosphereKey = computed(() => festiveToday.value?.key ?? 'none')
+const CONFETTI_COLORS = ['#ef4444', '#f59e0b', '#10b981', '#3b82f6', '#8b5cf6', '#ec4899']
+const decorParticles = Array.from({ length: 18 }, (_, id) => ({
+  id,
+  left: (id * 5.7 + 3) % 100,
+  delay: (id % 9) * -1.1,
+  dur: 6 + (id % 5),
+  size: 6 + (id % 3) * 3,
+}))
+
+function decorStyle(particle) {
+  const decor = festiveToday.value?.decor
+  const accent = festiveToday.value?.accentColor
+  let background = accent || 'var(--primary)'
+  const lantern = decor === 'lantern'
+  if (decor === 'snow') background = '#ffffff'
+  else if (decor === 'confetti') background = CONFETTI_COLORS[particle.id % CONFETTI_COLORS.length]
+  return {
+    left: `${particle.left}%`,
+    width: lantern ? `${14 + (particle.id % 3) * 3}px` : `${particle.size}px`,
+    height: lantern ? `${18 + (particle.id % 3) * 3}px` : decor === 'snow' ? `${particle.size}px` : `${particle.size + 3}px`,
+    background,
+    animationDelay: `${particle.delay}s`,
+    animationDuration: `${particle.dur}s`,
+  }
+}
+
+// 天气/节日氛围若变化，及时写入根节点 CSS 变量；无氛围时清空。
+watchEffect(() => {
+  applyAtmosphere(festiveToday.value ? { accentColor: festiveToday.value.accentColor, decor: festiveToday.value.decor } : null)
+})
+
+/* ---------- 全局快速记录：仅通过明确入口打开，不遮挡页面正文 ---------- */
+const quickRecordContext = computed(() => {
+  if (route.path === '/bills') return { preferredType: 'expense' }
+  if (route.path === '/tasks') return { preferredType: 'todo' }
+  if (route.path === '/schedule') return { preferredType: 'event' }
+  return {}
+})
+function openQuickRecord() { showQuickRecord.value = true }
+function closeQuickRecord() { showQuickRecord.value = false }
 
 // 按 1-8 快速切换页面（输入框聚焦时忽略）
 const routeOrder = ['/', '/schedule', '/tasks', '/exams', '/lists', '/bills', '/food']
 
 function onKeydown(event) {
-  if (event.key === 'Escape' && showQuickLedger.value) {
-    showQuickLedger.value = false
+  if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+    event.preventDefault()
+    openQuickRecord()
+    return
+  }
+  if (event.key === 'Escape' && showQuickRecord.value) {
+    showQuickRecord.value = false
     return
   }
   if (event.metaKey || event.ctrlKey || event.altKey) return
@@ -58,6 +115,17 @@ onMounted(() => {
   tasks = useStoredRef('sl_tasks', [])
   courses = useStoredRef('sl_courses', [])
   migrateTaskCourseLinks(tasks.value, courses.value)
+  const domainSchema = useStoredRef('sl_domain_schema', 0)
+  if (domainSchema.value < DOMAIN_SCHEMA_VERSION) {
+    migrateDomainData({
+      tasks: tasks.value,
+      milestones: useStoredRef('sl_exams', []).value,
+      transactions: useStoredRef('sl_expenses', []).value,
+      events: useStoredRef('sl_events', []).value,
+      notes: useStoredRef('sl_quick_notes', []).value,
+    })
+    domainSchema.value = DOMAIN_SCHEMA_VERSION
+  }
   // 浏览器标签页标题实时显示未完成待办数量
   stopTitleWatcher = watchEffect(() => {
     const pending = tasks.value.filter((task) => !task.done).length
@@ -99,15 +167,15 @@ const pageCacheSize = isIOSDevice() ? 2 : 4
 
 <template>
   <WallpaperLayer />
-  <div class="layout">
+  <div v-if="festiveToday?.decor" class="atmo-layer" :data-decor="festiveToday.decor" aria-hidden="true">
+    <i v-for="particle in decorParticles" :key="particle.id" :style="decorStyle(particle)" />
+  </div>
+  <div class="layout" :data-atmosphere="atmosphereKey">
     <Sidebar
-      :quick-ledger-open="showQuickLedger"
-      @toggle-quick-ledger="showQuickLedger = !showQuickLedger"
+      :quick-record-open="showQuickRecord"
+      @open-quick-record="openQuickRecord"
     />
     <main class="content" :class="widthClass">
-      <Transition name="quick-ledger">
-        <QuickLedgerPanel v-if="showQuickLedger" @close="showQuickLedger = false" />
-      </Transition>
       <router-view v-slot="{ Component, route: activeRoute }">
         <KeepAlive :include="cachedPageNames" :max="pageCacheSize">
           <component :is="Component" :key="activeRoute.name" />
@@ -116,6 +184,7 @@ const pageCacheSize = isIOSDevice() ? 2 : 4
     </main>
   </div>
   <UpdateNotes v-if="showReleaseNotes" :open="showReleaseNotes" @close="showReleaseNotes = false" />
+  <QuickRecordPanel v-if="showQuickRecord" :open="showQuickRecord" :context="quickRecordContext" @close="closeQuickRecord" />
 
   <Transition name="global-error">
     <div v-if="lastGlobalError" class="global-error-toast" role="alert">
@@ -148,15 +217,6 @@ const pageCacheSize = isIOSDevice() ? 2 : 4
   max-width: 1280px;
   margin: 0 auto;
   padding: 32px 40px 48px;
-}
-.quick-ledger-enter-active,
-.quick-ledger-leave-active {
-  transition: opacity 0.18s ease, transform 0.18s ease;
-}
-.quick-ledger-enter-from,
-.quick-ledger-leave-to {
-  opacity: 0;
-  transform: translateY(-10px);
 }
 
 /* 按页面类型分配宽度：Dashboard/账单/吃什么的宽版、清单与倒计时的中版、待办的紧凑版。
@@ -257,4 +317,5 @@ const pageCacheSize = isIOSDevice() ? 2 : 4
   opacity: 0;
   transform: translate(-50%, 10px);
 }
+
 </style>

@@ -12,6 +12,8 @@ import {
   SYNC_KEYS,
   assertValidSyncPayload,
   cloneValue,
+  normalizePullKeys,
+  pickSyncValues,
   sanitizeSyncPayload,
   validateSyncPayload,
 } from './cloudSyncData.js'
@@ -226,15 +228,16 @@ function saveUndo(values) {
   }
 }
 
-async function storedStates() {
-  const { useStoredRef } = await import('./store')
+async function storedStates(keys = SYNC_KEYS) {
+  // 让同步入口以独立边界按需加载完整 store；避免直接动态导入 store/index.js 的打包警告。
+  const { useStoredRef } = await import('./store/cloudAccess.js')
   return Object.fromEntries(
-    SYNC_KEYS.map((key) => [key, useStoredRef(key, cloneValue(SYNC_DEFAULTS[key]))])
+    keys.map((key) => [key, useStoredRef(key, cloneValue(SYNC_DEFAULTS[key]))])
   )
 }
 
-function snapshotStates(states) {
-  return Object.fromEntries(SYNC_KEYS.map((key) => [key, cloneValue(states[key].value)]))
+function snapshotStates(states, keys) {
+  return Object.fromEntries(keys.map((key) => [key, cloneValue(states[key]?.value)]))
 }
 
 function currentStateValues(states) {
@@ -320,9 +323,12 @@ export function disconnectCloud() {
 }
 
 // ---------- 拉取：仅可由 UI 的「从云端拉取」按钮调用 ----------
-export async function pullFromCloud({ signal = null, onProgress = null } = {}) {
+// keys：本次要拉取的 sl_* 键子集；null/undefined 保持全量向后兼容。
+export async function pullFromCloud({ signal = null, onProgress = null, keys = null } = {}) {
   if (isSyncing.value) return false
   if (!SYNC_CODE_PATTERN.test(code.value)) return showError('尚未连接云端，请先输入访问码连接')
+  const pullKeys = normalizePullKeys(keys)
+  if (!pullKeys.length) return showSuccess('未选择要拉取的数据模块，本地数据未发生变化')
   syncStatus.value = 'pulling'
   lastError.value = ''
 
@@ -347,15 +353,16 @@ export async function pullFromCloud({ signal = null, onProgress = null } = {}) {
     const remote = unpackSyncPackage(await decryptData(data, code.value))
     throwIfAborted(signal)
     reportProgress(onProgress, 'validate', '正在校验数据结构与兼容性')
-    const { values: validated, invalidKeys } = sanitizeSyncPayload(remote.values)
+    // 只对选中键做解密后校验，未勾选模块的云端值直接忽略、本地保持原样。
+    const { values: validated, invalidKeys } = sanitizeSyncPayload(pickSyncValues(remote.values, pullKeys))
     if (!Object.keys(validated).length && invalidKeys.length) {
       throw new Error('云端数据全部为旧版异常格式，本地数据未发生变化')
     }
-    // 先创建本机安全快照，再应用云端版本。
+    // 先创建本机安全快照，再应用云端版本；快照只覆盖本次涉及到的键。
     throwIfAborted(signal)
-    const states = await storedStates()
+    const states = await storedStates(pullKeys)
     reportProgress(onProgress, 'apply', '已创建拉取前快照，正在应用可用数据', { 数据模块: Object.keys(validated).length })
-    saveUndo(snapshotStates(states))
+    saveUndo(snapshotStates(states, pullKeys))
     applyRemoteValues(states, validated)
 
     // 新版来源以服务端 metadata 为准；旧加密包只作为兼容显示回退。
@@ -389,7 +396,7 @@ export async function pushToCloud({ signal = null, onProgress = null } = {}) {
 
   try {
     reportProgress(onProgress, 'collect', '正在收集本机可同步数据')
-    const { flushStoredWrites, useStoredRef } = await import('./store')
+    const { flushStoredWrites, useStoredRef } = await import('./store/cloudAccess.js')
     flushStoredWrites()
     const states = Object.fromEntries(
       SYNC_KEYS.map((key) => [key, useStoredRef(key, cloneValue(SYNC_DEFAULTS[key]))])

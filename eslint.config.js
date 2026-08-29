@@ -36,6 +36,12 @@ export default [
     },
     rules: {
       'vue/multi-word-component-names': 'off',
+      // 基础健壮性规则：禁止 var、禁止抛非 Error 值、禁止无意义的 catch 再抛。
+      'no-var': 'error',
+      'no-throw-literal': 'error',
+      'no-useless-catch': 'error',
+      'prefer-const': 'error',
+      'object-shorthand': ['error', 'properties'],
     },
   },
 ]

@@ -68,7 +68,7 @@ function parseTime(text) {
   if (!match) return ''
   const period = match[1] || ''
   let hour = chineseNumber(match[2])
-  let minute = colon ? Number(match[3]) : match[3] === '半' ? 30 : chineseNumber(String(match[3] || '0').replace('分', ''))
+  const minute = colon ? Number(match[3]) : match[3] === '半' ? 30 : chineseNumber(String(match[3] || '0').replace('分', ''))
   if (/下午|晚上|夜里/.test(period) && hour < 12) hour += 12
   if (/凌晨/.test(period) && hour === 12) hour = 0
   if (/中午/.test(period) && hour < 11) hour += 12

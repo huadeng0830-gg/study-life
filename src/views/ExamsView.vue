@@ -5,14 +5,14 @@ import Modal from '../components/Modal.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import VirtualList from '../components/VirtualList.vue'
 import {
-  useStoredRef,
   fmtCountdownDate,
   sortCountdowns,
 } from '../composables/store'
+import { useDomainCommands } from '../composables/domain/commands.js'
 
 const CATEGORIES = ['学习', '生活', '纪念日', '项目', '其他']
-const exams = useStoredRef('sl_exams', [])
-const courses = useStoredRef('sl_courses', [])
+const domain = useDomainCommands()
+const { milestones: exams, courses } = domain
 const showPast = useStoredRef('sl_countdown_show_past', false)
 const showForm = ref(false)
 const editingId = ref(null)
@@ -81,10 +81,9 @@ function save() {
     reviewProgress: isStudyCountdown ? Math.max(0, Math.min(100, Number(form.value.reviewProgress) || 0)) : 0,
   }
   if (editingId.value) {
-    const target = exams.value.find((item) => item.id === editingId.value)
-    if (target) Object.assign(target, data)
+    domain.updateMilestone(editingId.value, data)
   } else {
-    exams.value.push({ id: 'e' + Date.now(), ...data })
+    domain.createMilestone({ ...data, kind: form.value.category === '学习' ? 'exam' : 'countdown', createdFrom: 'manual' })
   }
   showForm.value = false
 }
@@ -160,8 +159,7 @@ function closeMenu() {
 }
 
 function menuPin(item) {
-  const target = exams.value.find((entry) => entry.id === item.id)
-  if (target) target.pinned = !target.pinned
+  domain.updateMilestone(item.id, { pinned: !item.pinned })
   closeMenu()
 }
 

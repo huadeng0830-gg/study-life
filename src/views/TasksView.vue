@@ -7,12 +7,13 @@ import NoticePaste from '../components/NoticePaste.vue'
 import SwipeActionItem from '../components/SwipeActionItem.vue'
 import VirtualList from '../components/VirtualList.vue'
 import { appearance } from '../composables/appearance.js'
-import { fmtDate, todayStr, useStoredRef } from '../composables/store'
-import { createNextWeeklyTask } from '../composables/taskRecurrence.js'
+import { fmtDate, todayStr } from '../composables/store'
 import { findUniqueCourseByName } from '../composables/courseLinks.js'
+import { classifyTasks } from '../composables/smartClassify.js'
+import { useDomainCommands } from '../composables/domain/commands.js'
 
-const tasks = useStoredRef('sl_tasks', [])
-const courses = useStoredRef('sl_courses', [])
+const domain = useDomainCommands()
+const { tasks, courses } = domain
 const showForm = ref(false)
 const showNotice = ref(false)
 const noticeMessage = ref('')
@@ -24,6 +25,18 @@ const form = ref(emptyForm())
 const deleteTarget = ref(null)
 const undoToast = ref(null)
 let undoTimer = 0
+
+// 一键智能整理：只改字段（补课程、分优先级），不删任何数据。
+const organizeMessage = ref('')
+let organizeTimer = 0
+
+function smartOrganize() {
+  const { list, changed } = classifyTasks(tasks.value, courses.value)
+  tasks.value = list
+  organizeMessage.value = changed ? `已智能整理 ${changed} 条待办` : '待办已经很整齐，无需整理'
+  window.clearTimeout(organizeTimer)
+  organizeTimer = window.setTimeout(() => { if (organizeMessage.value) organizeMessage.value = '' }, 3000)
+}
 
 const PRIORITIES = {
   high: { label: '高优先级', order: 0 },
@@ -93,15 +106,9 @@ function save() {
     repeat: form.value.repeat,
   }
   if (editingId.value) {
-    const target = tasks.value.find((task) => task.id === editingId.value)
-    if (target) Object.assign(target, data)
+    domain.updateTask(editingId.value, data)
   } else {
-    tasks.value.push({
-      id: 't' + Date.now(),
-      done: false,
-      createdAt: new Date().toISOString(),
-      ...data,
-    })
+    domain.createTask({ ...data, createdFrom: 'manual' })
   }
   showForm.value = false
 }
@@ -119,13 +126,7 @@ function toggleDone(event, id) {
 
 function toggleTask(task) {
   if (!task) return
-  task.done = !task.done
-  task.completedAt = task.done ? new Date().toISOString() : null
-  if (task.done && task.repeat === 'weekly' && task.dueDate && !task.repeatGeneratedAt) {
-    task.repeatGeneratedAt = new Date().toISOString()
-    const nextTask = createNextWeeklyTask(task)
-    if (nextTask) tasks.value.push(nextTask)
-  }
+  domain.toggleTask(task.id)
 }
 
 function swipeLabel(task, direction) {
@@ -151,21 +152,13 @@ function handleTaskSwipe(direction, task) {
 }
 
 function onNoticeCommit(payload) {
-  const now = new Date().toISOString()
   const course = findUniqueCourseByName(courses.value, payload.data.course)
   const data = { ...payload.data, courseId: course?.id ?? '' }
   if (payload.type === 'update') {
-    const target = tasks.value.find((task) => task.id === payload.id)
-    if (!target) return
-    Object.assign(target, data, { updatedAt: now })
+    if (!domain.updateTask(payload.id, data)) return
     showNoticeMessage(course || !payload.data.course ? `已根据新通知更新“${payload.title}”` : `已更新“${payload.title}”；课程名称未唯一匹配，请检查关联`)
   } else {
-    tasks.value.push({
-      id: 't' + Date.now(),
-      done: false,
-      createdAt: now,
-      ...data,
-    })
+    domain.createTask({ ...data, createdFrom: 'clipboard', sourceType: 'notice' })
     showNoticeMessage(course || !payload.data.course ? `已创建待办“${payload.title}”` : `已创建“${payload.title}”；课程名称未唯一匹配，请检查关联`)
   }
 }
@@ -183,6 +176,7 @@ function showNoticeMessage(message) {
 onBeforeUnmount(() => {
   window.clearTimeout(noticeMessageTimer)
   window.clearTimeout(undoTimer)
+  window.clearTimeout(organizeTimer)
 })
 
 function dueTimestamp(task) {
@@ -306,12 +300,14 @@ function taskCourseName(task) {
             <option v-for="s in SORTS" :key="s.key" :value="s.key">{{ s.label }}</option>
           </select>
         </label>
+        <button class="btn btn-ghost" @click="smartOrganize">✦ 一键整理</button>
         <button class="btn btn-ghost" @click="showNotice = true">📋 粘贴通知</button>
         <button class="btn btn-primary" @click="openAdd">＋ 添加待办</button>
       </div>
     </header>
 
     <p v-if="noticeMessage" class="notice-success">✓ {{ noticeMessage }}</p>
+    <p v-if="organizeMessage && !noticeMessage" class="notice-success">✓ {{ organizeMessage }}</p>
 
     <div class="segmented task-toolbar" role="tablist" aria-label="待办筛选">
       <button :class="{ on: filter === 'todo' }" @click="filter = 'todo'">待完成 <b>{{ counts.todo }}</b></button>

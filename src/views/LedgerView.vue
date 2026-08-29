@@ -10,7 +10,6 @@ import { ledgerTabFromQuery } from '../composables/routeState.js'
 import {
   DEFAULT_CATEGORIES,
   activeCategories,
-  billCategoryToKey,
   catInfo,
   computeFrequentFromIndex,
   detectCategory,
@@ -21,8 +20,11 @@ import {
   ledgerPeriodStatsFromIndex,
   parseNatural,
 } from '../composables/ledger.js'
+import { dayLabel, moneyHero, moneyRow, nowHM, pad2 } from '../utils/formatters.js'
+import { useDomainCommands } from '../composables/domain/commands.js'
 
 const bills = useStoredRef('sl_bills', [])
+const domain = useDomainCommands()
 const route = useRoute()
 
 const tab = ref('ledger') // ledger | bills | review
@@ -34,26 +36,8 @@ watch(() => route.query.tab, (value) => {
 }, { immediate: true })
 
 /* ================= 通用 ================= */
-const pad2 = (v) => String(v).padStart(2, '0')
-function nowHM() {
-  const d = new Date()
-  return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`
-}
-function moneyRow(v) {
-  const n = Number(v) || 0
-  return `¥${Number.isInteger(n) ? n.toLocaleString() : n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-}
-function moneyHero(v) {
-  return `¥${(Number(v) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-}
-function dayLabel(dateStr) {
-  if (dateStr === todayStr()) return '今天'
-  const y = new Date(Date.now() - 86400000)
-  const yStr = `${y.getFullYear()}-${pad2(y.getMonth() + 1)}-${pad2(y.getDate())}`
-  if (dateStr === yStr) return '昨天'
-  const d = new Date(dateStr + 'T00:00:00')
-  return `${d.getMonth() + 1}月${d.getDate()}日`
-}
+// 金额/时间/日期标签格式化统一走 utils/formatters.js。
+
 
 /* ---------- 撤销 toast ---------- */
 const toast = ref(null)
@@ -218,31 +202,27 @@ async function saveExpense(keepOpen = false) {
   if (!(amount > 0)) { amountEl.value?.focus(); return }
   if (!name) return
   if (duplicateHit.value) { dupWarn.value = true; return }
-  const now = new Date().toISOString()
   if (editingId.value) {
-    const target = expenses.value.find((e) => e.id === editingId.value)
-    if (target) {
-      Object.assign(target, {
+    const target = domain.updateTransaction(editingId.value, {
         name, amount, cat: catInput.value || detectCategory(name),
         date: dateInput.value || todayStr(), time: timeInput.value || nowHM(),
-        note: noteInput.value.trim(), updatedAt: now,
+        note: noteInput.value.trim(),
       })
+    if (target) {
       showToast(`已更新 ${moneyRow(amount)} · ${name}`)
     }
   } else {
-    expenses.value.push({
-      id: 'ex' + Date.now(),
-      name, amount,
+    const saved = domain.createTransaction({ name, amount,
       cat: catInput.value || detectCategory(name),
       date: dateInput.value || todayStr(),
       time: timeInput.value || nowHM(),
       note: noteInput.value.trim(),
       source: sourceInput.value || 'manual',
       billId: billIdInput.value || '',
-      createdAt: now, updatedAt: now,
+      createdFrom: sourceInput.value || 'manual',
     })
     showToast(`已记下 ${moneyRow(amount)} · ${name}`, () => {
-      expenses.value = expenses.value.filter((e) => e.name !== name || Number(e.amount) !== amount || e.createdAt !== now)
+      expenses.value = expenses.value.filter((e) => e.id !== saved.id)
     })
   }
   if (keepOpen) {
@@ -367,11 +347,10 @@ function saveBill() {
     updatedAt: new Date().toISOString(),
   }
   if (editingBillId.value) {
-    const target = bills.value.find((b) => b.id === editingBillId.value)
-    if (target) Object.assign(target, data)
+    domain.updateBill(editingBillId.value, data)
     showToast(`已更新固定账单「${data.name}」（只影响之后，历史记录不变）`)
   } else {
-    bills.value.push({ id: 'bill' + Date.now(), createdAt: new Date().toISOString(), ...data })
+    domain.createBill({ ...data, createdFrom: 'manual' })
     showToast(`已添加固定账单「${data.name}」`)
   }
   showBillForm.value = false
@@ -439,23 +418,13 @@ function advance(b) {
 
 // 已支付：生成账本记录 + 推进周期
 function markPaid(bill) {
-  const target = bills.value.find((b) => b.id === bill.id)
-  if (!target) return
-  const now = new Date().toISOString()
-  expenses.value.push({
-    id: 'ex' + Date.now(),
-    name: target.name,
-    amount: Number(target.amount) || 0,
-    cat: target.category ? billCategoryToKey(target.category) : detectCategory(target.name),
-    date: todayStr(),
-    time: nowHM(),
-    note: '来自固定账单',
-    source: 'bill',
-    billId: target.id,
-    createdAt: now, updatedAt: now,
-  })
-  advance(target)
-  showToast(`已支付并记入账本 ${moneyRow(target.amount)} · 下一期 ${target.nextDate}`)
+  const result = domain.payBill(bill.id)
+  if (!result) return
+  if (result.duplicate) {
+    showToast(`本期「${result.bill.name}」已记入账本，未重复创建交易`)
+    return
+  }
+  showToast(`已支付并记入账本 ${moneyRow(result.transaction.amount)} · 下一期 ${result.bill.nextDate}`)
 }
 
 // 跳过本次：只推进周期，不生成记录
@@ -740,9 +709,9 @@ function createBillFromSuggest() {
                 <div class="feed-item" @click="openDetail(e.id)">
                   <div class="fi-main">
                     <b>{{ e.name }}</b>
-                    <small>{{ catInfo(e.cat).name }} · {{ e.time }}<template v-if="e.source === 'bill'"> · 固定账单</template></small>
+                    <small>{{ e.direction === 'income' ? '收入' : catInfo(e.cat).name }} · {{ e.time }}<template v-if="e.source === 'bill'"> · 固定账单</template></small>
                   </div>
-                  <span class="fi-amount">{{ moneyRow(e.amount) }}</span>
+                  <span class="fi-amount" :class="{ income: e.direction === 'income' }">{{ e.direction === 'income' ? '+' : '' }}{{ moneyRow(e.amount) }}</span>
                 </div>
               </div>
             </template>
@@ -1170,6 +1139,7 @@ function createBillFromSuggest() {
 .fi-main b { overflow: hidden; font-size: 14px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
 .fi-main small { color: var(--ink-faint); font-size: 11.5px; font-variant-numeric: tabular-nums; }
 .fi-amount { flex: 0 0 auto; color: var(--text); font-size: 14.5px; font-weight: 750; font-variant-numeric: tabular-nums; }
+.fi-amount.income { color: #087a58; }
 .feed-item-enter-active { transition: opacity .2s ease, transform .2s ease; }
 .feed-item-enter-from { opacity: 0; transform: translateY(4px); }
 

@@ -11,6 +11,7 @@
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "typecheck": "vue-tsc --noEmit",
     "check": "npm run lint && npm run typecheck && npm test && npm run build",
     "release:bump": "node scripts/bump-release.mjs"
@@ -25,6 +26,7 @@
   "devDependencies": {
     "@types/node": "^26.4.0",
     "@vitejs/plugin-vue": "^6.0.8",
+    "@vitest/coverage-v8": "^4.1.11",
     "eslint": "^10.9.1",
     "eslint-plugin-vue": "^10.10.0",
     "happy-dom": "^20.11.6",

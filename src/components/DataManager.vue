@@ -31,6 +31,7 @@ import {
   undoLastPull,
 } from '../composables/cloudSync.js'
 import { deviceProfile, setDeviceName } from '../composables/deviceIdentity.js'
+import { SYNC_MODULES, moduleKeysFor } from '../composables/cloudSyncData.js'
 import {
   backupWallpapersForUndo,
   discardWallpaperUndo,
@@ -58,6 +59,17 @@ const backupProgress = useTaskProgress()
 let syncController = null
 let backupController = null
 let lastSyncAction = ''
+
+// 选择性拉取：默认全选所有可同步模块，可一键全选/清空。
+const selectedPullModules = ref(SYNC_MODULES.map((mod) => mod.key))
+const pullScopeKeys = computed(() => moduleKeysFor(selectedPullModules.value))
+const allModulesSelected = computed(() => selectedPullModules.value.length === SYNC_MODULES.length)
+const selectedModuleCount = computed(() => selectedPullModules.value.length)
+let pendingPullKeys = null
+
+function toggleAllModules() {
+  selectedPullModules.value = allModulesSelected.value ? [] : SYNC_MODULES.map((mod) => mod.key)
+}
 
 const codeInput = ref(code.value)
 const refreshingCloud = ref(false)
@@ -140,16 +152,23 @@ function closeConfirm() {
   confirmBox.value = null
 }
 
-function requestPullConfirm() {
+function requestPullConfirm(scopeKeys = null) {
   if (connectionState.value !== 'connected' || isSyncing.value) return
+  pendingPullKeys = scopeKeys == null ? null : scopeKeys
+  const scopeLabel = scopeKeys == null
+    ? '全部数据模块'
+    : selectedModuleCount.value
+      ? `已选 ${selectedModuleCount.value} 个模块`
+      : '未选择模块（需先勾选）'
   confirmBox.value = {
     mode: 'pull',
     title: '从云端拉取数据？',
     lines: [
       ['操作', '云端数据将应用到当前设备'],
+      ['拉取范围', scopeLabel],
       ['云端最后更新', `${fmtTime(remoteUpdatedAt.value)} · ${cloudSourceText.value}`],
       ['本地最后更新', `${fmtTime(lastLocalChangedAt.value)} · 当前设备「${deviceProfile.value.name}」`],
-      ['提示', localChanged.value ? '本机存在未同步修改；拉取可能覆盖本机尚未推送的数据。拉取前会创建安全快照。' : '拉取前会自动创建本机快照，本机将使用当前云端版本。'],
+      ['提示', localChanged.value ? '本机存在未同步修改；拉取可能覆盖本机尚未推送的数据。拉取前会创建安全快照。' : '拉取前会自动创建本机快照，未勾选模块保持原样。'],
     ],
     confirmLabel: localChanged.value ? '仍然拉取' : '确认拉取',
   }
@@ -221,7 +240,7 @@ function handleSyncProgress(event) {
   if (event.partial) syncProgress.setPartial(event.partial, event.message)
 }
 
-async function runSync(action) {
+async function runSync(action, keys = null) {
   closeConfirm()
   if (syncProgress.state.status === 'running') return
   lastSyncAction = action
@@ -234,7 +253,7 @@ async function runSync(action) {
   })
   try {
     const ok = action === 'pull'
-      ? await pullFromCloud({ signal: controller.signal, onProgress: handleSyncProgress })
+      ? await pullFromCloud({ signal: controller.signal, onProgress: handleSyncProgress, keys })
       : await pushToCloud({ signal: controller.signal, onProgress: handleSyncProgress })
     if (controller.signal.aborted) return
     if (!ok) {
@@ -254,7 +273,7 @@ async function runSync(action) {
 }
 
 function runPull() {
-  return runSync('pull')
+  return runSync('pull', pendingPullKeys)
 }
 
 function runPush() {
@@ -323,6 +342,9 @@ const STORAGE_KEYS = {
   courses: 'sl_courses',
   countdowns: 'sl_exams',
   tasks: 'sl_tasks',
+  events: 'sl_events',
+  quickNotes: 'sl_quick_notes',
+  quickRecordSettings: 'sl_quick_record_settings',
   courseTemplates: 'sl_course_templates',
   checklists: 'sl_checklists',
   bills: 'sl_bills',
@@ -361,6 +383,9 @@ function makeBackup() {
       courses: readStored(STORAGE_KEYS.courses, []),
       countdowns: readStored(STORAGE_KEYS.countdowns, []),
       tasks: readStored(STORAGE_KEYS.tasks, []),
+      events: readStored(STORAGE_KEYS.events, []),
+      quickNotes: readStored(STORAGE_KEYS.quickNotes, []),
+      quickRecordSettings: readStored(STORAGE_KEYS.quickRecordSettings, { clipboardHint: true, recentTypes: [] }),
       courseTemplates: readStored(STORAGE_KEYS.courseTemplates, []),
       checklists: readStored(STORAGE_KEYS.checklists, []),
       bills: readStored(STORAGE_KEYS.bills, []),
@@ -485,6 +510,9 @@ async function validateBackup(value) {
       courses: data.courses,
       countdowns: data.countdowns,
       tasks: Array.isArray(data.tasks) ? data.tasks : [],
+      events: Array.isArray(data.events) ? data.events : [],
+      quickNotes: Array.isArray(data.quickNotes) ? data.quickNotes : [],
+      quickRecordSettings: data.quickRecordSettings && typeof data.quickRecordSettings === 'object' ? data.quickRecordSettings : { clipboardHint: true, recentTypes: [] },
       courseTemplates: Array.isArray(data.courseTemplates) ? data.courseTemplates : [],
       checklists: Array.isArray(data.checklists) ? data.checklists : [],
       bills: Array.isArray(data.bills) ? data.bills : [],
@@ -531,6 +559,8 @@ const summary = computed(() => {
     courses: data.courses.length,
     countdowns: data.countdowns.length,
     tasks: data.tasks.length,
+    events: data.events.length,
+    quickNotes: data.quickNotes.length,
     courseTemplates: data.courseTemplates.length,
     checklists: data.checklists.length,
     bills: data.bills.length,
@@ -551,6 +581,9 @@ async function restoreBackup() {
     [STORAGE_KEYS.courses]: data.courses,
     [STORAGE_KEYS.countdowns]: data.countdowns,
     [STORAGE_KEYS.tasks]: data.tasks,
+    [STORAGE_KEYS.events]: data.events,
+    [STORAGE_KEYS.quickNotes]: data.quickNotes,
+    [STORAGE_KEYS.quickRecordSettings]: data.quickRecordSettings,
     [STORAGE_KEYS.courseTemplates]: data.courseTemplates,
     [STORAGE_KEYS.checklists]: data.checklists,
     [STORAGE_KEYS.bills]: data.bills,
@@ -764,6 +797,18 @@ async function restoreBackup() {
             </div>
 
             <div class="sync-ops">
+              <div class="pull-scope">
+                <div class="pull-scope-head">
+                  <span class="ops-label">拉取范围（可多选，只影响「从云端拉取」）</span>
+                  <button type="button" class="scope-toggle" @click="toggleAllModules">{{ allModulesSelected ? '清空' : '全选' }}</button>
+                </div>
+                <div class="scope-grid">
+                  <label v-for="mod in SYNC_MODULES" :key="mod.key" class="scope-item">
+                    <input v-model="selectedPullModules" type="checkbox" :value="mod.key" />
+                    <span>{{ mod.label }}</span>
+                  </label>
+                </div>
+              </div>
               <span class="ops-label">同步操作（均需手动确认）</span>
               <div class="sync-actions">
                 <button
@@ -773,9 +818,9 @@ async function restoreBackup() {
                 >{{ recommendedSyncLabel }}</button>
                 <button
                   class="btn btn-pull"
-                  :disabled="isSyncing || !cloudExists"
-                  :title="cloudExists ? '下载云端数据应用到本机（会先弹确认）' : '云端还没有数据，等首次推送后再拉取'"
-                  @click="requestPullConfirm"
+                  :disabled="isSyncing || !cloudExists || !selectedModuleCount"
+                  :title="!selectedModuleCount ? '请先勾选要拉取的数据模块' : cloudExists ? '只下载勾选模块的数据应用到本机（会先弹确认）' : '云端还没有数据，等首次推送后再拉取'"
+                  @click="requestPullConfirm(pullScopeKeys)"
                 >↓ 从云端拉取</button>
                 <button class="btn btn-push" :disabled="isSyncing" @click="requestPushConfirm">↑ 推送到云端</button>
               </div>
@@ -1024,6 +1069,55 @@ async function restoreBackup() {
   font-size: 10px;
   font-weight: 800;
   letter-spacing: 0.08em;
+}
+
+/* ---------- 选择性拉取范围 ---------- */
+.pull-scope {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  width: 100%;
+  padding: 9px 10px;
+  border: 1px dashed var(--border);
+  border-radius: 9px;
+  background: var(--bg);
+}
+.pull-scope-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.scope-toggle {
+  min-height: 30px;
+  padding: 3px 10px;
+  color: var(--primary);
+  font-size: 11.5px;
+  font-weight: 700;
+  border: none;
+  border-radius: 8px;
+  background: var(--primary-soft);
+}
+.scope-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+  gap: 6px;
+}
+.scope-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 40px;
+  padding: 4px 8px;
+  color: var(--text);
+  font-size: 12.5px;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+}
+.scope-item input {
+  accent-color: var(--primary);
 }
 .sync-actions {
   display: flex;

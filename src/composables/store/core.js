@@ -1,6 +1,7 @@
 import { effectScope, ref, watch } from 'vue'
 import { markLocalChanged } from '../cloudSync.js'
 import { mirrorLocalValue, mirrorLocalValues } from '../dataVault.js'
+import { recordSilentError } from '../globalError.js'
 
 const storedRefs = new Map()
 
@@ -39,9 +40,11 @@ function writeNow(key, makeRaw) {
   try {
     const raw = makeRaw()
     localStorage.setItem(key, raw)
-    mirrorLocalValue(key, raw).catch(() => {})
+    mirrorLocalValue(key, raw).catch((error) => recordSilentError('vault-mirror', error))
     markLocalChanged(key, raw)
-  } catch {
+  } catch (error) {
+    // 配额溢出/隐私模式等失败不阻塞应用，但必须留下排查线索。
+    recordSilentError('storage-write', error)
   }
 }
 
@@ -172,6 +175,15 @@ export function normalizeStoredValue(saved, defaultValue) {
     : { value: JSON.parse(JSON.stringify(defaultValue)), repaired: true }
 }
 
+/**
+ * 读取或创建一个持久化的响应式引用（localStorage + IndexedDB 镜像 + 云同步标记）。
+ * 同一 key 全局共享同一 ref；读取异常时回退到默认值并上报静默错误。
+ *
+ * @template T
+ * @param {string} key 以 `sl_` 开头的存储键
+ * @param {T} defaultValue 默认值（同时决定数据修复的形状基准）
+ * @returns {import('vue').Ref<T>}
+ */
 export function useStoredRef(key, defaultValue) {
   if (storedRefs.has(key)) return storedRefs.get(key)
 
@@ -180,7 +192,9 @@ export function useStoredRef(key, defaultValue) {
   try {
     savedRaw = localStorage.getItem(key)
     saved = savedRaw === null ? null : JSON.parse(savedRaw)
-  } catch {
+  } catch (error) {
+    // 读取失败（损坏/隐私模式）回退到默认值，同时留下排查线索。
+    recordSilentError('storage-read', error)
     saved = null
     savedRaw = null
   }
@@ -192,9 +206,10 @@ export function useStoredRef(key, defaultValue) {
     try {
       const raw = JSON.stringify(normalized.value)
       localStorage.setItem(key, raw)
-      mirrorLocalValue(key, raw).catch(() => {})
+      mirrorLocalValue(key, raw).catch((error) => recordSilentError('vault-mirror', error))
       savedRaw = raw
-    } catch {
+    } catch (error) {
+      recordSilentError('storage-repair', error)
     }
   }
   storedRefs.set(key, state)

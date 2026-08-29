@@ -1,3 +1,6 @@
+import { normalizeFestiveConfig } from './festive.js'
+import { normalizeMoodLog } from './mood.js'
+
 export const SYNC_DEFAULTS = {
   sl_courses: [],
   sl_course_templates: [],
@@ -5,6 +8,9 @@ export const SYNC_DEFAULTS = {
   sl_semester: { start: '' },
   sl_schedule_exceptions: [],
   sl_tasks: [],
+  sl_events: [],
+  sl_quick_notes: [],
+  sl_quick_record_settings: { clipboardHint: true, recentTypes: [] },
   sl_exams: [],
   sl_countdown_show_past: false,
   sl_checklists: [],
@@ -30,9 +36,47 @@ export const SYNC_DEFAULTS = {
   sl_wallpaper_accent: '#456fe8',
   sl_appearance: {},
   sl_wallpaper_config: {},
+  sl_festive_config: { enabled: true, birthday: '', installDate: '', anniversaries: [] },
+  sl_mood_log: {},
 }
 
 export const SYNC_KEYS = Object.keys(SYNC_DEFAULTS)
+
+// 「模块 → 键」静态分组：选择性拉取时按模块勾选，未勾选的键完全不动。
+export const SYNC_MODULES = Object.freeze([
+  { key: 'courses', label: '课程与课表', keys: ['sl_courses', 'sl_course_templates', 'sl_timecfg', 'sl_semester', 'sl_schedule_exceptions'] },
+  { key: 'tasks', label: '待办与快速记录', keys: ['sl_tasks', 'sl_events', 'sl_quick_notes', 'sl_quick_record_settings'] },
+  { key: 'countdown', label: '倒计时', keys: ['sl_exams', 'sl_countdown_show_past'] },
+  { key: 'checklists', label: '清单', keys: ['sl_checklists'] },
+  { key: 'ledger', label: '账本', keys: ['sl_bills', 'sl_expenses', 'sl_ledger_categories', 'sl_ledger_freq'] },
+  { key: 'food', label: '吃什么', keys: ['sl_food_places', 'sl_food_history'] },
+  { key: 'appearance', label: '外观与主题', keys: ['sl_theme', 'sl_custom_theme_color', 'sl_auto_wallpaper_color', 'sl_wallpaper_accent', 'sl_appearance', 'sl_wallpaper_config'] },
+  { key: 'atmosphere', label: '氛围与心情', keys: ['sl_festive_config', 'sl_mood_log'] },
+])
+
+// 根据勾选的模块 key 展开为待拉取的 sl_* 键（保持 SYNC_KEYS 顺序、去重）。
+export function moduleKeysFor(moduleKeys) {
+  const selected = new Set(Array.isArray(moduleKeys) ? moduleKeys.filter((key) => typeof key === 'string') : [])
+  return SYNC_KEYS.filter(
+    (key) => SYNC_MODULES.some((mod) => selected.has(mod.key) && mod.keys.includes(key))
+  )
+}
+
+// 归一化拉取键子集：null/undefined → 全量（向后兼容）；否则只保留合法 sl_* 键并去重。
+export function normalizePullKeys(keys) {
+  if (keys == null) return [...SYNC_KEYS]
+  const allowed = new Set(SYNC_KEYS)
+  return [...new Set((Array.isArray(keys) ? keys : []).filter((key) => typeof key === 'string' && allowed.has(key)))]
+}
+
+// 从云端负载中只挑出选中键（未提供或值为 undefined 的键不进入结果）。
+export function pickSyncValues(payload, keys) {
+  const source = isPlainObject(payload) ? payload : {}
+  const allowed = new Set(keys)
+  return Object.fromEntries(
+    keys.filter((key) => allowed.has(key) && source[key] !== undefined).map((key) => [key, source[key]])
+  )
+}
 
 export function cloneValue(value) {
   return value === undefined ? undefined : JSON.parse(JSON.stringify(value))
@@ -46,6 +90,13 @@ export function isCompatibleValue(value, expected) {
   if (Array.isArray(expected)) return Array.isArray(value)
   if (isPlainObject(expected)) return isPlainObject(value)
   return typeof value === typeof expected
+}
+
+// 写入前归一化：氛围与心情两个新键语义上“读取即纠偏”，拉取时同样先纠偏再落盘。
+function normalizeIncomingValue(key, value) {
+  if (key === 'sl_festive_config') return normalizeFestiveConfig(value)
+  if (key === 'sl_mood_log') return normalizeMoodLog(value)
+  return cloneValue(value)
 }
 
 function isValidKeyValue(key, value) {
@@ -77,7 +128,7 @@ export function sanitizeSyncPayload(payload) {
       invalidKeys.push(key)
       continue
     }
-    validated[key] = cloneValue(payload[key])
+    validated[key] = normalizeIncomingValue(key, payload[key])
   }
   return { values: validated, invalidKeys }
 }

@@ -124,4 +124,36 @@ describe('云同步长任务控制', () => {
     expect(localChanged.value).toBe(true)
   })
 
+  it('选择性拉取只应用勾选模块，未勾选模块本地值逐项保持不变', async () => {
+    const { flushStoredWrites, useStoredRef } = await import('../src/composables/store')
+    const tasks = useStoredRef('sl_tasks', [])
+    const courses = useStoredRef('sl_courses', [])
+    tasks.value = [{ id: 'local-task', title: '本地待办' }]
+    courses.value = [{ id: 'local-course', name: '本地课程' }]
+    flushStoredWrites()
+
+    code.value = '123456'
+    const encrypted = await encryptData({
+      sl_tasks: [{ id: 'remote-task', title: '云端待办' }],
+      sl_courses: [{ id: 'remote-course', name: '云端课程' }],
+    }, code.value)
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ exists: true, revision: 21, data: encrypted, updatedAt: '2026-08-29T00:00:00.000Z' }),
+    })))
+
+    expect(await pullFromCloud({ keys: ['sl_tasks'] })).toBe(true)
+
+    expect(tasks.value).toEqual([{ id: 'remote-task', title: '云端待办' }])
+    expect(courses.value).toEqual([{ id: 'local-course', name: '本地课程' }])
+  })
+
+  it('未选择任何模块时直接成功返回且不发起网络请求', async () => {
+    code.value = '123456'
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+    expect(await pullFromCloud({ keys: [] })).toBe(true)
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
 })

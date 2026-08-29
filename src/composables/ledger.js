@@ -57,12 +57,15 @@ export function buildLedgerIndex(list) {
 
   for (const expense of source) {
     const amount = Number(expense.amount || 0)
+    const direction = expense.direction === 'income' ? 'income' : 'expense'
     const month = expense.date.slice(0, 7)
-    const monthStat = monthStats.get(month) ?? { total: 0, count: 0 }
-    monthStat.total += amount
+    const monthStat = monthStats.get(month) ?? { total: 0, income: 0, count: 0 }
+    // 旧记录没有 direction，默认仍是支出；原有“本月支出”统计不受影响。
+    if (direction === 'income') monthStat.income += amount
+    else monthStat.total += amount
     monthStat.count += 1
     monthStats.set(month, monthStat)
-    dayTotals.set(expense.date, (dayTotals.get(expense.date) ?? 0) + amount)
+    if (direction !== 'income') dayTotals.set(expense.date, (dayTotals.get(expense.date) ?? 0) + amount)
     collectFrequentEntry(frequentByName, expense)
   }
 

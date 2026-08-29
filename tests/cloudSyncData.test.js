@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest'
-import { mergeSyncValue, sanitizeSyncPayload, validateSyncPayload } from '../src/composables/cloudSyncData.js'
+import {
+  SYNC_KEYS,
+  SYNC_MODULES,
+  mergeSyncValue,
+  moduleKeysFor,
+  normalizePullKeys,
+  pickSyncValues,
+  sanitizeSyncPayload,
+  validateSyncPayload,
+} from '../src/composables/cloudSyncData.js'
 import { normalizeStoredValue } from '../src/composables/store'
 
 describe('云同步数据保护', () => {
@@ -47,5 +56,50 @@ describe('云同步数据保护', () => {
       value: { start: '2026-09-01', mode: 'school' },
       repaired: true,
     })
+  })
+})
+
+describe('选择性拉取的分组与范围', () => {
+  it('模块分组恰好覆盖全部同步键，不重不漏', () => {
+    const grouped = SYNC_MODULES.flatMap((mod) => mod.keys)
+    expect(new Set(grouped).size).toBe(grouped.length)
+    expect([...new Set(grouped)].sort()).toEqual([...SYNC_KEYS].sort())
+  })
+
+  it('moduleKeysFor 只展开勾选模块的键', () => {
+    expect(moduleKeysFor(['tasks'])).toEqual(['sl_tasks', 'sl_events', 'sl_quick_notes', 'sl_quick_record_settings'])
+    expect(moduleKeysFor(['tasks', 'countdown'])).toEqual(['sl_tasks', 'sl_events', 'sl_quick_notes', 'sl_quick_record_settings', 'sl_exams', 'sl_countdown_show_past'])
+    expect(moduleKeysFor(['no-such-module'])).toEqual([])
+  })
+
+  it('normalizePullKeys 空值表示全量，数组去重且只留合法键', () => {
+    expect(normalizePullKeys(undefined)).toEqual([...SYNC_KEYS])
+    expect(normalizePullKeys(null)).toEqual([...SYNC_KEYS])
+    expect(normalizePullKeys(['sl_tasks', 'sl_tasks', 'not-a-key'])).toEqual(['sl_tasks'])
+    expect(normalizePullKeys([])).toEqual([])
+  })
+
+  it('pickSyncValues 只挑出选中键且忽略未知键', () => {
+    expect(pickSyncValues({ sl_tasks: [], sl_courses: [], __sync_meta: {} }, ['sl_tasks'])).toEqual({ sl_tasks: [] })
+  })
+
+  it('拉取时归一化氛围与心情两个新键', () => {
+    const result = sanitizeSyncPayload({
+      sl_festive_config: {
+        enabled: false,
+        birthday: '02-14',
+        installDate: 'bad-date',
+        anniversaries: [{ date: '10-01', label: '纪念日' }, { date: 'xx', label: '' }],
+      },
+      sl_mood_log: { '2026-08-29': '😊', 'bad-day': { mood: '😄' } },
+    })
+    expect(result.invalidKeys).toEqual([])
+    expect(result.values.sl_festive_config).toEqual({
+      enabled: false,
+      birthday: '02-14',
+      installDate: '',
+      anniversaries: [{ date: '10-01', label: '纪念日' }],
+    })
+    expect(result.values.sl_mood_log).toEqual({ '2026-08-29': { mood: '😊', note: '' } })
   })
 })

@@ -21,9 +21,9 @@ const FILLER_WORDS = /^(?:课程|课程名称|课程名|名称|星期|星期几|
 const STRONG_ROOM = /^(?:[A-Za-z]{0,3}-?\d{2,4}|[^\s]*?(?:教学楼|实验楼|实训楼|教室|实验室|机房|报告厅|体育馆|图书馆|操场|楼|馆|栋|厅)[^\s]*)$/
 
 // OCR相关状态和缓存
-let ocrWorker = null
-let ocrInitialized = false
-let ocrInitPromise = null
+const ocrWorker = null
+const ocrInitialized = false
+const ocrInitPromise = null
 
 // 统一的文本标准化函数
 export function normalizeText(text) {
@@ -84,7 +84,7 @@ export function parseWeekdayToken(token) {
 export function correctOCRErrors(text) {
   logDebug(OCR_LOG_PREFIX, '开始OCR错误纠正')
   
-  let corrected = text
+  const corrected = text
     .replace(/[Il][l1]-[l1][l1]节/g, '1-2节') // I-2节 -> 1-2节
     .replace(/[lI]-[l1][l1]节/g, '1-2节')
     .replace(/[A-Za-z](\d{2,4})/g, (match, digits) => match.charAt(0) + digits.replace(/[O0]/g, '0').replace(/[lI]/g, '1').replace(/[B]/g, '8')) // 教室号纠错
@@ -306,7 +306,7 @@ export function parseBatchLine(line, sourceIndex, timeConfig, MAX_WEEK) {
   const periodsMax = periods.length
   const explicitRoom = String(line).match(/(?:地点|位置|教室)[:：]\s*(.+?)(?=\s+(?:教师|老师|地点|位置|教室)[:：]|[\t,，;；|]|$)/)?.[1]?.trim() || ''
   const explicitTeacher = String(line).match(/(?:教师|老师)[:：]\s*(.+?)(?=\s+(?:地点|位置|教室|教师|老师)[:：]|[\t,，;；|]|$)/)?.[1]?.trim() || ''
-  let work = digitize(line)
+  const work = digitize(line)
     .replace(/\u00a0/g, ' ')
     .replace(/[()（）[\]【】〔〕《》<>]/g, ' ')
 
@@ -387,7 +387,7 @@ export function parseBatchLine(line, sourceIndex, timeConfig, MAX_WEEK) {
           teacher: features.teacher,
         },
     cells: segments,
-    confidence: confidence,
+    confidence,
     needsReview: confidence.level === 'very_low' || confidence.level === 'low'
   }
   

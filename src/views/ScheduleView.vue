@@ -2,7 +2,7 @@
 import { defineAsyncComponent, ref, reactive, computed, watch, onBeforeUnmount, onDeactivated } from 'vue'
 import Modal from '../components/Modal.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
-import { detachCourseLinks } from '../composables/courseLinks.js'
+import { detachCourseRelations } from '../composables/domain/relations.js'
 import { appearance } from '../composables/appearance.js'
 import {
   useStoredRef,
@@ -69,6 +69,8 @@ const courses = useStoredRef('sl_courses', [])
 const courseTemplates = useStoredRef('sl_course_templates', [])
 const tasks = useStoredRef('sl_tasks', [])
 const countdowns = useStoredRef('sl_exams', [])
+const events = useStoredRef('sl_events', [])
+const notes = useStoredRef('sl_quick_notes', [])
 
 // OCR 引擎、版面解析和本地纠错词典只在用户真正选择图片后才下载。
 // 普通查看/编辑课程表不再为这些重模块付出初始化成本。
@@ -264,6 +266,8 @@ function deleteSelectedCourses() {
   if (!selectedCourses.value.length) return
   if (!window.confirm(`确定删除选中的 ${selectedCourses.value.length} 门课程吗？`)) return
   const ids = new Set(selectedCourseIds.value)
+  // 默认只解除关联，保留历史任务、考试、日程与笔记。
+  courses.value.filter((course) => ids.has(course.id)).forEach((course) => detachCourseRelations(course, { tasks: tasks.value, milestones: countdowns.value, events: events.value, notes: notes.value }))
   courses.value = courses.value.filter((course) => !ids.has(course.id))
   selectedCourseIds.value = []
   managerMessage.value = '选中的课程已删除'
@@ -284,6 +288,7 @@ function duplicateSelectedCourses() {
 function clearCurrentSchedule() {
   if (!courses.value.length) return
   if (!window.confirm('确定清空当前全部课程吗？建议先保存为学期模板或导出备份。')) return
+  courses.value.forEach((course) => detachCourseRelations(course, { tasks: tasks.value, milestones: countdowns.value, events: events.value, notes: notes.value }))
   courses.value = []
   selectedCourseIds.value = []
   managerMessage.value = '当前课表已清空'
@@ -686,7 +691,7 @@ function removeCourseFromEditor(course) {
 function confirmDeleteCourse() {
   const course = deleteCourseTarget.value
   if (!course) return
-  detachCourseLinks(course, tasks.value, countdowns.value)
+  detachCourseRelations(course, { tasks: tasks.value, milestones: countdowns.value, events: events.value, notes: notes.value })
   courses.value = courses.value.filter((item) => item.id !== course.id)
   deleteCourseTarget.value = null
 }

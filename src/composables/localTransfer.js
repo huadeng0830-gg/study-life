@@ -8,7 +8,7 @@ import { throwIfAborted } from './asyncTask.js'
 
 export const TRANSFER_MODULES = {
   courses: { label: '课程、课表模板、作息与特殊日期', keys: ['sl_courses', 'sl_course_templates', 'sl_timecfg', 'sl_semester', 'sl_schedule_exceptions'] },
-  tasks: { label: '作业与待办', keys: ['sl_tasks'] },
+  tasks: { label: '作业、待办、日程与笔记', keys: ['sl_tasks', 'sl_events', 'sl_quick_notes', 'sl_quick_record_settings'] },
   countdowns: { label: '考试与倒计时', keys: ['sl_exams', 'sl_countdown_show_past'] },
   lists: { label: '生活清单', keys: ['sl_checklists'] },
   bills: { label: '固定账单', keys: ['sl_bills'] },
@@ -20,7 +20,7 @@ export const TRANSFER_MODULES = {
 }
 
 const ARRAY_KEYS = new Set([
-  'sl_courses', 'sl_course_templates', 'sl_schedule_exceptions', 'sl_tasks', 'sl_exams', 'sl_checklists',
+  'sl_courses', 'sl_course_templates', 'sl_schedule_exceptions', 'sl_tasks', 'sl_events', 'sl_quick_notes', 'sl_quick_record_settings', 'sl_exams', 'sl_checklists',
   'sl_bills', 'sl_expenses', 'sl_food_places', 'sl_food_history',
 ])
 const KEYED_ARRAY_KEYS = new Map([['sl_ledger_categories', 'key']])

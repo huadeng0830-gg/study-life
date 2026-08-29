@@ -1,60 +1,173 @@
-# 学习生活台(STUDY & LIFE)
+# 学习生活台 · Study & Life
 
-个人的学习生活管理 PWA:课程表、作业待办、考试倒计时、生活清单、固定账单、今天吃什么,数据默认全部保存在本机。
+一个面向学生日常的 **Local-first 学习生活 PWA**：把课程、作业、考试节点、日程、记账、固定账单、笔记和心情放进同一个可执行的今日视图，而不是堆成彼此割裂的功能页。
 
-## 功能
+线上地址：[study-life.pages.dev](https://study-life.pages.dev/)
 
-- **今日总览**:问候语、下一节课、今日待办、今天课程、近期提醒、本周统计、近期账单,模块可拖拽排序
-- **课程表**:多校区 × 作息季 × 自定义节次,支持课表模板、周次筛选(单双周)、批量导入、文本/图片 OCR 识别
-- **作业与待办**:优先级、课程关联、截止提醒、预计时长、每周重复;粘贴老师通知自动解析出日期时间和标题(纯本地解析)
-- **倒计时**:分类、置顶、年度重复、精确到分钟,学习类可关联课程与复习进度
-- **我的清单**:多清单管理、购物分类与单价统计
-- **固定账单**:订阅/缴费周期换算月成本,临近支付提醒;附随手记账与月度回顾
-- **今天吃什么**:地点库 + 随机/转盘挑选,预算与时长过滤、暂时不吃(次日自动恢复)
-- **个性化**:主题色、本地壁纸(压缩 + 自动取色)、励志语、页面皮肤、减少动态效果
+> 记录一次，所有相关页面自动更新。课程表负责“什么时候上课”，待办负责“要做什么”，提醒和首页只负责“现在最值得处理什么”。
 
-## 数据与隐私
+## 为什么做它
 
-- 核心数据仅保存在当前浏览器(localStorage),**不会主动上传任何服务器**
-- IndexedDB 保存一份设备内影子副本,localStorage 意外丢失时可自动恢复;壁纸图片在本机压缩后存入 IndexedDB
-- 数据迁移:
-  - **JSON 备份文件**(可携带壁纸)
-  - **二维码迁移**(AES-GCM 加密 + gzip,设备间扫码直传)
-  - 跨标签页实时同步(storage 事件)
-- **云同步(可选)**:通过 Cloudflare Pages Functions + Durable Objects 中转,6 位连接码配对设备;同步**严格手动**——只有你点击「推送到云端」/「从云端拉取」才会传输,带 revision 冲突保护,数据在设备上加密后再发送
+学生生活中的信息通常来自课程群通知、临时想法、付款记录和考试日期。它们如果分散在多个 App，很容易出现：作业记了但没进今日、账单到期忘了付、课程关联全靠手动回忆。
 
-## 开发
+学习生活台采用一条统一闭环：
 
-```bash
-npm install       # 安装依赖
-npm run dev       # 本地开发
-npm run build     # 生产构建(dist/)
-npm run preview   # 预览构建产物
-npm run lint      # ESLint 检查
-npm run test      # Vitest 单元测试
-npm run typecheck # vue-tsc 类型检查
-npm run check     # 发布前全量门禁:lint + typecheck + test + build
-npm run release:bump -- --notes "本次说明一|说明二"   # 自动更新版本说明与源码签名
+```text
+捕获 → 识别 → 结构化 → 关联 → 安排 → 提醒 → 执行 → 完成 → 回顾
 ```
 
-发布说明与构建联动:`release.config.js` 里保存版本与说明,`vite.config.js` 会校验源码签名,业务源码变化后必须更新说明(用 `release:bump` 自动完成)。
+快速记录和 OCR 只是输入方式；待办、交易、账单、日程、考试节点等才是唯一的业务数据源。
 
-## 部署
+## 核心能力
 
-Cloudflare Pages:
+### 今日行动中心
 
-```bash
-npx wrangler pages deploy dist --project-name=study-life --branch=main
+- 显示正在进行/即将开始的课程，以及当天待办与课程安排。
+- “近期提醒”动态聚合待办、固定账单、考试节点和日程，不复制业务数据。
+- 同一事项在首页只保留一个优先位置，避免“今日待办 + 近期提醒”重复出现。
+- 无课程、无账单等场景使用紧凑状态，不用空白大卡片占据手机空间。
+- 轻量记录心情、查看日/月/年度回放。
+
+### 全局快速记录
+
+手机底部中间的 `＋记录` 是唯一的全局新增入口；桌面端支持 `Ctrl/Cmd + K`。
+
+支持文本、语音、剪贴板提示和批量输入，优先本地规则解析：
+
+| 输入示例 | 结构化结果 |
+| --- | --- |
+| `周五18点交高数第三章作业，重要` | 作业 + 课程 + 截止时间 + 优先级 |
+| `午饭18微信` | 支出 + 餐饮分类 + 金额 + 账户 |
+| `生活费到账500` | 收入 + 金额 |
+| `每月15号39元话费` | 固定账单 + 周期 + 下次日期 |
+| `明天下午三点实验室组会` | 一次性日程 |
+| `距离六级考试还有90天` | 考试/重要节点倒计时 |
+| 多行早餐、公交、午饭记录 | 多笔交易，确认后批量保存 |
+
+解析结果可直接修改；只有需要时才展开详细字段。无法完整解析时，原文会保留为可手动补全的草稿，不会阻断记录。
+
+### 学习闭环
+
+- **课程表**：多校区、作息季、自定义节次、单双周、学期模板、特殊日期与课表导入。
+- **OCR 导入**：支持课表/作息图片识别，用户确认后才写入正式课程数据。
+- **作业与待办**：课程关联、截止日期、优先级、预计时长、每周重复、通知粘贴解析与智能整理。
+- **考试与节点**：考试、项目截止、纪念日等统一为时间节点；倒计时是节点的时间视图，不额外复制数据。
+- 删除课程时默认只解除关联并保留任务、节点、日程与笔记历史，避免误删学习记录。
+
+### 财务闭环
+
+- 快速记录支出和收入，自动识别常见分类与支付账户。
+- 固定账单支持周/月/季/年周期、提醒日期、暂停和跳过本期。
+- 点击“已支付”会生成关联交易并推进下一期；每期使用唯一标识，避免重复记账。
+- 提供日/月统计、常记项目、分类筛选与回顾。
+
+### 生活与回顾
+
+- 清单：购物、生活事项与价格记录。
+- 今天吃什么：地点库、预算与时长筛选、随机/转盘选择。
+- 心情：作为 Daily Log 的轻量属性参与回放，不干预任务安排。
+- 回放：按日、月、年汇总课程、任务、收支、节点、账单、日程、笔记和心情。
+
+## 数据设计
+
+应用遵循“一个事实，一个主数据源”。主要存储键保持兼容：
+
+| 业务实体 | 主数据源 | 典型派生视图 |
+| --- | --- | --- |
+| 课程与课表 | `sl_courses` | 今天课程、下一节课 |
+| 待办/作业/复习 | `sl_tasks` | 今日待办、提醒、回顾 |
+| 考试与重要节点 | `sl_exams` | 倒计时、近期提醒 |
+| 一次性日程 | `sl_events` | 今日时间轴、提醒 |
+| 笔记 | `sl_quick_notes` | 首页摘要、回放 |
+| 交易 | `sl_expenses` | 日/月统计、账单支付历史 |
+| 固定账单 | `sl_bills` | 到期提醒、下一期计算 |
+| 心情 | `sl_mood_log` | Daily Log、回放 |
+
+新记录会保留 `createdAt`、`updatedAt`、`createdFrom`、`sourceType`、`sourceId` 等来源信息。旧数据通过兼容迁移逐步补齐字段，不改名、不清空原有 `sl_*` 数据。
+
+## 隐私、离线与同步
+
+- **Local-first**：课程、任务、记账与浏览均可离线使用。
+- **本机优先**：核心数据在 `localStorage` 保存，并镜像到 IndexedDB；壁纸等较大资源也存于设备本地。
+- **可恢复**：支持 JSON 备份、二维码迁移，以及同浏览器多标签同步。
+- **严格手动云同步**：连接码仅用于配对；只有用户显式点击“推送到云端”或“从云端拉取”才会发生传输。
+- **冲突保护**：同步按实体 ID 与 `updatedAt` 合并；本地写入不会因同步失败而中断。
+
+## 手机体验
+
+底部导航固定为：
+
+```text
+首页 / 课程 / ＋记录 / 待办 / 更多
 ```
 
-- PWA 由 vite-plugin-pwa 生成,service worker 自动更新
-- `functions/`(云同步 API)与 `sync-coordinator/`(Durable Object)随 Pages 一起部署,`wrangler.jsonc` 已配置绑定
-- `*.study-life.pages.dev` 预览地址会自动重定向回正式域名,避免多来源数据隔离
-
-## CI
-
-GitHub Actions 在 `main` 分支的 push / PR 上自动运行 `npm run check`(lint、类型检查、单元测试、生产构建)并上传 `dist` 产物,保证发布前质量门禁必过。
+- `＋记录` 使用 Bottom Sheet，不覆盖正文卡片。
+- Safe Area、底部导航与键盘区域均保留安全间距。
+- 首页取消同权重的重复“新增”按钮；待办页和账本页保留各自的上下文操作入口。
+- 桌面端使用完整侧栏；移动端将低频模块收纳到“更多”。
 
 ## 技术栈
 
-Vue 3(`<script setup>`)· Vue Router · Vite · vite-plugin-pwa · tesseract.js(本地 OCR)· Cloudflare Pages Functions · Durable Objects
+- Vue 3 + `<script setup>`
+- Vue Router
+- Vite 8 + vite-plugin-pwa
+- Vitest + ESLint + vue-tsc
+- Tesseract.js（本地 OCR）
+- Cloudflare Pages Functions + Durable Objects（可选手动云同步）
+
+## 本地开发
+
+```bash
+git clone https://github.com/huadeng0830-gg/study-life.git
+cd study-life
+npm install
+npm run dev
+```
+
+常用命令：
+
+```bash
+npm run lint       # ESLint
+npm run typecheck  # Vue/TypeScript 类型检查
+npm test           # Vitest 单元测试
+npm run build      # 生产构建到 dist/
+npm run check      # lint + typecheck + test + build
+npm run preview    # 本地预览 dist/
+```
+
+发布说明与源码签名绑定。业务源码变更后，使用：
+
+```bash
+npm run release:bump -- --notes "本次更新说明一|本次更新说明二"
+```
+
+## 部署到 Cloudflare Pages
+
+```bash
+npm run build
+npx wrangler pages deploy dist --project-name=study-life --branch=main
+```
+
+`functions/` 的云同步 API 与 Durable Object 配置会随 Pages 部署；PWA Service Worker 由 Vite PWA 自动生成和更新。
+
+## 项目结构
+
+```text
+src/
+├─ views/                 # 首页、课程、待办、账本、节点等页面
+├─ components/            # 表单、弹窗、课表与移动端组件
+├─ composables/
+│  ├─ domain/             # 统一命令、状态、关系、提醒/首页选择器、迁移
+│  ├─ quickRecord/        # 输入解析与类型适配器
+│  └─ store/              # localStorage / IndexedDB 响应式存储核心
+├─ tests/                 # 解析、同步、关系、迁移与业务选择器测试
+└─ types/                 # 领域类型定义
+```
+
+## 质量门禁
+
+`main` 的提交和 Pull Request 会执行 lint、类型检查、单元测试与生产构建。构建成功表示版本说明与源码签名一致，避免“代码已发布但更新说明未同步”。
+
+---
+
+如果这个项目帮到了你，欢迎 Star。也欢迎基于真实学习场景提出建议：更少的录入步骤，比更多的功能更重要。

@@ -7,8 +7,10 @@ import { preloadCommonRoutes, preloadRoute } from '../router/routePreload.js'
 // 工具弹窗严格按需加载。手机端不在后台预载二维码库，避免与页面切换争抢网络和主线程。
 const loadDataManager = () => import('./DataManager.vue')
 const loadAppearanceSettings = () => import('./AppearanceSettings.vue')
+const loadQuickRecordSettings = () => import('./QuickRecordSettings.vue')
 const DataManager = defineAsyncComponent(loadDataManager)
 const AppearanceSettings = defineAsyncComponent(loadAppearanceSettings)
+const QuickRecordSettings = defineAsyncComponent(loadQuickRecordSettings)
 
 const navGroups = [
   {
@@ -48,10 +50,11 @@ const collapsed = ref(false)
 const showMobileMore = ref(false)
 const showDataManager = ref(false)
 const showAppearance = ref(false)
+const showQuickRecordSettings = ref(false)
 const checkingUpdate = ref(false)
 const updateNotice = ref('')
-const props = defineProps({ quickLedgerOpen: Boolean })
-const emit = defineEmits(['toggle-quick-ledger'])
+const props = defineProps({ quickRecordOpen: Boolean })
+const emit = defineEmits(['open-quick-record'])
 let noticeTimer = 0
 let warmupTimer = 0
 
@@ -160,12 +163,13 @@ function chooseTheme(key) {
       </router-link>
       <button
         class="mobile-nav-item mobile-ledger-trigger"
-        :class="{ active: props.quickLedgerOpen }"
+        :class="{ active: props.quickRecordOpen }"
         type="button"
-        :aria-expanded="props.quickLedgerOpen"
-        @click="emit('toggle-quick-ledger')"
+        :aria-expanded="props.quickRecordOpen"
+        aria-label="打开快速记录"
+        @click="emit('open-quick-record')"
       >
-        <span>＋</span><small>记账</small>
+        <span>＋</span><small>记录</small>
       </button>
       <router-link
         v-for="item in mobileTrailingItems"
@@ -190,6 +194,7 @@ function chooseTheme(key) {
             <span>{{ item.icon }}</span><small>{{ item.label }}</small>
           </router-link>
           <button type="button" class="mobile-more-item" @click="showMobileMore = false; showAppearance = true"><span>🎨</span><small>个性化</small></button>
+          <button type="button" class="mobile-more-item" @click="showMobileMore = false; showQuickRecordSettings = true"><span>⚡</span><small>快速记录设置</small></button>
           <button type="button" class="mobile-more-item" @click="showMobileMore = false; showDataManager = true"><span>💾</span><small>数据管理</small></button>
           <button type="button" class="mobile-more-item" :disabled="checkingUpdate" @click="showMobileMore = false; checkUpdate()"><span>↻</span><small>{{ checkingUpdate ? '检查中…' : '检查更新' }}</small></button>
         </div>
@@ -216,19 +221,22 @@ function chooseTheme(key) {
         <button
           type="button"
           class="quick-add-button"
-          :class="{ active: props.quickLedgerOpen }"
-          :aria-expanded="props.quickLedgerOpen"
-          aria-label="记账"
-          title="记账"
-          @click="emit('toggle-quick-ledger')"
+          :class="{ active: props.quickRecordOpen }"
+          :aria-expanded="props.quickRecordOpen"
+          aria-label="快速记录"
+          title="快速记录（Ctrl/Cmd + K）"
+          @click="emit('open-quick-record')"
         >
           <span class="quick-add-symbol" aria-hidden="true">＋</span>
-          <span class="quick-add-label">记账</span>
+          <span class="quick-add-label">记录</span>
         </button>
       </div>
       <button type="button" class="nav-item data-item" @pointerenter="warmTool('data')" @focus="warmTool('data')" @click="showDataManager = true">
         <span class="icon">💾<i v-if="needsBackup" class="backup-dot"></i></span>
         <span class="nav-label">数据管理</span>
+      </button>
+      <button type="button" class="nav-item data-item" @click="showQuickRecordSettings = true">
+        <span class="icon">⚡</span><span class="nav-label">快速记录设置</span>
       </button>
       <button type="button" class="nav-item data-item" :disabled="checkingUpdate" @click="checkUpdate">
         <span class="icon" aria-hidden="true">↻</span>
@@ -263,6 +271,7 @@ function chooseTheme(key) {
 
   <DataManager v-if="showDataManager" :open="showDataManager" @close="showDataManager = false" />
   <AppearanceSettings v-if="showAppearance" :open="showAppearance" @close="showAppearance = false" />
+  <QuickRecordSettings v-if="showQuickRecordSettings" :open="showQuickRecordSettings" @close="showQuickRecordSettings = false" />
 </template>
 
 <style scoped>
