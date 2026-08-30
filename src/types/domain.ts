@@ -12,6 +12,8 @@ export interface Course {
   startWeek?: number
   endWeek?: number
   weekType?: WeekType
+  campusId?: string
+  travelMinutes?: number
 }
 
 export interface PeriodTime {
@@ -91,6 +93,8 @@ export interface QuickNote {
   createdFrom?: string
   sourceType?: string
   sourceId?: string
+  inboxStatus?: 'inbox' | 'organized' | 'archived'
+  organizedAt?: string
 }
 
 export interface Transaction {

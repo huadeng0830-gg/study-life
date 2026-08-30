@@ -7,18 +7,21 @@ import VirtualList from '../components/VirtualList.vue'
 import {
   fmtCountdownDate,
   sortCountdowns,
+  todayStr,
+  useStoredRef,
 } from '../composables/store'
 import { useDomainCommands } from '../composables/domain/commands.js'
 
 const CATEGORIES = ['学习', '生活', '纪念日', '项目', '其他']
 const domain = useDomainCommands()
-const { milestones: exams, courses } = domain
+const { milestones: exams, courses, tasks } = domain
 const showPast = useStoredRef('sl_countdown_show_past', false)
 const showForm = ref(false)
 const editingId = ref(null)
 const error = ref('')
 const form = ref(emptyForm())
 const deleteTarget = ref(null)
+const reviewMessage = ref('')
 
 function emptyForm() {
   return {
@@ -99,6 +102,29 @@ const sorted = computed(() => sortCountdowns(exams.value))
 const visibleItems = computed(() =>
   showPast.value ? sorted.value : sorted.value.filter((item) => !item.countdown.isPast)
 )
+
+function createReviewTask(item, event) {
+  event?.stopPropagation()
+  const existing = tasks.value.find((task) => !task.done && task.sourceType === 'milestone-review' && task.sourceId === item.id)
+  if (existing) {
+    reviewMessage.value = `“${item.name}”已有待完成的复习任务`
+    return
+  }
+  const course = courses.value.find((entry) => entry.id === item.courseId)
+  domain.createTask({
+    title: `复习：${item.name}`,
+    courseId: item.courseId || '',
+    course: course?.name || item.courseName || '',
+    dueDate: todayStr(),
+    priority: 'high',
+    estimateMinutes: 25,
+    note: `由学习倒计时「${item.name}」创建，可在今天页直接开始专注。`,
+    createdFrom: 'milestone-review',
+    sourceType: 'milestone-review',
+    sourceId: item.id,
+  })
+  reviewMessage.value = `已安排“${item.name}”的 25 分钟复习，可在今天页开始专注`
+}
 
 // 窄屏（单列）下清单很长时做虚拟滚动；宽屏保持多列网格原样渲染。
 // 入场动画只对少量卡片有意义，长列表直接禁用，避免一次挂载几十个动画。
@@ -206,6 +232,7 @@ onBeforeUnmount(() => {
         <button class="btn btn-primary" @click="openAdd">＋ 添加倒计时</button>
       </div>
     </header>
+    <p v-if="reviewMessage" class="review-message" role="status">✓ {{ reviewMessage }}</p>
 
     <EmptyState
       v-if="exams.length === 0"
@@ -286,6 +313,7 @@ onBeforeUnmount(() => {
           <span class="tl-label strong">{{ timelineOf(item).end }}</span>
           <span class="tl-dot" :class="{ on: timelineOf(item).sameDay }"></span>
         </div>
+        <button v-if="item.category === '学习' && !item.countdown.isPast" type="button" class="review-action" @click="createReviewTask(item, $event)">安排 25 分钟复习</button>
       </div>
       </template>
     </VirtualList>
@@ -647,4 +675,8 @@ onBeforeUnmount(() => {
     grid-template-columns: 1fr;
   }
 }
+</style>
+
+<style scoped>
+.review-message{margin:0;color:var(--success);font-size:12.5px;font-weight:700}.review-action{align-self:flex-start;margin-top:12px;padding:7px 10px;color:var(--primary);font-size:12px;font-weight:750;border:1px solid var(--primary);border-radius:8px;background:var(--primary-soft)}.review-action:hover{background:var(--primary);color:#fff}
 </style>

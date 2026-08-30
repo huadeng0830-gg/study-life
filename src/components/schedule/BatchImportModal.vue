@@ -25,6 +25,7 @@ const emit = defineEmits([
   'clear',
   'import',
   'upload-image',
+  'crop-image',
   'cancel-progress',
   'retry-progress',
   'continue-progress',
@@ -43,6 +44,10 @@ function onTextInput(event) {
 
 function onFileChange(event) {
   emit('upload-image', event)
+}
+
+function onCropFileChange(event) {
+  emit('crop-image', event)
 }
 
 function coursePeriodText(row) {
@@ -82,6 +87,10 @@ const showRowError = computed(() => Boolean(props.error) && !(props.progress?.st
             <input type="file" accept="image/*" multiple :disabled="progress.state.status === 'running'" @change="onFileChange" hidden />
             <span v-if="progress.state.status === 'running'">🔄 {{ progress.state.latestActivity }}</span>
             <span v-else>📷 上传图片识别</span>
+          </label>
+          <label class="crop-button" :class="{ busy: progress.state.status === 'running' }">
+            <input type="file" accept="image/*" :disabled="progress.state.status === 'running'" @change="onCropFileChange" hidden />
+            ✂️ 先框选再识别（单张）
           </label>
           <p class="ocr-hint">支持一次选择多张 PNG/JPG/WebP；长截图会保留小字清晰度，结果逐张追加且不会覆盖已修改内容</p>
           <p v-if="summary" class="ocr-result-hint">{{ summary }}</p>
@@ -239,6 +248,7 @@ const showRowError = computed(() => Boolean(props.error) && !(props.progress?.st
   font-weight: 700;
   cursor: pointer;
 }
+.batch-image-upload .crop-button{display:inline-flex;align-items:center;justify-content:center;padding:8px 12px;color:var(--primary);font-size:12px;font-weight:700;border:1px solid var(--primary);border-radius:8px;background:var(--primary-soft);cursor:pointer}.batch-image-upload .crop-button.busy{opacity:.55;cursor:not-allowed}
 .file-button.busy {
   pointer-events: none;
   opacity: 0.7;

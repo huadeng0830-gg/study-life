@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { migrateDomainData } from '../src/composables/domain/migrations.js'
 import { detachCourseRelations } from '../src/composables/domain/relations.js'
-import { selectActionCenter, selectReminders } from '../src/composables/domain/selectors.js'
+import { selectActionCenter, selectDayAgenda, selectReminders } from '../src/composables/domain/selectors.js'
 import { taskStatus } from '../src/composables/domain/state.js'
 
 describe('domain state and projections', () => {
@@ -28,6 +28,16 @@ describe('domain state and projections', () => {
       events: [{ id: 'e1', title: '组会', date: '2026-08-30', time: '15:00' }],
     }, new Date('2026-08-29T10:00:00'))
     expect(reminders.map((item) => item.sourceType).sort()).toEqual(['bill', 'event', 'milestone', 'task'])
+  })
+
+  it('projects today courses and actionable records into one time-ordered agenda', () => {
+    const agenda = selectDayAgenda({
+      courses: [{ id: 'c1', name: '高数', time: '08:00', room: 'A101' }],
+      tasks: [{ id: 't1', title: '交作业', dueDate: '2026-08-29', dueTime: '10:00' }],
+      events: [{ id: 'e1', title: '组会', date: '2026-08-29', time: '14:00' }],
+    }, new Date('2026-08-29T09:00:00'))
+    expect(agenda.map((item) => item.sourceType)).toEqual(['course', 'task', 'event'])
+    expect(agenda[0]).toMatchObject({ title: '高数', meta: 'A101' })
   })
 })
 

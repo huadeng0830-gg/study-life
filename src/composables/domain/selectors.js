@@ -26,3 +26,28 @@ export function selectActionCenter(data = {}, now = new Date()) {
   const take = (predicate, limit) => reminders.filter((item) => { if (seen.has(item.key) || !predicate(item)) return false; seen.add(item.key); return true }).slice(0, limit)
   return { urgent: take((item) => item.kind === 'overdue' || item.priority === 'high', 3), today: take((item) => item.entity?.dueDate === today || item.entity?.nextDate === today || item.entity?.date === today, 6), soon: take(() => true, 5) }
 }
+
+// 首页的“今日行动清单”同样只是一层投影：课程、待办、日程、节点和账单仍由各自模块拥有。
+export function selectDayAgenda({ courses = [], tasks = [], bills = [], milestones = [], events = [] } = {}, now = new Date(), { limit = 8 } = {}) {
+  const today = dateText(now)
+  const results = []
+  for (const course of courses) {
+    results.push({ key: ref('course', course), sourceType: 'course', sourceId: course.id, kind: 'course', title: course.name, time: course.time || '', meta: course.room || '', dueAt: dateTime(today, course.time || '23:59'), entity: course })
+  }
+  for (const task of tasks) {
+    if (!isTaskActionable(task, now) || !task.dueDate) continue
+    const status = taskStatus(task, now)
+    if (status === 'overdue' || task.dueDate === today) results.push({ key: ref('task', task), sourceType: 'task', sourceId: task.id, kind: status, title: task.title, time: task.dueTime || '', meta: task.course || '', dueAt: dateTime(task.dueDate, task.dueTime), entity: task })
+  }
+  for (const event of events) {
+    if (event.date === today) results.push({ key: ref('event', event), sourceType: 'event', sourceId: event.id, kind: 'event', title: event.title, time: event.time || '', meta: event.courseName || '', dueAt: dateTime(today, event.time || '23:59'), entity: event })
+  }
+  for (const milestone of milestones) {
+    if (milestone.date === today) results.push({ key: ref('milestone', milestone), sourceType: 'milestone', sourceId: milestone.id, kind: 'milestone', title: milestone.name, time: '', meta: '今天到期', dueAt: dateTime(today), entity: milestone })
+  }
+  for (const bill of bills) {
+    const status = billStatus(bill, now)
+    if (status === 'due' || status === 'overdue') results.push({ key: ref('bill', bill), sourceType: 'bill', sourceId: bill.id, kind: status, title: bill.name, time: '', meta: `¥${Number(bill.amount || 0).toFixed(2)}`, dueAt: dateTime(bill.nextDate || today), entity: bill })
+  }
+  return results.sort((a, b) => (a.kind === 'overdue' ? -1 : b.kind === 'overdue' ? 1 : a.dueAt - b.dueAt || a.title.localeCompare(b.title, 'zh-CN'))).slice(0, limit)
+}

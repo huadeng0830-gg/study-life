@@ -1,6 +1,16 @@
 // 语音输入（模块 C）：只用浏览器本地 Web Speech API，不接任何外部服务。
 // 不支持（Firefox 桌面版 / 非 HTTPS / 无 API）时 isSupported() 返回 false、transcribe() 返回 null，
 // UI 应隐藏或禁用语音按钮并给出一次性友好提示，保持可用不报错。
+// 语音状态机：idle → listening → transcribing → done / error。
+// 快速笔记模式不需要“理解中”状态，由调用方自行决定是否展示 transcribing 之后的流程。
+
+export const VOICE_STATES = Object.freeze({
+  idle: 'idle',
+  listening: 'listening',
+  transcribing: 'transcribing',
+  done: 'done',
+  error: 'error',
+})
 
 export function speechRecognitionAPI() {
   if (typeof window === 'undefined') return null
@@ -24,6 +34,7 @@ export function voiceErrorMessage(errorCode) {
 }
 
 // 返回可 start/stop/abort 的控制器；不支持时返回 null。
+// 新增 onStateChange 状态回调与 maxSeconds 安全超时，兼容原 onResult/onError/onEnd 参数。
 export function transcribe(options = {}) {
   const API = speechRecognitionAPI()
   if (!API) return null
@@ -32,9 +43,11 @@ export function transcribe(options = {}) {
     lang = 'zh-CN',
     interimResults = true,
     continuous = false,
+    maxSeconds = 30,
     onResult = () => {},
     onError = () => {},
     onEnd = () => {},
+    onStateChange = () => {},
   } = options
 
   const recognition = new API()
@@ -45,6 +58,41 @@ export function transcribe(options = {}) {
   let finalText = ''
   let interimText = ''
   let started = false
+  let maxTimer = 0
+  let stoppedByUser = false
+  let failed = false
+
+  function setState(state) {
+    onStateChange(state)
+  }
+
+  function clearMaxTimer() {
+    if (maxTimer) window.clearTimeout(maxTimer)
+    maxTimer = 0
+  }
+
+  function finish() {
+    started = false
+    clearMaxTimer()
+    const result = finalText
+    finalText = ''
+    interimText = ''
+    setState(result ? VOICE_STATES.done : VOICE_STATES.idle)
+    onEnd(result)
+  }
+
+  recognition.onstart = () => {
+    started = true
+    stoppedByUser = false
+    setState(VOICE_STATES.listening)
+    clearMaxTimer()
+    if (maxSeconds > 0) {
+      maxTimer = window.setTimeout(() => {
+        // 到达最长聆听时间自动结束，避免误留后台录音。
+        try { recognition.stop() } catch { finish() }
+      }, maxSeconds * 1000)
+    }
+  }
 
   recognition.onresult = (event) => {
     // interim 片段是「替换上一次临时结果」，不能累加；final 片段才追加到最终文本。
@@ -56,15 +104,33 @@ export function transcribe(options = {}) {
       else interim += transcript
     }
     interimText = interim
+    if (finalText || interimText) setState(VOICE_STATES.transcribing)
     onResult(finalText, interimText)
   }
+
   recognition.onerror = (event) => {
     started = false
+    failed = true
+    clearMaxTimer()
+    finalText = ''
+    interimText = ''
+    setState(VOICE_STATES.error)
     onError(event?.error ?? 'unknown')
   }
+
   recognition.onend = () => {
-    started = false
-    onEnd(finalText)
+    if (failed) {
+      failed = false
+      clearMaxTimer()
+      return
+    }
+    if (started) finish()
+    else if (finalText) finish()
+    else {
+      started = false
+      clearMaxTimer()
+      if (!stoppedByUser) setState(VOICE_STATES.idle)
+    }
   }
 
   return {
@@ -74,18 +140,19 @@ export function transcribe(options = {}) {
       interimText = ''
       try {
         recognition.start()
-        started = true
       } catch (error) {
         // start() 同步抛错（未授权、重复启动、环境禁用）时必须显式反馈，不能静默失败。
-        started = false
         onError(error?.name ?? 'start-error')
       }
     },
     stop() {
-      try { recognition.stop() } catch { started = false }
+      stoppedByUser = true
+      try { recognition.stop() } catch { finish() }
     },
     abort() {
+      stoppedByUser = true
       started = false
+      clearMaxTimer()
       try { recognition.abort() } catch {}
     },
   }

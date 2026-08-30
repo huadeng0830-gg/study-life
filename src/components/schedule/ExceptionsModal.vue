@@ -1,6 +1,7 @@
 <script setup>
 import { reactive, ref, watch } from 'vue'
 import Modal from '../Modal.vue'
+import { todayStr } from '../../composables/store/utils.js'
 
 const props = defineProps({
   show: { type: Boolean, required: true },
@@ -10,14 +11,12 @@ const props = defineProps({
 
 const emit = defineEmits(['close', 'submit', 'remove'])
 
-const todayStr = new Date().toISOString().slice(0, 10)
-
-const form = reactive({ date: todayStr, type: 'off', sourceDay: 0, note: '' })
+const form = reactive({ date: todayStr(), type: 'off', sourceDay: 0, note: '' })
 const error = ref('')
 
 watch(() => props.show, (open) => {
   if (open) {
-    form.date = todayStr
+    form.date = todayStr()
     form.type = 'off'
     form.sourceDay = 0
     form.note = ''

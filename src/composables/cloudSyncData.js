@@ -11,6 +11,9 @@ export const SYNC_DEFAULTS = {
   sl_events: [],
   sl_quick_notes: [],
   sl_quick_record_settings: { clipboardHint: true, recentTypes: [] },
+  sl_capture_enabled: true,
+  sl_focus_sessions: [],
+  sl_course_checkins: [],
   sl_exams: [],
   sl_countdown_show_past: false,
   sl_checklists: [],
@@ -30,13 +33,17 @@ export const SYNC_DEFAULTS = {
   sl_ledger_freq: { pinned: [], hidden: [] },
   sl_food_places: [],
   sl_food_history: [],
+  sl_food_filters: {},
+  sl_ocr_vocabulary: { courses: [], teachers: [], rooms: [], campuses: [] },
   sl_theme: 'blue',
   sl_custom_theme_color: '#456fe8',
   sl_auto_wallpaper_color: false,
   sl_wallpaper_accent: '#456fe8',
   sl_appearance: {},
   sl_wallpaper_config: {},
+  sl_performance_mode: 'auto',
   sl_festive_config: { enabled: true, birthday: '', installDate: '', anniversaries: [] },
+  sl_festive_birthday_full: '',
   sl_mood_log: {},
 }
 
@@ -44,14 +51,15 @@ export const SYNC_KEYS = Object.keys(SYNC_DEFAULTS)
 
 // 「模块 → 键」静态分组：选择性拉取时按模块勾选，未勾选的键完全不动。
 export const SYNC_MODULES = Object.freeze([
-  { key: 'courses', label: '课程与课表', keys: ['sl_courses', 'sl_course_templates', 'sl_timecfg', 'sl_semester', 'sl_schedule_exceptions'] },
-  { key: 'tasks', label: '待办与快速记录', keys: ['sl_tasks', 'sl_events', 'sl_quick_notes', 'sl_quick_record_settings'] },
+  { key: 'courses', label: '课程与课表', keys: ['sl_courses', 'sl_course_templates', 'sl_timecfg', 'sl_semester', 'sl_schedule_exceptions', 'sl_ocr_vocabulary', 'sl_course_checkins'] },
+  { key: 'tasks', label: '待办与快速记录', keys: ['sl_tasks', 'sl_events', 'sl_quick_notes', 'sl_quick_record_settings', 'sl_capture_enabled'] },
+  { key: 'focus', label: '专注记录', keys: ['sl_focus_sessions'] },
   { key: 'countdown', label: '倒计时', keys: ['sl_exams', 'sl_countdown_show_past'] },
   { key: 'checklists', label: '清单', keys: ['sl_checklists'] },
   { key: 'ledger', label: '账本', keys: ['sl_bills', 'sl_expenses', 'sl_ledger_categories', 'sl_ledger_freq'] },
-  { key: 'food', label: '吃什么', keys: ['sl_food_places', 'sl_food_history'] },
-  { key: 'appearance', label: '外观与主题', keys: ['sl_theme', 'sl_custom_theme_color', 'sl_auto_wallpaper_color', 'sl_wallpaper_accent', 'sl_appearance', 'sl_wallpaper_config'] },
-  { key: 'atmosphere', label: '氛围与心情', keys: ['sl_festive_config', 'sl_mood_log'] },
+  { key: 'food', label: '吃什么', keys: ['sl_food_places', 'sl_food_history', 'sl_food_filters'] },
+  { key: 'appearance', label: '外观与主题', keys: ['sl_theme', 'sl_custom_theme_color', 'sl_auto_wallpaper_color', 'sl_wallpaper_accent', 'sl_appearance', 'sl_wallpaper_config', 'sl_performance_mode'] },
+  { key: 'atmosphere', label: '氛围与心情', keys: ['sl_festive_config', 'sl_festive_birthday_full', 'sl_mood_log'] },
 ])
 
 // 根据勾选的模块 key 展开为待拉取的 sl_* 键（保持 SYNC_KEYS 顺序、去重）。
@@ -95,6 +103,7 @@ export function isCompatibleValue(value, expected) {
 // 写入前归一化：氛围与心情两个新键语义上“读取即纠偏”，拉取时同样先纠偏再落盘。
 function normalizeIncomingValue(key, value) {
   if (key === 'sl_festive_config') return normalizeFestiveConfig(value)
+  if (key === 'sl_festive_birthday_full') return /^\d{4}-(0[1-9]|1[0-2])-([0-2]\d|3[01])$/.test(String(value ?? '')) ? String(value) : ''
   if (key === 'sl_mood_log') return normalizeMoodLog(value)
   return cloneValue(value)
 }
@@ -115,6 +124,7 @@ function isValidKeyValue(key, value) {
   if (key === 'sl_wallpaper_config') {
     return value.targets === undefined || isPlainObject(value.targets)
   }
+  if (key === 'sl_festive_birthday_full') return typeof value === 'string'
   return true
 }
 

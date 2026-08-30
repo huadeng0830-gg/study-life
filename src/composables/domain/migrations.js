@@ -18,6 +18,10 @@ export function migrateDomainData({ tasks = [], milestones = [], transactions = 
     if (!item.updatedAt && item.createdAt) { item.updatedAt = item.createdAt; changed++ }
   }
   for (const item of events) if (!item.updatedAt && item.createdAt) { item.updatedAt = item.createdAt; changed++ }
-  for (const item of notes) if (!item.updatedAt && item.createdAt) { item.updatedAt = item.createdAt; changed++ }
+  for (const item of notes) {
+    if (!item.updatedAt && item.createdAt) { item.updatedAt = item.createdAt; changed++ }
+    if (!Array.isArray(item.tags)) { item.tags = []; changed++ }
+    if (!item.sourceText) { item.sourceText = item.content || item.title || ''; changed++ }
+  }
   return changed
 }

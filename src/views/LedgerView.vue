@@ -462,6 +462,14 @@ const laterBills = computed(() =>
     .sort((a, b) => daysUntil(a.nextDate) - daysUntil(b.nextDate))
 )
 const pausedBills = computed(() => bills.value.filter((b) => b.active === false))
+const billForecast = computed(() => {
+  const active = bills.value.filter((bill) => bill.active !== false)
+  const annual = active.reduce((total, bill) => total + Number(bill.amount || 0) * (CYCLES[bill.cycle]?.monthFactor ?? 1) * 12, 0)
+  const next30 = active
+    .filter((bill) => daysUntil(bill.nextDate) >= 0 && daysUntil(bill.nextDate) <= 30)
+    .reduce((total, bill) => total + Number(bill.amount || 0), 0)
+  return { active: active.length, annual, monthly: annual / 12, next30 }
+})
 
 /* ================= 回顾 ================= */
 const reviewMonth = ref(todayStr().slice(0, 7)) // YYYY-MM
@@ -738,6 +746,12 @@ function createBillFromSuggest() {
       />
 
       <template v-else>
+        <section class="bill-forecast card" aria-label="固定账单预算预测">
+          <div><small>每月固定支出估算</small><b>{{ moneyHero(billForecast.monthly) }}</b></div>
+          <div><small>未来 30 天待支付</small><b>{{ moneyRow(billForecast.next30) }}</b></div>
+          <div><small>全年预计</small><b>{{ moneyRow(billForecast.annual) }}</b></div>
+          <p>基于 {{ billForecast.active }} 项启用账单的当前周期估算，不包含日常手动消费。</p>
+        </section>
         <section v-if="dueBills.length" class="bill-group">
           <h3 class="block-title">即将到来</h3>
           <div class="bill-list">
@@ -1369,4 +1383,8 @@ function createBillFromSuggest() {
   .quick-actions { flex-direction: column-reverse; }
   .quick-actions .btn { width: 100%; }
 }
+</style>
+
+<style scoped>
+.bill-forecast{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px}.bill-forecast>div{display:flex;flex-direction:column;gap:3px}.bill-forecast small,.bill-forecast p{color:var(--ink-soft);font-size:11.5px}.bill-forecast b{font-size:17px}.bill-forecast p{grid-column:1/-1;margin:1px 0 0}@media(max-width:620px){.bill-forecast{grid-template-columns:1fr 1fr}.bill-forecast>div:last-of-type{grid-column:1/-1}}
 </style>

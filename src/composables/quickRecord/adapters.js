@@ -26,8 +26,30 @@ export function useQuickRecordAdapters() {
       domain.createEvent({ ...base, courseName: draft.course })
       return `已添加日程「${draft.title}」`
     }
-    domain.createNote({ ...base, content: draft.note || draft.title, courseName: draft.course })
+    // 笔记与“识别不清”的输入都落到自由笔记，确保用户输入不丢失。
+    domain.createNote({ ...base, content: draft.note || draft.title || draft.raw || '', courseName: draft.course })
     return '已保存快速笔记'
   }
-  return { courses, save }
+
+  function convertNote(noteId, targetType) {
+    const note = domain.notes.value.find((item) => item.id === noteId)
+    if (!note) return { ok: false, error: '笔记不存在或已被删除' }
+    const content = String(note.content || note.title || '').trim()
+    const title = (note.title || content || '').replace(/\s+/g, ' ').slice(0, 60)
+    if (!title) return { ok: false, error: '笔记内容为空，无法转换' }
+
+    if (targetType === 'todo') {
+      const task = domain.createTask({ title, note: content, sourceText: content, sourceId: noteId, sourceType: 'note', createdFrom: 'note-organize' })
+      domain.updateNote(noteId, { inboxStatus: 'organized', organizedAt: new Date().toISOString() })
+      return { ok: true, message: `已转为待办「${task.title}」` }
+    }
+    if (targetType === 'event') {
+      const event = domain.createEvent({ title, note: content, sourceId: noteId, sourceType: 'note', createdFrom: 'note-organize' })
+      domain.updateNote(noteId, { inboxStatus: 'organized', organizedAt: new Date().toISOString() })
+      return { ok: true, message: `已转为日程「${event.title}」` }
+    }
+    return { ok: false, error: '暂不支持这个转换类型' }
+  }
+
+  return { courses, save, convertNote }
 }

@@ -5,22 +5,26 @@ import {
   restoreWallpaperUndo,
 } from './wallpaperStorage.js'
 import { throwIfAborted } from './asyncTask.js'
+import { restoreStoredValues } from './store/index.js'
+import { markLocalChanged } from './cloudSync.js'
 
 export const TRANSFER_MODULES = {
-  courses: { label: '课程、课表模板、作息与特殊日期', keys: ['sl_courses', 'sl_course_templates', 'sl_timecfg', 'sl_semester', 'sl_schedule_exceptions'] },
-  tasks: { label: '作业、待办、日程与笔记', keys: ['sl_tasks', 'sl_events', 'sl_quick_notes', 'sl_quick_record_settings'] },
+  courses: { label: '课程、课表模板、作息与特殊日期', keys: ['sl_courses', 'sl_course_templates', 'sl_timecfg', 'sl_semester', 'sl_schedule_exceptions', 'sl_ocr_vocabulary', 'sl_course_checkins'] },
+  tasks: { label: '作业、待办、日程与笔记', keys: ['sl_tasks', 'sl_events', 'sl_quick_notes', 'sl_quick_record_settings', 'sl_capture_enabled'] },
+  focus: { label: '专注记录', keys: ['sl_focus_sessions'] },
   countdowns: { label: '考试与倒计时', keys: ['sl_exams', 'sl_countdown_show_past'] },
   lists: { label: '生活清单', keys: ['sl_checklists'] },
   bills: { label: '固定账单', keys: ['sl_bills'] },
   expenses: { label: '消费记录与账本偏好', keys: ['sl_expenses', 'sl_ledger_categories', 'sl_ledger_freq'] },
-  food: { label: '吃什么选择库', keys: ['sl_food_places', 'sl_food_history'] },
-  appearance: { label: '励志语、首页布局与页面皮肤', keys: ['sl_appearance'] },
+  food: { label: '吃什么选择库', keys: ['sl_food_places', 'sl_food_history', 'sl_food_filters'] },
+  appearance: { label: '励志语、首页布局与页面皮肤', keys: ['sl_appearance', 'sl_performance_mode'] },
   wallpapers: { label: '壁纸图片（可选，二维码较多）', keys: ['sl_wallpaper_config', 'sl_auto_wallpaper_color', 'sl_wallpaper_accent'] },
   preferences: { label: '主题与显示偏好', keys: ['sl_theme', 'sl_custom_theme_color'] },
+  atmosphere: { label: '节日、纪念日与心情', keys: ['sl_festive_config', 'sl_festive_birthday_full', 'sl_mood_log'] },
 }
 
 const ARRAY_KEYS = new Set([
-  'sl_courses', 'sl_course_templates', 'sl_schedule_exceptions', 'sl_tasks', 'sl_events', 'sl_quick_notes', 'sl_quick_record_settings', 'sl_exams', 'sl_checklists',
+  'sl_courses', 'sl_course_templates', 'sl_schedule_exceptions', 'sl_course_checkins', 'sl_tasks', 'sl_events', 'sl_quick_notes', 'sl_focus_sessions', 'sl_exams', 'sl_checklists',
   'sl_bills', 'sl_expenses', 'sl_food_places', 'sl_food_history',
 ])
 const KEYED_ARRAY_KEYS = new Map([['sl_ledger_categories', 'key']])
@@ -210,6 +214,27 @@ function mergeKeyedArray(current, incoming, key, identityKey) {
   return { value: result, added, key }
 }
 
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+// 快速记录设置是对象而非实体数组。迁移时保留本机开关，并合并两端的最近类型，
+// 防止「合并」把整个设置写成空数组后在下次启动被重置。
+function mergeQuickRecordSettings(current, incoming) {
+  const local = isPlainObject(current) ? current : {}
+  const remote = isPlainObject(incoming) ? incoming : {}
+  const recentTypes = [...new Set([
+    ...(Array.isArray(local.recentTypes) ? local.recentTypes : []),
+    ...(Array.isArray(remote.recentTypes) ? remote.recentTypes : []),
+  ].filter((item) => typeof item === 'string' && item))].slice(0, 4)
+  return {
+    clipboardHint: typeof local.clipboardHint === 'boolean'
+      ? local.clipboardHint
+      : typeof remote.clipboardHint === 'boolean' ? remote.clipboardHint : true,
+    recentTypes,
+  }
+}
+
 function periodMapping(incomingConfig, currentConfig) {
   const current = currentConfig?.periods ?? []
   const map = new Map()
@@ -237,6 +262,7 @@ export async function importTransferPackage(pkg, mode = 'merge', { signal = null
   const undo = { createdAt: new Date().toISOString(), values: {}, hadWallpapers: false }
   for (const key of keys) undo.values[key] = localStorage.getItem(key)
   localStorage.setItem(UNDO_KEY, JSON.stringify(undo))
+  let committed = false
   try {
     if (wallpaperImages) {
       onProgress?.({ stage: 'snapshot', message: '正在创建壁纸回滚快照' })
@@ -257,6 +283,7 @@ export async function importTransferPackage(pkg, mode = 'merge', { signal = null
     const currentPeriodIds = new Set((currentConfig?.periods ?? []).map((period) => period.id))
 
     const dataEntries = Object.entries(pkg.data).filter(([key]) => key !== '__wallpaper_images')
+    const nextValues = {}
     for (const [index, [key, incomingRaw]] of dataEntries.entries()) {
       throwIfAborted(signal)
       let incoming = incomingRaw
@@ -268,23 +295,33 @@ export async function importTransferPackage(pkg, mode = 'merge', { signal = null
         }))
       }
 
-      if (mode === 'merge' && (ARRAY_KEYS.has(key) || KEYED_ARRAY_KEYS.has(key))) {
+      if (mode === 'merge' && key === 'sl_quick_record_settings') {
+        const value = mergeQuickRecordSettings(readStored(key), incoming)
+        nextValues[key] = value
+        details.push({ key, mergedSettings: true })
+      } else if (mode === 'merge' && (ARRAY_KEYS.has(key) || KEYED_ARRAY_KEYS.has(key))) {
         const result = KEYED_ARRAY_KEYS.has(key)
           ? mergeKeyedArray(readStored(key), incoming, key, KEYED_ARRAY_KEYS.get(key))
           : mergeArray(readStored(key), incoming, key)
-        localStorage.setItem(key, JSON.stringify(result.value))
+        nextValues[key] = result.value
         added += result.added
         details.push({ key, added: result.added })
       } else if (mode === 'merge' && localStorage.getItem(key) !== null) {
         // 合并时保留本机的作息、学期和主题设置。
         details.push({ key, keptLocal: true })
       } else {
-        localStorage.setItem(key, JSON.stringify(incoming))
+        nextValues[key] = incoming
         details.push({ key, replaced: true })
       }
       onProgress?.({ stage: 'data', current: index + 1, total: dataEntries.length, key })
     }
+    throwIfAborted(signal)
+    if (Object.keys(nextValues).length) {
+      await restoreStoredValues(nextValues)
+      committed = true
+    }
     if (wallpaperImages) {
+      committed = true
       await importWallpapersFromTransfer(wallpaperImages, mode, {
         signal,
         onProgress: (progress) => onProgress?.({ ...progress, stage: 'wallpapers' }),
@@ -292,7 +329,11 @@ export async function importTransferPackage(pkg, mode = 'merge', { signal = null
     }
     return { added, details, affected: keys.length }
   } catch (reason) {
-    try { await restoreTransferUndo() } catch {}
+    if (committed) {
+      try { await restoreTransferUndo() } catch {}
+    } else {
+      localStorage.removeItem(UNDO_KEY)
+    }
     throw reason
   }
 }
@@ -304,10 +345,17 @@ export function hasTransferUndo() {
 export async function restoreTransferUndo() {
   const undo = readStored(UNDO_KEY)
   if (!undo?.values) return false
+  const values = {}
+  const removedKeys = []
   for (const [key, raw] of Object.entries(undo.values)) {
-    if (raw === null) localStorage.removeItem(key)
-    else localStorage.setItem(key, raw)
+    if (raw === null) removedKeys.push(key)
+    else {
+      try { values[key] = JSON.parse(raw) } catch { values[key] = null }
+    }
   }
+  if (Object.keys(values).length) await restoreStoredValues(values)
+  for (const key of removedKeys) localStorage.removeItem(key)
+  if (removedKeys.length && !Object.keys(values).length) markLocalChanged()
   if (undo.hadWallpapers) {
     await restoreWallpaperUndo()
   }

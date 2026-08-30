@@ -13,11 +13,16 @@ export const WALLPAPER_TARGETS = {
 
 export const HOME_MODULES = [
   { id: 'next', label: '接下来' },
+  { id: 'agenda', label: '今日时间轴' },
+  { id: 'focus', label: '专注计时' },
   { id: 'tasks', label: '今日待办' },
   { id: 'courses', label: '今天课程' },
+  { id: 'feedback', label: '课程反馈' },
+  { id: 'inbox', label: '收件箱' },
+  { id: 'workload', label: '课程工作量' },
   { id: 'countdowns', label: '近期提醒' },
   { id: 'week', label: '本周概况' },
-  { id: 'bills', label: '近期账单' },
+  { id: 'pulse', label: '本周脉搏' },
 ]
 
 const DEFAULT_EFFECTS = {

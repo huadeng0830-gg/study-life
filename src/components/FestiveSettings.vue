@@ -3,6 +3,7 @@ import { ref, watch } from 'vue'
 import Modal from './Modal.vue'
 import { festiveConfig } from '../composables/atmosphereStore.js'
 import { builtInFestivalTable, normalizeFestiveConfig } from '../composables/festive.js'
+import { useStoredRef } from '../composables/store/index.js'
 
 const props = defineProps({ open: Boolean })
 const emit = defineEmits(['close'])
@@ -16,17 +17,13 @@ let anniversarySeq = 0
 // 「我的生日」date 输入框需要完整年月日，故用独立 key 记住出生年份，
 // 关闭面板再打开时年份也不会被重设成占位年份。
 const BIRTHDAY_FULL_KEY = 'sl_festive_birthday_full'
+const birthdayFull = useStoredRef(BIRTHDAY_FULL_KEY, '')
 function readBirthdayFull() {
-  try {
-    const value = localStorage.getItem(BIRTHDAY_FULL_KEY)
-    return /^\d{4}-\d{2}-\d{2}$/.test(String(value ?? '')) ? value : ''
-  } catch { return '' }
+  const value = String(birthdayFull.value ?? '')
+  return /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : ''
 }
 function writeBirthdayFull(value) {
-  try {
-    if (value) localStorage.setItem(BIRTHDAY_FULL_KEY, value)
-    else localStorage.removeItem(BIRTHDAY_FULL_KEY)
-  } catch {}
+  birthdayFull.value = value || ''
 }
 function birthdayInputOf(cfg) {
   const full = readBirthdayFull()
@@ -176,7 +173,7 @@ watch(
             </tbody>
           </table>
         </div>
-        <p class="table-note">农历/节气日期维护在 <code>festive.js → LUNAR_DATE_TABLE</code>，未收录的年份会自动跳过、不报错。</p>
+        <p class="table-note">农历与节气日期由本地历法计算生成；表格默认展示当前年前后各六年，供随时核对。</p>
       </div>
 
       <p class="saved-hint">✓ 修改即时自动保存</p>

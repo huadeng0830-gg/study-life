@@ -96,6 +96,8 @@ function save() {
       name: draft.name.trim(),
       teacher: String(draft.teacher ?? '').trim(),
       room: String(draft.room ?? '').trim(),
+      campusId: String(draft.campusId ?? '').trim(),
+      travelMinutes: Math.max(0, Number(draft.travelMinutes) || 0),
       color: draft.color,
       day: Number(draft.day),
       start,
@@ -123,6 +125,11 @@ function requestDelete() {
 
       <label>上课地点</label>
       <input v-model="draft.room" placeholder="例如：教学楼 A201" />
+
+      <div class="row">
+        <div><label>校区</label><select v-model="draft.campusId"><option value="">跟随当前校区</option><option v-for="campus in timeConfig.campuses" :key="campus.id" :value="campus.id">{{ campus.name }}</option></select></div>
+        <div><label>提前出发（分钟）</label><input v-model.number="draft.travelMinutes" type="number" min="0" max="180" inputmode="numeric" placeholder="选填" /></div>
+      </div>
 
       <div class="row">
         <div><label>星期</label><select v-model.number="draft.day"><option v-for="(day, index) in DAYS" :key="day" :value="index">{{ day }}</option></select></div>

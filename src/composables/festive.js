@@ -1,6 +1,8 @@
 // 氛围与节日引擎（模块 A）：纯函数判断某天命中哪个节日、生日或纪念日，
 // 产出 key / name / 主题色 / 祝福语 / 装饰类型（snow|confetti|lantern|null）。
 // 本文件不读写任何存储，供单测直接调用；存储与坏数据修复见 atmosphereStore.js。
+// 农历和节气由 lunar-javascript 计算，不能再维护容易过期的手填日期表。
+import { Solar } from 'lunar-javascript'
 
 const pad2 = (value) => String(value).padStart(2, '0')
 
@@ -58,7 +60,7 @@ export const SOLAR_FIXED = {
   '12-25': { key: 'christmas', name: '圣诞节', accentColor: '#2f9e6e', message: '圣诞快乐，平安顺遂。', decor: 'snow' },
 }
 
-// 农历/节气节日的公历日期表（2026–2030）。查不到年份就跳过，不猜不编。
+// 农历/节气节日定义。日期在运行时由历法库计算，而不是维护静态映射。
 export const LUNAR_DEFS = {
   spring: { key: 'spring', name: '春节', accentColor: '#e23b3b', message: '新春大吉，阖家团圆。', decor: 'lantern' },
   lantern: { key: 'lantern', name: '元宵节', accentColor: '#f59e0b', message: '元宵快乐，团团圆圆。', decor: 'lantern' },
@@ -69,12 +71,17 @@ export const LUNAR_DEFS = {
   winter: { key: 'winter', name: '冬至', accentColor: '#64748b', message: '冬至安好，记得吃顿热乎的。', decor: null },
 }
 
-export const LUNAR_DATE_TABLE = {
-  2026: { '02-17': 'spring', '03-03': 'lantern', '04-05': 'qingming', '06-19': 'dragon', '09-25': 'midautumn', '10-18': 'chongyang', '12-22': 'winter' },
-  2027: { '02-06': 'spring', '02-20': 'lantern', '04-05': 'qingming', '06-09': 'dragon', '09-15': 'midautumn', '10-08': 'chongyang', '12-22': 'winter' },
-  2028: { '01-26': 'spring', '02-09': 'lantern', '04-04': 'qingming', '05-28': 'dragon', '10-03': 'midautumn', '10-26': 'chongyang', '12-21': 'winter' },
-  2029: { '02-13': 'spring', '02-27': 'lantern', '04-04': 'qingming', '06-16': 'dragon', '09-22': 'midautumn', '10-16': 'chongyang', '12-21': 'winter' },
-  2030: { '02-03': 'spring', '02-17': 'lantern', '04-05': 'qingming', '06-05': 'dragon', '09-12': 'midautumn', '10-05': 'chongyang', '12-22': 'winter' },
+function lunarFestivalKey(date) {
+  const solar = Solar.fromYmd(date.getFullYear(), date.getMonth() + 1, date.getDate())
+  const lunar = solar.getLunar()
+  if (lunar.getMonth() === 1 && lunar.getDay() === 1) return 'spring'
+  if (lunar.getMonth() === 1 && lunar.getDay() === 15) return 'lantern'
+  if (lunar.getMonth() === 5 && lunar.getDay() === 5) return 'dragon'
+  if (lunar.getMonth() === 8 && lunar.getDay() === 15) return 'midautumn'
+  if (lunar.getMonth() === 9 && lunar.getDay() === 9) return 'chongyang'
+  if (lunar.getJieQi() === '清明') return 'qingming'
+  if (lunar.getJieQi() === '冬至') return 'winter'
+  return ''
 }
 
 function pick(key, name, accentColor, message, decor) {
@@ -111,8 +118,8 @@ export function festiveFor(date, config) {
   const solar = SOLAR_FIXED[md]
   if (solar) return pick(solar.key, solar.name, solar.accentColor, solar.message, solar.decor)
 
-  const lunar = LUNAR_DATE_TABLE[year]?.[md]
-  const lunarDef = lunar ? LUNAR_DEFS[lunar] : null
+  const lunarKey = lunarFestivalKey(new Date(`${full}T00:00:00`))
+  const lunarDef = lunarKey ? LUNAR_DEFS[lunarKey] : null
   if (lunarDef) return pick(lunarDef.key, lunarDef.name, lunarDef.accentColor, lunarDef.message, lunarDef.decor)
 
   return null
@@ -132,18 +139,21 @@ export function applyAtmosphere(overlay) {
 }
 
 // 供「节日与纪念日设置」面板展示的内置节日对照表（只读）。
-// 结构与内置常量一一对应：固定公历节日按月-日升序；农历节日按 LUNAR_DEFS 顺序给列，
-// 每个年份把 date→key 反查成 key→date，方便表格按列渲染。
-export function builtInFestivalTable() {
+// 为可核对性默认展示当前年前后各六年；表中每一格都由同一历法计算器生成。
+export function builtInFestivalTable(anchorYear = new Date().getFullYear()) {
   const solar = Object.entries(SOLAR_FIXED).map(([date, def]) => ({ date, name: def.name }))
   const lunarFestivals = Object.entries(LUNAR_DEFS).map(([key, def]) => ({ key, name: def.name }))
-  const years = Object.keys(LUNAR_DATE_TABLE).map(Number).sort((a, b) => a - b)
+  const years = Array.from({ length: 13 }, (_, index) => anchorYear - 6 + index)
   const keys = lunarFestivals.map((item) => item.key)
   const lunar = years.map((year) => {
-    const byDate = LUNAR_DATE_TABLE[year] || {}
     const cells = {}
-    for (const key of keys) {
-      cells[key] = Object.keys(byDate).find((date) => byDate[date] === key) ?? ''
+    for (let month = 0; month < 12; month++) {
+      const days = new Date(year, month + 1, 0).getDate()
+      for (let day = 1; day <= days; day++) {
+        const date = new Date(year, month, day)
+        const key = lunarFestivalKey(date)
+        if (keys.includes(key)) cells[key] = `${pad2(month + 1)}-${pad2(day)}`
+      }
     }
     return { year, cells }
   })

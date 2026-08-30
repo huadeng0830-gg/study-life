@@ -45,4 +45,57 @@ describe('quickRecord.parser', () => {
     expect(draft.type).toBe('todo')
     expect(draft.date).toBe('')
   })
+it('语序变化不影响支出识别：买/花了/五元/五块钱', () => {
+    const now = new Date('2026-08-29T10:00:00')
+    for (const text of ['买牛肉面花了五元', '花了五元买牛肉面', '五元买牛肉面', '牛肉面5元', '五块钱买了牛肉面']) {
+      const [draft] = parseQuickRecord(text, { now })
+      expect(draft.type).toBe('expense')
+      expect(draft.amount).toBe(5)
+      expect(draft.title).toContain('牛肉面')
+      expect(draft.date).toBe('2026-08-29')
+    }
+  })
+
+  it('识别口语金额 12块5 为 12.5', () => {
+    const [draft] = parseQuickRecord('刚刚买咖啡花了12块5')
+    expect(draft.type).toBe('expense')
+    expect(draft.amount).toBe(12.5)
+    expect(draft.title).toContain('咖啡')
+  })
+
+  it('金额不完整时不乱猜类型，给出 unknown 降级出口', () => {
+    const [draft] = parseQuickRecord('牛肉面五')
+    expect(draft.type).toBe('unknown')
+    expect(draft.uncertain).toBe(true)
+    expect(draft.note).toBe('牛肉面五')
+  })
+
+  it('选择快速笔记后不进行意图分类', () => {
+    const [draft] = parseQuickRecord('明天下午三点交作业', { forcedType: 'note' })
+    expect(draft.type).toBe('note')
+    expect(draft.note).toBe('明天下午三点交作业')
+    expect(draft.date).toBe('')
+  })
+it('识别日程实体：组会/上课/实验室会议', () => {
+    const now = new Date('2026-08-29T10:00:00')
+    const cases = [
+      ['明天下午三点开组会', { date: '2026-08-30', time: '15:00' }],
+      ['周五上午十点上课', { date: '2026-09-04', time: '10:00' }],
+      ['下周一两点实验室会议', { date: '2026-08-31', time: '14:00' }],
+    ]
+    for (const [text, expected] of cases) {
+      const [draft] = parseQuickRecord(text, { now })
+      expect(draft.type).toBe('event')
+      expect(draft.date).toBe(expected.date)
+      expect(draft.time).toBe(expected.time)
+    }
+  })
+
+  it('自由笔记模式下不提取日期和任务字段', () => {
+    const [draft] = parseQuickRecord('明天下午三点交作业', { forcedType: 'note' })
+    expect(draft.type).toBe('note')
+    expect(draft.date).toBe('')
+    expect(draft.time).toBe('')
+    expect(draft.note).toBe('明天下午三点交作业')
+  })
 })

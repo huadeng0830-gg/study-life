@@ -40,6 +40,7 @@ import {
   restoreWallpaperUndo,
 } from '../composables/wallpaperStorage.js'
 import { restoreStoredValues } from '../composables/store'
+import { todayStr } from '../composables/store/utils.js'
 import { useTaskProgress } from '../composables/taskProgress.js'
 
 // 二维码生成/扫描依赖体积较大，仅在用户真正打开迁移面板时下载和解析。
@@ -345,6 +346,9 @@ const STORAGE_KEYS = {
   events: 'sl_events',
   quickNotes: 'sl_quick_notes',
   quickRecordSettings: 'sl_quick_record_settings',
+  captureEnabled: 'sl_capture_enabled',
+  focusSessions: 'sl_focus_sessions',
+  courseCheckins: 'sl_course_checkins',
   courseTemplates: 'sl_course_templates',
   checklists: 'sl_checklists',
   bills: 'sl_bills',
@@ -359,10 +363,16 @@ const STORAGE_KEYS = {
   countdownShowPast: 'sl_countdown_show_past',
   foodPlaces: 'sl_food_places',
   foodHistory: 'sl_food_history',
+  foodFilters: 'sl_food_filters',
+  ocrVocabulary: 'sl_ocr_vocabulary',
   appearance: 'sl_appearance',
   wallpaperConfig: 'sl_wallpaper_config',
   autoWallpaperColor: 'sl_auto_wallpaper_color',
   wallpaperAccent: 'sl_wallpaper_accent',
+  performanceMode: 'sl_performance_mode',
+  festiveConfig: 'sl_festive_config',
+  festiveBirthdayFull: 'sl_festive_birthday_full',
+  moodLog: 'sl_mood_log',
 }
 
 function readStored(key, fallback) {
@@ -376,7 +386,7 @@ function readStored(key, fallback) {
 function makeBackup() {
   return {
     app: 'study-life',
-    version: 7,
+    version: 9,
     schema: 'study-life.backup/v1',
     exportedAt: new Date().toISOString(),
     data: {
@@ -386,6 +396,9 @@ function makeBackup() {
       events: readStored(STORAGE_KEYS.events, []),
       quickNotes: readStored(STORAGE_KEYS.quickNotes, []),
       quickRecordSettings: readStored(STORAGE_KEYS.quickRecordSettings, { clipboardHint: true, recentTypes: [] }),
+      captureEnabled: readStored(STORAGE_KEYS.captureEnabled, true),
+      focusSessions: readStored(STORAGE_KEYS.focusSessions, []),
+      courseCheckins: readStored(STORAGE_KEYS.courseCheckins, []),
       courseTemplates: readStored(STORAGE_KEYS.courseTemplates, []),
       checklists: readStored(STORAGE_KEYS.checklists, []),
       bills: readStored(STORAGE_KEYS.bills, []),
@@ -400,10 +413,16 @@ function makeBackup() {
       countdownShowPast: readStored(STORAGE_KEYS.countdownShowPast, false),
       foodPlaces: readStored(STORAGE_KEYS.foodPlaces, []),
       foodHistory: readStored(STORAGE_KEYS.foodHistory, []),
+      foodFilters: readStored(STORAGE_KEYS.foodFilters, {}),
+      ocrVocabulary: readStored(STORAGE_KEYS.ocrVocabulary, { courses: [], teachers: [], rooms: [], campuses: [] }),
       appearance: readStored(STORAGE_KEYS.appearance, null),
       wallpaperConfig: readStored(STORAGE_KEYS.wallpaperConfig, null),
       autoWallpaperColor: readStored(STORAGE_KEYS.autoWallpaperColor, false),
       wallpaperAccent: readStored(STORAGE_KEYS.wallpaperAccent, '#456fe8'),
+      performanceMode: readStored(STORAGE_KEYS.performanceMode, 'auto'),
+      festiveConfig: readStored(STORAGE_KEYS.festiveConfig, { enabled: true, birthday: '', installDate: '', anniversaries: [] }),
+      festiveBirthdayFull: readStored(STORAGE_KEYS.festiveBirthdayFull, ''),
+      moodLog: readStored(STORAGE_KEYS.moodLog, {}),
     },
   }
 }
@@ -456,7 +475,7 @@ async function exportBackup() {
   const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' })
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
-  const date = new Date().toISOString().slice(0, 10)
+  const date = todayStr()
   link.href = url
   link.download = `控制台备份-${date}.json`
   document.body.appendChild(link)
@@ -491,7 +510,7 @@ function sanitizeWallpaperImages(value) {
 }
 
 async function validateBackup(value) {
-  if (!value || value.app !== 'study-life' || ![1, 2, 3, 4, 5, 6, 7].includes(value.version) || !value.data) {
+  if (!value || value.app !== 'study-life' || ![1, 2, 3, 4, 5, 6, 7, 8, 9].includes(value.version) || !value.data) {
     throw new Error('这不是有效的控制台备份文件')
   }
   if (value.version >= 7 && value.schema !== 'study-life.backup/v1') {
@@ -513,6 +532,9 @@ async function validateBackup(value) {
       events: Array.isArray(data.events) ? data.events : [],
       quickNotes: Array.isArray(data.quickNotes) ? data.quickNotes : [],
       quickRecordSettings: data.quickRecordSettings && typeof data.quickRecordSettings === 'object' ? data.quickRecordSettings : { clipboardHint: true, recentTypes: [] },
+      captureEnabled: typeof data.captureEnabled === 'boolean' ? data.captureEnabled : true,
+      focusSessions: Array.isArray(data.focusSessions) ? data.focusSessions : [],
+      courseCheckins: Array.isArray(data.courseCheckins) ? data.courseCheckins : [],
       courseTemplates: Array.isArray(data.courseTemplates) ? data.courseTemplates : [],
       checklists: Array.isArray(data.checklists) ? data.checklists : [],
       bills: Array.isArray(data.bills) ? data.bills : [],
@@ -527,10 +549,16 @@ async function validateBackup(value) {
       countdownShowPast: Boolean(data.countdownShowPast),
       foodPlaces: Array.isArray(data.foodPlaces) ? data.foodPlaces : [],
       foodHistory: Array.isArray(data.foodHistory) ? data.foodHistory : [],
+      foodFilters: data.foodFilters && typeof data.foodFilters === 'object' ? data.foodFilters : {},
+      ocrVocabulary: data.ocrVocabulary && typeof data.ocrVocabulary === 'object' ? data.ocrVocabulary : { courses: [], teachers: [], rooms: [], campuses: [] },
       appearance: data.appearance && typeof data.appearance === 'object' ? data.appearance : null,
       wallpaperConfig: data.wallpaperConfig && typeof data.wallpaperConfig === 'object' ? data.wallpaperConfig : null,
       autoWallpaperColor: Boolean(data.autoWallpaperColor),
       wallpaperAccent: typeof data.wallpaperAccent === 'string' ? data.wallpaperAccent : '#456fe8',
+      performanceMode: ['auto', 'low', 'high'].includes(data.performanceMode) ? data.performanceMode : 'auto',
+      festiveConfig: data.festiveConfig && typeof data.festiveConfig === 'object' ? data.festiveConfig : { enabled: true, birthday: '', installDate: '', anniversaries: [] },
+      festiveBirthdayFull: typeof data.festiveBirthdayFull === 'string' ? data.festiveBirthdayFull : '',
+      moodLog: data.moodLog && typeof data.moodLog === 'object' ? data.moodLog : {},
       __wallpaper_images: sanitizeWallpaperImages(data.__wallpaper_images),
     },
   }
@@ -584,6 +612,9 @@ async function restoreBackup() {
     [STORAGE_KEYS.events]: data.events,
     [STORAGE_KEYS.quickNotes]: data.quickNotes,
     [STORAGE_KEYS.quickRecordSettings]: data.quickRecordSettings,
+    [STORAGE_KEYS.captureEnabled]: data.captureEnabled,
+    [STORAGE_KEYS.focusSessions]: data.focusSessions,
+    [STORAGE_KEYS.courseCheckins]: data.courseCheckins,
     [STORAGE_KEYS.courseTemplates]: data.courseTemplates,
     [STORAGE_KEYS.checklists]: data.checklists,
     [STORAGE_KEYS.bills]: data.bills,
@@ -598,10 +629,16 @@ async function restoreBackup() {
     [STORAGE_KEYS.countdownShowPast]: data.countdownShowPast,
     [STORAGE_KEYS.foodPlaces]: data.foodPlaces,
     [STORAGE_KEYS.foodHistory]: data.foodHistory,
+    [STORAGE_KEYS.foodFilters]: data.foodFilters,
+    [STORAGE_KEYS.ocrVocabulary]: data.ocrVocabulary,
     ...(data.appearance ? { [STORAGE_KEYS.appearance]: data.appearance } : {}),
     ...(data.wallpaperConfig ? { [STORAGE_KEYS.wallpaperConfig]: data.wallpaperConfig } : {}),
     [STORAGE_KEYS.autoWallpaperColor]: data.autoWallpaperColor,
     [STORAGE_KEYS.wallpaperAccent]: data.wallpaperAccent,
+    [STORAGE_KEYS.performanceMode]: data.performanceMode,
+    [STORAGE_KEYS.festiveConfig]: data.festiveConfig,
+    [STORAGE_KEYS.festiveBirthdayFull]: data.festiveBirthdayFull,
+    [STORAGE_KEYS.moodLog]: data.moodLog,
   }
   const previous = Object.fromEntries(
     Object.keys(restoredValues).map((key) => [key, localStorage.getItem(key)])
@@ -794,6 +831,12 @@ async function restoreBackup() {
               </div>
               <span>云端最后更新：<b>{{ fmtTime(remoteUpdatedAt) }}</b> · {{ cloudSourceText }}<i v-if="!cloudExists">（云端还没有数据）</i></span>
               <span>本地最后更新：<b>{{ fmtTime(lastLocalChangedAt) }}</b> · 当前设备「{{ deviceProfile.name }}」</span>
+            </div>
+
+            <div v-if="syncRelationship === 'both-changed' || syncRelationship === 'unknown'" class="conflict-guide" role="note">
+              <b>{{ syncRelationship === 'both-changed' ? '需要你决定以哪个版本为准' : '无法自动判断同步方向' }}</b>
+              <span>{{ syncRelationship === 'both-changed' ? '如果两端都有想保留的内容，请先在“数据备份”导出本机备份；拉取前也会自动创建本机安全快照。' : '当前云端版本没有可靠的修订信息。请核对最后更新时间与来源设备后，再手动选择方向。' }}</span>
+              <div><button type="button" class="btn btn-sm" :disabled="isSyncing || !cloudExists || !selectedModuleCount" @click="requestPullConfirm(pullScopeKeys)">以云端为准（拉取）</button><button type="button" class="btn btn-sm btn-push" :disabled="isSyncing" @click="requestPushConfirm">以本机为准（推送）</button></div>
             </div>
 
             <div class="sync-ops">
@@ -1057,6 +1100,7 @@ async function restoreBackup() {
 .relationship-state { display: flex; flex-direction: column; gap: 2px; padding-bottom: 5px; border-bottom: 1px solid var(--border); }
 .relationship-state b { color: var(--text); }
 .relationship-state span { color: var(--muted); }
+.conflict-guide{display:flex;flex-direction:column;gap:6px;margin-top:10px;padding:10px 12px;border:1px solid #f1bf63;border-radius:9px;background:#fff8e9;color:#75531b;font-size:12px;line-height:1.55}.conflict-guide span{color:#8b692b}.conflict-guide>div{display:flex;flex-wrap:wrap;gap:6px}.conflict-guide .btn{min-height:30px}
 
 .sync-ops {
   width: 100%;

@@ -1,5 +1,6 @@
-// 快速录入引擎（模块 C）：把一段自然语言归类为待办 / 记账 / 倒计时，并产出可编辑预填草稿。
-// 判定优先级：含金额 → 记账；含日期且像“节点/事件” → 倒计时；含日期或其余 → 待办。
+// 快速录入引擎（旧版，已废弃）：仅保留给旧 QuickCapturePanel 和旧测试使用。
+// 新业务请使用 quickRecord/parser.js：那边的 parseQuickRecord 采用实体提取+意图判断，
+// 支持“花了五元买牛肉面”等语序变化和“12块5”等口语金额。
 import { parseNotice } from './noticeParser.js'
 import { parseNatural, detectCategory } from './ledger.js'
 

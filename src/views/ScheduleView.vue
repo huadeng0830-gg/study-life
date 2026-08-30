@@ -38,6 +38,7 @@ import ScheduleGrid from '../components/schedule/ScheduleGrid.vue'
 const CourseEditorModal = defineAsyncComponent(() => import('../components/schedule/CourseEditorModal.vue'))
 const CourseManagerModal = defineAsyncComponent(() => import('../components/schedule/CourseManagerModal.vue'))
 const BatchImportModal = defineAsyncComponent(() => import('../components/schedule/BatchImportModal.vue'))
+const ImageCropModal = defineAsyncComponent(() => import('../components/schedule/ImageCropModal.vue'))
 const ImportConflictModal = defineAsyncComponent(() => import('../components/schedule/ImportConflictModal.vue'))
 const ExceptionsModal = defineAsyncComponent(() => import('../components/schedule/ExceptionsModal.vue'))
 const SemesterModal = defineAsyncComponent(() => import('../components/schedule/SemesterModal.vue'))
@@ -113,6 +114,8 @@ const error = ref('')
 const batchText = ref('')
 const batchError = ref('')
 const ocrSummary = ref('')
+const cropImageFile = ref(null)
+const showImageCropper = ref(false)
 const message = ref('')
 const showImportConflict = ref(false)
 const importDraft = ref(null)
@@ -132,6 +135,8 @@ const form = reactive({
   name: '',
   teacher: '',
   room: '',
+  campusId: '',
+  travelMinutes: 0,
   color: PALETTE[0],
   day: 0,
   start: 1,
@@ -483,6 +488,23 @@ async function ocrImage(event) {
   await runTimetableOCR(files)
 }
 
+function selectCropImage(event) {
+  const file = event.target.files?.[0]
+  event.target.value = ''
+  if (!file?.type?.startsWith('image/')) { batchError.value = '请选择一张图片文件'; return }
+  cropImageFile.value = file
+  showImageCropper.value = true
+}
+
+async function recognizeCroppedImage(file) {
+  showImageCropper.value = false
+  cropImageFile.value = null
+  if (!file) return
+  batchError.value = ''
+  ocrSummary.value = '已按框选区域裁切图片，正在重新识别。'
+  await runTimetableOCR([file])
+}
+
 async function runTimetableOCR(files) {
   if (!files.length) return
   if (batchOcrProgress.state.status === 'running') return
@@ -640,6 +662,8 @@ function openAdd(day = null, period = null) {
   form.name = ''
   form.teacher = ''
   form.room = ''
+  form.campusId = currentCampusId() || ''
+  form.travelMinutes = 0
   form.color = PALETTE[courses.value.length % PALETTE.length]
   form.day = day ?? todayIndex()
   form.start = period ?? fallbackStart
@@ -874,6 +898,7 @@ const todayIdx = computed(() => todayIndex())
       @clear="batchText = ''"
       @import="importBatch"
       @upload-image="ocrImage"
+      @crop-image="selectCropImage"
       @cancel-progress="batchOcrProgress.cancel()"
       @retry-progress="retryBatchOCR"
       @continue-progress="continueBatchResults"
@@ -882,6 +907,8 @@ const todayIdx = computed(() => todayIndex())
       @continue-import="continueBatchImport"
       @finish-import="finishBatchImport"
     />
+
+    <ImageCropModal :show="showImageCropper" :file="cropImageFile" @close="showImageCropper = false; cropImageFile = null" @confirm="recognizeCroppedImage" />
 
     <ImportConflictModal
       :show="showImportConflict"

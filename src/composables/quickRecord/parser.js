@@ -1,155 +1,199 @@
-import { parseNotice } from '../noticeParser.js'
 import { detectCategory } from '../ledger.js'
+import {
+  buildExpenseTitle,
+  chineseNumber,
+  extractAccount,
+  extractAmounts,
+  extractCycle,
+  extractSchedule,
+  hasAmbiguousAmount,
+} from './entities.js'
+
+// 快速记录解析层：先做实体提取，再做意图判断。不再只用固定语序和补丁正则，
+// 同一段文本无论“金额在前/在后”都会先被识别成实体，再组合成结构化草稿。
 
 const HOMEWORK_WORDS = /作业|实验报告|论文|习题|复习|预习|测验|英语作文|报告/
-const EVENT_WORDS = /开会|会议|组会|答辩|面试|约|活动|讲座|值班|课题组/
+const EVENT_WORDS = /开会|会议|组会|答辩|面试|约|活动|讲座|值班|课题组|上课|课程/
 const COUNTDOWN_WORDS = /倒计时|还有\d+天|距离.*?(考试|生日|放假|纪念日)|六级|四级|考研/
 const NOTE_WORDS = /^(记一下|笔记|note[：:]?)/i
-const INCOME_WORDS = /生活费|工资|奖学金|报销|退款|到账|收入|收款|红包|转入/
-const BILL_WORDS = /每月|每周|每年|每季度|周期|自动续费/
+const INCOME_WORDS = /生活费|工资|奖学金|报销|退款|到账|收入|收款|红包|转入|兼职/
+const BILL_WORDS = /每月|每周|每年|每季度|周期|自动续费|月租|订阅|会员/
 
-function uid() { return `qr${Date.now()}${Math.random().toString(36).slice(2, 7)}` }
+let uidSeq = 0
+function uid() { return `qr${Date.now().toString(36)}${uidSeq++}${Math.random().toString(36).slice(2, 7)}` }
 function pad(value) { return String(value).padStart(2, '0') }
 function today(now) { return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}` }
 function currentTime(now) { return `${pad(now.getHours())}:${pad(now.getMinutes())}` }
-function timeFrom(source, parsed) {
-  if (parsed?.dueTime) return parsed.dueTime
-  const hit = String(source).match(/(?:下午|晚上)?\s*(\d{1,2})点/)
-  if (!hit) return ''
-  let hour = Number(hit[1])
-  if (/下午|晚上/.test(source) && hour < 12) hour += 12
-  return hour <= 23 ? `${pad(hour)}:00` : ''
+
+function timeOf(source, schedule) {
+  if (schedule?.time) return schedule.time
+  const original = String(source ?? '')
+  // 先去掉“下周一”这类日期词，避免解析时间时把“一两”连在一起。
+  const text = original.replace(/(下|本|这)?(?:周|星期)[一二三四五六日天]/g, ' ')
+  const colon = text.match(/(凌晨|早上|上午|中午|下午|晚上|夜里)?\s*(\d{1,2})[:：](\d{2})/)
+  const point = text.match(/(凌晨|早上|上午|中午|下午|晚上|夜里)?\s*([零〇一二两三四五六七八九十\d]{1,3})[点时](?:半|[零〇一二两三四五六七八九十\d]{1,3}分?)?/)
+  const match = colon || point
+  if (!match) return ''
+  const period = match[1] || ''
+  let hour = chineseNumber(match[2])
+  const minute = colon ? Number(match[3]) : match[3] === '半' ? 30 : chineseNumber(String(match[3] || '0').replace('分', ''))
+  if (/下午|晚上|夜里/.test(period) && hour < 12) hour += 12
+  if (/凌晨/.test(period) && hour === 12) hour = 0
+  if (/中午/.test(period) && hour < 11) hour += 12
+  // 没有明确上下午时，“两点”通常指下午 2 点；凌晨场景应显式写“凌晨两点”。
+  if (!period && hour <= 6) hour += 12
+  if (!Number.isFinite(hour) || !Number.isFinite(minute) || hour > 23 || minute > 59) return ''
+  return `${pad(hour)}:${pad(minute)}`
 }
-function cleanTitle(source, parsed) {
-  return String(parsed?.title || source || '')
-    .replace(/^(记一下|笔记|note[：:]?|提醒我|记得)/i, '')
+
+function cleanTaskTitle(source, fallback) {
+  return String(fallback || source || '')
+    .replace(/^(提醒我|记得|请|请于|请在|务必|必须|需要)+/g, '')
+    .replace(/^(前|之前|以前|截止|截至)\s*/g, '')
     .replace(/(重要|紧急)$/g, '')
-    .replace(/[，,。；;]+$/g, '')
-    .trim() || '未命名记录'
+    .trim() || source
 }
-const CN_NUMBERS = { 零: 0, 〇: 0, 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 }
-function chineseAmount(value) {
-  const text = String(value || '')
-  if (/^\d+(?:\.\d+)?$/.test(text)) return Number(text)
-  if (!/^[零〇一二两三四五六七八九十百]+$/.test(text)) return 0
-  let total = 0; let current = 0
-  for (const char of text) {
-    if (char === '十') { total += (current || 1) * 10; current = 0 }
-    else if (char === '百') { total += (current || 1) * 100; current = 0 }
-    else current = CN_NUMBERS[char]
-  }
-  return total + current
-}
-function moneyMatches(text) {
-  const source = String(text || '')
-  const expression = /(?:¥|￥)?\s*(\d+(?:\.\d{1,2})?|[零〇一二两三四五六七八九十百]+)\s*(?:块钱|元|块|rmb)/gi
-  return [...source.matchAll(expression)].map((match) => ({
-    amount: chineseAmount(match[1]), start: match.index ?? 0, end: (match.index ?? 0) + match[0].length, raw: match[0],
-  })).filter((match) => match.amount > 0)
-}
-function amountOf(text) {
-  const explicit = moneyMatches(text)[0]
-  if (explicit) return explicit.amount
-  const matches = [...String(text).matchAll(/(?:¥|￥)?\s*(\d+(?:\.\d{1,2})?)\s*(?:元|块|rmb)?/gi)]
-  const hit = matches.find((item) => !/[年月日号点时]/.test(String(text).slice(item.index + item[0].length, item.index + item[0].length + 1)))
-  return hit ? Number(hit[1]) : 0
-}
-function cycleOf(text) {
-  const source = String(text)
-  const match = source.match(/每(周|星期|月|季度|年)\s*(\d{1,2})?\s*(?:号|日)?/)
-  if (!match) return null
-  const cycle = match[1].includes('周') || match[1].includes('星期') ? 'weekly'
-    : match[1].includes('季度') ? 'quarterly'
-      : match[1] === '年' ? 'yearly' : 'monthly'
-  return { cycle, day: match[2] ? Number(match[2]) : null }
-}
-function paymentAccount(text) {
-  const match = String(text).match(/微信|支付宝|现金|银行卡|校园卡|信用卡/)
-  return match?.[0] ?? ''
-}
-function titleWithoutMoney(text, amount) {
-  return String(text)
-    .replace(/每(周|星期|月|季度|年)\s*\d{0,2}\s*(?:号|日)?/g, '')
-    .replace(new RegExp(`(?:¥|￥)?\\s*${String(amount).replace('.', '\\.')}\\s*(?:元|块|rmb)?`, 'i'), '')
-    .replace(/微信|支付宝|现金|银行卡|校园卡|信用卡/g, '')
-    .replace(/(到账|收入|支出|花了|花费)/g, '')
-    .replace(/[，,。；;]+/g, ' ')
-    .trim()
-}
-function compactExpenseTitle(text) {
-  return String(text || '')
-    .replace(/(?:¥|￥)?\s*(?:\d+(?:\.\d{1,2})?|[零〇一二两三四五六七八九十百]+)\s*(?:块钱|元|块|rmb)/gi, '')
-    .replace(/^(今天|今日|刚刚|我|去|坐|乘坐|乘|搭乘)+/g, '')
-    .replace(/(用了|花了|花费|支付了|买了|去吃了|吃了|消费了)+$/g, '')
-    .replace(/^[的、，,\s]+|[的、，,。；;\s]+$/g, '')
-    .trim()
-}
-function moneyBatchStatements(source) {
-  const matches = moneyMatches(source)
-  if (matches.length < 2 || BILL_WORDS.test(source) || INCOME_WORDS.test(source)) return null
-  return matches.map((match, index) => {
-    const before = source.slice(index ? matches[index - 1].end : 0, match.start)
-    const after = source.slice(match.end, index + 1 < matches.length ? matches[index + 1].start : source.length)
-    const afterName = /^\s*的\s*([^，,。；;]+)/.exec(after)?.[1] || ''
-    const title = compactExpenseTitle(afterName || before)
-    return { statement: title || `支出 ${match.amount}元`, amount: match.amount, title: title || '未命名账目' }
-  })
-}
+
 function splitStatements(text) {
-  const lines = String(text).split(/\n+/).map((item) => item.trim()).filter(Boolean)
-  if (lines.length > 1) return lines
-  const pieces = String(text).split(/[，,；;](?=(?:周|星期|明天|后天|今天|下周|记得|开始|完成))/).map((item) => item.trim()).filter(Boolean)
-  return pieces.length > 1 ? pieces : lines
+  const source = String(text ?? '').trim()
+  if (!source) return []
+  const lines = source.split(/\n+/).map((item) => item.trim()).filter(Boolean)
+  if (lines.length > 1) return lines.map((statement) => ({ statement, amount: null, title: '' }))
+
+  const amounts = extractAmounts(source)
+  if (amounts.length >= 2 && !INCOME_WORDS.test(source) && !BILL_WORDS.test(source)) {
+    return amounts.map((amount, index) => {
+      const before = source.slice(index ? amounts[index - 1].end : 0, amount.start)
+      const after = source.slice(amount.end, index + 1 < amounts.length ? amounts[index + 1].start : source.length)
+      const afterName = /^\s*的\s*([^，,。；;]+)/.exec(after)?.[1] || ''
+      const raw = (afterName || before || `支出 ${amount.amount}元`).trim()
+      return { statement: raw, amount: amount.amount, title: '' }
+    })
+  }
+
+  return [{ statement: source, amount: null, title: '' }]
 }
-function inferType(source, forcedType, preferredType = '') {
-  if (forcedType) return forcedType
-  if (NOTE_WORDS.test(source)) return 'note'
-  if (BILL_WORDS.test(source) && amountOf(source)) return 'bill'
-  if (COUNTDOWN_WORDS.test(source)) return 'countdown'
-  if (amountOf(source)) return INCOME_WORDS.test(source) ? 'income' : 'expense'
-  if (EVENT_WORDS.test(source)) return 'event'
-  if (HOMEWORK_WORDS.test(source)) return 'homework'
-  return preferredType || 'todo'
+
+function inferIntent(source, schedule, amountCount, forcedType, preferredType = '') {
+  if (forcedType) return { type: forcedType, confidence: 0.94, uncertain: false }
+  const hasDate = Boolean(schedule.date)
+  const hasTime = Boolean(schedule.time)
+
+  if (amountCount > 0) {
+    if (INCOME_WORDS.test(source)) return { type: 'income', confidence: 0.88, uncertain: false }
+    if (BILL_WORDS.test(source)) return { type: 'bill', confidence: 0.84, uncertain: false }
+    return { type: 'expense', confidence: 0.92, uncertain: false }
+  }
+
+  if (COUNTDOWN_WORDS.test(source) && hasDate) return { type: 'countdown', confidence: 0.8, uncertain: false }
+  if (EVENT_WORDS.test(source) && (hasDate || hasTime)) return { type: 'event', confidence: 0.84, uncertain: false }
+  if (HOMEWORK_WORDS.test(source)) return { type: 'homework', confidence: 0.72, uncertain: false }
+  if (NOTE_WORDS.test(source)) return { type: 'note', confidence: 0.9, uncertain: false }
+  if (hasDate || hasTime || /提醒我|记得|截止|开始|完成|提交|交/.test(source)) return { type: preferredType === 'event' ? 'event' : 'todo', confidence: 0.66, uncertain: false }
+  if (hasAmbiguousAmount(source)) return { type: 'unknown', confidence: 0.3, uncertain: true }
+  if (preferredType) return { type: preferredType, confidence: 0.5, uncertain: true }
+  return { type: 'todo', confidence: 0.45, uncertain: true }
 }
-function questionsFor(type, parsed, source, amount = 0) {
+
+function questionsFor(type, source, schedule, amount) {
   if ((type === 'expense' || type === 'income' || type === 'bill') && !(Number(amount) > 0)) {
     return [{ field: 'amount', label: '金额需要确认', choices: ['5', '10', '20'] }]
   }
-  if ((type === 'event' || type === 'homework') && /明晚/.test(source) && !parsed.dueTime) {
+  if ((type === 'event' || type === 'homework' || type === 'todo') && /明晚/.test(source) && !schedule.time) {
     return [{ field: 'time', label: '时间需要确认', choices: ['18:00', '20:00', '23:59'] }]
   }
   return []
 }
 
+function parseStatement(statement, { courses = [], now = new Date(), forcedType = '', context = {} } = {}) {
+  const source = String(statement ?? '').trim()
+  if (!source) return null
+  // 自由笔记是明确的用户意图：不做日期、金额、课程等实体提取，
+  // 既避免无意义的计算，也不会把笔记误显示成待办草稿。
+  if (forcedType === 'note') {
+    return {
+      id: uid(), type: 'note', raw: source, title: '', course: '', courseId: '',
+      date: '', time: '', priority: 'normal', note: source, amount: 0,
+      category: '', account: '', cycle: 'monthly', questions: [], confidence: 0.94, uncertain: false,
+    }
+  }
+  const knownAmount = typeof context.knownAmount === 'number' ? context.knownAmount : null
+  const amounts = extractAmounts(source)
+  const schedule = extractSchedule(source, courses, now)
+  const account = extractAccount(source)
+  const cycle = extractCycle(source)
+  const amount = knownAmount ?? amounts[0]?.amount ?? 0
+  const amountCount = knownAmount === null ? amounts.length : 1
+  const intent = knownAmount === null
+    ? inferIntent(source, schedule, amountCount, forcedType, context.preferredType)
+    : { type: forcedType || 'expense', confidence: 0.9, uncertain: false }
+  const type = intent.type
+
+  const base = {
+    id: uid(),
+    type,
+    raw: source,
+    title: '',
+    course: schedule.course || context.courseName || '',
+    courseId: context.courseId || '',
+    date: schedule.date || '',
+    time: timeOf(source, schedule),
+    priority: schedule.priority || 'normal',
+    note: schedule.note || '',
+    amount,
+    category: detectCategory(source),
+    account,
+    cycle: cycle?.cycle || 'monthly',
+    questions: questionsFor(type, source, schedule, amount),
+    confidence: intent.confidence,
+    uncertain: Boolean(intent.uncertain),
+  }
+
+  if (type === 'expense' || type === 'income' || type === 'bill') {
+    base.title = buildExpenseTitle(source, amounts, account) || (type === 'income' ? '收入' : '未命名账目')
+    base.date = schedule.date || today(now)
+    base.time = schedule.time || currentTime(now)
+    if (type === 'bill') {
+      const day = cycle?.day || now.getDate()
+      base.date = schedule.date || `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(day)}`
+    }
+  } else if (type === 'countdown') {
+    base.title = cleanTaskTitle(source, schedule.title)
+    base.date = schedule.date || ''
+    base.time = schedule.time || ''
+  } else if (type === 'event') {
+    base.title = cleanTaskTitle(source, schedule.title)
+    base.date = schedule.date || ''
+    base.time = timeOf(source, schedule)
+  } else {
+    base.title = cleanTaskTitle(source, schedule.title)
+    base.date = schedule.date || ''
+    base.time = timeOf(source, schedule)
+  }
+
+  if (type === 'note' || type === 'unknown') {
+    base.title = ''
+    base.note = source
+  }
+
+  return base
+}
+
 export function parseQuickRecord(text, { courses = [], now = new Date(), forcedType = '', context = {} } = {}) {
-  const source = String(text ?? '').trim()
-  if (!source) return []
-  const batch = moneyBatchStatements(source)
-  const statements = batch ?? splitStatements(source).map((statement) => ({ statement, amount: null, title: '' }))
-  return statements.map(({ statement, amount: knownAmount, title: knownTitle }) => {
-    const parsed = parseNotice(statement, courses, now)
-    // 同一句中拆出的金额片段已经明确是独立消费，不能再因为片段标题里没有金额而退回待办。
-    const type = knownAmount ? (forcedType || 'expense') : inferType(statement, forcedType, context.preferredType)
-    const amount = knownAmount ?? amountOf(statement)
-    const cycle = cycleOf(statement)
-    const base = {
-      id: uid(), type, raw: statement, title: knownTitle || cleanTitle(statement, parsed),
-      course: parsed.course || context.courseName || '', courseId: context.courseId || '',
-      date: parsed.dueDate || '', time: timeFrom(statement, parsed), priority: parsed.priority || 'normal',
-      note: type === 'note' ? cleanTitle(statement, parsed) : parsed.note || '',
-      amount, category: detectCategory(statement), account: paymentAccount(statement), cycle: cycle?.cycle || 'monthly',
-      questions: questionsFor(type, parsed, statement, amount), confidence: knownAmount ? 0.9 : 0.78,
-    }
-    if (type === 'expense' || type === 'income' || type === 'bill') {
-      base.title = knownTitle || compactExpenseTitle(titleWithoutMoney(statement, amount)) || (type === 'income' ? '收入' : '未命名账目')
-      base.date = parsed.dueDate || today(now)
-      base.time = parsed.dueTime || currentTime(now)
-      if (type === 'bill') {
-        const day = cycle?.day || now.getDate()
-        base.date = parsed.dueDate || `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(day)}`
+  const statements = splitStatements(text)
+  return statements
+    .map(({ statement, amount: knownAmount, title: knownTitle }) => {
+      const mergedContext = { ...context }
+      if (knownAmount !== null) mergedContext.knownAmount = knownAmount
+      const draft = parseStatement(statement, { courses, now, forcedType, context: mergedContext })
+      if (!draft) return null
+      if (knownTitle) draft.title = knownTitle
+      if (knownAmount !== null) {
+        draft.type = forcedType || 'expense'
+        draft.amount = knownAmount
+        draft.confidence = 0.9
       }
-    }
-    if (type === 'countdown') base.date = parsed.dueDate || ''
-    return base
-  })
+      return draft
+    })
+    .filter(Boolean)
 }

@@ -101,6 +101,28 @@ describe('导入与撤销', () => {
     expect(result.added).toBe(1)
   })
 
+  it('合并快速记录设置时保持对象结构并合并最近类型', async () => {
+    localStorage.setItem('sl_quick_record_settings', JSON.stringify({
+      clipboardHint: false,
+      recentTypes: ['todo', 'note'],
+    }))
+    const pkg = {
+      app: 'study-life',
+      version: 2,
+      modules: ['tasks'],
+      data: {
+        sl_quick_record_settings: { clipboardHint: true, recentTypes: ['event', 'todo'] },
+      },
+    }
+
+    await importTransferPackage(pkg, 'merge')
+    expect(JSON.parse(localStorage.getItem('sl_quick_record_settings'))).toEqual({
+      clipboardHint: false,
+      recentTypes: ['todo', 'note', 'event'],
+    })
+    expect(localStorage.getItem('study_life_last_local_change')).toBeTruthy()
+  })
+
   it('账本分类按 key 合并，不会产生重复分类键', async () => {
     localStorage.setItem('sl_ledger_categories', JSON.stringify([
       { key: 'food', name: '我的餐饮', icon: '🥗', hidden: true },
@@ -157,10 +179,14 @@ describe('导入与撤销', () => {
 
   it('打包器只收集所选模块的键', async () => {
     localStorage.setItem('sl_tasks', JSON.stringify([]))
+    localStorage.setItem('sl_focus_sessions', JSON.stringify([{ id: 'f1' }]))
     localStorage.setItem('sl_bills', JSON.stringify([{ id: 'bill1' }]))
     const pkg = await createTransferPackage(['tasks'])
     expect(Object.keys(pkg.data)).toEqual(['sl_tasks'])
     expect(pkg.app).toBe('study-life')
     expect(pkg.version).toBe(2)
+
+    const focus = await createTransferPackage(['focus'])
+    expect(focus.data.sl_focus_sessions).toEqual([{ id: 'f1' }])
   })
 })

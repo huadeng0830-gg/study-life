@@ -52,18 +52,19 @@ describe('festive.js', () => {
     expect(result.message).toContain('一年')
   })
 
-  it('农历表查不到的年份跳过，不编造', () => {
-    expect(festiveFor('2031-02-17', DEFAULT_FESTIVE_CONFIG)).toBeNull()
+  it('使用历法计算，而非手填年份表：可识别 2031 春节', () => {
+    expect(festiveFor('2031-01-23', DEFAULT_FESTIVE_CONFIG)?.key).toBe('spring')
   })
 
   it('内置节日对照表与内置常量一致', () => {
-    const table = builtInFestivalTable()
-    expect(table.solar.map((item) => item.name)).toEqual(['元旦', '情人节', '愚人节', '儿童节', '国庆节', '圣诞节'])
-    expect(table.lunarFestivals.map((item) => item.name)).toEqual(['春节', '元宵节', '清明节', '端午节', '中秋节', '重阳节', '冬至'])
-    expect(table.lunar.map((row) => row.year)).toEqual([2026, 2027, 2028, 2029, 2030])
+    const defaultTable = builtInFestivalTable()
+    expect(defaultTable.solar.map((item) => item.name)).toEqual(['元旦', '情人节', '愚人节', '儿童节', '国庆节', '圣诞节'])
+    expect(defaultTable.lunarFestivals.map((item) => item.name)).toEqual(['春节', '元宵节', '清明节', '端午节', '中秋节', '重阳节', '冬至'])
+    const table = builtInFestivalTable(2026)
+    expect(table.lunar.map((row) => row.year)).toEqual([2020, 2021, 2022, 2023, 2024, 2025, 2026, 2027, 2028, 2029, 2030, 2031, 2032])
     for (const row of table.lunar) {
       expect(Object.values(row.cells).filter(Boolean)).toHaveLength(7)
     }
-    expect(table.lunar[0].cells.spring).toBe('02-17')
+    expect(table.lunar.find((row) => row.year === 2026).cells.spring).toBe('02-17')
   })
 })

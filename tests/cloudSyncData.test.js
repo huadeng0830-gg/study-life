@@ -67,8 +67,9 @@ describe('选择性拉取的分组与范围', () => {
   })
 
   it('moduleKeysFor 只展开勾选模块的键', () => {
-    expect(moduleKeysFor(['tasks'])).toEqual(['sl_tasks', 'sl_events', 'sl_quick_notes', 'sl_quick_record_settings'])
-    expect(moduleKeysFor(['tasks', 'countdown'])).toEqual(['sl_tasks', 'sl_events', 'sl_quick_notes', 'sl_quick_record_settings', 'sl_exams', 'sl_countdown_show_past'])
+    expect(moduleKeysFor(['tasks'])).toEqual(['sl_tasks', 'sl_events', 'sl_quick_notes', 'sl_quick_record_settings', 'sl_capture_enabled'])
+    expect(moduleKeysFor(['tasks', 'countdown'])).toEqual(['sl_tasks', 'sl_events', 'sl_quick_notes', 'sl_quick_record_settings', 'sl_capture_enabled', 'sl_exams', 'sl_countdown_show_past'])
+    expect(moduleKeysFor(['focus'])).toEqual(['sl_focus_sessions'])
     expect(moduleKeysFor(['no-such-module'])).toEqual([])
   })
 
@@ -101,5 +102,16 @@ describe('选择性拉取的分组与范围', () => {
       anniversaries: [{ date: '10-01', label: '纪念日' }],
     })
     expect(result.values.sl_mood_log).toEqual({ '2026-08-29': { mood: '😊', note: '' } })
+  })
+
+  it('同步 OCR 词库、设备偏好与完整生日日期，坏日期会被清空', () => {
+    const result = sanitizeSyncPayload({
+      sl_ocr_vocabulary: { courses: ['高数'], teachers: [], rooms: [], campuses: [] },
+      sl_performance_mode: 'auto',
+      sl_festive_birthday_full: 'bad-date',
+    })
+    expect(result.invalidKeys).toEqual([])
+    expect(result.values.sl_ocr_vocabulary.courses).toEqual(['高数'])
+    expect(result.values.sl_festive_birthday_full).toBe('')
   })
 })
