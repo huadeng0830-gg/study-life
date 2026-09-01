@@ -1,5 +1,6 @@
 import { normalizeFestiveConfig } from './festive.js'
 import { normalizeMoodLog } from './mood.js'
+import { normalizeFocusSettings } from './focusTimer.js'
 
 export const SYNC_DEFAULTS = {
   sl_courses: [],
@@ -13,6 +14,7 @@ export const SYNC_DEFAULTS = {
   sl_quick_record_settings: { clipboardHint: true, recentTypes: [] },
   sl_capture_enabled: true,
   sl_focus_sessions: [],
+sl_focus_settings: { quickTimes: [15, 25, 45, 60], lastUsedMinutes: 25, recentTemporaries: [], soundEnabled: true, vibrationEnabled: true, systemNotificationEnabled: true },
   sl_course_checkins: [],
   sl_exams: [],
   sl_countdown_show_past: false,
@@ -53,7 +55,7 @@ export const SYNC_KEYS = Object.keys(SYNC_DEFAULTS)
 export const SYNC_MODULES = Object.freeze([
   { key: 'courses', label: '课程与课表', keys: ['sl_courses', 'sl_course_templates', 'sl_timecfg', 'sl_semester', 'sl_schedule_exceptions', 'sl_ocr_vocabulary', 'sl_course_checkins'] },
   { key: 'tasks', label: '待办与快速记录', keys: ['sl_tasks', 'sl_events', 'sl_quick_notes', 'sl_quick_record_settings', 'sl_capture_enabled'] },
-  { key: 'focus', label: '专注记录', keys: ['sl_focus_sessions'] },
+  { key: 'focus', label: '专注记录', keys: ['sl_focus_sessions', 'sl_focus_settings'] },
   { key: 'countdown', label: '倒计时', keys: ['sl_exams', 'sl_countdown_show_past'] },
   { key: 'checklists', label: '清单', keys: ['sl_checklists'] },
   { key: 'ledger', label: '账本', keys: ['sl_bills', 'sl_expenses', 'sl_ledger_categories', 'sl_ledger_freq'] },
@@ -105,6 +107,12 @@ function normalizeIncomingValue(key, value) {
   if (key === 'sl_festive_config') return normalizeFestiveConfig(value)
   if (key === 'sl_festive_birthday_full') return /^\d{4}-(0[1-9]|1[0-2])-([0-2]\d|3[01])$/.test(String(value ?? '')) ? String(value) : ''
   if (key === 'sl_mood_log') return normalizeMoodLog(value)
+  if (key === 'sl_focus_settings') return normalizeFocusSettings(value)
+  if (key === 'sl_performance_mode') {
+    if (value === 'low') return 'on'
+    if (value === 'high') return 'off'
+    return value
+  }
   return cloneValue(value)
 }
 
@@ -125,6 +133,12 @@ function isValidKeyValue(key, value) {
     return value.targets === undefined || isPlainObject(value.targets)
   }
   if (key === 'sl_festive_birthday_full') return typeof value === 'string'
+  if (key === 'sl_focus_settings') {
+    return isPlainObject(value)
+      && (value.quickTimes === undefined || Array.isArray(value.quickTimes))
+      && (value.recentTemporaries === undefined || Array.isArray(value.recentTemporaries))
+  }
+  if (key === 'sl_performance_mode') return ['auto', 'on', 'off', 'low', 'high'].includes(value)
   return true
 }
 

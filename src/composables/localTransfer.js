@@ -7,11 +7,12 @@ import {
 import { throwIfAborted } from './asyncTask.js'
 import { restoreStoredValues } from './store/index.js'
 import { markLocalChanged } from './cloudSync.js'
+import { validateSyncPayload } from './cloudSyncData.js'
 
 export const TRANSFER_MODULES = {
   courses: { label: '课程、课表模板、作息与特殊日期', keys: ['sl_courses', 'sl_course_templates', 'sl_timecfg', 'sl_semester', 'sl_schedule_exceptions', 'sl_ocr_vocabulary', 'sl_course_checkins'] },
   tasks: { label: '作业、待办、日程与笔记', keys: ['sl_tasks', 'sl_events', 'sl_quick_notes', 'sl_quick_record_settings', 'sl_capture_enabled'] },
-  focus: { label: '专注记录', keys: ['sl_focus_sessions'] },
+  focus: { label: '专注记录与设置', keys: ['sl_focus_sessions', 'sl_focus_settings'] },
   countdowns: { label: '考试与倒计时', keys: ['sl_exams', 'sl_countdown_show_past'] },
   lists: { label: '生活清单', keys: ['sl_checklists'] },
   bills: { label: '固定账单', keys: ['sl_bills'] },
@@ -255,10 +256,22 @@ function remapCourses(list, map, currentIds) {
 }
 
 export async function importTransferPackage(pkg, mode = 'merge', { signal = null, onProgress = null } = {}) {
-  if (!pkg || pkg.app !== 'study-life' || pkg.version !== 2 || !pkg.data) throw new Error('迁移数据格式不正确')
+  if (!pkg || pkg.app !== 'study-life' || pkg.version !== 2 || !isPlainObject(pkg.data)) throw new Error('迁移数据格式不正确')
+  if (mode !== 'merge' && mode !== 'replace') throw new Error('迁移模式不受支持')
+  const supportedKeys = new Set(Object.values(TRANSFER_MODULES).flatMap((module) => module.keys))
+  const incomingKeys = Object.keys(pkg.data).filter((key) => key !== '__wallpaper_images')
+  const unknownKeys = incomingKeys.filter((key) => !supportedKeys.has(key))
+  if (unknownKeys.length) throw new Error(`迁移包包含不受支持的数据：${unknownKeys.join('、')}`)
+  const validatedData = validateSyncPayload(
+    Object.fromEntries(incomingKeys.map((key) => [key, pkg.data[key]]))
+  )
+  const transferData = {
+    ...validatedData,
+    ...(pkg.data.__wallpaper_images === undefined ? {} : { __wallpaper_images: pkg.data.__wallpaper_images }),
+  }
   throwIfAborted(signal)
-  const wallpaperImages = pkg.data.__wallpaper_images
-  const keys = Object.keys(pkg.data).filter((key) => key !== '__wallpaper_images')
+  const wallpaperImages = transferData.__wallpaper_images
+  const keys = Object.keys(validatedData)
   const undo = { createdAt: new Date().toISOString(), values: {}, hadWallpapers: false }
   for (const key of keys) undo.values[key] = localStorage.getItem(key)
   localStorage.setItem(UNDO_KEY, JSON.stringify(undo))
@@ -274,7 +287,7 @@ export async function importTransferPackage(pkg, mode = 'merge', { signal = null
     let added = 0
     const details = []
     const localCourses = readStored('sl_courses') ?? []
-    const incomingConfig = pkg.data.sl_timecfg
+    const incomingConfig = transferData.sl_timecfg
     const currentConfig = readStored('sl_timecfg')
     const shouldRemapCourses = mode === 'merge' && localCourses.length && incomingConfig && currentConfig
     const courseMap = shouldRemapCourses
@@ -282,7 +295,7 @@ export async function importTransferPackage(pkg, mode = 'merge', { signal = null
       : new Map()
     const currentPeriodIds = new Set((currentConfig?.periods ?? []).map((period) => period.id))
 
-    const dataEntries = Object.entries(pkg.data).filter(([key]) => key !== '__wallpaper_images')
+    const dataEntries = Object.entries(validatedData)
     const nextValues = {}
     for (const [index, [key, incomingRaw]] of dataEntries.entries()) {
       throwIfAborted(signal)

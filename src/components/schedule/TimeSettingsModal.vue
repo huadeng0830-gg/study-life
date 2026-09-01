@@ -58,7 +58,10 @@ const newPeriodLabel = ref('')
 
 function onAddCampus() {
   settingError.value = ''
-  if (addCampus(newCampusName.value)) newCampusName.value = ''
+  if (addCampus(newCampusName.value)) {
+    newCampusName.value = ''
+    initPlanSelection()
+  }
   else settingError.value = '请输入校区名称'
 }
 
@@ -73,6 +76,7 @@ function onRemoveCampus(id) {
   if (isCurrent) lines.push('该校区是当前查看的校区，删除后会切换到其他校区。')
   if (!window.confirm(lines.join('\n'))) return
   removeCampus(id)
+  initPlanSelection()
 }
 
 function onAddSeason() {
@@ -84,6 +88,7 @@ function onAddSeason() {
   if (addSeason(newSeasonName.value, newSeasonDate.value)) {
     newSeasonName.value = ''
     newSeasonDate.value = '03-01'
+    initPlanSelection()
   } else {
     settingError.value = '请输入作息季名称'
   }
@@ -100,6 +105,7 @@ function onRemoveSeason(id) {
   if (activeId === id) lines.push('该季是当前生效的作息季，删除后会自动切换到其他作息季。')
   if (!window.confirm(lines.join('\n'))) return
   removeSeason(id)
+  initPlanSelection()
 }
 
 function onSeasonDateChange(season, value, input) {
@@ -128,19 +134,31 @@ function toggleSeasonCampus(season, campusId) {
   }
   season.campuses = current
   settingError.value = ''
+  initPlanSelection()
 }
 const seasonDateConflicts = computed(() => seasonConflicts(timeConfig.value))
 
 function onAddPeriod() {
   settingError.value = ''
-  if (addPeriod(newPeriodLabel.value)) newPeriodLabel.value = ''
+  if (addPeriod(newPeriodLabel.value)) {
+    newPeriodLabel.value = ''
+    loadPlanDraft(planSeasonId.value, planCampusId.value)
+  }
   else settingError.value = '请输入节次名称'
 }
 
 function onRemovePeriod(id) {
   settingError.value = ''
   const result = removePeriod(id, props.courseCountByPeriodId)
-  if (result !== true) settingError.value = result
+  if (result !== true) {
+    settingError.value = result
+    return
+  }
+  loadPlanDraft(planSeasonId.value, planCampusId.value)
+}
+
+function periodUseCount(id) {
+  return Number(props.courseCountByPeriodId(id)) || 0
 }
 
 function onResetTimes() {
@@ -239,6 +257,13 @@ function switchPlan(seasonId, campusId) {
   loadPlanDraft(seasonId, campusId)
 }
 
+function switchSettingsTab(tab) {
+  if (tab === settingsTab.value) return
+  if (draftDirty.value && !guardDraft()) return
+  if (draftDirty.value) discardDraft()
+  settingsTab.value = tab
+}
+
 function markDirty() {
   draftDirty.value = true
 }
@@ -274,9 +299,11 @@ function openTimeSettings() {
   settingsTab.value = 'plans'
 }
 
+// 组件以 v-if 方式首次挂载时 props.show 已经是 true；普通 watch 不会在
+// 首次执行，导致草稿数组为空，时间输入框访问 draft[index] 时直接报错。
 watch(() => props.show, (open) => {
   if (open) initPlanSelection()
-})
+}, { immediate: true })
 
 // 关闭弹窗时守卫（确认放弃则重置草稿）
 function tryCloseTimeEditor() {
@@ -1001,7 +1028,7 @@ defineExpose({ stopBackgroundWork })
           type="button"
           class="tab-btn"
           :class="{ on: settingsTab === tab }"
-          @click="settingsTab = tab"
+          @click="switchSettingsTab(tab)"
         >{{ tabLabel(tab) }}</button>
       </div>
       <p class="settings-hint">{{ tabHints[settingsTab] }}</p>
@@ -1382,10 +1409,13 @@ defineExpose({ stopBackgroundWork })
                 :value="period.label"
                 @change="renamePeriod(period.id, $event.target.value)"
               />
+              <small v-if="periodUseCount(period.id)" class="period-use-count">
+                {{ periodUseCount(period.id) }} 门占用
+              </small>
               <button
                 class="setting-del"
-                :disabled="timeConfig.periods.length <= 1"
-                title="删除节次"
+                :disabled="timeConfig.periods.length <= 1 || periodUseCount(period.id) > 0"
+                :title="periodUseCount(period.id) ? `有 ${periodUseCount(period.id)} 门课程或模板课程占用` : '删除节次'"
                 @click="onRemovePeriod(period.id)"
               >✕</button>
             </div>
@@ -1688,6 +1718,12 @@ defineExpose({ stopBackgroundWork })
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
+}
+.period-use-count {
+  flex: 0 0 auto;
+  color: #9a6414;
+  font-size: 10.5px;
+  white-space: nowrap;
 }
 .tab-bar {
   display: flex;

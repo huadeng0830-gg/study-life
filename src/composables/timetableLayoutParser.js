@@ -4,6 +4,13 @@ const DAY_DIGITS = { 一: 0, 二: 1, 三: 2, 四: 3, 五: 4, 六: 5, 日: 6, 天
 const CLASS_CODE = /^[\u4e00-\u9fff]{1,6}\d{4}(?:-\d+)?$/
 const HEADER_NOISE = /^(?:星期[一二三四五六日天]?|周[一二三四五六日天]|备注|节次)$/
 
+// 教务系统常把班级编号（如“环工2504”）附在课程块末尾，但“追光楼3603”
+// 这一类“楼名 + 房间号”外形相同，绝不能一概丢弃。
+function isClassCode(value) {
+  const compact = String(value || '').replace(/\s/g, '')
+  return CLASS_CODE.test(compact) && !/(?:楼|馆|室|堂|中心|实验|基地|校区)/.test(compact)
+}
+
 function cleanText(value) {
   return String(value || '')
     .replace(/[\u2013\u2014\u2212~～]/g, '-')
@@ -13,6 +20,32 @@ function cleanText(value) {
     .replace(/[）]/g, ')')
     .replace(/\s+/g, ' ')
     .trim()
+}
+
+// OCR 结果即使字段置信度较高，也可能留下括号/符号残片（例如“岭西10]”）。
+// 这类结构性异常应进入确认列表，避免把明显损坏的教室或课程静默导入。
+function fieldNeedsReview(value) {
+  const text = cleanText(value)
+  if (!text) return false
+  const left = (text.match(/[[(]/g) || []).length
+  const right = (text.match(/[\])]/g) || []).length
+  if (left !== right) return true
+  if (text.includes('(') !== text.includes(')') || text.includes('[') !== text.includes(']')) return true
+  return /[^\u4e00-\u9fffA-Za-z0-9()[\].*#_\-/\s]/.test(text)
+}
+
+function markSuspiciousCourses(courses) {
+  return courses.map((course) => {
+    const reviewReasons = []
+    if (fieldNeedsReview(course.name)) reviewReasons.push('课程名称包含残缺括号或异常符号')
+    if (fieldNeedsReview(course.room)) reviewReasons.push('地点包含残缺括号或异常符号')
+    if (fieldNeedsReview(course.teacher)) reviewReasons.push('教师姓名包含残缺括号或异常符号')
+    return {
+      ...course,
+      needsReview: Boolean(course.needsReview || reviewReasons.length),
+      reviewReasons,
+    }
+  })
 }
 
 function centerX(item) {
@@ -32,7 +65,10 @@ function weekdayFromText(text) {
 // bands from their actual locations so uneven, partial and rotated tables do
 // not inherit coordinates from an unrelated layout.
 function detectDayBands(layout) {
-  const headers = (layout?.words || [])
+  // Tesseract can split a short header such as “星期一” into words, while its
+  // line result still keeps it intact. Read both levels: the line anchors the
+  // column and the words continue to provide the fine-grained course layout.
+  const headers = [...(layout?.words || []), ...(layout?.lines || [])]
     .map((word) => ({ day: weekdayFromText(word.text), x: centerX(word), y: centerY(word) }))
     .filter((item) => item.day !== null && Number.isFinite(item.x) && Number.isFinite(item.y))
   const pickClosest = (axis) => [...new Map(
@@ -150,7 +186,7 @@ function groupWordsIntoColumns(words) {
 
 function parseWeek(text, maxWeek) {
   const normalized = cleanText(text)
-  const match = normalized.match(/(\d{1,2})\s*-\s*(\d{1,2})\s*(?:\((?:单|双)?周\)|(?:单|双)?周)/)
+  const match = normalized.match(/(\d{1,2})\s*-\s*(\d{1,2})\s*(?:[\[(](?:单|双)?周[\])]|(?:单|双)?周)/)
   if (!match) return null
   const startWeek = Number(match[1])
   const endWeek = Number(match[2])
@@ -159,6 +195,50 @@ function parseWeek(text, maxWeek) {
     startWeek,
     endWeek,
     weekType: normalized.includes('单周') ? 'odd' : normalized.includes('双周') ? 'even' : 'all',
+  }
+}
+
+function parseInlineRecord(text, day, timeConfig, maxWeek, confidence) {
+  const normalized = cleanText(text)
+    .replace(/[\u4e00-\u9fff]{1,6}\d{4}(?:-\d+)?/g, (match) => isClassCode(match) ? ' ' : match)
+    .replace(/\s+/g, ' ')
+    .trim()
+  const periodPattern = /[[(]?\s*(?:(?:0?[1-9]|1[0-2])(?:\s*[-,，、/]\s*(?:0?[1-9]|1[0-2])){0,5})[\])]?\s*节/
+  const periodMatch = normalized.match(periodPattern)
+  if (!periodMatch || periodMatch.index === undefined) return null
+  const period = parsePeriod(periodMatch[0])
+  const weekMatch = normalized.match(/(\d{1,2})\s*-\s*(\d{1,2})\s*(?:[\[(](?:单|双)?周[\])]|(?:单|双)?周)/)
+  if (!period || !weekMatch || weekMatch.index === undefined || weekMatch.index > periodMatch.index) return null
+  const week = parseWeek(weekMatch[0], maxWeek)
+  if (!week) return null
+
+  const nameParts = normalized.slice(0, weekMatch.index).trim().split(/\s+/).filter(Boolean)
+  let teacher = ''
+  if (nameParts.length > 1 && isTeacherCandidate(nameParts[nameParts.length - 1])) teacher = nameParts.pop()
+  const name = nameParts
+    .join('')
+    .replace(/[（(](?:北|南|本部|东校区|西校区)[）)]/g, '')
+    .trim()
+  const room = normalized.slice(weekMatch.index + weekMatch[0].length, periodMatch.index)
+    .replace(/^地点[:：]?/, '')
+    .trim() || null
+  const periods = timeConfig?.value?.periods || []
+  const start = periodIdFromNumber(periods, period.start)
+  const end = periodIdFromNumber(periods, period.end)
+  if (!name || !start || !end) return null
+  return {
+    name,
+    day,
+    start,
+    end,
+    startPeriod: period.start,
+    endPeriod: period.end,
+    startWeek: week.startWeek,
+    endWeek: week.endWeek,
+    weekType: week.weekType,
+    room,
+    teacher: teacher || null,
+    confidence,
   }
 }
 
@@ -184,12 +264,16 @@ function stripNoise(lines) {
     .map(cleanText)
     .filter(Boolean)
     .filter((line) => !HEADER_NOISE.test(line))
-    .filter((line) => !CLASS_CODE.test(line.replace(/\s/g, '')))
+    .filter((line) => !isClassCode(line))
     .filter((line) => !/^[-—_]{3,}$/.test(line))
 }
 
 function parseRecord(lines, day, timeConfig, maxWeek, confidence) {
   const cleaned = stripNoise(lines)
+  if (cleaned.length === 1) {
+    const inline = parseInlineRecord(cleaned[0], day, timeConfig, maxWeek, confidence)
+    if (inline) return inline
+  }
   const periodIndex = cleaned.findIndex((line) => parsePeriod(line))
   if (periodIndex < 0) return null
   const period = parsePeriod(cleaned[periodIndex])
@@ -362,7 +446,7 @@ function dedupeCourses(courses) {
       && existing.endPeriod === course.endPeriod
       && existing.startWeek === course.startWeek
       && existing.endWeek === course.endWeek
-      && (existing.name.includes(course.name) || course.name.includes(existing.name))
+      && namesLikelySame(existing.name, course.name)
     ))
     if (duplicateIndex < 0) {
       result.push(course)
@@ -382,6 +466,18 @@ function dedupeCourses(courses) {
   return result
 }
 
+function namesLikelySame(left, right) {
+  const one = cleanText(left).replace(/[^\u4e00-\u9fffA-Za-z0-9]/g, '')
+  const other = cleanText(right).replace(/[^\u4e00-\u9fffA-Za-z0-9]/g, '')
+  if (!one || !other || one.includes(other) || other.includes(one)) return Boolean(one && other)
+  const limit = Math.min(one.length, other.length)
+  let prefix = 0
+  while (prefix < limit && one[prefix] === other[prefix]) prefix++
+  // OCR may only damage a suffix accidentally joined to the course name.
+  // Merge that artifact only when the timetable slot is otherwise identical.
+  return prefix >= Math.max(6, Math.ceil(limit * 0.72))
+}
+
 function normalizeColumnLines(text) {
   const result = []
   for (const raw of String(text || '').split(/\r?\n/)) {
@@ -393,7 +489,21 @@ function normalizeColumnLines(text) {
       result.push(line)
     }
   }
-  return result
+  const marker = /[[(]?\s*(?:(?:0?[1-9]|1[0-2])(?:\s*[-,，、/]\s*(?:0?[1-9]|1[0-2])){0,5})[\])]?\s*节/g
+  const records = []
+  for (const line of result) {
+    let cursor = 0
+    let match
+    let matched = false
+    while ((match = marker.exec(line))) {
+      matched = true
+      records.push(line.slice(cursor, match.index + match[0].length))
+      cursor = match.index + match[0].length
+    }
+    marker.lastIndex = 0
+    if (!matched) records.push(line)
+  }
+  return records.map(cleanText).filter(Boolean)
 }
 
 export function parseTimetableColumns(columns, timeConfig, maxWeek) {
@@ -406,8 +516,13 @@ export function parseTimetableColumns(columns, timeConfig, maxWeek) {
     return recordsForDay(lines, column.day, timeConfig, maxWeek)
   })
 
-  const unique = dedupeCourses(courses)
-  return { courses: unique, batchText: unique.map(toBatchLine).join('\n') }
+  const unique = markSuspiciousCourses(dedupeCourses(courses))
+  return {
+    courses: unique,
+    batchText: unique.map(toBatchLine).join('\n'),
+    detectedHeaders: new Set((columns || []).map((column) => column.day)).size,
+    needsReview: (columns || []).some((column) => column.inferred) || unique.some((course) => course.needsReview),
+  }
 }
 
 export function parseTimetableLayout(layout, timeConfig, maxWeek) {
@@ -445,7 +560,7 @@ export function parseTimetableLayout(layout, timeConfig, maxWeek) {
     )
   })
 
-  const unique = dedupeCourses(courses)
+  const unique = markSuspiciousCourses(dedupeCourses(courses))
 
   return {
     courses: unique,
@@ -471,7 +586,7 @@ export function scoreTimetableExtraction(table) {
   const confidence = courses.length
     ? courses.reduce((sum, course) => sum + (Number(course.confidence) || 0), 0) / courses.length
     : 0
-  const reviewCount = courses.filter((course) => (Number(course.confidence) || 0) < 70).length
+  const reviewCount = courses.filter((course) => course.needsReview || (Number(course.confidence) || 0) < 70).length
   return {
     score: courses.length * 10 + (Number(table?.detectedHeaders) || 0) * 1.5 + confidence * 0.08 - invalid * 12 - duplicateSlots * 5,
     invalid,

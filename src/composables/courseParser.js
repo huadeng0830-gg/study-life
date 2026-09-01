@@ -244,15 +244,28 @@ export function extractStrongFeatures(segments, periodsMax, MAX_WEEK) {
 
 // “第 1 节”应对应标签中的“第一节课”，不能简单按数组下标取值，
 // 因为课表前面可能还有“早自习”等不编号时段。
+export function numberedPeriodOptions(periods) {
+  const source = Array.isArray(periods) ? periods : []
+  const nonCoursePeriod = /早自习|午休|午餐|晚自习|课间|休息/
+  const used = new Set()
+  let nextNumber = 1
+  return source.flatMap((period) => {
+    const label = String(period?.label ?? '').trim()
+    if (!period?.id || nonCoursePeriod.test(label)) return []
+    const match = digitize(label).match(/(?:第)?(\d{1,2})\s*(?:节|课)/)
+    let number = match ? Number(match[1]) : null
+    if (!Number.isInteger(number) || number < 1 || used.has(number)) {
+      while (used.has(nextNumber)) nextNumber++
+      number = nextNumber
+    }
+    used.add(number)
+    nextNumber = Math.max(nextNumber, number + 1)
+    return [{ ...period, number }]
+  })
+}
+
 export function periodIdFromNumber(periods, number) {
-  const numbered = periods
-    .map((period) => {
-      const match = digitize(period.label ?? '').match(/(\d{1,2})\s*(?:节|课)/)
-      return { id: period.id, number: match ? Number(match[1]) : null }
-    })
-    .filter((period) => period.number !== null)
-  if (numbered.length) return numbered.find((period) => period.number === number)?.id ?? null
-  return periods[number - 1]?.id ?? null
+  return numberedPeriodOptions(periods).find((period) => period.number === number)?.id ?? null
 }
 
 // 计算解析置信度

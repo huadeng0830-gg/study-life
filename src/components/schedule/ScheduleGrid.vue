@@ -7,7 +7,6 @@ import { useScheduleGrid } from '../../composables/schedule/useScheduleGrid.js'
 const props = defineProps({
   courses: { type: Array, required: true },
   scheduleExceptions: { type: Array, required: true },
-  semester: { type: Object, required: true },
   viewWeek: { type: Number, required: true },
   mobileView: { type: String, required: true },
   mobileDay: { type: Number, required: true },
@@ -32,7 +31,6 @@ const {
 } = useScheduleGrid(
   computed(() => props.courses),
   computed(() => props.scheduleExceptions),
-  computed(() => props.semester),
   computed(() => props.viewWeek),
   computed(() => props.mobileView),
   computed(() => props.mobileDay),
@@ -69,6 +67,10 @@ function openAdd(day, period) {
 
 function openEdit(course) {
   emit('open-edit', course)
+}
+
+function viewWeekText(week) {
+  return week < 1 ? '开学前' : `第 ${week} 周`
 }
 </script>
 
@@ -108,7 +110,7 @@ function openEdit(course) {
     <!-- Desktop Week View -->
     <div v-else class="card timetable-wrap" :class="`skin-${appearance.scheduleSkin}`">
       <div v-if="conflictIds.size > 0" class="warn-banner">
-        ⚠️ 第 {{ viewWeek }} 周有 {{ conflictCount }} 组课程时间冲突（红框标出），请检查周次设置
+          ⚠️ {{ viewWeekText(viewWeek) }}有 {{ conflictCount }} 组课程时间冲突（红框标出），请检查周次设置
       </div>
 
       <div class="timetable">
@@ -160,7 +162,7 @@ function openEdit(course) {
     <p class="tip">
       💡 正在查看：{{ timeConfig.campuses.find(c => c.id === timeConfig.currentCampus)?.name || '' }} ·
       {{ timeConfig.seasons.find(s => s.id === timeConfig.currentSeason)?.name || '' }}<template v-if="timeConfig.seasons.length > 1 && timeConfig.autoSeason">（自动）</template> ·
-      第 {{ viewWeek }} 周的课程；
+      {{ viewWeekText(viewWeek) }}的课程；
       点击空白格子快速添加，点击课程卡片可编辑
     </p>
   </div>

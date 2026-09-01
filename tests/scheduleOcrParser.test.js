@@ -133,4 +133,33 @@ describe('schedule OCR structured parser', () => {
     ])
     expect(parsed.schemes[3].rows[1]).toMatchObject({ start: '09:05', end: '09:50' })
   })
+
+  it('优先用带坐标的布局列，避免逐行 OCR 的乱序时间串到其它作息组', () => {
+    const word = (text, x, y) => ({ text, confidence: 93, bbox: { x0: x - 30, y0: y - 9, x1: x + 30, y1: y + 9 } })
+    const layout = {
+      width: 1000,
+      height: 700,
+      words: [
+        word('夏季时间', 290, 30), word('冬季时间', 730, 30),
+        word('南校区', 150, 70), word('北校区', 430, 70), word('南校区', 590, 70), word('北校区', 870, 70),
+        word('第一节', 45, 140), word('08:00-08:45', 150, 140), word('08:10-08:55', 430, 140), word('08:00-08:45', 590, 140), word('08:10-08:55', 870, 140),
+        word('第二节', 45, 190), word('08:55-09:40', 150, 190), word('09:05-09:50', 430, 190), word('08:55-09:40', 590, 190), word('09:05-09:50', 870, 190),
+      ],
+    }
+    const parsed = parseScheduleOCR({
+      text: '',
+      layout,
+      // 表格行 OCR 把四列文字从右到左拼乱；不能覆盖布局里的正确列顺序。
+      regions: [
+        { source: 'table-row', confidence: 92, text: '第一节 20:40-21:25 08:10-08:55 08:00-08:45 08:10-08:55' },
+        { source: 'table-row', confidence: 92, text: '第二节 21:30-22:15 09:05-09:50 08:55-09:40 09:05-09:50' },
+      ],
+    }, {
+      campuses: [{ id: 'south', name: '南校区' }, { id: 'north', name: '北校区' }],
+      seasons: [{ id: 'summer', name: '夏季时间' }, { id: 'winter', name: '冬季时间' }],
+    })
+
+    expect(parsed.schemes.map((scheme) => scheme.rows[0].start)).toEqual(['08:00', '08:10', '08:00', '08:10'])
+    expect(parsed.schemes.map((scheme) => scheme.rows[1].start)).toEqual(['08:55', '09:05', '08:55', '09:05'])
+  })
 })

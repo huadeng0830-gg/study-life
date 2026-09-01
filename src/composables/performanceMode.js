@@ -4,6 +4,15 @@ import { useStoredRef } from './store'
 // auto 根据设备和用户的“减少动态效果”偏好降级；用户也可以强制开启或关闭。
 export const performanceMode = useStoredRef('sl_performance_mode', 'auto')
 
+export function normalizePerformanceMode(value) {
+  if (value === 'low') return 'on'
+  if (value === 'high') return 'off'
+  return ['auto', 'on', 'off'].includes(value) ? value : 'auto'
+}
+
+const normalizedInitialMode = normalizePerformanceMode(performanceMode.value)
+if (performanceMode.value !== normalizedInitialMode) performanceMode.value = normalizedInitialMode
+
 export function isIOSDevice() {
   if (typeof navigator === 'undefined') return false
   const ua = navigator.userAgent || ''

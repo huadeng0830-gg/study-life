@@ -17,6 +17,7 @@
     "release:bump": "node scripts/bump-release.mjs"
   },
   "dependencies": {
+    "@e965/xlsx": "^0.20.3",
     "jsqr": "^1.4.0",
     "lunar-javascript": "^1.7.7",
     "qrcode": "^1.5.4",

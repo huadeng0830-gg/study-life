@@ -1,3 +1,5 @@
+import { normalizeFocusSession } from './focusTimer.js'
+
 function pad(value) { return String(value).padStart(2, '0') }
 
 export function dayText(value = new Date()) {
@@ -114,7 +116,10 @@ export function weeklyPulse({ tasks = [], focusSessions = [], courseCheckins = [
   const start = mondayOf(now).getTime()
   const end = start + 7 * 86400000
   const done = tasks.filter((task) => task.completedAt && new Date(task.completedAt).getTime() >= start && new Date(task.completedAt).getTime() < end).length
-  const minutes = focusSessions.filter((item) => item.endedAt && new Date(item.endedAt).getTime() >= start && new Date(item.endedAt).getTime() < end).reduce((sum, item) => sum + Math.max(0, Number(item.minutes) || 0), 0)
+  const minutes = focusSessions.filter((item) => item.endedAt && new Date(item.endedAt).getTime() >= start && new Date(item.endedAt).getTime() < end).reduce(
+    (sum, item) => sum + Math.round((normalizeFocusSession(item)?.actualFocusSeconds || 0) / 60),
+    0
+  )
   const reviewCourses = new Set(courseCheckins.filter((item) => {
     const time = new Date(`${item.date}T00:00:00`).getTime()
     return item.state === COURSE_CHECKIN_STATES.review && time >= start && time < end

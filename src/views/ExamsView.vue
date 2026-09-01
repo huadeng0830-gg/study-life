@@ -22,6 +22,8 @@ const error = ref('')
 const form = ref(emptyForm())
 const deleteTarget = ref(null)
 const reviewMessage = ref('')
+const deleteUndo = ref(null)
+let deleteUndoTimer = 0
 
 function emptyForm() {
   return {
@@ -200,9 +202,25 @@ function menuDelete(item) {
 }
 
 function confirmDelete() {
-  if (!deleteTarget.value) return
-  exams.value = exams.value.filter((entry) => entry.id !== deleteTarget.value.id)
+  const target = deleteTarget.value
+  if (!target) return
+  const index = exams.value.findIndex((entry) => entry.id === target.id)
+  if (index < 0) return
+  exams.value.splice(index, 1)
   deleteTarget.value = null
+  deleteUndo.value = { item: target, index }
+  window.clearTimeout(deleteUndoTimer)
+  deleteUndoTimer = window.setTimeout(() => { deleteUndo.value = null }, 6000)
+}
+
+function undoDelete() {
+  if (!deleteUndo.value) return
+  const { item, index } = deleteUndo.value
+  if (!exams.value.some((entry) => entry.id === item.id)) {
+    exams.value.splice(Math.min(index, exams.value.length), 0, item)
+  }
+  deleteUndo.value = null
+  window.clearTimeout(deleteUndoTimer)
 }
 
 function courseLabel(item) {
@@ -214,6 +232,7 @@ if (typeof document !== 'undefined') {
 }
 onBeforeUnmount(() => {
   if (typeof document !== 'undefined') document.removeEventListener('click', closeMenu)
+  window.clearTimeout(deleteUndoTimer)
 })
 </script>
 
@@ -375,11 +394,15 @@ onBeforeUnmount(() => {
     <ConfirmDialog
       :open="Boolean(deleteTarget)"
       title="删除倒计时"
-      :message="`确定删除倒计时“${deleteTarget?.name || ''}”吗？此操作无法撤销。`"
+      :message="`确定删除倒计时“${deleteTarget?.name || ''}”吗？删除后可在短时间内撤销。`"
       confirm-label="删除"
       @close="deleteTarget = null"
       @confirm="confirmDelete"
     />
+    <div v-if="deleteUndo" class="undo-toast" role="status" aria-live="polite">
+      <span>倒计时已删除</span>
+      <button type="button" @click="undoDelete">撤销</button>
+    </div>
   </div>
 </template>
 
@@ -638,6 +661,21 @@ onBeforeUnmount(() => {
 .actions .btn-danger {
   margin-right: auto;
 }
+.undo-toast {
+  position: fixed;
+  right: 18px;
+  bottom: calc(24px + env(safe-area-inset-bottom));
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 11px 14px;
+  color: #fff;
+  border-radius: 10px;
+  background: #263247;
+  box-shadow: var(--shadow-lg);
+}
+.undo-toast button { padding: 3px 6px; color: #9db6ff; font-weight: 800; border: 0; background: transparent; }
 
 @media (max-width: 720px) {
   .page-head {

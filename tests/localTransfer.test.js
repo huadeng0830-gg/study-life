@@ -177,6 +177,30 @@ describe('导入与撤销', () => {
     await expect(importTransferPackage({ app: 'other', version: 2 }, 'replace')).rejects.toThrow()
   })
 
+  it('损坏的数据形状在写入前被拒绝，且不改动本机数据', async () => {
+    localStorage.setItem('sl_tasks', JSON.stringify([{ id: 'safe' }]))
+    const pkg = {
+      app: 'study-life',
+      version: 2,
+      modules: ['tasks'],
+      data: { sl_tasks: { 0: { id: 'broken' } } },
+    }
+    await expect(importTransferPackage(pkg, 'replace')).rejects.toThrow('格式异常')
+    expect(JSON.parse(localStorage.getItem('sl_tasks'))).toEqual([{ id: 'safe' }])
+    expect(localStorage.getItem('sl_transfer_undo')).toBeNull()
+  })
+
+  it('迁移包不能写入项目未声明的存储键', async () => {
+    const pkg = {
+      app: 'study-life',
+      version: 2,
+      modules: [],
+      data: { sl_unknown_private_key: { enabled: true } },
+    }
+    await expect(importTransferPackage(pkg, 'replace')).rejects.toThrow('不受支持')
+    expect(localStorage.getItem('sl_unknown_private_key')).toBeNull()
+  })
+
   it('打包器只收集所选模块的键', async () => {
     localStorage.setItem('sl_tasks', JSON.stringify([]))
     localStorage.setItem('sl_focus_sessions', JSON.stringify([{ id: 'f1' }]))

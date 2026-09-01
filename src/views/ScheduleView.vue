@@ -18,6 +18,7 @@ import {
   seasonName,
   currentCampusId,
   currentSeasonId,
+  courseUsesPeriod,
   currentTimes,
   periodIndex,
   periodLabelById,
@@ -51,12 +52,17 @@ const DAYS = ['周一', '周二', '周三', '周四', '周五', '周六', '周�
 const TaskProgress = defineAsyncComponent(() => import('../components/TaskProgress.vue'))
 let batchParserApi = null
 let batchParserTask = null
+const batchParserReady = ref(false)
 let courseImportApi = null
 let courseImportTask = null
 
 function loadBatchParser() {
   if (batchParserApi) return Promise.resolve(batchParserApi)
-  batchParserTask ??= import('../composables/courseParser.js').then((api) => (batchParserApi = api))
+  batchParserTask ??= import('../composables/courseParser.js').then((api) => {
+    batchParserApi = api
+    batchParserReady.value = true
+    return api
+  })
   return batchParserTask
 }
 
@@ -72,6 +78,11 @@ const tasks = useStoredRef('sl_tasks', [])
 const countdowns = useStoredRef('sl_exams', [])
 const events = useStoredRef('sl_events', [])
 const notes = useStoredRef('sl_quick_notes', [])
+const scheduleNote = useStoredRef('sl_schedule_note', '')
+
+function saveScheduleNote() {
+  // 备注内容已通过 useStoredRef 自动保存
+}
 
 // OCR 引擎、版面解析和本地纠错词典只在用户真正选择图片后才下载。
 // 普通查看/编辑课程表不再为这些重模块付出初始化成本。
@@ -90,6 +101,20 @@ async function extractTimetable(result) {
   const columnTable = parser.parseTimetableColumns(result.columns, timeConfig, MAX_WEEK)
   const layoutTable = parser.parseTimetableLayout(result.layout, timeConfig, MAX_WEEK)
   return { table: parser.selectBestTimetableExtraction(columnTable, layoutTable), toBatchLine: parser.toBatchLine }
+}
+
+async function extractExcelTimetable(file) {
+  const [xlsxModule, parser] = await Promise.all([
+    import('@e965/xlsx'),
+    import('../composables/excelTimetableParser.js'),
+  ])
+  const XLSX = xlsxModule.default || xlsxModule
+  const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array', cellText: true, cellDates: false })
+  const sheets = workbook.SheetNames.map((name) => ({
+    name,
+    rows: XLSX.utils.sheet_to_json(workbook.Sheets[name], { header: 1, defval: '', raw: false, blankrows: false }),
+  }))
+  return parser.extractExcelTimetable(sheets)
 }
 
 async function applyTimetableVocabulary(table) {
@@ -114,6 +139,8 @@ const error = ref('')
 const batchText = ref('')
 const batchError = ref('')
 const ocrSummary = ref('')
+const batchReviewMetadata = ref({})
+const batchReviewByLine = ref({})
 const cropImageFile = ref(null)
 const showImageCropper = ref(false)
 const message = ref('')
@@ -124,11 +151,13 @@ const lastImportUndo = ref(null)
 const batchOcrProgress = useTaskProgress()
 let batchOcrController = null
 let lastBatchFiles = []
+let retryableImport = null
 const selectedCourseIds = ref([])
 const templateName = ref('')
 const managerMessage = ref('')
 const managerError = ref('')
-const viewWeek = ref(Math.min(Math.max(currentWeek(), 1), MAX_WEEK))
+const clampViewWeek = (week) => Math.min(Math.max(week, 0), MAX_WEEK)
+const viewWeek = ref(clampViewWeek(currentWeek()))
 const mobileView = ref(typeof window !== 'undefined' && window.matchMedia('(max-width: 760px)').matches ? 'day' : 'week')
 const mobileDay = ref(todayIndex())
 const form = reactive({
@@ -203,7 +232,15 @@ function openTimeSettings() {
 }
 
 function courseCountByPeriodId(periodId) {
-  return courses.value.filter((c) => c.start === periodId || c.end === periodId).length
+  const activeCount = courses.value.filter((course) =>
+    courseUsesPeriod(course, periodId, timeConfig.value.periods)
+  ).length
+  const templateCount = courseTemplates.value.reduce((count, template) =>
+    count + (template.courses ?? []).filter((course) =>
+      courseUsesPeriod(course, periodId, timeConfig.value.periods)
+    ).length,
+  0)
+  return activeCount + templateCount
 }
 
 function stopBackgroundWork() {
@@ -342,13 +379,78 @@ async function openBatchShift() {
   batchText.value = ''
   batchError.value = ''
   ocrSummary.value = ''
+  batchReviewMetadata.value = {}
+  batchReviewByLine.value = {}
   message.value = ''
   showBatch.value = true
 }
 
+function batchCourseKey(course) {
+  if (!course) return ''
+  return [course.name, course.day, course.start, course.end, course.startWeek, course.endWeek, course.weekType, course.room || '', course.teacher || ''].join('|')
+}
+
+function rememberCourseReviews(items, lineOffset = 0) {
+  const next = { ...batchReviewMetadata.value }
+  const nextByLine = { ...batchReviewByLine.value }
+  for (const [index, course] of (items || []).entries()) {
+    const confidence = Number(course.confidence) || 0
+    if (!course.needsReview && confidence >= 70) continue
+    const reasons = [...(course.reviewReasons || [])]
+    if (confidence < 70) reasons.push(`OCR 文字置信度 ${Math.round(confidence)}%`)
+    const reviewReasons = reasons.length ? reasons : ['OCR 结构识别结果需要核对']
+    next[batchCourseKey(course)] = reviewReasons
+    nextByLine[lineOffset + index + 1] = reviewReasons
+  }
+  batchReviewMetadata.value = next
+  batchReviewByLine.value = nextByLine
+}
+
+function clearBatchInput() {
+  batchText.value = ''
+  batchReviewMetadata.value = {}
+  batchReviewByLine.value = {}
+}
+
+function batchPeriodNumber(periodId) {
+  if (!batchParserApi) return null
+  return batchParserApi.numberedPeriodOptions(timeConfig.value.periods)
+    .find((period) => period.id === periodId)?.number ?? null
+}
+
+const batchPeriodOptions = computed(() => {
+  // batchParserApi 不是响应式变量，必须显式依赖 ready 标记；否则首次计算得到
+  // 空数组后会被 computed 缓存，解析器加载完成也不会刷新节次下拉。
+  if (!batchParserReady.value || !batchParserApi) return []
+  return batchParserApi.numberedPeriodOptions(timeConfig.value.periods)
+})
+
+function replaceBatchRow({ sourceIndex, data }) {
+  const startPeriod = batchPeriodNumber(data.start)
+  const endPeriod = batchPeriodNumber(data.end)
+  if (!startPeriod || !endPeriod || startPeriod > endPeriod) {
+    batchError.value = '开始节次不能晚于结束节次'
+    return
+  }
+  const weekType = data.weekType === 'odd' ? '\t单周' : data.weekType === 'even' ? '\t双周' : ''
+  const room = data.room ? `\t地点:${data.room}` : ''
+  const teacher = data.teacher ? `\t教师:${data.teacher}` : ''
+  const replacement = `${data.name}\t${DAYS[data.day]}\t${startPeriod}-${endPeriod}节\t${data.startWeek}-${data.endWeek}周${weekType}${room}${teacher}`
+  const lines = batchText.value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
+  if (sourceIndex < 1 || sourceIndex > lines.length) return
+  lines[sourceIndex - 1] = replacement
+  batchText.value = lines.join('\n')
+  const remainingByLine = { ...batchReviewByLine.value }
+  delete remainingByLine[sourceIndex]
+  batchReviewByLine.value = remainingByLine
+  batchError.value = ''
+}
+
 
 const batchRows = computed(() => {
-  if (!batchParserApi) return []
+  // The parser is lazy-loaded. This reactive flag makes an already-open modal
+  // recalculate as soon as the module is ready instead of being stuck at 0.
+  if (!batchParserReady.value || !batchParserApi) return []
   const lines = batchText.value
     .split(/\r?\n/)
     .map((line) => line.trim())
@@ -357,7 +459,14 @@ const batchRows = computed(() => {
   return lines
     .map((line, index) => ({ line, index }))
     .filter(({ line, index }) => !(index === 0 && /课程.*星期/.test(line)))
-    .map(({ line, index }) => batchParserApi.parseBatchLine(line, index + 1, timeConfig, MAX_WEEK))
+    .map(({ line, index }) => {
+      const row = batchParserApi.parseBatchLine(line, index + 1, timeConfig, MAX_WEEK)
+      const reasons = batchReviewByLine.value[row.sourceIndex]
+        || (row.data ? batchReviewMetadata.value[batchCourseKey(row.data)] : null)
+      return reasons
+        ? { ...row, needsReview: true, reviewReasons: [...new Set([...(row.reviewReasons || []), ...reasons])] }
+        : row
+    })
 })
 
 const validBatchCount = computed(() => batchRows.value.filter((row) => row.data).length)
@@ -450,7 +559,7 @@ async function commitCourseImport(mode = 'smart') {
     const summary = `新增 ${plan.added} 门，替换 ${plan.replaced} 门，跳过 ${plan.skipped} 门${plan.kept ? `，保留冲突 ${plan.kept} 门` : ''}`
     if (draft.source === 'manual') { showForm.value = false; showToast(`课程已保存：${summary}`) }
     else if (draft.source === 'template') { managerMessage.value = `模板导入完成：${summary}` }
-    else { batchText.value = ''; batchError.value = ''; message.value = `导入完成：${summary}${draft.reviewCount ? `（${draft.reviewCount} 门建议确认）` : ''}` }
+    else { clearBatchInput(); batchError.value = ''; message.value = `导入完成：${summary}${draft.reviewCount ? `（${draft.reviewCount} 门建议确认）` : ''}` }
     showImportConflict.value = false
     importDraft.value = null
   } catch (e) {
@@ -468,7 +577,7 @@ courses.value = JSON.parse(JSON.stringify(undo.snapshot))
 
 function continueBatchImport() {
   message.value = ''
-  batchText.value = ''
+  clearBatchInput()
   ocrSummary.value = ''
 }
 
@@ -476,6 +585,46 @@ function finishBatchImport() {
   message.value = ''
   showBatch.value = false
 }
+
+// OCR 进度步骤与事件映射，仅服务于“批量识图课程表”流程。
+const TIMETABLE_OCR_STEPS = [
+  { id: 'read', label: '读取图片队列' },
+  { id: 'engine', label: '准备识别引擎' },
+  { id: 'recognize', label: '识别课程文字' },
+  { id: 'structure', label: '恢复星期与节次结构' },
+  { id: 'validate', label: '校验课程字段' },
+  { id: 'preview', label: '生成导入预览' },
+]
+
+function handleOcrActivity(progress, event, recognizeStep = 'structure') {
+  const stage = String(event?.stage || '').replace(/\.\.\./g, '…')
+  if (!stage) return
+  if (/检查图片|处理图片/.test(stage)) progress.setStep('read', 'running', stage)
+  else if (/初始化|加载|模型|内核|接口|就绪/.test(stage)) {
+    progress.setStep('read', 'completed', '图片读取完成')
+    progress.setStep('engine', 'running', stage)
+  } else if (/识别|核对|分列/.test(stage)) {
+    progress.setStep('engine', 'completed', '识别引擎已就绪')
+    progress.setStep(recognizeStep, 'running', stage)
+  } else progress.activity(stage)
+}
+
+function isOcrEngineFailure(progress, message) {
+  if (/未识别到文字|图片(?:尺寸)?太小|图片格式|请选择图片/.test(message)) return false
+  const engineStep = progress.state.steps.find((step) => step.id === 'engine')
+  return engineStep?.status === 'running'
+    || /初始化|语言模型|OCR 内核|Worker|Failed to fetch|NetworkError|script load|动态导入/i.test(message)
+}
+
+// 手动保存课程后的轻量提示：不新增全局 toast 组件，仅在课表页内短暂显示。
+const toastMessage = ref('')
+let toastTimer = 0
+function showToast(text) {
+  toastMessage.value = text
+  window.clearTimeout(toastTimer)
+  toastTimer = window.setTimeout(() => { toastMessage.value = '' }, 3200)
+}
+onBeforeUnmount(() => window.clearTimeout(toastTimer))
 
 async function ocrImage(event) {
   const files = [...(event.target.files || [])]
@@ -496,6 +645,78 @@ function selectCropImage(event) {
   showImageCropper.value = true
 }
 
+const EXCEL_IMPORT_STEPS = [
+  { id: 'read', label: '读取 Excel 文件' },
+  { id: 'sheets', label: '识别工作表结构' },
+  { id: 'structure', label: '还原课程字段与星期列' },
+  { id: 'preview', label: '生成可编辑导入预览' },
+]
+
+function isExcelFile(file) {
+  return /\.(?:xlsx|xls|xlsm|xlsb|csv|ods)$/i.test(file?.name || '')
+}
+
+async function importExcel(event) {
+  const file = event.target.files?.[0]
+  event.target.value = ''
+  if (!file || !isExcelFile(file)) {
+    batchError.value = '请选择 Excel、CSV 或 ODS 课程表文件'
+    return
+  }
+  await runExcelImport(file)
+}
+
+async function runExcelImport(file) {
+  if (batchOcrProgress.state.status === 'running') return
+  let cancelled = false
+  retryableImport = { type: 'excel', file }
+  batchError.value = ''
+  batchOcrProgress.start({
+    title: '正在读取 Excel 课程表',
+    steps: EXCEL_IMPORT_STEPS,
+    cancel: () => { cancelled = true },
+  })
+  try {
+    batchOcrProgress.setStep('read', 'running', `正在读取 ${file.name}`)
+    const extracted = await extractExcelTimetable(file)
+    if (cancelled) return
+    batchOcrProgress.setStep('read', 'completed', '文件已在本机读取，未上传服务器')
+    batchOcrProgress.setStep('sheets', 'running', '正在识别课程清单或星期表格')
+    if (!extracted.count) throw new Error('没有找到可识别的课程清单或星期表头，请确认文件包含课程名称、星期和节次')
+    batchOcrProgress.setStep('sheets', 'completed', `已识别工作表“${extracted.sheetName}”的${extracted.mode === 'grid' ? '星期表格' : '课程清单'}`)
+    batchOcrProgress.setStep('structure', 'running', '正在还原课程字段、周次与节次')
+    let importText = extracted.batchText
+    let table = null
+    if (extracted.columns?.length) {
+      const structured = await extractTimetable({ columns: extracted.columns, layout: null })
+      table = structured.table
+      importText = table.batchText
+      const lineOffset = batchText.value.split(/\r?\n/).filter((line) => line.trim()).length
+      rememberCourseReviews(table.courses, lineOffset)
+    }
+    if (!importText.trim()) throw new Error('已读到课表，但未能还原课程的周次或节次；请检查单元格是否包含“1-16周”和“1-2节”')
+    await loadBatchParser()
+    const parsed = importText.split(/\r?\n/)
+      .map((line, index) => batchParserApi.parseBatchLine(line, index + 1, timeConfig, MAX_WEEK))
+    const validCount = parsed.filter((row) => row.data).length
+    if (!validCount) throw new Error('已读取 Excel，但课程字段不完整。请检查预览中是否包含星期和节次')
+    batchText.value = (batchText.value ? `${batchText.value}\n` : '') + importText
+    const reviewCount = Math.max(parsed.filter((row) => row.needsReview).length, table?.diagnostics.reviewCount || 0)
+    const label = extracted.mode === 'grid' ? '星期表格' : '课程清单'
+    ocrSummary.value = `已从 Excel 工作表“${extracted.sheetName}”识别 ${validCount} 门课程（${label}），结果已放入预览，确认后才会写入课表。${reviewCount ? `其中 ${reviewCount} 门建议确认。` : ''}`
+    batchOcrProgress.setStep('structure', reviewCount ? 'warning' : 'completed', `已还原 ${validCount} 门课程${reviewCount ? '，部分建议确认' : ''}`)
+    batchOcrProgress.setStep('preview', 'running', '正在生成可编辑导入预览')
+    batchOcrProgress.setPartial({ 工作表: extracted.sheetName, 课程: validCount, 格式: label }, 'Excel 解析完成')
+    batchOcrProgress.setStep('preview', 'completed', '导入预览已生成，尚未写入课表')
+    batchOcrProgress.finish('Excel 课程表已解析，请确认预览', reviewCount ? 'warning' : 'completed')
+  } catch (error) {
+    if (cancelled) return
+    const message = error?.message || 'Excel 课程表读取失败，请检查文件格式后重试'
+    batchError.value = message
+    batchOcrProgress.fail('structure', message, { retry: true })
+  }
+}
+
 async function recognizeCroppedImage(file) {
   showImageCropper.value = false
   cropImageFile.value = null
@@ -509,6 +730,7 @@ async function runTimetableOCR(files) {
   if (!files.length) return
   if (batchOcrProgress.state.status === 'running') return
   lastBatchFiles = files
+  retryableImport = { type: 'image', files }
   const controller = new AbortController()
   batchOcrController = controller
   batchOcrProgress.start({
@@ -532,7 +754,7 @@ async function runTimetableOCR(files) {
         result = await performAccurateOCR(
           file,
           (event) => handleOcrActivity(batchOcrProgress, event, 'recognize'),
-          { kind: 'timetable', mode: 'auto', signal: controller.signal },
+          { kind: 'timetable', mode: 'accurate', signal: controller.signal },
         )
       } catch (accurateError) {
         if (accurateError?.name === 'AbortError') throw accurateError
@@ -550,11 +772,13 @@ async function runTimetableOCR(files) {
       const { table, toBatchLine } = await extractTimetable(result)
       const vocabularyChanges = await applyTimetableVocabulary(table)
       if (vocabularyChanges.length) table.batchText = table.courses.map(toBatchLine).join('\n')
+      const lineOffset = batchText.value.split(/\r?\n/).filter((line) => line.trim()).length
+      rememberCourseReviews(table.courses, lineOffset)
       batchOcrProgress.setStep(
         'structure',
         table.needsReview ? 'warning' : 'completed',
         table.needsReview
-          ? '表头锚点不足，已保留文字结果供手动确认'
+          ? '存在待确认的表头或字段，已保留可编辑结果供手动确认'
           : `恢复 ${table.courses.length} 门课程的空间归属${vocabularyChanges.length ? `，已应用 ${vocabularyChanges.length} 个本地词库建议` : ''}`,
       )
       batchOcrProgress.setStep('validate', 'running', '正在检查课程字段与行列对应')
@@ -597,18 +821,19 @@ async function runTimetableOCR(files) {
 }
 
 function retryBatchOCR() {
-  if (lastBatchFiles.length) void runTimetableOCR(lastBatchFiles)
+  if (retryableImport?.type === 'excel') void runExcelImport(retryableImport.file)
+  else if (lastBatchFiles.length) void runTimetableOCR(lastBatchFiles)
 }
 
 function continueBatchResults() {
   batchOcrProgress.reset()
 }
 
-const curWeek = computed(() => Math.min(Math.max(currentWeek(), 1), MAX_WEEK))
+const curWeek = computed(() => clampViewWeek(currentWeek()))
 
 function goWeek(delta) {
   const next = viewWeek.value + delta
-  if (next >= 1 && next <= MAX_WEEK) viewWeek.value = next
+  if (next >= 0 && next <= MAX_WEEK) viewWeek.value = next
 }
 
 function saveSemester(value) {
@@ -789,9 +1014,9 @@ const todayIdx = computed(() => todayIndex())
       <div class="seg-group">
         <span class="seg-label">周次</span>
         <div class="seg">
-          <button :disabled="viewWeek <= 1" @click="goWeek(-1)">‹</button>
+          <button :disabled="viewWeek <= 0" @click="goWeek(-1)">‹</button>
           <button class="wn" :class="{ thisweek: viewWeek === curWeek }">
-            第 {{ viewWeek }} 周
+            {{ viewWeek < 1 ? '开学前' : `第 ${viewWeek} 周` }}
           </button>
           <button :disabled="viewWeek >= MAX_WEEK" @click="goWeek(1)">›</button>
         </div>
@@ -824,7 +1049,6 @@ const todayIdx = computed(() => todayIndex())
     <ScheduleGrid
       :courses="courses"
       :schedule-exceptions="scheduleExceptions"
-      :semester="semester"
       :view-week="viewWeek"
       :mobile-view="mobileView"
       :mobile-day="mobileDay"
@@ -834,6 +1058,16 @@ const todayIdx = computed(() => todayIndex())
       @open-edit="openEdit"
       @mobile-day-change="shiftMobileDay"
     />
+
+    <div class="schedule-note">
+      <input
+        v-model="scheduleNote"
+        type="text"
+        placeholder="📝 课程表备注..."
+        class="schedule-note-input"
+        @blur="saveScheduleNote"
+      />
+    </div>
 
     <CourseEditorModal
       :open="showForm"
@@ -887,6 +1121,8 @@ const todayIdx = computed(() => todayIndex())
       :invalid-count="invalidBatchCount"
       :review-count="needsReviewCount"
       :days="DAYS"
+      :periods="batchPeriodOptions"
+      :max-week="MAX_WEEK"
       :progress="batchOcrProgress"
       :summary="ocrSummary"
       :message="message"
@@ -895,10 +1131,12 @@ const todayIdx = computed(() => todayIndex())
       @close="showBatch = false"
       @update:text="batchText = $event"
       @update:error="batchError = $event"
-      @clear="batchText = ''"
+      @clear="clearBatchInput"
+      @replace-row="replaceBatchRow"
       @import="importBatch"
       @upload-image="ocrImage"
       @crop-image="selectCropImage"
+      @upload-excel="importExcel"
       @cancel-progress="batchOcrProgress.cancel()"
       @retry-progress="retryBatchOCR"
       @continue-progress="continueBatchResults"
@@ -949,6 +1187,10 @@ const todayIdx = computed(() => todayIndex())
       :course-count-by-period-id="courseCountByPeriodId"
       @close="showTimeEditor = false"
     />
+
+    <Transition name="toast">
+      <div v-if="toastMessage" class="page-toast" role="status">{{ toastMessage }}</div>
+    </Transition>
   </div>
 </template>
 
@@ -1674,5 +1916,53 @@ const todayIdx = computed(() => todayIndex())
 .link-action { color: var(--primary); font-size: 12px; font-weight: 700; text-decoration: none; }
 @media (max-width: 520px) {
   .course-link-columns { flex-direction: column; gap: 10px; }
+}
+
+/* ---------- 页面内轻量 toast ---------- */
+.page-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 26px;
+  transform: translateX(-50%);
+  z-index: 1001;
+  padding: 10px 18px;
+  color: #fff;
+  font-size: 14px;
+  border-radius: 999px;
+  background: rgba(33, 43, 54, 0.92);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  pointer-events: none;
+}
+.toast-enter-active,
+.toast-leave-active {
+  transition: opacity 0.2s, transform 0.2s;
+}
+.toast-enter-from,
+.toast-leave-to {
+  opacity: 0;
+  transform: translateX(-50%) translateY(8px);
+}
+
+/* 课程表备注横条 */
+.schedule-note {
+  margin-top: 8px;
+}
+.schedule-note-input {
+  width: 100%;
+  padding: 10px 14px;
+  font-size: 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--text);
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.schedule-note-input:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px var(--primary-soft);
+}
+.schedule-note-input::placeholder {
+  color: var(--muted);
 }
 </style>

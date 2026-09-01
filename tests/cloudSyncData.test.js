@@ -69,7 +69,7 @@ describe('选择性拉取的分组与范围', () => {
   it('moduleKeysFor 只展开勾选模块的键', () => {
     expect(moduleKeysFor(['tasks'])).toEqual(['sl_tasks', 'sl_events', 'sl_quick_notes', 'sl_quick_record_settings', 'sl_capture_enabled'])
     expect(moduleKeysFor(['tasks', 'countdown'])).toEqual(['sl_tasks', 'sl_events', 'sl_quick_notes', 'sl_quick_record_settings', 'sl_capture_enabled', 'sl_exams', 'sl_countdown_show_past'])
-    expect(moduleKeysFor(['focus'])).toEqual(['sl_focus_sessions'])
+    expect(moduleKeysFor(['focus'])).toEqual(['sl_focus_sessions', 'sl_focus_settings'])
     expect(moduleKeysFor(['no-such-module'])).toEqual([])
   })
 
@@ -113,5 +113,11 @@ describe('选择性拉取的分组与范围', () => {
     expect(result.invalidKeys).toEqual([])
     expect(result.values.sl_ocr_vocabulary.courses).toEqual(['高数'])
     expect(result.values.sl_festive_birthday_full).toBe('')
+  })
+
+  it('同步时迁移旧版流畅模式并拒绝未知值', () => {
+    expect(sanitizeSyncPayload({ sl_performance_mode: 'low' }).values.sl_performance_mode).toBe('on')
+    expect(sanitizeSyncPayload({ sl_performance_mode: 'high' }).values.sl_performance_mode).toBe('off')
+    expect(sanitizeSyncPayload({ sl_performance_mode: 'turbo' }).invalidKeys).toEqual(['sl_performance_mode'])
   })
 })

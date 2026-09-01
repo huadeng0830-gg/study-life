@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseNotice } from '../src/composables/noticeParser.js'
+import { buildNoticeUnderstanding, parseNotice } from '../src/composables/noticeParser.js'
 
 const now = new Date('2026-09-01T10:00:00')
 
@@ -150,5 +150,27 @@ describe('通知解析真实输入回归', () => {
     expect(uncertain.rawText).toBe('明天可能会调整上课地点，另行通知。')
     expect(second.rawText).toBe('后天确定交实验报告。')
     expect(uncertain.rawText).not.toBe(second.rawText)
+  })
+
+  it('把通知转成理解结果：缴费通知不生成空地点和课程字段', () => {
+    const parsed = parseNotice('2026秋季学期缴费工作安排，缴费平台已开放，请于9月6日前完成学费缴纳。', [], now)
+    const understanding = buildNoticeUnderstanding(parsed)
+    expect(parsed.type).toBe('缴费')
+    expect(parsed.title).toContain('缴费工作安排')
+    expect(understanding.actionText).toBe('完成本学期学费缴纳')
+    expect(understanding.recommendation).toMatchObject({ key: 'task', label: '创建待办' })
+    expect(understanding.facts.map((item) => item.key)).toEqual(['dueDate'])
+  })
+
+  it('按通知语义推荐日程、作业或仅保存通知', () => {
+    expect(buildNoticeUnderstanding(parseNotice('明天下午3点在教学楼302开班会。', [], now)).recommendation.key).toBe('event')
+    expect(buildNoticeUnderstanding(parseNotice('9月10日前提交实验报告。', [], now)).recommendation.key).toBe('homework')
+    expect(buildNoticeUnderstanding(parseNotice('图书馆国庆期间开放时间调整如下……', [], now)).recommendation.key).toBe('note')
+  })
+
+  it('只在动作边界清楚时拆分多事项', () => {
+    const parsed = parseNotice('9月5日前完成报名，9月7日前缴费，9月10日上午8点到体育馆报到。', [], now)
+    expect(parsed.items).toHaveLength(3)
+    expect(parsed.items.map((item) => item.dueDate)).toEqual(['2026-09-05', '2026-09-07', '2026-09-10'])
   })
 })

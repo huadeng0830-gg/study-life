@@ -338,8 +338,9 @@ function pickBillFields(b) {
 function saveBill() {
   const f = billForm.value
   if (!f.name.trim()) { billError.value = '请填写名称'; return }
-  if (f.amount === '' || Number(f.amount) < 0) { billError.value = '请填写正确金额'; return }
+  if (!Number.isFinite(Number(f.amount)) || !(Number(f.amount) > 0)) { billError.value = '金额必须大于 0'; return }
   if (!f.nextDate) { billError.value = '请选择下次支付日期'; return }
+  if (!Number.isFinite(Number(f.remindDays)) || Number(f.remindDays) < 0) { billError.value = '提前提醒天数不能小于 0'; return }
   const data = {
     name: f.name.trim(), amount: Number(f.amount), cycle: f.cycle,
     nextDate: f.nextDate, remindDays: Number(f.remindDays) || 0,

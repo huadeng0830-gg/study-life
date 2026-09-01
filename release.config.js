@@ -7,6 +7,14 @@
 // 3. 更早的版本逐条下移，最多保留 3 个版本，超出即删除。
 export const RELEASE_UPDATES = Object.freeze([
   {
+    version: '2026年09月01日-版本22',
+    signature: 'f2b194fba7',
+    notes: [
+      '粘贴通知：升级为通知理解确认流程，按缴费、作业、会议、考试、课程和普通通知动态展示关键事实并推荐处理方式',
+      '粘贴通知：支持行动结论可编辑、原文折叠与重新解析、可靠多事项选择，以及待办/作业/日程/仅保存通知分流',
+    ],
+  },
+  {
     version: '2026年09月01日-版本21',
     signature: '8016b67e1a',
     notes: [
@@ -360,7 +368,7 @@ export const RELEASE_UPDATES = Object.freeze([
 export const RELEASE_VERSION = RELEASE_UPDATES[0].version
 
 // 与第一条签名保持一致，交给 vite.config.js 校验源码一致性。
-export const RELEASE_SOURCE_SIGNATURE = '8016b67e1a'
+export const RELEASE_SOURCE_SIGNATURE = 'b15733bf30'
 
 // 兼容旧引用：当前版本的更新说明。
 export const RELEASE_NOTES = RELEASE_UPDATES[0].notes

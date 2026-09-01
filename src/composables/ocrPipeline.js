@@ -290,6 +290,7 @@ function detectDayGeometry(layout) {
   } else if (unique.length === 1) firstCenter = unique[0].x - spacing * unique[0].day
   return {
     detectedHeaders: unique.length,
+    days: unique.map((item) => item.day).sort((left, right) => left - right),
     centers: Array.from({ length: 7 }, (_, day) => firstCenter + spacing * day),
     spacing: Math.abs(spacing),
     top: unique.length ? Math.max(...unique.map((item) => item.y)) : layout.height * 0.22,
@@ -300,8 +301,13 @@ function detectDayGeometry(layout) {
 function needsDetailPass(result, kind, mode, quality) {
   if (mode === 'accurate') return true
   if (result.confidence < 74) return true
-  if (kind === 'timetable') return detectDayGeometry(result.layout).detectedHeaders < 4
-  if (kind === 'schedule') return structuredEvidence(result, kind) < 28
+  // Full-page OCR can read every character yet still lose their cell ownership
+  // in tall web timetables. A column pass is therefore required for course
+  // tables; it is the only stage that verifies weekday-to-course assignment.
+  if (kind === 'timetable') return true
+  // 作息表的数字即使被全文 OCR 读到，仍可能归属到错误的“季节 × 校区”列。
+  // 对它始终执行表格行核对，避免高置信度文本掩盖列错位。
+  if (kind === 'schedule') return true
   return Boolean(quality.needsEnhancement && result.confidence < 84)
 }
 
@@ -324,23 +330,25 @@ function cropColumn(source, geometry, day) {
 }
 
 async function recognizeTimetableColumns(instance, source, bestResult, signal = null) {
-  if (!/(?:星期|周)[一二三四五六日天]/.test(bestResult.text) || !/(?:0?1\s*[-—]\s*0?2|0102)/.test(bestResult.text)) return []
   const geometry = detectDayGeometry(bestResult.layout)
-  // Do not crop a guessed seven-column grid when the image itself did not
-  // provide enough weekday anchors. The layout parser can still use the full
-  // spatial OCR output, while the preview asks for confirmation instead of
-  // assigning course blocks to invented columns.
-  if (geometry.detectedHeaders < 2) return []
+  const crops = geometry.detectedHeaders >= 2
+    ? geometry.days.map((day) => ({ day, canvas: cropColumn(source, geometry, day), inferred: false }))
+    : timetableGridColumns(detectTableGrid(source)).map((column) => ({
+      ...column,
+      canvas: cropTimetableGridColumn(source, column),
+      inferred: true,
+    }))
+  const usableCrops = crops.filter((crop) => crop.canvas)
+  if (!usableCrops.length) return []
   const columns = []
   await instance.setParameters({ tessedit_pageseg_mode: ocrWorker.tesseractModule.PSM.SINGLE_BLOCK, preserve_interword_spaces: '1' })
   try {
-    for (let day = 0; day < 7; day++) {
-      const canvas = cropColumn(source, geometry, day)
-      if (!canvas) continue
-      const data = await recognizeWithTimeout(instance, canvas, `正在按星期核对... ${day + 1}/7`, 82 + day * 2.3, 84 + day * 2.2, signal)
-      if (String(data.text || '').trim()) columns.push({ day, text: data.text, confidence: data.confidence })
-      canvas.width = 1
-      canvas.height = 1
+    for (const [index, crop] of usableCrops.entries()) {
+      const progress = 82 + (index / Math.max(1, usableCrops.length)) * 15
+      const data = await recognizeWithTimeout(instance, crop.canvas, `正在按星期核对... ${index + 1}/${usableCrops.length}`, progress, progress + 1.8, signal)
+      if (String(data.text || '').trim()) columns.push({ day: crop.day, text: data.text, confidence: data.confidence, inferred: crop.inferred })
+      crop.canvas.width = 1
+      crop.canvas.height = 1
     }
   } finally {
     await instance.setParameters({ tessedit_pageseg_mode: ocrWorker.tesseractModule.PSM.SPARSE_TEXT, preserve_interword_spaces: '1' }).catch(() => {})
@@ -392,6 +400,43 @@ function detectTableGrid(source) {
   if (yLines.length && yLines[yLines.length - 1] < source.height * 0.96) yLines.push(source.height - 1)
   const valid = xLines.length >= 3 && xLines.length <= 16 && yLines.length >= 5 && yLines.length <= 40
   return { xLines, yLines, valid }
+}
+
+function timetableGridColumns(grid) {
+  if (!grid.valid || grid.xLines.length < 9 || grid.xLines.length > 12 || grid.yLines.length < 3) return []
+  const cells = grid.xLines.slice(0, -1).map((left, index) => ({ left, right: grid.xLines[index + 1], width: grid.xLines[index + 1] - left }))
+  let selected = null
+  for (let index = 0; index <= cells.length - 7; index++) {
+    const candidate = cells.slice(index, index + 7)
+    const widths = candidate.map((cell) => cell.width).filter((width) => width > 0)
+    const min = Math.min(...widths)
+    const max = Math.max(...widths)
+    if (!min || max / min > 1.45) continue
+    const score = widths.reduce((sum, width) => sum + width, 0) - (max - min) * 4
+    if (!selected || score > selected.score) selected = { score, cells: candidate }
+  }
+  if (!selected) return []
+  const top = grid.yLines[1] ?? grid.yLines[0]
+  const bottom = grid.yLines[grid.yLines.length - 1]
+  return selected.cells.map((cell, day) => ({ ...cell, day, top, bottom }))
+}
+
+function cropTimetableGridColumn(source, column) {
+  const padding = Math.max(2, Math.round((column.right - column.left) * 0.025))
+  const left = Math.max(0, column.left + padding)
+  const top = Math.max(0, column.top + padding)
+  const width = Math.max(1, Math.min(source.width - left, column.right - column.left - padding * 2))
+  const height = Math.max(1, Math.min(source.height - top, column.bottom - top - padding * 2))
+  if (width < 30 || height < 60) return null
+  const scale = Math.min(2, Math.sqrt(1_650_000 / Math.max(1, width * height)))
+  const canvas = document.createElement('canvas')
+  canvas.width = Math.max(1, Math.round(width * scale))
+  canvas.height = Math.max(1, Math.round(height * scale))
+  const context = canvas.getContext('2d', { alpha: false })
+  context.fillStyle = '#fff'
+  context.fillRect(0, 0, canvas.width, canvas.height)
+  context.drawImage(source, left, top, width, height, 0, 0, canvas.width, canvas.height)
+  return canvas
 }
 
 function cropGridRow(source, grid, top, bottom) {
@@ -472,6 +517,7 @@ export async function performOCR(file, onProgress = null, options = {}) {
     const originalData = await recognizeWithTimeout(instance, prepared.canvas, '正在识别原图...', 60, 75, signal)
     const variants = [normalizeResult(originalData, prepared.canvas, 'original')]
     const shouldCompareEnhanced = mode === 'accurate'
+      || kind === 'schedule'
       || variants[0].confidence < 72
       || (kind !== 'generic' && structuredEvidence(variants[0], kind) < 16)
     if (shouldCompareEnhanced) {

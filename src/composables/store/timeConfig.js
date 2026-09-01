@@ -369,6 +369,17 @@ export function periodIndex(id) {
   return timeConfig.value.periods.findIndex((p) => p.id === id)
 }
 
+export function courseUsesPeriod(course, periodId, periods = timeConfig.value.periods) {
+  if (!course || !periodId || !Array.isArray(periods)) return false
+  const targetIndex = periods.findIndex((period) => period.id === periodId)
+  const startIndex = periods.findIndex((period) => period.id === course.start)
+  const endIndex = periods.findIndex((period) => period.id === course.end)
+  if (targetIndex < 0 || startIndex < 0 || endIndex < 0) return false
+  const first = Math.min(startIndex, endIndex)
+  const last = Math.max(startIndex, endIndex)
+  return targetIndex >= first && targetIndex <= last
+}
+
 export function periodLabelById(id) {
   return timeConfig.value.periods.find((p) => p.id === id)?.label ?? '未知节次'
 }

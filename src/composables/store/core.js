@@ -40,7 +40,9 @@ function writeNow(key, makeRaw) {
   try {
     const raw = makeRaw()
     localStorage.setItem(key, raw)
-    mirrorLocalValue(key, raw).catch((error) => recordSilentError('vault-mirror', error))
+    // 来自响应式业务状态的写入是用户已确认的最新事实；即便是空集合，
+    // 也必须覆盖影子副本，避免之后把已删除的数据重新恢复出来。
+    mirrorLocalValue(key, raw, { allowEmpty: true }).catch((error) => recordSilentError('vault-mirror', error))
     markLocalChanged(key, raw)
   } catch (error) {
     // 配额溢出/隐私模式等失败不阻塞应用，但必须留下排查线索。

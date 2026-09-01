@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseBatchLine, periodIdFromNumber } from '../src/composables/courseParser.js'
+import { numberedPeriodOptions, parseBatchLine, periodIdFromNumber } from '../src/composables/courseParser.js'
 
 const timeConfig = {
   value: {
@@ -33,6 +33,19 @@ describe('课程批量录入解析', () => {
   it('没有编号标签的自定义节次仍按顺序兼容', () => {
     const custom = [{ id: 'a', label: '上午一' }, { id: 'b', label: '上午二' }]
     expect(periodIdFromNumber(custom, 2)).toBe('b')
+  })
+
+  it('确认卡节次选项实时使用当前作息设置，并排除非课程时段', () => {
+    const custom = [
+      { id: 'early', label: '早自习' },
+      { id: 'am', label: '上午课 A' },
+      { id: 'pm', label: '下午课 B' },
+      { id: 'break', label: '午休' },
+    ]
+    expect(numberedPeriodOptions(custom)).toEqual([
+      { id: 'am', label: '上午课 A', number: 1 },
+      { id: 'pm', label: '下午课 B', number: 2 },
+    ])
   })
 
   it('支持表格识别生成的地点与教师标签', () => {

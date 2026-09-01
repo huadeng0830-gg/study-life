@@ -73,6 +73,48 @@ describe('教务系统表格课表识别', () => {
     expect(result.courses[1]).toMatchObject({ name: '普通化学实验', startWeek: 5, endWeek: 12 })
   })
 
+  it('支持教务系统 Excel 把整个课程块压缩为一行，并识别方括号周次', () => {
+    const result = parseTimetableColumns([{
+      day: 1,
+      confidence: 96,
+      text: '环境工程原理A 李晓锐 1-16[周] 1206(博学楼) [01-02]节 环工2504',
+    }, {
+      day: 3,
+      confidence: 96,
+      text: '环境工程原理A 李晓锐 13-16[周] 应用化学实验室(岭西101) [05-06-07-08]节 环工2504',
+    }], timeConfig, 25)
+
+    expect(result.courses).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: '环境工程原理A', day: 1, start: 'p1', end: 'p2', startWeek: 1, endWeek: 16, teacher: '李晓锐' }),
+      expect.objectContaining({ name: '环境工程原理A', day: 3, start: 'p5', end: 'p8', startWeek: 13, endWeek: 16 }),
+    ]))
+  })
+
+  it('保留楼名加房间号，而只过滤真正的班级编号', () => {
+    const result = parseTimetableColumns([{
+      day: 2,
+      confidence: 96,
+      text: '大学生创业基础 杨金涛 1-16[周] 追光楼3603(智慧) [07-08]节 环工2504',
+    }], timeConfig, 25)
+
+    expect(result.courses).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: '大学生创业基础', room: '追光楼3603(智慧)', teacher: '杨金涛' }),
+    ]))
+  })
+
+  it('对 OCR 残缺括号的教室字段标记人工确认', () => {
+    const result = parseTimetableColumns([{
+      day: 1,
+      confidence: 96,
+      text: '环境工程原理A 李晓锐 1-16[周] 应用化学实验室(岭西101] [01-02]节 环工2504',
+    }], timeConfig, 25)
+
+    expect(result.courses[0].room).toContain('岭西101]')
+    expect(result.courses[0].needsReview).toBe(true)
+    expect(result.courses[0].reviewReasons).toContain('地点包含残缺括号或异常符号')
+    expect(selectBestTimetableExtraction(result).diagnostics.reviewCount).toBe(1)
+  })
+
   it('按结构完整性选择结果，而不是只比较课程数量', () => {
     const noisy = {
       courses: [
@@ -93,6 +135,15 @@ describe('教务系统表格课表识别', () => {
     const selected = selectBestTimetableExtraction(noisy, structured)
     expect(selected.batchText).toBe('structured')
     expect(selected.diagnostics).toMatchObject({ invalid: 0, duplicateSlots: 0, reviewCount: 0 })
+  })
+
+  it('合并同一时间格中仅 OCR 尾字不同的重复课程', () => {
+    const result = parseTimetableColumns([{
+      day: 0,
+      confidence: 80,
+      text: `参与式环境监测方法与实践牛到\n张老师\n5-8(周)\n1305\n[05-06-07-08]节\n参与式环境监测方法与实践牛唆\n张老师\n5-8(周)\n1305\n[05-06-07-08]节`,
+    }], timeConfig, 20)
+    expect(result.courses).toHaveLength(1)
   })
 
   it('使用图片中不等宽的星期锚点，而不是推定七等分列', () => {
@@ -130,6 +181,22 @@ describe('教务系统表格课表识别', () => {
     expect(parsed.courses.map((course) => [course.name, course.day])).toEqual([
       ['线性代数', 0],
       ['大学物理', 1],
+    ])
+  })
+
+  it('星期表头只出现在 OCR 行级结果时，仍能用单词坐标恢复课程列', () => {
+    const layout = {
+      width: 800,
+      height: 600,
+      lines: [item('星期一', 180, 40), item('星期三', 500, 40)],
+      words: [
+        item('高等数学', 180, 120), item('1-16(周)', 180, 150), item('[01-02]节', 180, 180),
+        item('大学英语', 500, 120), item('1-16(周)', 500, 150), item('[01-02]节', 500, 180),
+      ],
+    }
+    const parsed = parseTimetableLayout(layout, timeConfig, 20)
+    expect(parsed.courses.map((course) => [course.name, course.day])).toEqual([
+      ['高等数学', 0], ['大学英语', 2],
     ])
   })
 

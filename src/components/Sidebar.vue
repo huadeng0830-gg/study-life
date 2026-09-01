@@ -8,9 +8,11 @@ import { preloadCommonRoutes, preloadRoute } from '../router/routePreload.js'
 const loadDataManager = () => import('./DataManager.vue')
 const loadAppearanceSettings = () => import('./AppearanceSettings.vue')
 const loadQuickRecordSettings = () => import('./QuickRecordSettings.vue')
+const loadFocusSettings = () => import('./FocusSettings.vue')
 const DataManager = defineAsyncComponent(loadDataManager)
 const AppearanceSettings = defineAsyncComponent(loadAppearanceSettings)
 const QuickRecordSettings = defineAsyncComponent(loadQuickRecordSettings)
+const FocusSettings = defineAsyncComponent(loadFocusSettings)
 
 const navGroups = [
   {
@@ -51,6 +53,7 @@ const showMobileMore = ref(false)
 const showDataManager = ref(false)
 const showAppearance = ref(false)
 const showQuickRecordSettings = ref(false)
+const showFocusSettings = ref(false)
 const checkingUpdate = ref(false)
 const updateNotice = ref('')
 const props = defineProps({ quickRecordOpen: Boolean })
@@ -61,6 +64,7 @@ let warmupTimer = 0
 function warmTool(name) {
   if (name === 'data') void loadDataManager()
   if (name === 'appearance') void loadAppearanceSettings()
+  if (name === 'focus') void loadFocusSettings()
 }
 
 function warmRoute(path) {
@@ -194,6 +198,7 @@ function chooseTheme(key) {
             <span>{{ item.icon }}</span><small>{{ item.label }}</small>
           </router-link>
           <button type="button" class="mobile-more-item" @click="showMobileMore = false; showAppearance = true"><span>🎨</span><small>个性化</small></button>
+<button type="button" class="mobile-more-item" @click="showMobileMore = false; showFocusSettings = true" @pointerdown="warmTool('focus')"><span>⏱</span><small>专注设置</small></button>
           <button type="button" class="mobile-more-item" @click="showMobileMore = false; showQuickRecordSettings = true"><span>⚡</span><small>快速记录设置</small></button>
           <button type="button" class="mobile-more-item" @click="showMobileMore = false; showDataManager = true"><span>💾</span><small>数据管理</small></button>
           <button type="button" class="mobile-more-item" :disabled="checkingUpdate" @click="showMobileMore = false; checkUpdate()"><span>↻</span><small>{{ checkingUpdate ? '检查中…' : '检查更新' }}</small></button>
@@ -238,6 +243,9 @@ function chooseTheme(key) {
       <button type="button" class="nav-item data-item" @click="showQuickRecordSettings = true">
         <span class="icon">⚡</span><span class="nav-label">快速记录设置</span>
       </button>
+<button type="button" class="nav-item data-item" @pointerenter="warmTool('focus')" @focus="warmTool('focus')" @click="showFocusSettings = true">
+          <span class="icon">⏱</span><span class="nav-label">专注设置</span>
+        </button>
       <button type="button" class="nav-item data-item" :disabled="checkingUpdate" @click="checkUpdate">
         <span class="icon" aria-hidden="true">↻</span>
         <span class="nav-label">{{ checkingUpdate ? '检查中…' : '检查更新' }}</span>
@@ -272,6 +280,7 @@ function chooseTheme(key) {
   <DataManager v-if="showDataManager" :open="showDataManager" @close="showDataManager = false" />
   <AppearanceSettings v-if="showAppearance" :open="showAppearance" @close="showAppearance = false" />
   <QuickRecordSettings v-if="showQuickRecordSettings" :open="showQuickRecordSettings" @close="showQuickRecordSettings = false" />
+<FocusSettings v-if="showFocusSettings" :open="showFocusSettings" @close="showFocusSettings = false" />
 </template>
 
 <style scoped>

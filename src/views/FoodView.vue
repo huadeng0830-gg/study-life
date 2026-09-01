@@ -33,6 +33,8 @@ const picked = ref(null)
 const meal = ref(currentMeal())
 const form = ref(emptyForm())
 const deleteTarget = ref(null)
+const deleteUndo = ref(null)
+let deleteUndoTimer = 0
 const spinDegrees = ref(0)
 const spinning = ref(false)
 const flashPlace = ref(null)
@@ -314,12 +316,30 @@ function deletePlaceCard(place) {
 function confirmDeletePlace() {
   const place = deleteTarget.value
   if (!place) return
+  const index = places.value.findIndex((item) => item.id === place.id)
+  const wasSkipped = skippedIds.value.includes(place.id)
   places.value = places.value.filter((item) => item.id !== place.id)
   skippedIds.value = skippedIds.value.filter((id) => id !== place.id)
   if (flashPlace.value?.id === place.id) flashPlace.value = null
   if (picked.value?.id === place.id) picked.value = null
   if (lastSelectedId.value === place.id) lastSelectedId.value = ''
   deleteTarget.value = null
+  deleteUndo.value = { place, index, wasSkipped }
+  window.clearTimeout(deleteUndoTimer)
+  deleteUndoTimer = window.setTimeout(() => { deleteUndo.value = null }, 6000)
+}
+
+function undoDeletePlace() {
+  const snapshot = deleteUndo.value
+  if (!snapshot) return
+  if (!places.value.some((item) => item.id === snapshot.place.id)) {
+    places.value.splice(Math.min(Math.max(0, snapshot.index), places.value.length), 0, snapshot.place)
+  }
+  if (snapshot.wasSkipped && !skippedIds.value.includes(snapshot.place.id)) {
+    skippedIds.value = [...skippedIds.value, snapshot.place.id]
+  }
+  deleteUndo.value = null
+  window.clearTimeout(deleteUndoTimer)
 }
 
 function toggleSkipCurrent() {
@@ -415,6 +435,7 @@ function stopPickerAnimation() {
 
 onDeactivated(stopPickerAnimation)
 onBeforeUnmount(stopPickerAnimation)
+onBeforeUnmount(() => window.clearTimeout(deleteUndoTimer))
 
 function markAte() {
   if (!picked.value) return
@@ -756,11 +777,15 @@ const wheelGradient = computed(() => {
     <ConfirmDialog
       :open="Boolean(deleteTarget)"
       title="删除候选"
-      :message="`确定删除候选“${deleteTarget?.name || ''}”吗？此操作无法撤销。`"
+      :message="`确定删除候选“${deleteTarget?.name || ''}”吗？删除后可在短时间内撤销。`"
       confirm-label="删除"
       @close="deleteTarget = null"
       @confirm="confirmDeletePlace"
     />
+    <div v-if="deleteUndo" class="undo-toast" role="status" aria-live="polite">
+      <span>候选已删除</span>
+      <button type="button" @click="undoDeletePlace">撤销</button>
+    </div>
   </div>
 </template>
 
@@ -974,6 +999,8 @@ h2.rolling { filter: blur(0.4px); opacity: .82; }
 .error { color: var(--danger); font-size: 12px; }
 .actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
 .actions .btn-danger { margin-right: auto; }
+.undo-toast { position: fixed; right: 18px; bottom: calc(24px + env(safe-area-inset-bottom)); z-index: 90; display: flex; align-items: center; gap: 14px; padding: 11px 14px; color: #fff; border-radius: 10px; background: #263247; box-shadow: var(--shadow-lg); }
+.undo-toast button { padding: 3px 6px; color: #9db6ff; font-weight: 800; border: 0; background: transparent; }
 
 /* ============ 平板与手机（< 900 起变单列，< 768 起手机化，< 480 再收紧） ============ */
 @media (max-width: 900px) {

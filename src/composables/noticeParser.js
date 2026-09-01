@@ -2,7 +2,18 @@
 const WEEKDAY = { 日: 0, 天: 0, 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6 }
 const CN_DIGITS = { 零: 0, 〇: 0, 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 }
 const PERIOD_WORDS = '凌晨|早上|上午|中午|下午|晚上|夜里|今晚|今早'
-const ACTION_WORDS = '提交|上交|上传|完成|报名|填写|领取|参加|召开|开会|举行|签到|上课|听|交|改到|换到|处理|确认|缴费'
+const ACTION_WORDS = '提交|上交|上传|完成|报名|填写|领取|参加|召开|开会|举行|签到|报到|集合|上课|听|交|改到|换到|处理|确认|缴费'
+
+export const NOTICE_TYPE_OPTIONS = [
+  { value: '缴费', label: '缴费', icon: '💰' },
+  { value: '作业', label: '作业', icon: '📚' },
+  { value: '会议', label: '会议', icon: '📅' },
+  { value: '考试', label: '考试', icon: '📝' },
+  { value: '课程', label: '课程', icon: '🏫' },
+  { value: '截止', label: '截止事项', icon: '⏳' },
+  { value: '提醒', label: '提醒', icon: '🔔' },
+  { value: '通知', label: '普通通知', icon: '📣' },
+]
 
 function pad(value) {
   return String(value).padStart(2, '0')
@@ -82,7 +93,7 @@ function isPublicationCandidate(candidate, text) {
 
 function isDeadlineCandidate(candidate, text) {
   const context = text.slice(Math.max(0, candidate.start - 8), Math.min(text.length, candidate.end + 16))
-  return /截止|截至|最晚|之前|以前|报名截止/.test(context)
+    return /截止|截至|最晚|之前|以前|报名截止|前/.test(context)
 }
 
 /** 找出所有日期候选；选择事件日期时会排除末尾的通知发布日期。 */
@@ -188,7 +199,7 @@ export function extractLocationCandidates(value) {
   const candidates = []
   const patterns = [
     { pattern: /(?:地点|地址|会议地点)\s*[:：]\s*([^\n，,。；;]+)/g, explicit: true },
-    { pattern: /(?:在|到|于(?!\s*(?:\d{1,4}\s*(?:月|日|号|点|时)|\d{1,2}\s*[:：]|今天|明天|后天|本周|下周)))\s*([^\n，,。；;]+?)(?=\s*(?:召开|开会|开班会|举行|参加|上课|集合|签到|开始|听|提交|上交|上传|完成|报名|填写|领取|携带|处理|确认|缴费|[。.!！?？]|$))/g, explicit: false },
+    { pattern: /(?:在|到|于(?!\s*(?:\d{1,4}\s*(?:月|日|号|点|时)|\d{1,2}\s*[:：]|今天|明天|后天|本周|下周)))\s*([^\n，,。；;]+?)(?=\s*(?:召开|开会|开班会|举行|参加|上课|集合|签到|报到|开始|听|提交|上交|上传|完成|报名|填写|领取|携带|处理|确认|缴费|[。.!！?？]|$))/g, explicit: false },
   ]
   for (const { pattern, explicit } of patterns) {
     for (const match of text.matchAll(pattern)) {
@@ -272,11 +283,139 @@ function noteFrom(text, title, reminder) {
 }
 
 function classifyNotice(text, title) {
+  if (/缴费|交费|学费|收费|付款|支付/.test(text)) return '缴费'
+  if (/考试|测验|期中|期末|模拟考|模拟考试|四六级|六级|四级/.test(text)) return '考试'
   if (/班会|会议|开会|组会|答辩|面试|讲座|活动|签到|召开|举行/.test(text)) return '会议'
   if (/调课|改到|换到|上课|课程/.test(text)) return '课程'
   if (/作业|实验报告|论文|习题|上交|提交|上传/.test(text)) return '作业'
   if (/截止|截至|最晚|逾期|之前|以前/.test(text)) return '截止'
+  if (/(报名|报到|集合|提交|完成|缴费)/.test(text) && /前|日期|时间|今天|明天|后天|本周|下周|\d{1,2}月|\d{1,2}日/.test(text)) return '截止'
+  if (/公告|公示|须知|开放时间|安排如下|说明如下|通知如下|信息通知/.test(text)) return '通知'
   return title && title !== '待处理通知' ? '提醒' : '通知'
+}
+
+function extractAmount(text) {
+  const match = text.match(/(?:金额|费用|收费标准|缴费金额)\s*[:：]?\s*(?:人民币|RMB|¥|￥)?\s*(\d+(?:\.\d{1,2})?)\s*(?:元|块)?/i) || text.match(/(?:人民币|RMB|¥|￥)\s*(\d+(?:\.\d{1,2})?)/i)
+  return match ? `¥${match[1]}` : ''
+}
+
+function extractPaymentPlatform(text) {
+  const match = text.match(/(?:通过|登录|进入|在)\s*([^，,。；;\n]{1,24}?)(?:缴费|支付|付款)/)
+  if (!match) return ''
+  const value = match[1].replace(/^(?:手机|线上|网上|统一)\s*/, '').trim()
+  return value && !/^(?:本学期|相关|平台已开放)$/.test(value) ? value : ''
+}
+
+function extractDateRangeText(text) {
+  const range = text.match(/((?:\d{1,2}\s*月)?\s*(?:上旬|中旬|下旬)(?:\s*(?:至|到|[-—~～])\s*(?:\d{1,2}\s*月)?\s*(?:上旬|中旬|下旬)))/)
+  if (range) return range[1].replace(/\s+/g, '')
+  const relative = text.match(/(?:本周|下周|这周|近期|近日)(?:内|左右)?/)
+  return relative ? relative[0] : ''
+}
+
+function actionTextFor(type, title, text) {
+  const subject = String(title || '').replace(/^(?:参加|完成|提交|上交|上传|缴费|报名|处理)\s*/, '').trim() || '这项通知'
+  if (type === '缴费') {
+    if (/学费/.test(text)) return '完成本学期学费缴纳'
+    if (/住宿费/.test(text)) return '完成住宿费缴纳'
+    return '完成本次缴费'
+  }
+  if (type === '作业') return `提交${subject}`
+  if (type === '考试') return `参加${subject}`
+  if (type === '会议') return `参加${subject}`
+  if (type === '截止' && /报到/.test(text)) {
+    const location = text.match(/(?:到|在)\s*([^，,。；;\n]+?)\s*报到/)?.[1]?.trim()
+    return location ? `前往${location}报到` : '按通知要求报到'
+  }
+  if (type === '课程') return '查看课程调整并按新安排上课'
+  if (type === '截止') return `完成${subject}`
+  if (type === '通知') return '无需操作'
+  if (type === '提醒') return /带|携带/.test(text) ? `准备${subject}` : `处理${subject}`
+  return subject
+}
+
+function summaryFor(text, title) {
+  const firstSentence = normalizeText(text).split(/[。！？!?\n]/).map((item) => item.trim()).find(Boolean) || ''
+  const summary = firstSentence.replace(title, '').replace(/^[:：、，,\s]+|[:：、，,\s]+$/g, '').trim()
+  return (summary || title || '待处理通知').slice(0, 120)
+}
+
+function refineTitle(title, type, text) {
+  let result = String(title || '').replace(/[.。…]+$/g, '').replace(/\s+/g, ' ').trim()
+  if (type === '考试' || type === '会议') result = result.replace(/\s*(?:举行|召开|开会|参加|签到|报到)\s*$/, '').trim()
+  if (type === '会议') result = result.replace(/^开(?=班会|会)/, '')
+  if (type === '缴费') {
+    const firstRelevant = normalizeText(text).split(/[。！？!?\n，,]/).map((item) => item.trim()).find((item) => /学费|缴费|收费/.test(item))
+    if (firstRelevant && firstRelevant.length <= 48) result = firstRelevant.replace(/^(?:转发|关于|请大家|请各位)\s*/, '').replace(/(?:通知|请查收)$/, '').trim()
+  }
+  return result.slice(0, 80) || '待处理通知'
+}
+
+function recommendationFor(type) {
+  if (type === '会议' || type === '考试') return { key: 'event', label: '加入日程', reason: '这是一个有明确发生时间的事项。' }
+  if (type === '作业') return { key: 'homework', label: '添加作业', reason: '保留课程作业语义，并按截止时间管理。' }
+  if (type === '课程') return { key: 'note', label: '保存课程通知', reason: '当前先保存调课信息，不直接改动课表。' }
+  if (type === '通知') return { key: 'note', label: '仅保存通知', reason: '这条内容没有明确需要你完成的动作。' }
+  return { key: 'task', label: '创建待办', reason: '这条内容包含需要完成或处理的动作。' }
+}
+
+function extractNoticeItems(text, courses, now) {
+  const clauses = normalizeText(text).split(/[\n。！？!?；;]/).flatMap((line) => line.split(/[，,]/)).map((item) => item.trim()).filter(Boolean)
+  const actionClauses = clauses.filter((clause) => new RegExp(`(?:${ACTION_WORDS}|报到|带)`).test(clause) && !/缴费平台|缴费工作安排|缴费通知|缴费时间/.test(clause))
+  if (actionClauses.length < 2 || actionClauses.length > 5) return []
+  const items = actionClauses.map((clause, index) => {
+    const item = parseNotice(clause, courses, now, { skipItems: true })
+    return {
+      id: `notice-item-${index + 1}`,
+      title: item.actionText === '无需操作' ? item.title : item.actionText,
+      type: item.type,
+      dueDate: item.dueDate,
+      dueTime: item.dueTime,
+      endTime: item.endTime,
+      dateRange: item.dateRange,
+      dateText: item.dateText,
+      location: item.location,
+      course: item.course,
+      deadline: item.deadline,
+      confidence: item.confidence,
+      sourceText: clause,
+    }
+  }).filter((item) => item.title && item.title !== '待处理通知')
+  return items.length >= 2 ? items : []
+}
+
+export function buildNoticeUnderstanding(parsed) {
+  if (!parsed) return null
+  const type = parsed.type || '通知'
+  const recommendation = recommendationFor(type)
+  const facts = []
+  const addFact = (key, label, value, kind = 'text') => { if (value) facts.push({ key, label, value, kind }) }
+  const dateValue = parsed.dueDate || parsed.dateRange
+  if (dateValue) {
+    const label = type === '缴费' ? '缴费时间' : type === '截止' || type === '作业' ? '截止' : type === '课程' ? '生效' : '日期'
+    addFact('dueDate', label, dateValue, parsed.dueDate ? 'date' : 'text')
+  }
+  if (parsed.dueTime) addFact('dueTime', type === '缴费' ? '时间' : '时间', parsed.dueTime, 'time')
+  if (parsed.endTime) addFact('endTime', '结束', parsed.endTime, 'time')
+  if (parsed.location) addFact('location', '地点', parsed.location)
+  if (parsed.course && type !== '课程') addFact('course', '课程', parsed.course)
+  if (type === '缴费') {
+    addFact('amount', '金额', parsed.amount)
+    addFact('paymentPlatform', '缴费平台', parsed.paymentPlatform)
+  }
+  return {
+    type,
+    actionText: parsed.actionText || actionTextFor(type, parsed.title, parsed.content || parsed.rawText),
+    summary: parsed.summary || summaryFor(parsed.content || parsed.rawText, parsed.title),
+    facts,
+    recommendation,
+    hasAction: type !== '通知',
+    warnings: [
+      ...((parsed.uncertain || parsed.dateCandidates?.some((item) => item.ambiguous)) ? ['部分信息需要确认'] : []),
+      ...(!parsed.dueDate && !parsed.dateRange && type !== '通知' && type !== '提醒' ? ['时间未识别'] : []),
+      ...((parsed.dateCandidates?.filter((item) => !item.isPublication).length || 0) > 1 ? ['原文包含多个日期'] : []),
+    ],
+  }
 }
 
 function confidenceOf({ title, dates, times, location, type, reminder, uncertain }) {
@@ -372,7 +511,7 @@ function similarity(left, right) {
   return (2 * same) / (a.size + b.size)
 }
 
-export function parseNotice(source, courses = [], now = new Date()) {
+export function parseNotice(source, courses = [], now = new Date(), options = {}) {
   const rawText = String(source ?? '')
   const normalizedText = normalizeText(rawText)
   const dateCandidates = extractDateCandidates(normalizedText, now)
@@ -382,22 +521,23 @@ export function parseNotice(source, courses = [], now = new Date()) {
   const location = locations[0]?.raw ?? ''
   const reminder = extractReminder(normalizedText)
   // 清理标题时使用全部日期，避免通知落款日期泄漏到标题。
-  const title = cleanTitle(normalizedText, dateCandidates, timeCandidates, locations)
-  const type = classifyNotice(normalizedText, title)
+  const rawTitle = cleanTitle(normalizedText, dateCandidates, timeCandidates, locations)
+  const type = classifyNotice(normalizedText, rawTitle)
+  const title = refineTitle(rawTitle, type, normalizedText)
   const uncertain = /可能|暂定|预计|待定|或许|另行通知/.test(normalizedText)
   const selectedTime = selectTimeCandidate(timeCandidates, normalizedText, type)
   const rangeEnd = findTimeRange(selectedTime, timeCandidates, normalizedText)
   const endTime = rangeEnd?.time ?? ''
   const selectedDate = selectDateCandidate(eventDates.length ? eventDates : dateCandidates, normalizedText, type)
   const confidence = confidenceOf({ title, dates: eventDates.length ? eventDates : dateCandidates, times: timeCandidates, location, type, reminder, uncertain })
-  const isDeadline = selectedDate ? /截止|截至|最晚|之前|以前|前(?:提交|完成|交|报名|上传|到)/.test(normalizedText.slice(Math.max(0, selectedDate.start - 8), selectedDate.end + 12)) : false
-  const dateRange = selectedDate && !selectedDate.value ? selectedDate.raw : ''
+  const isDeadline = selectedDate ? /截止|截至|最晚|之前|以前|前/.test(normalizedText.slice(Math.max(0, selectedDate.start - 8), selectedDate.end + 12)) : false
+  const dateRange = selectedDate && !selectedDate.value ? selectedDate.raw : selectedDate ? '' : extractDateRangeText(normalizedText)
   const course = (Array.isArray(courses) ? courses : [])
     .map((item) => String(item?.name ?? '').trim())
     .filter(Boolean)
     .filter((name) => normalizedText.includes(name))
     .sort((a, b) => b.length - a.length)[0] ?? ''
-  return {
+  const result = {
     title,
     content: normalizedText,
     type,
@@ -413,8 +553,12 @@ export function parseNotice(source, courses = [], now = new Date()) {
      dateCandidates: dateCandidates.map((item) => ({ raw: item.raw, value: item.value, kind: item.kind, isPublication: Boolean(item.isPublication), isDeadline: Boolean(item.isDeadline), ambiguous: Boolean(item.ambiguous) })),
     location,
     reminder,
+    amount: extractAmount(normalizedText),
+    paymentPlatform: extractPaymentPlatform(normalizedText),
     priority: /紧急|务必|必须|逾期|最后|尽快|立即/.test(normalizedText) ? 'high' : 'normal',
     note: noteFrom(normalizedText, title, reminder),
+    actionText: actionTextFor(type, title, normalizedText),
+    summary: summaryFor(normalizedText, title),
      confidence: confidence.value,
      confidenceLevel: confidence.level,
      uncertain,
@@ -423,6 +567,8 @@ export function parseNotice(source, courses = [], now = new Date()) {
     normalizedText,
     sourceText: rawText,
   }
+  if (!options.skipItems) result.items = extractNoticeItems(normalizedText, courses, now)
+  return result
 }
 
 export function findNoticeChanges(parsed, tasks) {

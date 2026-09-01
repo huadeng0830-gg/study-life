@@ -1,18 +1,11 @@
 import { computed } from 'vue'
 import { periodIndex, timeConfig } from '../store/timeConfig.js'
-import { coursesForDate } from '../store/schedule.js'
+import { coursesForDate, dateForWeekDay } from '../store/schedule.js'
 
-export function useScheduleGrid(courses, scheduleExceptions, semester, viewWeek, mobileView, mobileDay) {
+export function useScheduleGrid(courses, scheduleExceptions, viewWeek, mobileView, mobileDay) {
   const DAYS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
 
-  const viewDates = computed(() =>
-    DAYS.map((_, day) => {
-      const date = new Date(semester.value.start + 'T00:00:00')
-      date.setDate(date.getDate() + (viewWeek.value - 1) * 7 + day)
-      const p = (v) => String(v).padStart(2, '0')
-      return `${date.getFullYear()}-${p(date.getMonth() + 1)}-${p(date.getDate())}`
-    })
-  )
+  const viewDates = computed(() => DAYS.map((_, day) => dateForWeekDay(viewWeek.value, day)))
 
   const viewExceptions = computed(() =>
     viewDates.value.map((date) => scheduleExceptions.value.find((item) => item.date === date) ?? null)
@@ -22,12 +15,7 @@ export function useScheduleGrid(courses, scheduleExceptions, semester, viewWeek,
     viewDates.value.flatMap((date) => coursesForDate(courses.value, date))
   )
 
-  const mobileDate = computed(() => {
-    const date = new Date(semester.value.start + 'T00:00:00')
-    date.setDate(date.getDate() + (viewWeek.value - 1) * 7 + mobileDay.value)
-    const p = (v) => String(v).padStart(2, '0')
-    return `${date.getFullYear()}-${p(date.getMonth() + 1)}-${p(date.getDate())}`
-  })
+  const mobileDate = computed(() => dateForWeekDay(viewWeek.value, mobileDay.value))
 
   const mobileCourses = computed(() =>
     coursesForDate(courses.value, mobileDate.value).sort((a, b) => periodIndex(a.start) - periodIndex(b.start))

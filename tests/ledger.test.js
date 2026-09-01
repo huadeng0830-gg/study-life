@@ -55,4 +55,18 @@ describe('ledger index', () => {
       { name: '咖啡', amount: 15, cat: 'food', count: 2 },
     ])
   })
+
+  it('旧备份中的残缺记录不会拖垮账本索引或污染日期统计', () => {
+    const index = buildLedgerIndex([
+      { id: 'ok', name: '午饭', amount: 18, date: '2026-08-28', time: '12:00' },
+      { id: 'missing-date', name: '旧记录', amount: 9 },
+      null,
+    ])
+    expect(index.sortedExpenses.map((item) => item?.id)).toEqual(['ok', 'missing-date', undefined])
+    expect(ledgerPeriodStatsFromIndex(index, '2026-08-28')).toMatchObject({
+      monthTotal: 18,
+      monthCount: 1,
+      todayTotal: 18,
+    })
+  })
 })

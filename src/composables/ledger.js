@@ -20,7 +20,9 @@ export const ledgerCategories = useStoredRef('sl_ledger_categories', DEFAULT_CAT
 export const freqPrefs = useStoredRef('sl_ledger_freq', { pinned: [], hidden: [] })
 
 function compareExpenseNewestFirst(a, b) {
-  return (b.date + (b.time ?? '')).localeCompare(a.date + (a.time ?? ''))
+  const left = `${String(a?.date ?? '')}${String(a?.time ?? '')}`
+  const right = `${String(b?.date ?? '')}${String(b?.time ?? '')}`
+  return right.localeCompare(left)
 }
 
 function collectFrequentEntry(map, expense) {
@@ -56,16 +58,20 @@ export function buildLedgerIndex(list) {
   const frequentByName = new Map()
 
   for (const expense of source) {
+    if (!expense || typeof expense !== 'object') continue
     const amount = Number(expense.amount || 0)
     const direction = expense.direction === 'income' ? 'income' : 'expense'
-    const month = expense.date.slice(0, 7)
-    const monthStat = monthStats.get(month) ?? { total: 0, income: 0, count: 0 }
-    // 旧记录没有 direction，默认仍是支出；原有“本月支出”统计不受影响。
-    if (direction === 'income') monthStat.income += amount
-    else monthStat.total += amount
-    monthStat.count += 1
-    monthStats.set(month, monthStat)
-    if (direction !== 'income') dayTotals.set(expense.date, (dayTotals.get(expense.date) ?? 0) + amount)
+    const date = String(expense.date ?? '')
+    if (/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      const month = date.slice(0, 7)
+      const monthStat = monthStats.get(month) ?? { total: 0, income: 0, count: 0 }
+      // 旧记录没有 direction，默认仍是支出；原有“本月支出”统计不受影响。
+      if (direction === 'income') monthStat.income += amount
+      else monthStat.total += amount
+      monthStat.count += 1
+      monthStats.set(month, monthStat)
+      if (direction !== 'income') dayTotals.set(date, (dayTotals.get(date) ?? 0) + amount)
+    }
     collectFrequentEntry(frequentByName, expense)
   }
 

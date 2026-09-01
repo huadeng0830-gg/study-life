@@ -10,12 +10,21 @@ lerna-debug.log*
 node_modules
 coverage
 dist
+dist-bak
 dist-ssr
+*.cache
+.npm-npx-cache
 *.local
 .wrangler
 .playwright-cli
 preview.log
 /*.traineddata
+
+# 用户导出的备份与本地数据（不要提交到 GitHub）
+**/备份文件/
+**/backups/
+*.backup.json
+*.export.json
 
 # 本地会话交接草稿：内容随协作过程变化，不作为项目源码或用户文档发布。
 HANDOFF.md

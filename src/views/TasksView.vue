@@ -114,8 +114,9 @@ function save() {
 }
 
 function remove() {
-  tasks.value = tasks.value.filter((task) => task.id !== editingId.value)
+  const task = tasks.value.find((item) => item.id === editingId.value)
   showForm.value = false
+  if (task) deleteTarget.value = task
 }
 
 function toggleDone(event, id) {
@@ -152,14 +153,24 @@ function handleTaskSwipe(direction, task) {
 }
 
 function onNoticeCommit(payload) {
-  const course = findUniqueCourseByName(courses.value, payload.data.course)
-  const data = { ...payload.data, courseId: course?.id ?? '' }
+  const firstData = payload.data || payload.items?.[0] || {}
+  const course = findUniqueCourseByName(courses.value, firstData.course)
+  const withCourse = (value) => ({ ...value, courseId: findUniqueCourseByName(courses.value, value.course)?.id ?? '' })
   if (payload.type === 'update') {
+    const data = withCourse(firstData)
     if (!domain.updateTask(payload.id, data)) return
-    showNoticeMessage(course || !payload.data.course ? `已根据新通知更新“${payload.title}”` : `已更新“${payload.title}”；课程名称未唯一匹配，请检查关联`)
+    showNoticeMessage(course || !firstData.course ? `已根据新通知更新“${payload.title}”` : `已更新“${payload.title}”；课程名称未唯一匹配，请检查关联`)
+  } else if (payload.type === 'event') {
+    payload.items.forEach((item) => domain.createEvent({ ...withCourse(item), courseName: item.course || '', createdFrom: 'clipboard', sourceType: 'notice' }))
+    showNoticeMessage(payload.items.length > 1 ? `已加入 ${payload.items.length} 项日程` : `已加入日程“${payload.items[0].title}”`)
+  } else if (payload.type === 'note') {
+    const data = withCourse(firstData)
+    domain.createNote({ ...data, title: payload.title, content: firstData.content || firstData.rawText, courseName: data.course, createdFrom: 'clipboard', sourceType: 'notice' })
+    showNoticeMessage('已保存通知，未创建待办')
   } else {
-    domain.createTask({ ...data, createdFrom: 'clipboard', sourceType: 'notice' })
-    showNoticeMessage(course || !payload.data.course ? `已创建待办“${payload.title}”` : `已创建“${payload.title}”；课程名称未唯一匹配，请检查关联`)
+    const items = payload.items?.length ? payload.items : [firstData]
+    items.forEach((item) => domain.createTask({ ...withCourse(item), kind: payload.kind || 'todo', createdFrom: 'clipboard', sourceType: 'notice' }))
+    showNoticeMessage(items.length > 1 ? `已创建 ${items.length} 项${payload.kind === 'homework' ? '作业' : '待办'}` : course || !firstData.course ? `已创建待办“${payload.title}”` : `已创建“${payload.title}”；课程名称未唯一匹配，请检查关联`)
   }
 }
 
@@ -284,6 +295,14 @@ function linkCourseFromName() {
 function taskCourseName(task) {
   return courses.value.find((course) => course.id === task.courseId)?.name ?? task.course
 }
+
+function taskFocusSummary(task) {
+  const count = Math.max(0, Number(task.focusCount) || 0)
+  const seconds = Math.max(0, Number(task.focusTotalSeconds) || 0)
+  if (!count && !seconds) return ''
+  const minutes = Math.max(1, Math.round(seconds / 60))
+  return `已专注 ${count} 次 · ${minutes} 分钟`
+}
 </script>
 
 <template>
@@ -351,6 +370,7 @@ function taskCourseName(task) {
             {{ task.done ? '✓' : '' }}
           </button>
 
+<span v-if="taskFocusSummary(task)" class="course-tag focus-tag">{{ taskFocusSummary(task) }}</span>
           <div class="task-main">
             <div class="task-topline">
               <h3>{{ task.title }}</h3>
@@ -562,6 +582,10 @@ function taskCourseName(task) {
   text-overflow: ellipsis;
   white-space: nowrap;
   background: #f1ebff;
+}
+.course-tag.focus-tag {
+  color: #087a58;
+  background: #e7f8f1;
 }
 .task-main p {
   overflow: hidden;

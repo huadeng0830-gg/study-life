@@ -2,7 +2,8 @@ import pluginVue from 'eslint-plugin-vue'
 
 export default [
   {
-    ignores: ['dist/**', 'node_modules/**', '.wrangler/**', 'dev-dist/**'],
+    // 构建产物和历史产物不属于源代码检查范围；否则旧 bundle 会产生海量无关告警。
+    ignores: ['dist/**', 'dist-bak/**', 'node_modules/**', '.wrangler/**', 'dev-dist/**'],
   },
   ...pluginVue.configs['flat/essential'],
   {

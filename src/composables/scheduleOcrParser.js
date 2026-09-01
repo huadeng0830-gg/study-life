@@ -302,13 +302,34 @@ function layoutSchemeHints(layout, options, expectedColumns) {
 }
 
 function candidateFromLine(line, index) {
-  const ranges = extractTimeRanges(line.text)
+  // Layout OCR 的整行文本在跨列表格中偶尔会按识别置信度重排，
+  // 不能只相信拼接后的字符串顺序。若词级框能提供至少两组时间，
+  // 按 x 坐标重新取值，确保“夏南/夏北/冬南/冬北”列顺序稳定。
+  const positionedRanges = Array.isArray(line.words)
+    ? line.words
+      .flatMap((word) => extractTimeRanges(word?.text).map((range) => ({
+        ...range,
+        x: (Number(word?.bbox?.x0) + Number(word?.bbox?.x1)) / 2,
+      })))
+      .filter((range) => Number.isFinite(range.x))
+      .sort((left, right) => left.x - right.x)
+    : []
+  const ranges = positionedRanges.length >= 2
+    ? positionedRanges.map((range) => ({
+      start: range.start,
+      end: range.end,
+      raw: range.raw,
+      index: range.index,
+      valid: range.valid,
+    }))
+    : extractTimeRanges(line.text)
   if (!ranges.length) return null
-  const before = line.text.slice(0, ranges[0].index)
+  const firstRangeIndex = Math.max(0, line.text.indexOf(ranges[0].raw))
+  const before = line.text.slice(0, firstRangeIndex)
     .replace(/^(?:节次|课次|上课时间|时间)\s*[:：]?\s*/i, '')
     .replace(/[|:：,，。]+$/g, '')
     .trim()
-  const after = line.text.slice(ranges[0].index + ranges[0].raw.length).trim()
+  const after = line.text.slice(firstRangeIndex + ranges[0].raw.length).trim()
   const period = normalizePeriod(before) || normalizePeriod(after)
   if (!period) return null
   const range = ranges[0]
@@ -330,6 +351,10 @@ function candidateFromLine(line, index) {
     issues,
     baseScore: (range.valid ? 0.55 : 0.18) + ocrConfidence * 0.28 + (period.start ? 0.1 : 0),
   }
+}
+
+function isLayoutCandidate(candidate) {
+  return Boolean(candidate?.bbox && (candidate.source === 'layout' || String(candidate.source || '').endsWith('-layout')))
 }
 
 function mergeCandidates(candidates) {
@@ -360,11 +385,18 @@ function mergeCandidates(candidates) {
       score -= 0.22
       issues.push(`多次识别结果冲突：${ranked.map(([value]) => value).join(' / ')}`)
     }
-    // 时间列模板：取整组中证据列最多（通常=时间列数）的候选，保持来源顺序。
-    // 若只看胜出候选，表格行重识别（regions）胜出时会因缺少 alternatives
-    // 导致列数塌缩成 1，多组作息被错误合并并互相串时间。
+    // 时间列模板：带坐标的页面布局优先于逐行 OCR，即使后者恰好识别出
+    // 更多时间串也不能覆盖它。逐行 OCR 在跨列、合并单元格里会打乱顺序，
+    // 这正是冬季时间被错填进夏季列的根源；缺列时应留待确认而非错填。
     const template = [...group]
-      .sort((a, b) => (1 + (b.alternatives?.length || 0)) - (1 + (a.alternatives?.length || 0)) || b.baseScore - a.baseScore)[0]
+      .sort((a, b) => {
+        const spatialA = isLayoutCandidate(a) ? 2 : a.bbox && a.source !== 'table-row' ? 1 : 0
+        const spatialB = isLayoutCandidate(b) ? 2 : b.bbox && b.source !== 'table-row' ? 1 : 0
+        if (spatialB !== spatialA) return spatialB - spatialA
+        const optionDiff = (1 + (b.alternatives?.length || 0)) - (1 + (a.alternatives?.length || 0))
+        if (optionDiff) return optionDiff
+        return b.baseScore - a.baseScore
+      })[0]
     const timeOptions = [{ start: template.start, end: template.end }, ...(template.alternatives || [])]
       .filter((option) => option.start || option.end)
     rows.push({
@@ -476,10 +508,14 @@ export function parseScheduleOCR(input, options = {}) {
   }
   const lines = mergeSplitRows(sources)
   const named = detectNamedFields(lines, options.campuses, options.seasons)
-  const preciseCandidates = regionLines.map(candidateFromLine).filter(Boolean)
-  const candidates = preciseCandidates.length >= 3 ? preciseCandidates : lines.map(candidateFromLine).filter(Boolean)
+  // 逐行裁切 OCR 只是一份辅助证据，不能因为它的行数较多就排除带坐标的
+  // 全图布局证据；后者才可稳定恢复“夏/冬 × 南/北”多列的左右关系。
+  const candidates = lines.map(candidateFromLine).filter(Boolean)
+  const expectedColumns = named.seasons.length && named.campuses.length
+    ? named.seasons.length * named.campuses.length
+    : 0
   const rows = validateRows(insertMissingPeriodRows(mergeCandidates(candidates)))
-  const columnCount = Math.max(0, ...rows.map((row) => row.timeOptions?.length || 0))
+  const columnCount = Math.max(expectedColumns, ...rows.map((row) => row.timeOptions?.length || 0))
   const combinations = named.seasons.length && named.campuses.length
     ? named.seasons.flatMap((season) => named.campuses.map((campus) => ({ season, campus })))
     : []
@@ -518,7 +554,7 @@ export function parseScheduleOCR(input, options = {}) {
         // 多组证据但缺当前列时必须留空并标记，避免把别的列/别的组数据串进来。
         const value = index < options.length
           ? options[index]
-          : options.length === 1
+          : options.length === 1 && expectedColumns <= 1
             ? options[0]
             : { start: '', end: '' }
         const issues = [...row.issues]

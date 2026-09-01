@@ -8,13 +8,13 @@ import {
 import { todayStr, MAX_WEEK, dateString } from './utils.js'
 
 export const semester = useStoredRef('sl_semester', {
-  start: (function mondayOfThisWeek() {
+  start: (function defaultSemesterStart() {
     const d = new Date()
-    const todayIdx = new Date().getDay()
-    const idx = todayIdx === 0 ? 6 : todayIdx - 1
-    d.setDate(d.getDate() - idx)
+    const year = d.getFullYear()
+    const month = d.getMonth()
     const p = (n) => String(n).padStart(2, '0')
-    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+    const isAfterSep = month >= 8
+    return `${year + (isAfterSep ? 0 : -1)}-${p(isAfterSep ? 9 : 3)}-01`
   })(),
 })
 
@@ -28,6 +28,14 @@ export function weekOf(dateStr) {
 
 export function currentWeek() {
   return weekOf(todayStr())
+}
+
+export function mondayOfDate(dateStr) {
+  const date = new Date(`${String(dateStr ?? '')}T00:00:00`)
+  if (!dateStr || Number.isNaN(date.getTime())) return ''
+  const day = date.getDay()
+  date.setDate(date.getDate() - (day === 0 ? 6 : day - 1))
+  return dateString(date)
 }
 
 export function courseInWeek(c, week) {

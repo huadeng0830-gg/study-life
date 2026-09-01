@@ -1,5 +1,5 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import Modal from '../Modal.vue'
 import TaskProgress from '../TaskProgress.vue'
 
@@ -11,6 +11,8 @@ const props = defineProps({
   invalidCount: { type: Number, required: true },
   reviewCount: { type: Number, required: true },
   days: { type: Array, required: true },
+  periods: { type: Array, required: true },
+  maxWeek: { type: Number, default: 25 },
   progress: { type: Object, required: true },
   summary: { type: String, default: '' },
   message: { type: String, default: '' },
@@ -26,6 +28,7 @@ const emit = defineEmits([
   'import',
   'upload-image',
   'crop-image',
+  'upload-excel',
   'cancel-progress',
   'retry-progress',
   'continue-progress',
@@ -33,6 +36,7 @@ const emit = defineEmits([
   'undo',
   'continue-import',
   'finish-import',
+  'replace-row',
 ])
 
 const weekTypeLabel = { all: '每周', odd: '单周', even: '双周' }
@@ -50,13 +54,97 @@ function onCropFileChange(event) {
   emit('crop-image', event)
 }
 
+function onExcelFileChange(event) {
+  emit('upload-excel', event)
+}
+
 function coursePeriodText(row) {
-  const start = row.data.start
-  const end = row.data.end
-  return start === end ? start : `${start}至${end}`
+  const start = row?.start
+  const end = row?.end
+  if (!start || !end) return '—'
+  const startLabel = props.periods.find((period) => period.id === start)?.label || start
+  const endLabel = props.periods.find((period) => period.id === end)?.label || end
+  return start === end ? startLabel : `${startLabel} 至 ${endLabel}`
 }
 
 const showRowError = computed(() => Boolean(props.error) && !(props.progress?.state?.active && props.progress?.state?.visible))
+const reviewRows = computed(() => props.rows.filter((row) => row.needsReview && !row.error))
+const editingSourceIndex = ref(null)
+const reviewDraft = reactive({
+  name: '', day: 0, start: '', end: '', startWeek: 1, endWeek: 16, weekType: 'all', room: '', teacher: '',
+})
+const weekOptions = computed(() => Array.from({ length: Math.max(1, props.maxWeek) }, (_, index) => index + 1))
+const canSaveReviewDraft = computed(() => Boolean(
+  reviewDraft.name.trim()
+  && reviewDraft.start
+  && reviewDraft.end
+  && props.periods.some((period) => period.id === reviewDraft.start)
+  && props.periods.some((period) => period.id === reviewDraft.end)
+  && props.periods.findIndex((period) => period.id === reviewDraft.start) <= props.periods.findIndex((period) => period.id === reviewDraft.end)
+  && reviewDraft.startWeek >= 1
+  && reviewDraft.endWeek >= reviewDraft.startWeek
+  && reviewDraft.endWeek <= props.maxWeek,
+))
+
+function onStartWeekChange() {
+  if (reviewDraft.endWeek < reviewDraft.startWeek) reviewDraft.endWeek = reviewDraft.startWeek
+}
+
+function startReviewEdit(row) {
+  if (!row.data) return
+  Object.assign(reviewDraft, {
+    name: row.data.name || '',
+    day: Number(row.data.day) || 0,
+    start: row.data.start || '',
+    end: row.data.end || '',
+    startWeek: Number(row.data.startWeek) || 1,
+    endWeek: Number(row.data.endWeek) || 16,
+    weekType: row.data.weekType || 'all',
+    room: row.data.room || '',
+    teacher: row.data.teacher || '',
+  })
+  editingSourceIndex.value = row.sourceIndex
+}
+
+function saveReviewEdit() {
+  if (!canSaveReviewDraft.value || editingSourceIndex.value === null) return
+  emit('replace-row', {
+    sourceIndex: editingSourceIndex.value,
+    data: { ...reviewDraft, name: reviewDraft.name.trim(), room: reviewDraft.room.trim(), teacher: reviewDraft.teacher.trim() },
+  })
+  editingSourceIndex.value = null
+}
+
+function reviewReason(row) {
+  const reasons = Array.isArray(row.reviewReasons) ? [...row.reviewReasons] : []
+  const details = row.confidence?.details || {}
+  const fields = [
+    ['hasName', '课程名称'],
+    ['hasWeekday', '星期'],
+    ['hasPeriod', '节次'],
+    ['hasWeek', '周次'],
+    ['hasRoom', '地点'],
+    ['hasTeacher', '教师'],
+  ]
+  const uncertain = fields.filter(([key]) => details[key] === false).map(([, label]) => label)
+  if (uncertain.length) reasons.push(`${uncertain.join('、')}未可靠识别`)
+  if (!reasons.length) reasons.push(`整体识别置信度 ${Math.round((Number(row.confidence?.score) || 0) * 100)}%`)
+  return [...new Set(reasons)].join('；')
+}
+
+function reviewCourseSummary(row) {
+  if (!row.data) return '未形成完整课程数据'
+  return [
+    daysLabel(row.data.day),
+    coursePeriodText(row.data),
+    row.data.room ? `地点：${row.data.room}` : '地点：未识别',
+    row.data.teacher ? `教师：${row.data.teacher}` : '教师：未识别',
+  ].join(' · ')
+}
+
+function daysLabel(day) {
+  return props.days[day] || '星期未识别'
+}
 </script>
 
 <template>
@@ -70,6 +158,11 @@ const showRowError = computed(() => Boolean(props.error) && !(props.progress?.st
       <div class="batch-help">
         <b>方式二：上传教务系统课表截图/照片</b>
         <span>会读取文字在表格中的位置，自动还原星期、节次、周次、教室和教师。图片不上传服务器，本地完成。</span>
+      </div>
+
+      <div class="batch-help">
+        <b>方式三：直接上传 Excel 课程表</b>
+        <span>支持教务系统导出的 XLSX/XLS/CSV/ODS：既可识别“课程名称、星期、节次”清单，也可识别按星期排布的课表。解析后仍须确认预览才会写入。</span>
       </div>
 
       <div class="batch-input-row">
@@ -92,7 +185,12 @@ const showRowError = computed(() => Boolean(props.error) && !(props.progress?.st
             <input type="file" accept="image/*" :disabled="progress.state.status === 'running'" @change="onCropFileChange" hidden />
             ✂️ 先框选再识别（单张）
           </label>
+          <label class="excel-button" :class="{ busy: progress.state.status === 'running' }">
+            <input type="file" accept=".xlsx,.xls,.xlsm,.xlsb,.csv,.ods,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv" :disabled="progress.state.status === 'running'" @change="onExcelFileChange" hidden />
+            📊 上传 Excel 自动识别
+          </label>
           <p class="ocr-hint">支持一次选择多张 PNG/JPG/WebP；长截图会保留小字清晰度，结果逐张追加且不会覆盖已修改内容</p>
+          <p class="ocr-hint">Excel 文件仅在当前设备解析；会保留原有预览内容并追加新结果。</p>
           <p v-if="summary" class="ocr-result-hint">{{ summary }}</p>
         </div>
       </div>
@@ -107,6 +205,45 @@ const showRowError = computed(() => Boolean(props.error) && !(props.progress?.st
         @continue="emit('continue-progress')"
         @wait="emit('wait-progress')"
       />
+
+      <section v-if="reviewRows.length" class="review-checklist" aria-live="polite">
+        <header>
+          <div>
+            <b>请逐项确认以下 {{ reviewRows.length }} 门课程</b>
+            <span>核对课程、星期、节次、地点和教师；当前作息设置共有 {{ periods.length }} 个编号节次，可直接在卡片中修改。</span>
+          </div>
+        </header>
+        <ol>
+          <li v-for="row in reviewRows" :key="`review-${row.sourceIndex}`">
+            <div class="review-course-title">
+              <strong>{{ row.data?.name || row.cells?.[0] || '未识别课程' }}</strong>
+              <span>第 {{ row.sourceIndex }} 行</span>
+              <button v-if="row.data && editingSourceIndex !== row.sourceIndex" type="button" @click="startReviewEdit(row)">直接修改</button>
+            </div>
+            <template v-if="editingSourceIndex === row.sourceIndex">
+              <div class="review-edit-grid">
+                <label class="wide"><span>课程名称</span><input v-model="reviewDraft.name" /></label>
+                <label><span>星期</span><select v-model.number="reviewDraft.day"><option v-for="(day, index) in days" :key="day" :value="index">{{ day }}</option></select></label>
+                <label><span>开始节次</span><select v-model="reviewDraft.start"><option v-for="period in periods" :key="period.id" :value="period.id">第 {{ period.number }} 节 · {{ period.label }}</option></select></label>
+                <label><span>结束节次</span><select v-model="reviewDraft.end"><option v-for="period in periods" :key="period.id" :value="period.id">第 {{ period.number }} 节 · {{ period.label }}</option></select></label>
+                <label><span>开始周</span><select v-model.number="reviewDraft.startWeek" @change="onStartWeekChange"><option v-for="week in weekOptions" :key="`start-${week}`" :value="week">第 {{ week }} 周</option></select></label>
+                <label><span>结束周</span><select v-model.number="reviewDraft.endWeek"><option v-for="week in weekOptions" :key="`end-${week}`" :value="week" :disabled="week < reviewDraft.startWeek">第 {{ week }} 周</option></select></label>
+                <label><span>单双周</span><select v-model="reviewDraft.weekType"><option value="all">每周</option><option value="odd">单周</option><option value="even">双周</option></select></label>
+                <label><span>地点</span><input v-model="reviewDraft.room" /></label>
+                <label><span>教师</span><input v-model="reviewDraft.teacher" /></label>
+              </div>
+              <div class="review-edit-actions">
+                <button type="button" @click="editingSourceIndex = null">取消</button>
+                <button type="button" class="save" :disabled="!canSaveReviewDraft" @click="saveReviewEdit">保存并重新校验</button>
+              </div>
+            </template>
+            <template v-else>
+              <p>{{ reviewCourseSummary(row) }}</p>
+              <em>需要确认：{{ reviewReason(row) }}</em>
+            </template>
+          </li>
+        </ol>
+      </section>
 
       <div v-if="rows.length" class="batch-preview-wrap">
         <div class="batch-summary">
@@ -146,7 +283,7 @@ const showRowError = computed(() => Boolean(props.error) && !(props.progress?.st
                   <td></td><td colspan="7">
                     <div class="review-message">
                       <span class="review-icon">ℹ️</span>
-                      <span>置信度: {{ (row.confidence.score * 100).toFixed(0) }}% (建议确认)</span>
+                      <span>需要确认：{{ reviewReason(row) }}</span>
                     </div>
                   </td>
                 </tr>
@@ -174,7 +311,7 @@ const showRowError = computed(() => Boolean(props.error) && !(props.progress?.st
               <div><dt>教师</dt><dd>{{ row.data.teacher || '—' }}</dd></div>
             </dl>
             <p v-if="row.error">⚠️ {{ row.error }}</p>
-            <p v-else-if="row.needsReview">ℹ️ 识别结果建议人工确认</p>
+            <p v-else-if="row.needsReview">ℹ️ 需要确认：{{ reviewReason(row) }}</p>
           </article>
         </div>
       </div>
@@ -249,6 +386,7 @@ const showRowError = computed(() => Boolean(props.error) && !(props.progress?.st
   cursor: pointer;
 }
 .batch-image-upload .crop-button{display:inline-flex;align-items:center;justify-content:center;padding:8px 12px;color:var(--primary);font-size:12px;font-weight:700;border:1px solid var(--primary);border-radius:8px;background:var(--primary-soft);cursor:pointer}.batch-image-upload .crop-button.busy{opacity:.55;cursor:not-allowed}
+.batch-image-upload .excel-button{display:inline-flex;align-items:center;justify-content:center;padding:8px 12px;color:#2268ba;font-size:12px;font-weight:700;border:1px solid #8bb7ec;border-radius:8px;background:#f1f7ff;cursor:pointer}.batch-image-upload .excel-button.busy{opacity:.55;cursor:not-allowed}
 .file-button.busy {
   pointer-events: none;
   opacity: 0.7;
@@ -342,8 +480,47 @@ const showRowError = computed(() => Boolean(props.error) && !(props.progress?.st
 .batch-success>div { display: flex; justify-content: flex-end; gap: 8px; }
 .error-message { display: flex; align-items: center; gap: 6px; padding: 6px 8px; }
 .review-message { display: flex; align-items: center; gap: 6px; padding: 6px 8px; color: #9a6414; }
+.review-checklist {
+  padding: 12px;
+  color: #7a5317;
+  border: 1px solid #edca7b;
+  border-radius: 10px;
+  background: #fffbef;
+}
+.review-checklist header b { display: block; color: #62400e; font-size: 13px; }
+.review-checklist header span { display: block; margin-top: 3px; font-size: 11px; line-height: 1.5; }
+.review-checklist ol {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  max-height: 240px;
+  margin: 10px 0 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+}
+.review-checklist li { min-width: 0; padding: 9px 10px; border: 1px solid #f0d99e; border-radius: 8px; background: #fff; }
+.review-course-title { display: flex; align-items: center; gap: 8px; }
+.review-course-title strong { overflow: hidden; color: var(--text); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.review-course-title span { flex: none; margin-left: auto; color: var(--muted); font-size: 10px; }
+.review-course-title button,
+.review-edit-actions button { flex: none; padding: 4px 7px; color: #835711; font-size: 10px; font-weight: 700; border: 1px solid #e3c171; border-radius: 6px; background: #fff8e4; cursor: pointer; }
+.review-checklist p { margin: 5px 0; color: var(--muted); font-size: 10px; line-height: 1.5; }
+.review-checklist em { color: #9a6414; font-size: 10px; font-style: normal; font-weight: 700; line-height: 1.5; }
+.review-edit-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; margin-top: 9px; }
+.review-edit-grid label { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
+.review-edit-grid label.wide { grid-column: span 2; }
+.review-edit-grid label span { color: var(--muted); font-size: 9px; }
+.review-edit-grid input,
+.review-edit-grid select { width: 100%; min-width: 0; box-sizing: border-box; padding: 6px 7px; font-size: 11px; border: 1px solid var(--border); border-radius: 6px; background: #fff; }
+.review-edit-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 8px; }
+.review-edit-actions button.save { color: #fff; border-color: var(--primary); background: var(--primary); }
+.review-edit-actions button:disabled { cursor: not-allowed; opacity: .5; }
 
 @media (max-width: 760px) {
+  .review-checklist ol { grid-template-columns: 1fr; max-height: 300px; }
+  .review-edit-grid { grid-template-columns: 1fr 1fr; }
+  .review-edit-grid label.wide { grid-column: 1 / -1; }
   .batch-summary { flex-wrap: wrap; gap: 6px 10px; }
   .batch-desktop-preview { display: none; }
   .batch-mobile-preview {

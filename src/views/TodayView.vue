@@ -403,7 +403,7 @@ const weekReview = computed(() => {
     <template v-if="entryReady">
     <p v-if="experienceMessage" class="experience-message" role="status">✓ {{ experienceMessage }}</p>
     <AgendaPanel v-if="homeModuleVisible('agenda')" :items="dailyAgenda" @complete-task="domain.toggleTask" @rescue-task="rescueTask" />
-    <FocusPanel v-if="homeModuleVisible('focus')" :tasks="displayTasks" />
+    <FocusPanel v-if="homeModuleVisible('focus')" />
     <!-- ③④ 课程 + 待办：桌面双栏，手机单列（待办在前） -->
     <div v-if="homeModuleVisible('tasks') || homeModuleVisible('courses')" class="main-grid">
       <section v-if="homeModuleVisible('tasks')" class="panel order-tasks">

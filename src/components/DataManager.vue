@@ -10,6 +10,9 @@ import {
   updateMessage,
 } from '../composables/appUpdate.js'
 import { lastBackupAt, markBackedUp, needsBackup } from '../composables/backupReminder.js'
+import { backupProvidedFields, buildBackupRestoreValues } from '../composables/backupRestore.js'
+import { normalizeFocusSettings } from '../composables/focusTimer.js'
+import { normalizePerformanceMode } from '../composables/performanceMode.js'
 import {
   canUndoPull,
   cloudExists,
@@ -348,6 +351,7 @@ const STORAGE_KEYS = {
   quickRecordSettings: 'sl_quick_record_settings',
   captureEnabled: 'sl_capture_enabled',
   focusSessions: 'sl_focus_sessions',
+    focusSettings: 'sl_focus_settings',
   courseCheckins: 'sl_course_checkins',
   courseTemplates: 'sl_course_templates',
   checklists: 'sl_checklists',
@@ -398,6 +402,7 @@ function makeBackup() {
       quickRecordSettings: readStored(STORAGE_KEYS.quickRecordSettings, { clipboardHint: true, recentTypes: [] }),
       captureEnabled: readStored(STORAGE_KEYS.captureEnabled, true),
       focusSessions: readStored(STORAGE_KEYS.focusSessions, []),
+        focusSettings: readStored(STORAGE_KEYS.focusSettings, { quickTimes: [15, 25, 45, 60], lastUsedMinutes: 25, recentTemporaries: [], soundEnabled: true, vibrationEnabled: true, systemNotificationEnabled: true }),
       courseCheckins: readStored(STORAGE_KEYS.courseCheckins, []),
       courseTemplates: readStored(STORAGE_KEYS.courseTemplates, []),
       checklists: readStored(STORAGE_KEYS.checklists, []),
@@ -525,6 +530,7 @@ async function validateBackup(value) {
   }
   return {
     ...value,
+    providedFields: [...backupProvidedFields(data)],
     data: {
       courses: data.courses,
       countdowns: data.countdowns,
@@ -534,6 +540,7 @@ async function validateBackup(value) {
       quickRecordSettings: data.quickRecordSettings && typeof data.quickRecordSettings === 'object' ? data.quickRecordSettings : { clipboardHint: true, recentTypes: [] },
       captureEnabled: typeof data.captureEnabled === 'boolean' ? data.captureEnabled : true,
       focusSessions: Array.isArray(data.focusSessions) ? data.focusSessions : [],
+        focusSettings: data.focusSettings && typeof data.focusSettings === 'object' ? normalizeFocusSettings(data.focusSettings) : { quickTimes: [15, 25, 45, 60], lastUsedMinutes: 25, recentTemporaries: [], soundEnabled: true, vibrationEnabled: true, systemNotificationEnabled: true },
       courseCheckins: Array.isArray(data.courseCheckins) ? data.courseCheckins : [],
       courseTemplates: Array.isArray(data.courseTemplates) ? data.courseTemplates : [],
       checklists: Array.isArray(data.checklists) ? data.checklists : [],
@@ -555,7 +562,7 @@ async function validateBackup(value) {
       wallpaperConfig: data.wallpaperConfig && typeof data.wallpaperConfig === 'object' ? data.wallpaperConfig : null,
       autoWallpaperColor: Boolean(data.autoWallpaperColor),
       wallpaperAccent: typeof data.wallpaperAccent === 'string' ? data.wallpaperAccent : '#456fe8',
-      performanceMode: ['auto', 'low', 'high'].includes(data.performanceMode) ? data.performanceMode : 'auto',
+      performanceMode: normalizePerformanceMode(data.performanceMode),
       festiveConfig: data.festiveConfig && typeof data.festiveConfig === 'object' ? data.festiveConfig : { enabled: true, birthday: '', installDate: '', anniversaries: [] },
       festiveBirthdayFull: typeof data.festiveBirthdayFull === 'string' ? data.festiveBirthdayFull : '',
       moodLog: data.moodLog && typeof data.moodLog === 'object' ? data.moodLog : {},
@@ -605,41 +612,9 @@ async function restoreBackup() {
   if (!window.confirm('恢复后将覆盖当前浏览器中的课程、倒计时和待办数据，是否继续？')) return
 
   const { data } = backup
-  const restoredValues = {
-    [STORAGE_KEYS.courses]: data.courses,
-    [STORAGE_KEYS.countdowns]: data.countdowns,
-    [STORAGE_KEYS.tasks]: data.tasks,
-    [STORAGE_KEYS.events]: data.events,
-    [STORAGE_KEYS.quickNotes]: data.quickNotes,
-    [STORAGE_KEYS.quickRecordSettings]: data.quickRecordSettings,
-    [STORAGE_KEYS.captureEnabled]: data.captureEnabled,
-    [STORAGE_KEYS.focusSessions]: data.focusSessions,
-    [STORAGE_KEYS.courseCheckins]: data.courseCheckins,
-    [STORAGE_KEYS.courseTemplates]: data.courseTemplates,
-    [STORAGE_KEYS.checklists]: data.checklists,
-    [STORAGE_KEYS.bills]: data.bills,
-    [STORAGE_KEYS.expenses]: data.expenses,
-    ...(data.ledgerCategories ? { [STORAGE_KEYS.ledgerCategories]: data.ledgerCategories } : {}),
-    ...(data.ledgerFreq ? { [STORAGE_KEYS.ledgerFreq]: data.ledgerFreq } : {}),
-    ...(data.timeConfig ? { [STORAGE_KEYS.timeConfig]: data.timeConfig } : {}),
-    ...(data.semester ? { [STORAGE_KEYS.semester]: data.semester } : {}),
-    [STORAGE_KEYS.scheduleExceptions]: data.scheduleExceptions,
-    [STORAGE_KEYS.theme]: data.theme,
-    [STORAGE_KEYS.customThemeColor]: data.customThemeColor,
-    [STORAGE_KEYS.countdownShowPast]: data.countdownShowPast,
-    [STORAGE_KEYS.foodPlaces]: data.foodPlaces,
-    [STORAGE_KEYS.foodHistory]: data.foodHistory,
-    [STORAGE_KEYS.foodFilters]: data.foodFilters,
-    [STORAGE_KEYS.ocrVocabulary]: data.ocrVocabulary,
-    ...(data.appearance ? { [STORAGE_KEYS.appearance]: data.appearance } : {}),
-    ...(data.wallpaperConfig ? { [STORAGE_KEYS.wallpaperConfig]: data.wallpaperConfig } : {}),
-    [STORAGE_KEYS.autoWallpaperColor]: data.autoWallpaperColor,
-    [STORAGE_KEYS.wallpaperAccent]: data.wallpaperAccent,
-    [STORAGE_KEYS.performanceMode]: data.performanceMode,
-    [STORAGE_KEYS.festiveConfig]: data.festiveConfig,
-    [STORAGE_KEYS.festiveBirthdayFull]: data.festiveBirthdayFull,
-    [STORAGE_KEYS.moodLog]: data.moodLog,
-  }
+  // 校验层会为旧备份补齐显示用默认值；恢复时只能写入原文件实际携带的字段，
+  // 避免用空默认值覆盖当前版本后来新增的模块。
+  const restoredValues = buildBackupRestoreValues(data, backup.providedFields, STORAGE_KEYS)
   const previous = Object.fromEntries(
     Object.keys(restoredValues).map((key) => [key, localStorage.getItem(key)])
   )

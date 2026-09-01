@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import Modal from './Modal.vue'
 import { findNoticeChanges, parseNotice } from '../composables/noticeParser.js'
+import NoticeUnderstanding from './NoticeUnderstanding.vue'
 
 const props = defineProps({ open: Boolean, tasks: { type: Array, default: () => [] }, courses: { type: Array, default: () => [] } })
 const emit = defineEmits(['close', 'commit'])
@@ -27,22 +28,8 @@ watch(() => props.open, (open) => {
 })
 
 async function readClipboard() {
-  if (typeof navigator === 'undefined' || !navigator.clipboard?.readText) {
-    clipboardMessage.value = '无法自动读取剪贴板，请按 Ctrl + V 粘贴通知。'
-    return
-  }
-  try {
-    const value = await navigator.clipboard.readText()
-    if (!props.open) return
-    if (value.trim()) {
-      source.value = value
-      analyze()
-    } else {
-      clipboardMessage.value = '剪贴板为空，请按 Ctrl + V 粘贴通知。'
-    }
-  } catch {
-    clipboardMessage.value = '浏览器未授权读取剪贴板，请按 Ctrl + V 粘贴通知。'
-  }
+  // NoticeUnderstanding owns the clipboard flow; keep this wrapper's legacy
+  // state isolated so opening the compatibility component never reads twice.
 }
 
 function onSourceInput() {
@@ -131,6 +118,15 @@ function save() {
 </script>
 
 <template>
+  <NoticeUnderstanding
+    v-if="open"
+    :open="open"
+    :tasks="tasks"
+    :courses="courses"
+    @close="emit('close')"
+    @commit="emit('commit', $event)"
+  />
+  <div v-if="false">
   <Modal :open="open" title="📋 粘贴通知" wide @close="emit('close')">
     <div class="notice-layout">
       <section class="source-panel">
@@ -177,6 +173,7 @@ function save() {
       </section>
     </div>
   </Modal>
+  </div>
 </template>
 
 <style scoped>

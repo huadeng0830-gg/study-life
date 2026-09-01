@@ -103,6 +103,10 @@ function isEmptyCollection(raw) {
   }
 }
 
+export function shouldMirrorValue(rawValue, previousValue, { allowEmpty = false } = {}) {
+  return allowEmpty || previousValue === undefined || !isEmptyCollection(rawValue) || isEmptyCollection(previousValue)
+}
+
 function deferStartupMirror(entries) {
   if (!entries.length) return
   const flush = () => {
@@ -110,7 +114,7 @@ function deferStartupMirror(entries) {
     // 放回统一队列，不能让启动时捕获的旧快照覆盖刚写入的影子副本。
     for (const [key] of entries) {
       const latest = localStorage.getItem(key)
-      if (latest !== null) pendingMirrorWrites.set(key, latest)
+      if (latest !== null) pendingMirrorWrites.set(key, { raw: latest, allowEmpty: false })
     }
     void flushMirrorWrites()
   }
@@ -151,7 +155,7 @@ export async function initializeDataVault() {
         localStorage.setItem(key, backup.value)
         restored.push(key)
       } else if (localValue !== null) {
-        // 空数组可能是正常删除结果，但不应覆盖最后一份非空安全副本。
+        // 启动阶段的空集合可能来自浏览器异常清理，不能覆盖最后一份非空安全副本。
         // 内容相同不重复写入；之前每次启动都会重写全部 sl_* 键。
         const changed = !backup || backup.value !== localValue
         if (changed && (!backup || !isEmptyCollection(localValue) || isEmptyCollection(backup.value))) {
@@ -179,10 +183,12 @@ async function flushMirrorWrites() {
     const db = await openVault()
     if (!db) return
     const previous = await readRecords(db, entries.map(([key]) => key))
-    const safeEntries = entries.filter(([key, value]) => {
-      const backup = previous.get(key)
-      return !backup || !isEmptyCollection(value) || isEmptyCollection(backup.value)
-    })
+    const safeEntries = entries
+      .filter(([key, value]) => {
+        const backup = previous.get(key)
+        return shouldMirrorValue(value.raw, backup?.value, value)
+      })
+      .map(([key, value]) => [key, value.raw])
     await writeRecords(db, safeEntries)
   } catch {
     // 影子备份失败不影响本次正常保存。
@@ -202,9 +208,9 @@ function scheduleMirrorFlush() {
 
 // 每次正常保存时同步一份设备内副本；同一小段时间内的多个模块会合并为
 // 一次读取和一次 IndexedDB 事务，不再为每个键单独打开读写事务。
-export function mirrorLocalValue(key, rawValue) {
+export function mirrorLocalValue(key, rawValue, { allowEmpty = false } = {}) {
   if (!managedKey(key) || rawValue === null || rawValue === undefined) return Promise.resolve()
-  pendingMirrorWrites.set(key, rawValue)
+  pendingMirrorWrites.set(key, { raw: rawValue, allowEmpty })
   scheduleMirrorFlush()
   return Promise.resolve()
 }
