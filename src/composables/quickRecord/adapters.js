@@ -6,8 +6,11 @@ export function useQuickRecordAdapters() {
 
   function save(draft) {
     const base = { ...draft, createdFrom: 'quick-record', sourceType: 'quick-record', sourceId: draft.id }
+    const contextNote = [draft.note, draft.dateRange ? `时间范围：${draft.dateRange}` : '', draft.location ? `地点：${draft.location}` : '', draft.reminder ? `提醒：${draft.reminder}` : '']
+      .filter(Boolean)
+      .join('；')
     if (draft.type === 'todo' || draft.type === 'homework') {
-      const task = domain.createTask({ ...base, kind: draft.type, dueDate: draft.date, dueTime: draft.time, sourceText: draft.raw })
+      const task = domain.createTask({ ...base, kind: draft.type, dueDate: draft.date, dueTime: draft.time, note: contextNote, sourceText: draft.raw })
       return `已添加「${task.title}」`
     }
     if (draft.type === 'expense' || draft.type === 'income') {

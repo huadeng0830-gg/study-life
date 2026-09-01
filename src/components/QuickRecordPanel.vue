@@ -40,6 +40,7 @@ let feedbackTimer = 0
 let voiceTimer = 0
 let noteBeforeVoice = ''
 let smartBeforeVoice = ''
+let voiceRunId = 0
 
 const actions = computed(() => QUICK_ACTIONS.map((type) => ({ type, ...recordTypeMeta(type) })))
 const activeLedgerCategories = computed(() => ledgerCategories.value.filter((item) => !item.hidden))
@@ -81,6 +82,7 @@ function parse() {
 }
 
 function chooseAction(type) {
+  stopActiveVoice()
   if (type === 'note') {
     mode.value = 'note'
     forcedType.value = ''
@@ -96,6 +98,7 @@ function chooseAction(type) {
 }
 
 function chooseAuto() {
+  stopActiveVoice()
   mode.value = 'smart'
   forcedType.value = ''
   parse()
@@ -115,17 +118,30 @@ function categoryLabel(key) { return ledgerCategories.value.find((item) => item.
 
 function saveAll() {
   if (!drafts.value.length) return
-  try {
-    const messages = drafts.value.map((draft) => save(draft))
-    updateRecent(drafts.value.map((draft) => draft.type))
-    showFeedback(`✓ ${messages.length === 1 ? messages[0] : `已添加 ${messages.length} 项记录`}`)
-    input.value = ''
-    drafts.value = []
-    forcedType.value = ''
-    focusInput()
-  } catch (cause) {
-    error.value = cause?.message || '保存失败，请补充必要信息'
+  error.value = ''
+  const pending = [...drafts.value]
+  const messages = []
+  const savedIds = []
+  for (const draft of pending) {
+    try {
+      messages.push(save(draft))
+      savedIds.push(draft.id)
+    } catch (cause) {
+      drafts.value = drafts.value.filter((item) => !savedIds.includes(item.id))
+      const reason = cause?.message || '请补充必要信息'
+      error.value = savedIds.length
+        ? `前 ${savedIds.length} 项已保存；剩余内容未保存：${reason}`
+        : `保存失败：${reason}`
+      if (savedIds.length) updateRecent(pending.slice(0, savedIds.length).map((draft) => draft.type))
+      return
+    }
   }
+  updateRecent(pending.map((draft) => draft.type))
+  showFeedback(`✓ ${messages.length === 1 ? messages[0] : `已添加 ${messages.length} 项记录`}`)
+  input.value = ''
+  drafts.value = []
+  forcedType.value = ''
+  focusInput()
 }
 
 function saveNote() {
@@ -213,6 +229,16 @@ function stopVoiceTimer() {
   voiceSeconds.value = 0
 }
 
+function stopActiveVoice() {
+  voiceRunId += 1
+  const activeRecognizer = recognizer
+  recognizer = null
+  listening.value = false
+  activeRecognizer?.abort?.()
+  stopVoiceTimer()
+  voiceState.value = VOICE_STATES.idle
+}
+
 function onVoiceState(state) {
   voiceState.value = state
   if (state === VOICE_STATES.listening) {
@@ -228,7 +254,10 @@ function toggleVoice() {
   if (!voiceSupported) { error.value = '当前浏览器不支持语音识别，请改用键盘输入'; return }
   if (listening.value) { recognizer?.stop(); return }
 
+  const runId = ++voiceRunId
+  const isCurrentRun = () => runId === voiceRunId
   const onError = (code) => {
+    if (!isCurrentRun()) return
     listening.value = false
     voiceState.value = VOICE_STATES.error
     stopVoiceTimer()
@@ -238,13 +267,16 @@ function toggleVoice() {
   if (mode.value === 'note') {
     noteBeforeVoice = noteBody.value
     recognizer = transcribe({
-      onStateChange: onVoiceState,
+      continuous: true,
+      maxSeconds: 60,
+      onStateChange: (state) => { if (isCurrentRun()) onVoiceState(state) },
       onResult: (finalText, interimText) => {
+        if (!isCurrentRun()) return
         noteBody.value = (noteBeforeVoice + (noteBeforeVoice ? ' ' : '') + finalText + interimText).trim()
-        onNoteInput()
       },
       onError,
       onEnd: (finalText) => {
+        if (!isCurrentRun()) return
         listening.value = false
         if (finalText) {
           noteBody.value = (noteBeforeVoice + (noteBeforeVoice ? ' ' : '') + finalText).trim()
@@ -257,13 +289,16 @@ function toggleVoice() {
   } else {
     smartBeforeVoice = input.value
     recognizer = transcribe({
-      onStateChange: onVoiceState,
+      continuous: true,
+      maxSeconds: 60,
+      onStateChange: (state) => { if (isCurrentRun()) onVoiceState(state) },
       onResult: (finalText, interimText) => {
+        if (!isCurrentRun()) return
         input.value = (smartBeforeVoice + (smartBeforeVoice ? ' ' : '') + finalText + interimText).trim()
-        onSmartInput()
       },
       onError,
       onEnd: (finalText) => {
+        if (!isCurrentRun()) return
         listening.value = false
         if (finalText) {
           input.value = (smartBeforeVoice + (smartBeforeVoice ? ' ' : '') + finalText).trim()
@@ -277,6 +312,7 @@ function toggleVoice() {
 
   if (!recognizer) { error.value = '语音识别暂不可用'; return }
   listening.value = true
+  voiceState.value = VOICE_STATES.listening
   recognizer.start()
 }
 
@@ -295,7 +331,10 @@ async function checkClipboard() {
 }
 
 watch(() => props.open, (open) => {
-  if (!open) return
+  if (!open) {
+    stopActiveVoice()
+    return
+  }
   mode.value = 'smart'
   noteBody.value = ''
   noteTitle.value = ''
@@ -314,8 +353,7 @@ watch(() => props.open, (open) => {
 })
 
 onBeforeUnmount(() => {
-  recognizer?.abort()
-  stopVoiceTimer()
+  stopActiveVoice()
   window.clearTimeout(feedbackTimer)
 })
 </script>
@@ -335,7 +373,7 @@ onBeforeUnmount(() => {
             inputmode="text"
             placeholder="记点什么……例如：午饭18元 / 周五交高数作业 / 明天下午三点组会"
             @input="onSmartInput"
-            @keydown.enter.exact.prevent="saveAll"
+            @keydown.enter.exact.prevent="!$event.isComposing && saveAll()"
           />
           <button
             class="mic"
@@ -393,8 +431,12 @@ onBeforeUnmount(() => {
                 <label v-if="['expense', 'income', 'bill'].includes(draft.type)">¥ <input v-model.number="draft.amount" type="number" min="0" step="0.01" inputmode="decimal" /></label>
                 <label v-if="draft.course">{{ draft.course }}</label>
                 <label v-if="['expense', 'income'].includes(draft.type) && categoryLabel(draft.category)">{{ categoryLabel(draft.category) }}</label>
+                <label v-if="draft.dateRange && !draft.date">时间范围：{{ draft.dateRange }}</label>
                 <label v-if="draft.date"><input v-model="draft.date" type="date" aria-label="日期" /></label>
                 <label v-if="draft.time"><input v-model="draft.time" type="time" aria-label="时间" /></label>
+                <label v-if="draft.endTime">至 {{ draft.endTime }}</label>
+                <label v-if="draft.location">地点：{{ draft.location }}</label>
+                <label v-if="draft.reminder">提醒：{{ draft.reminder }}</label>
                 <label v-if="draft.priority === 'high'">🔴 重要</label>
                 <label v-if="draft.account">{{ draft.account }}</label>
               </div>

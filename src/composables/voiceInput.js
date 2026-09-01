@@ -55,12 +55,22 @@ export function transcribe(options = {}) {
   recognition.interimResults = interimResults
   recognition.continuous = continuous
 
-  let finalText = ''
-  let interimText = ''
+  // Web Speech 的 results 是“按索引更新”的快照，不是可无限 append 的事件流。
+  // 按 result index 保存片段，可以避免 finalResult 重发时重复文字。
+  let finalSegments = []
+  let interimSegments = []
   let started = false
   let maxTimer = 0
   let stoppedByUser = false
   let failed = false
+  let finished = false
+
+  function snapshot() {
+    return {
+      finalText: finalSegments.join(''),
+      interimText: interimSegments.join(''),
+    }
+  }
 
   function setState(state) {
     onStateChange(state)
@@ -72,17 +82,20 @@ export function transcribe(options = {}) {
   }
 
   function finish() {
+    if (finished) return
+    finished = true
     started = false
     clearMaxTimer()
-    const result = finalText
-    finalText = ''
-    interimText = ''
+    const snapshotText = snapshot()
+    const result = snapshotText.finalText || snapshotText.interimText
     setState(result ? VOICE_STATES.done : VOICE_STATES.idle)
     onEnd(result)
   }
 
   recognition.onstart = () => {
     started = true
+    finished = false
+    failed = false
     stoppedByUser = false
     setState(VOICE_STATES.listening)
     clearMaxTimer()
@@ -95,27 +108,31 @@ export function transcribe(options = {}) {
   }
 
   recognition.onresult = (event) => {
-    // interim 片段是「替换上一次临时结果」，不能累加；final 片段才追加到最终文本。
-    let interim = ''
-    for (let index = event.resultIndex; index < event.results.length; index++) {
+    const start = Math.max(0, Number(event?.resultIndex) || 0)
+    for (let index = start; index < event.results.length; index++) {
       const result = event.results[index]
       const transcript = result[0]?.transcript ?? ''
-      if (result.isFinal) finalText += transcript
-      else interim += transcript
+      if (result.isFinal) {
+        finalSegments[index] = transcript
+        interimSegments[index] = ''
+      } else {
+        interimSegments[index] = transcript
+      }
     }
-    interimText = interim
-    if (finalText || interimText) setState(VOICE_STATES.transcribing)
-    onResult(finalText, interimText)
+    const current = snapshot()
+    if (current.finalText || current.interimText) setState(VOICE_STATES.transcribing)
+    onResult(current.finalText, current.interimText)
   }
 
   recognition.onerror = (event) => {
     started = false
     failed = true
     clearMaxTimer()
-    finalText = ''
-    interimText = ''
+    const current = snapshot()
+    // 错误只结束识别，不抹掉已经拿到的文字；调用方可保留 partial transcript 让用户继续编辑。
+    if (current.finalText || current.interimText) onResult(current.finalText, current.interimText)
     setState(VOICE_STATES.error)
-    onError(event?.error ?? 'unknown')
+    onError(event?.error ?? 'unknown', current.finalText || current.interimText)
   }
 
   recognition.onend = () => {
@@ -125,7 +142,7 @@ export function transcribe(options = {}) {
       return
     }
     if (started) finish()
-    else if (finalText) finish()
+    else if (snapshot().finalText || snapshot().interimText) finish()
     else {
       started = false
       clearMaxTimer()
@@ -136,12 +153,15 @@ export function transcribe(options = {}) {
   return {
     start() {
       if (started) return
-      finalText = ''
-      interimText = ''
+      finalSegments = []
+      interimSegments = []
+      finished = false
+      failed = false
       try {
         recognition.start()
       } catch (error) {
         // start() 同步抛错（未授权、重复启动、环境禁用）时必须显式反馈，不能静默失败。
+        setState(VOICE_STATES.error)
         onError(error?.name ?? 'start-error')
       }
     },
@@ -153,6 +173,7 @@ export function transcribe(options = {}) {
       stoppedByUser = true
       started = false
       clearMaxTimer()
+      finished = true
       try { recognition.abort() } catch {}
     },
   }
