@@ -1,5 +1,8 @@
+// 通知/自然语言解析核心：粘贴通知和语音转写共用这一条文字理解路径。
 const WEEKDAY = { 日: 0, 天: 0, 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6 }
 const CN_DIGITS = { 零: 0, 〇: 0, 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 }
+const PERIOD_WORDS = '凌晨|早上|上午|中午|下午|晚上|夜里|今晚|今早'
+const ACTION_WORDS = '提交|上交|上传|完成|报名|填写|领取|参加|召开|开会|举行|签到|上课|听|交|改到|换到|处理|确认|缴费'
 
 function pad(value) {
   return String(value).padStart(2, '0')
@@ -18,84 +21,333 @@ function addDays(date, count) {
 function chineseNumber(value) {
   const text = String(value ?? '')
   if (/^\d+$/.test(text)) return Number(text)
+  if (!text) return 0
   if (text === '十') return 10
   if (text.includes('十')) {
     const [left, right] = text.split('十')
     return (left ? CN_DIGITS[left] ?? 0 : 1) * 10 + (right ? CN_DIGITS[right] ?? 0 : 0)
   }
-  return CN_DIGITS[text] ?? Number(text)
-}
-
-function parseDate(text, now) {
-  const explicit = text.match(/(?:(\d{4})[年\-/])?(\d{1,2})[月\-/](\d{1,2})日?/)
-  if (explicit) {
-    const year = Number(explicit[1] || now.getFullYear())
-    const date = new Date(year, Number(explicit[2]) - 1, Number(explicit[3]))
-    if (!explicit[1] && date < new Date(now.getFullYear(), now.getMonth(), now.getDate())) {
-      date.setFullYear(date.getFullYear() + 1)
-    }
-    return dateString(date)
+  if (text.includes('百')) {
+    const [left, right] = text.split('百')
+    return (left ? CN_DIGITS[left] ?? 0 : 1) * 100 + (right ? chineseNumber(right) : 0)
   }
-  if (/大后天/.test(text)) return dateString(addDays(now, 3))
-  if (/后天/.test(text)) return dateString(addDays(now, 2))
-  if (/明天|明日/.test(text)) return dateString(addDays(now, 1))
-  if (/今天|今日/.test(text)) return dateString(now)
-
-  const weekday = text.match(/(下|本|这)?(?:周|星期)([一二三四五六日天])/) 
-  if (weekday) {
-    const target = WEEKDAY[weekday[2]]
-    const current = now.getDay()
-    const targetFromMonday = (target + 6) % 7
-    const currentFromMonday = (current + 6) % 7
-    let delta
-    if (/下/.test(weekday[1] || '')) {
-      delta = 7 - currentFromMonday + targetFromMonday
-    } else if (/本|这/.test(weekday[1] || '')) {
-      delta = targetFromMonday - currentFromMonday
-    } else {
-      delta = (target - current + 7) % 7
-      if (delta === 0) delta = 7
-    }
-    return dateString(addDays(now, delta))
-  }
-  return ''
+  return CN_DIGITS[text] ?? 0
 }
 
-function parseTime(text) {
-  const colon = text.match(/(上午|早上|中午|下午|晚上|夜里|凌晨)?\s*(\d{1,2})[:：](\d{2})/)
-  const point = text.match(/(上午|早上|中午|下午|晚上|夜里|凌晨)?\s*([零〇一二两三四五六七八九十\d]{1,3})[点时](半|[零〇一二两三四五六七八九十\d]{1,3}分?)?/) 
-  const match = colon || point
-  if (!match) return ''
-  const period = match[1] || ''
-  let hour = chineseNumber(match[2])
-  const minute = colon ? Number(match[3]) : match[3] === '半' ? 30 : chineseNumber(String(match[3] || '0').replace('分', ''))
-  if (/下午|晚上|夜里/.test(period) && hour < 12) hour += 12
-  if (/凌晨/.test(period) && hour === 12) hour = 0
-  if (/中午/.test(period) && hour < 11) hour += 12
-  if (!Number.isFinite(hour) || !Number.isFinite(minute) || hour > 23 || minute > 59) return ''
-  return `${pad(hour)}:${pad(minute)}`
-}
-
-function cleanTitle(text) {
-  let first = text.split(/[，,。；;\n]/)[0] || text
-  first = first
-    .replace(/(?:(?:\d{4})[年\-/])?\d{1,2}[月\-/]\d{1,2}日?/g, '')
-    .replace(/(?:下|本|这)?(?:周|星期)[一二三四五六日天]/g, '')
-    .replace(/今天|今日|明天|明日|后天|大后天/g, '')
-    .replace(/(?:上午|早上|中午|下午|晚上|夜里|凌晨)?\s*\d{1,2}[:：]\d{2}/g, '')
-    .replace(/(?:上午|早上|中午|下午|晚上|夜里|凌晨)?\s*[零〇一二两三四五六七八九十\d]{1,3}[点时](?:半|[零〇一二两三四五六七八九十\d]{1,3}分?)?/g, '')
-    .replace(/^(各位)?(同学们?|大家)?[：:]?/g, '')
-    .replace(/^(请|请于|请在|务必|必须|需要|记得)+/g, '')
-    .replace(/^(截止|截至)|之前|以前|前(?=提交|完成|上交|报名|参加)/g, '')
+/** 只整理格式，不删除原文；“通知/辅导员/@全体成员”等语义仍保留。 */
+export function normalizeText(value) {
+  return String(value ?? '')
+    .normalize('NFKC')
+    .replace(/\uFEFF/g, '')
+    .replace(/\r\n?/g, '\n')
+    .replace(/[ \t]+/g, ' ')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join('\n')
     .trim()
-  const action = first.search(/提交|上交|完成|报名|参加|准备|领取|填写|考试|汇报|答辩|开会|签到|缴费|确认/)
-  if (action > 0 && action < 12) first = first.slice(action)
-  return first.replace(/^[：:、，,\s]+|[：:、，,\s]+$/g, '').slice(0, 60) || '待处理通知'
 }
 
-function noteFrom(text) {
-  const parts = text.split(/[，,。；;\n]/).map((item) => item.trim()).filter(Boolean)
-  return parts.slice(1).join('；').slice(0, 500)
+function lineAt(text, index) {
+  const start = text.lastIndexOf('\n', index) + 1
+  const end = text.indexOf('\n', index)
+  return text.slice(start, end < 0 ? text.length : end).trim()
+}
+
+function relativeDateValue(raw, now) {
+  if (/大后天/.test(raw)) return dateString(addDays(now, 3))
+  if (/后天/.test(raw)) return dateString(addDays(now, 2))
+  if (/明天|明日|明早|明晚/.test(raw)) return dateString(addDays(now, 1))
+  if (/今天|今日|今晚|今早/.test(raw)) return dateString(now)
+  const weekday = raw.match(/(下|本|这)?(?:周|星期|礼拜)([一二三四五六日天])$/)
+  if (!weekday) return ''
+  const target = WEEKDAY[weekday[2]]
+  const currentFromMonday = (now.getDay() + 6) % 7
+  const targetFromMonday = (target + 6) % 7
+  const delta = weekday[1] === '下'
+    ? 7 - currentFromMonday + targetFromMonday
+    : weekday[1] === '本' || weekday[1] === '这'
+      ? targetFromMonday - currentFromMonday
+      : (target - now.getDay() + 7) % 7 || 7
+  return dateString(addDays(now, delta))
+}
+
+function isPublicationCandidate(candidate, text) {
+  const context = text.slice(Math.max(0, candidate.start - 6), Math.min(text.length, candidate.end + 24))
+  if (/发布|发布日期|通知日期|落款/.test(context)) return true
+  if (!/^\d{4}/.test(candidate.raw)) return false
+  const line = lineAt(text, candidate.start)
+  return line.length <= 30 || /辅导员|发布|发布日期|通知日期|落款/.test(line)
+}
+
+function isDeadlineCandidate(candidate, text) {
+  const context = text.slice(Math.max(0, candidate.start - 8), Math.min(text.length, candidate.end + 16))
+  return /截止|截至|最晚|之前|以前|报名截止/.test(context)
+}
+
+/** 找出所有日期候选；选择事件日期时会排除末尾的通知发布日期。 */
+export function extractDateCandidates(value, now = new Date()) {
+  const text = normalizeText(value)
+  const candidates = []
+  const explicit = /(?:(\d{4})\s*(?:年|[\/-])\s*)?(\d{1,2})\s*(?:月|[\/-])\s*(\d{1,2})\s*(?:日|号)?/g
+  for (const match of text.matchAll(explicit)) {
+    const year = Number(match[1] || now.getFullYear())
+    const date = new Date(year, Number(match[2]) - 1, Number(match[3]))
+    if (date.getFullYear() !== year || date.getMonth() !== Number(match[2]) - 1 || date.getDate() !== Number(match[3])) continue
+    let ambiguous = false
+    if (!match[1] && date < new Date(now.getFullYear(), now.getMonth(), now.getDate())) {
+      const daysPast = Math.round((new Date(now.getFullYear(), now.getMonth(), now.getDate()) - date) / 86400000)
+      // 临近过去日期可能是通知中的实际日期，不武断推到下一年，交给用户确认。
+      if (daysPast <= 45) ambiguous = true
+      else date.setFullYear(date.getFullYear() + 1)
+    }
+    const candidate = { raw: match[0], start: match.index, end: match.index + match[0].length, value: dateString(date), kind: 'explicit' }
+    candidate.isPublication = isPublicationCandidate(candidate, text)
+    candidate.isDeadline = isDeadlineCandidate(candidate, text)
+    candidate.ambiguous = ambiguous
+    candidates.push(candidate)
+  }
+  // “最晚15号交”这类通知只写日，不写月份；按当前月份解析并保留为候选。
+  for (const match of text.matchAll(/(\d{1,2})\s*(?:日|号)/g)) {
+    if (candidates.some((item) => item.start <= match.index && item.end >= match.index + match[0].length)) continue
+    const day = Number(match[1])
+    if (day < 1 || day > 31) continue
+    let date = new Date(now.getFullYear(), now.getMonth(), day)
+    if (date < new Date(now.getFullYear(), now.getMonth(), now.getDate())) date = new Date(now.getFullYear(), now.getMonth() + 1, day)
+    if (date.getDate() !== day) continue
+    candidates.push({ raw: match[0], start: match.index, end: match.index + match[0].length, value: dateString(date), kind: 'day', isPublication: false, isDeadline: isDeadlineCandidate({ start: match.index, end: match.index + match[0].length }, text), ambiguous: false })
+  }
+  const relative = /((?:下|本|这)?(?:周|星期|礼拜)[一二三四五六日天]|(?:下|本|这)?(?:周|星期|礼拜)|大后天|后天|明天|明日|明早|明晚|今天|今日|今晚|今早)/g
+  for (const match of text.matchAll(relative)) {
+    const raw = match[0]
+    candidates.push({ raw, start: match.index, end: match.index + raw.length, value: relativeDateValue(raw, now), kind: /周|星期|礼拜/.test(raw) ? 'weekday' : 'relative', isPublication: false, isDeadline: isDeadlineCandidate({ start: match.index, end: match.index + raw.length }, text), ambiguous: false })
+  }
+  const byStart = new Map()
+  for (const candidate of candidates) {
+    const previous = byStart.get(candidate.start)
+    if (!previous || candidate.end - candidate.start > previous.end - previous.start) byStart.set(candidate.start, candidate)
+  }
+  return [...byStart.values()].sort((a, b) => a.start - b.start)
+}
+
+function parsePeriod(period, hour) {
+  let value = hour
+  if (/下午|晚上|夜里|今晚/.test(period) && value < 12) value += 12
+  if (/凌晨/.test(period) && value === 12) value = 0
+  if (/中午/.test(period) && value < 11) value += 12
+  // 没写上下文的“两点/三点”按常见口语理解为下午，同时标记为低确定性。
+  const ambiguous = !period && value >= 1 && value <= 6
+  if (ambiguous) value += 12
+  return { value, ambiguous }
+}
+
+function parseMinute(token) {
+  if (!token) return 0
+  if (token === '半') return 30
+  if (token === '一刻') return 15
+  if (token === '三刻') return 45
+  return chineseNumber(String(token).replace(/分/g, ''))
+}
+
+/** 找出时间点和时间范围；范围的第二个时间点继承“下午/晚上”上下文。 */
+export function extractTimeCandidates(value) {
+  const text = normalizeText(value)
+  const candidates = []
+  const colon = new RegExp(`(${PERIOD_WORDS})?\\s*(\\d{1,2})\\s*[:：]\\s*(\\d{2})`, 'g')
+  for (const match of text.matchAll(colon)) {
+    const parsed = parsePeriod(match[1] || '', Number(match[2]))
+    if (parsed.value > 23 || Number(match[3]) > 59) continue
+    candidates.push({ raw: match[0], start: match.index, end: match.index + match[0].length, time: `${pad(parsed.value)}:${pad(match[3])}`, period: match[1] || '', ambiguous: parsed.ambiguous })
+  }
+  const point = new RegExp(`(${PERIOD_WORDS})?\\s*((?:\\d{1,3}|[零〇一二两三四五六七八九十百]{1,4}))\\s*[点时]\\s*(半|一刻|三刻|[零〇一二两三四五六七八九十百\\d]{1,3}分?)?`, 'g')
+  for (const match of text.matchAll(point)) {
+    const hour = chineseNumber(match[2])
+    // “下周一两点”不能把日期末尾的“一”和时间“两点”粘成“一两点”。
+    if (!hour && !/^(?:0|零|〇)$/.test(match[2])) continue
+    const parsed = parsePeriod(match[1] || '', hour)
+    const minute = parseMinute(match[3])
+    if (parsed.value > 23 || minute > 59) continue
+    candidates.push({ raw: match[0], start: match.index, end: match.index + match[0].length, time: `${pad(parsed.value)}:${pad(minute)}`, period: match[1] || '', ambiguous: parsed.ambiguous })
+  }
+  candidates.sort((a, b) => a.start - b.start)
+  for (let index = 1; index < candidates.length; index++) {
+    const previous = candidates[index - 1]
+    const current = candidates[index]
+    const between = text.slice(previous.end, current.start)
+    if (!current.period && /^(?:到|至|[-—~～])$/.test(between.trim()) && previous.period) {
+      const parsed = parsePeriod(previous.period, Number(current.time.slice(0, 2)))
+      current.time = `${pad(parsed.value)}:${current.time.slice(3)}`
+      current.ambiguous = parsed.ambiguous
+    }
+  }
+  return candidates
+}
+
+export function extractLocationCandidates(value) {
+  const text = normalizeText(value)
+  const candidates = []
+  const patterns = [
+    { pattern: /(?:地点|地址|会议地点)\s*[:：]\s*([^\n，,。；;]+)/g, explicit: true },
+    { pattern: /(?:在|到|于(?!\s*(?:\d{1,4}\s*(?:月|日|号|点|时)|\d{1,2}\s*[:：]|今天|明天|后天|本周|下周)))\s*([^\n，,。；;]+?)(?=\s*(?:召开|开会|开班会|举行|参加|上课|集合|签到|开始|听|提交|上交|上传|完成|报名|填写|领取|携带|处理|确认|缴费|[。.!！?？]|$))/g, explicit: false },
+  ]
+  for (const { pattern, explicit } of patterns) {
+    for (const match of text.matchAll(pattern)) {
+      const prefix = explicit ? '' : match[0].trim().slice(0, 1)
+      const previous = match.index > 0 ? text[match.index - 1] : ''
+      // “关于实验报告提交”里的“于”不是地点介词；只接受独立出现的“于”。
+      if (!explicit && prefix === '于' && /[关于对于由于至于基于位于鉴于]$/.test(previous)) continue
+      const location = match[1].replace(/^(这里|那里)\s*/, '').trim()
+      if (!location || location === '场' || /^(今天|明天|后天|上午|下午|晚上|早上)/.test(location) || extractTimeCandidates(location).length) continue
+      candidates.push({ raw: location, start: match.index, end: match.index + match[0].length, explicit })
+    }
+  }
+  return candidates.sort((a, b) => {
+    if (a.explicit !== b.explicit) return a.explicit ? -1 : 1
+    return b.raw.length - a.raw.length || a.start - b.start
+  })
+}
+
+function stripRecognizedParts(text, dates, times, locations) {
+  let result = text
+  const spans = [...dates, ...times, ...locations]
+    .map((item) => ({ start: item.start, end: item.end }))
+    .sort((a, b) => b.start - a.start)
+  const merged = []
+  for (const span of spans) {
+    const previous = merged[merged.length - 1]
+    if (previous && span.end >= previous.start) {
+      previous.start = Math.min(previous.start, span.start)
+      previous.end = Math.max(previous.end, span.end)
+    } else merged.push(span)
+  }
+  for (const span of merged) result = result.slice(0, span.start) + ' ' + result.slice(span.end)
+  return result
+}
+
+function cleanTitle(value, dates, times, locations) {
+  const heading = normalizeText(value).split('\n')
+    .map((line) => line.replace(/^\s*(?:【通知】|\[通知\]|通知)\s*[:：]?\s*/, '').trim())
+    .map((line) => line.match(/^关于\s*(.+?)\s*(?:的)?通知[：:。.!！]?$/))
+    .find(Boolean)
+  if (heading?.[1]) return heading[1].trim()
+
+  let text = stripRecognizedParts(value, dates, times, locations)
+    .replace(/(^|\n)\s*(?:【通知】|\[通知\]|通知)\s*[:：]?/gi, '$1 ')
+    .replace(/(^|\n)\s*@?(?:全体成员|所有人|各位同学|同学们|大家)\s*[:：]?/g, '$1 ')
+    .replace(/(^|\n)\s*(?:辅导员|班主任|老师)\s*$/gm, '')
+    .replace(/(?:请大家|请各位|请|务必|必须|需要|记得|注意)\s*/g, ' ')
+    .replace(/(?:发布通知|通知公告)\s*/g, ' ')
+    .replace(/(?:提前\s*[零〇一二两三四五六七八九十百\d]+\s*分钟?[^\n，,。；;]*)/g, ' ')
+    .replace(/(?:截止|截至|最晚)\s*/g, ' ')
+    .replace(/(?:前|之前|以前)\s*/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  const action = text.match(new RegExp(`(?:^|\\s)((?:${ACTION_WORDS})[^，,。；;\\n]*)`, 'i'))
+  if (action) {
+    const phrase = action[1].trim()
+    const startsTitle = text.indexOf(phrase) === 0
+    if (startsTitle && /^(召开|开会|开班会|举行|签到|上课|听)/.test(phrase)) text = phrase.replace(/^(召开|开会|开班会|举行|签到|上课|听)\s*/, '')
+    else if (startsTitle && !/^(交|提交|完成|报名|填写|领取|参加|处理|确认|缴费)$/.test(phrase)) text = phrase
+  }
+  text = text.replace(/截止|截至|最晚/g, ' ').replace(/\s+交$/g, '').replace(/[\n，,。；;]+/g, ' ').replace(/\s+/g, ' ').replace(/(?<=[\p{L}\p{N}])(?:至|到|在|于)(?=\s)/gu, ' ').replace(/(^|\s)(?:至|到|在|于)(?=\s|$)/g, '$1').replace(/^(?:至|到|在|于)\s*/g, '').replace(/^[:：、\s]+|[:：、\s]+$/g, '').replace(/^交(?=[^班级代])/g, '提交')
+  return text.slice(0, 80) || '待处理通知'
+}
+
+function extractReminder(text) {
+  const match = text.match(/提前\s*([零〇一二两三四五六七八九十百\d]+)\s*分钟?[^\n，,。；;]*/)
+  return match ? match[0].trim() : ''
+}
+
+function noteFrom(text, title, reminder) {
+  const lines = normalizeText(text).split('\n')
+  const useful = []
+  for (const line of lines) {
+    if (!line || /^【?通知】?$/.test(line) || /^(辅导员|班主任|老师)$/.test(line)) continue
+    if (/^\d{4}\s*[年\/-]\s*\d{1,2}\s*[月\/-]\s*\d{1,2}\s*(?:日|号)?$/.test(line)) continue
+    const rest = title && line.includes(title) ? line.replace(title, '') : line
+    const cleaned = rest.trim().replace(/^关于\s*的通知[：:。.!！]?$/, '')
+    if (cleaned && (!title || cleaned !== line.trim() || reminder)) useful.push(cleaned)
+  }
+  return useful.join('；').replace(/^；+|；+$/g, '').slice(0, 500)
+}
+
+function classifyNotice(text, title) {
+  if (/班会|会议|开会|组会|答辩|面试|讲座|活动|签到|召开|举行/.test(text)) return '会议'
+  if (/调课|改到|换到|上课|课程/.test(text)) return '课程'
+  if (/作业|实验报告|论文|习题|上交|提交|上传/.test(text)) return '作业'
+  if (/截止|截至|最晚|逾期|之前|以前/.test(text)) return '截止'
+  return title && title !== '待处理通知' ? '提醒' : '通知'
+}
+
+function confidenceOf({ title, dates, times, location, type, reminder, uncertain }) {
+  let score = title && title !== '待处理通知' ? 0.32 : 0.12
+  if (dates.length) score += dates.some((item) => item.value) ? 0.25 : 0.12
+  if (times.length) score += 0.16
+  if (location) score += 0.1
+  if (type !== '通知') score += 0.1
+  if (reminder) score += 0.04
+  if (dates.some((item) => item.ambiguous)) score -= 0.08
+  if (uncertain) score -= 0.2
+  const value = Math.min(0.98, Number(score.toFixed(2)))
+  return { value, level: value >= 0.78 ? 'high' : value >= 0.5 ? 'medium' : 'low' }
+}
+
+function selectTimeCandidate(candidates, text, type) {
+  if (!candidates.length) return null
+  const scored = candidates.map((candidate, index) => {
+    const before = text.slice(Math.max(0, candidate.start - 10), candidate.start)
+    const after = text.slice(candidate.end, Math.min(text.length, candidate.end + 12))
+    const context = `${before}${after}`
+    let score = -index * 0.01
+    if (/签到|报到|检录|到场|集合|进场|入场/.test(context)) score -= 2
+    if (/开始|正式|举行|召开|开会|上课|活动/.test(after) || /开始时间|正式开始|时间为/.test(before)) score += 2
+    if (type === '截止' || type === '作业') {
+      if (/截止|截至|最晚|之前|以前|前/.test(context)) score += 2
+    }
+    if (candidate.ambiguous) score -= 0.2
+    return { candidate, score }
+  })
+  return scored.sort((a, b) => b.score - a.score)[0].candidate
+}
+
+function findTimeRange(start, candidates, text) {
+  if (!start) return null
+  const index = candidates.indexOf(start)
+  const end = index >= 0 ? candidates[index + 1] : null
+  if (!end) return null
+  const between = text.slice(start.end, end.start).trim()
+  return /^(?:到|至|[-—~～])$/.test(between) ? end : null
+}
+
+function semanticContext(text, candidate) {
+  const separators = /[\n，,。；;：:!?！？]/g
+  let left = 0
+  let right = text.length
+  for (const match of text.slice(0, candidate.start).matchAll(separators)) left = match.index + 1
+  const rightMatch = text.slice(candidate.end).search(/[\n，,。；;：:!?！？]/)
+  if (rightMatch >= 0) right = candidate.end + rightMatch
+  const segment = text.slice(left, right).trim()
+  return segment.length <= 80 ? segment : text.slice(Math.max(0, candidate.start - 10), Math.min(text.length, candidate.end + 12))
+}
+
+function selectDateCandidate(candidates, text, type) {
+  if (!candidates.length) return null
+  const scored = candidates.map((candidate, index) => {
+    const context = semanticContext(text, candidate)
+    let score = -index * 0.01
+    if (candidate.isPublication) score -= 6
+    const afterCandidate = text.slice(candidate.end, candidate.end + 40)
+    const signal = afterCandidate.search(/活动|安排|会议|班会|召开|开会|举行|上课|调整|提交|上交|上传|完成|报名|截止|最晚/)
+    if (signal >= 0) score += Math.max(0, 0.8 - signal / 40)
+    if (type === '会议' || type === '课程') {
+      if (/活动|安排|会议|班会|召开|开会|举行|上课/.test(context)) score += 3
+      if (candidate.isDeadline) score += 4
+      else if (/截止|最晚|之前|以前/.test(context)) score -= 2
+    } else if (/截止|最晚|之前|以前|提交|上交|上传|完成|报名/.test(context)) score += 3
+    if (candidate.isDeadline && type !== '会议' && type !== '课程') score += 1
+    return { candidate, score }
+  })
+  return scored.sort((a, b) => b.score - a.score)[0].candidate
 }
 
 function normalize(value) {
@@ -121,16 +373,55 @@ function similarity(left, right) {
 }
 
 export function parseNotice(source, courses = [], now = new Date()) {
-  const text = String(source ?? '').trim()
-  const course = courses.find((item) => item?.name && text.includes(item.name))?.name ?? ''
+  const rawText = String(source ?? '')
+  const normalizedText = normalizeText(rawText)
+  const dateCandidates = extractDateCandidates(normalizedText, now)
+  const eventDates = dateCandidates.filter((item) => !item.isPublication)
+  const timeCandidates = extractTimeCandidates(normalizedText)
+  const locations = extractLocationCandidates(normalizedText)
+  const location = locations[0]?.raw ?? ''
+  const reminder = extractReminder(normalizedText)
+  // 清理标题时使用全部日期，避免通知落款日期泄漏到标题。
+  const title = cleanTitle(normalizedText, dateCandidates, timeCandidates, locations)
+  const type = classifyNotice(normalizedText, title)
+  const uncertain = /可能|暂定|预计|待定|或许|另行通知/.test(normalizedText)
+  const selectedTime = selectTimeCandidate(timeCandidates, normalizedText, type)
+  const rangeEnd = findTimeRange(selectedTime, timeCandidates, normalizedText)
+  const endTime = rangeEnd?.time ?? ''
+  const selectedDate = selectDateCandidate(eventDates.length ? eventDates : dateCandidates, normalizedText, type)
+  const confidence = confidenceOf({ title, dates: eventDates.length ? eventDates : dateCandidates, times: timeCandidates, location, type, reminder, uncertain })
+  const isDeadline = selectedDate ? /截止|截至|最晚|之前|以前|前(?:提交|完成|交|报名|上传|到)/.test(normalizedText.slice(Math.max(0, selectedDate.start - 8), selectedDate.end + 12)) : false
+  const dateRange = selectedDate && !selectedDate.value ? selectedDate.raw : ''
+  const course = (Array.isArray(courses) ? courses : [])
+    .map((item) => String(item?.name ?? '').trim())
+    .filter(Boolean)
+    .filter((name) => normalizedText.includes(name))
+    .sort((a, b) => b.length - a.length)[0] ?? ''
   return {
-    title: cleanTitle(text),
-    dueDate: parseDate(text, now),
-    dueTime: parseTime(text),
+    title,
+    content: normalizedText,
+    type,
     course,
-    priority: /紧急|务必|必须|逾期|最后/.test(text) ? 'high' : 'normal',
-    note: noteFrom(text),
-    sourceText: text,
+    dueDate: selectedDate?.value ?? '',
+    dueTime: selectedTime?.time ?? '',
+    startTime: selectedTime?.time ?? '',
+    endTime,
+    deadline: isDeadline,
+    deadlineText: isDeadline ? selectedDate?.raw ?? '' : '',
+    dateText: selectedDate?.raw ?? '',
+    dateRange,
+     dateCandidates: dateCandidates.map((item) => ({ raw: item.raw, value: item.value, kind: item.kind, isPublication: Boolean(item.isPublication), isDeadline: Boolean(item.isDeadline), ambiguous: Boolean(item.ambiguous) })),
+    location,
+    reminder,
+    priority: /紧急|务必|必须|逾期|最后|尽快|立即/.test(normalizedText) ? 'high' : 'normal',
+    note: noteFrom(normalizedText, title, reminder),
+     confidence: confidence.value,
+     confidenceLevel: confidence.level,
+     uncertain,
+    // rawText 永远保存用户输入；sourceText 保留给旧任务和旧匹配逻辑。
+    rawText,
+    normalizedText,
+    sourceText: rawText,
   }
 }
 

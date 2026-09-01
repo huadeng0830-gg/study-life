@@ -25,6 +25,7 @@ function makeFakeRecognition({ throwOnStart = false } = {}) {
         error.name = 'NotAllowedError'
         throw error
       }
+      this.onstart?.()
     }
     stop() {}
     abort() {}
@@ -62,6 +63,37 @@ describe('语音输入兼容性', () => {
     expect(instances[0].lang).toBe('zh-CN')
   })
 
+  it('重复 start 不创建第二个识别实例，stop 后仍交付最后一段 final', () => {
+    const { FakeRecognition, instances } = makeFakeRecognition()
+    vi.stubGlobal('SpeechRecognition', FakeRecognition)
+    const onEnd = vi.fn()
+    const controller = transcribe({ onEnd })
+    controller.start()
+    controller.start()
+    expect(instances).toHaveLength(1)
+    const rec = instances[0]
+    controller.stop()
+    rec.onresult({ resultIndex: 0, results: [{ isFinal: true, 0: { transcript: '停止前的最后一句' } }] })
+    rec.onend()
+    expect(onEnd).toHaveBeenLastCalledWith('停止前的最后一句')
+  })
+
+  it('同一控制器重新开始时清理上一轮片段并允许再次结束', () => {
+    const { FakeRecognition, instances } = makeFakeRecognition()
+    vi.stubGlobal('SpeechRecognition', FakeRecognition)
+    const onEnd = vi.fn()
+    const controller = transcribe({ onEnd })
+    controller.start()
+    const rec = instances[0]
+    rec.onresult({ resultIndex: 0, results: [{ isFinal: true, 0: { transcript: '第一轮' } }] })
+    rec.onend()
+    controller.start()
+    expect(instances).toHaveLength(1)
+    rec.onresult({ resultIndex: 0, results: [{ isFinal: true, 0: { transcript: '第二轮' } }] })
+    rec.onend()
+    expect(onEnd).toHaveBeenLastCalledWith('第二轮')
+  })
+
   it('start 同步抛错时显式回调 onError 而不是静默失败', () => {
     const { FakeRecognition } = makeFakeRecognition({ throwOnStart: true })
     vi.stubGlobal('SpeechRecognition', FakeRecognition)
@@ -81,6 +113,33 @@ describe('语音输入兼容性', () => {
     rec.onresult({ resultIndex: 0, results: [{ isFinal: false, 0: { transcript: '午饭' } }] })
     rec.onresult({ resultIndex: 0, results: [{ isFinal: true, 0: { transcript: '午饭 18' } }] })
     expect(onResult).toHaveBeenLastCalledWith('午饭 18', '')
+  })
+
+  it('重复收到同一个 final result 时不会重复拼接', () => {
+    const { FakeRecognition, instances } = makeFakeRecognition()
+    vi.stubGlobal('SpeechRecognition', FakeRecognition)
+    const onResult = vi.fn()
+    const controller = transcribe({ onResult })
+    controller.start()
+    const rec = instances[0]
+    const event = { resultIndex: 0, results: [{ isFinal: true, 0: { transcript: '明天下午三点' } }] }
+    rec.onresult(event)
+    rec.onresult(event)
+    expect(onResult).toHaveBeenLastCalledWith('明天下午三点', '')
+  })
+
+  it('识别发生错误时保留已识别文本，并把 partial transcript 传给调用方', () => {
+    const { FakeRecognition, instances } = makeFakeRecognition()
+    vi.stubGlobal('SpeechRecognition', FakeRecognition)
+    const onResult = vi.fn()
+    const onError = vi.fn()
+    const controller = transcribe({ onResult, onError })
+    controller.start()
+    const rec = instances[0]
+    rec.onresult({ resultIndex: 0, results: [{ isFinal: true, 0: { transcript: '明天交英语作业' } }] })
+    rec.onerror({ error: 'network' })
+    expect(onError).toHaveBeenLastCalledWith('network', '明天交英语作业')
+    expect(onResult).toHaveBeenLastCalledWith('明天交英语作业', '')
   })
 
   it('voiceErrorMessage 覆盖常见错误码并有兜底文案', () => {

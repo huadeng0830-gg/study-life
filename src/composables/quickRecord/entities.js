@@ -128,10 +128,14 @@ export function extractSchedule(text, courses = [], now = new Date()) {
   return {
     title: parsed.title,
     date: parsed.dueDate,
+    dateRange: parsed.dateRange,
     time: parsed.dueTime,
+    endTime: parsed.endTime,
     course: parsed.course,
     priority: parsed.priority,
     note: parsed.note,
+    location: parsed.location,
+    reminder: parsed.reminder,
   }
 }
 
