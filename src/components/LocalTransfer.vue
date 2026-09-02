@@ -457,7 +457,7 @@ const decodedSummary = computed(() => decodedPackage.value ? transferSummary(dec
           <img :src="qrImages[currentFrame]" alt="本地迁移二维码" class="qr-image" />
           <div v-if="qrImages.length > 1" class="frame-progress"><i :style="{ width: ((currentFrame + 1) / qrImages.length * 100) + '%' }"></i></div>
           <p>二维码会循环播放，接收设备会自动收集缺少的片段。</p>
-          <div v-if="packageInfo" class="summary-chips"><span>{{ packageInfo.courses }} 门课程</span><span>{{ packageInfo.tasks }} 项待办</span><span>{{ packageInfo.countdowns }} 个倒计时</span><span>{{ packageInfo.food }} 个吃饭选择</span><span v-if="packageInfo.wallpapers">{{ packageInfo.wallpapers }} 张壁纸</span></div>
+          <div v-if="packageInfo" class="summary-chips"><span>{{ packageInfo.courses }} 门课程</span><span>{{ packageInfo.tasks }} 项待办</span><span>{{ packageInfo.countdowns }} 个重要日期</span><span>{{ packageInfo.food }} 个吃饭选择</span><span v-if="packageInfo.wallpapers">{{ packageInfo.wallpapers }} 张壁纸</span></div>
         </template>
         <template v-else><div class="qr-placeholder"><span>▦</span><p>选择数据并设置密码后生成二维码</p></div></template>
       </section>
@@ -496,7 +496,7 @@ const decodedSummary = computed(() => decodedPackage.value ? transferSummary(dec
         </template>
         <template v-else>
           <div class="preview-title"><span>✓</span><div><b>数据已成功解密</b><p>{{ new Date(decodedPackage.createdAt).toLocaleString('zh-CN') }} 创建</p></div></div>
-          <div class="preview-summary"><span>课程 <b>{{ decodedSummary.courses }}</b></span><span>待办 <b>{{ decodedSummary.tasks }}</b></span><span>倒计时 <b>{{ decodedSummary.countdowns }}</b></span><span>清单 <b>{{ decodedSummary.lists }}</b></span><span>账单 <b>{{ decodedSummary.bills }}</b></span><span>吃饭选择 <b>{{ decodedSummary.food }}</b></span><span v-if="decodedSummary.wallpapers">壁纸 <b>{{ decodedSummary.wallpapers }}</b></span></div>
+          <div class="preview-summary"><span>课程 <b>{{ decodedSummary.courses }}</b></span><span>待办 <b>{{ decodedSummary.tasks }}</b></span><span>重要日期 <b>{{ decodedSummary.countdowns }}</b></span><span>清单 <b>{{ decodedSummary.lists }}</b></span><span>账单 <b>{{ decodedSummary.bills }}</b></span><span>吃饭选择 <b>{{ decodedSummary.food }}</b></span><span v-if="decodedSummary.wallpapers">壁纸 <b>{{ decodedSummary.wallpapers }}</b></span></div>
           <div class="mode-options"><label :class="{ on: importMode === 'merge' }"><input v-model="importMode" type="radio" value="merge" /><span><b>安全合并</b><small>保留本机数据，重复ID另存副本</small></span></label><label :class="{ on: importMode === 'replace' }"><input v-model="importMode" type="radio" value="replace" /><span><b>覆盖所选模块</b><small>使用发送设备的数据替换本机内容</small></span></label></div>
           <button class="btn btn-primary" @click="doImport">确认导入</button>
         </template>

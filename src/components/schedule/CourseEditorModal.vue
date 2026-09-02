@@ -4,6 +4,7 @@ import Modal from '../Modal.vue'
 import { PALETTE, MAX_WEEK } from '../../composables/store/utils.js'
 import { periodIndex, periodLabelById, periodRangeById } from '../../composables/store/timeConfig.js'
 import { weekLabel } from '../../composables/store/schedule.js'
+import { isArchived, taskStatus } from '../../composables/domain/state.js'
 
 const props = defineProps({
   open: Boolean,
@@ -16,7 +17,7 @@ const props = defineProps({
   linkedReviewProgress: { type: [Number, null], default: null },
 })
 
-const emit = defineEmits(['close', 'save', 'delete', 'add-another'])
+const emit = defineEmits(['close', 'save', 'delete', 'archive', 'add-another', 'add-homework'])
 
 const DAYS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
 const draft = reactive({})
@@ -65,6 +66,7 @@ function overlaps(course) {
 }
 
 const formCellClash = computed(() => formCellCourses.value.find((course) => overlaps(course)))
+const editingCourse = computed(() => props.courses.find((course) => course.id === props.editingId) ?? null)
 
 function periodOption(id) {
   const label = periodLabelById(id)
@@ -90,7 +92,7 @@ function save() {
   let endWeek = Number(draft.endWeek)
   if (endWeek < startWeek) [startWeek, endWeek] = [endWeek, startWeek]
   emit('save', {
-    id: props.editingId || `c${Date.now()}`,
+    id: props.editingId || `c${crypto.randomUUID()}`,
     editingId: props.editingId,
     data: {
       name: draft.name.trim(),
@@ -150,17 +152,17 @@ function requestDelete() {
       <p v-if="formCellClash" class="error">⚠️ 周次与「{{ formCellClash.name }}」重叠，请调整开始/结束周，否则两门课会叠在一起</p>
 
       <section v-if="editingId" class="course-links" aria-label="课程关联事项">
-        <div class="course-links-head"><div><b>关联事项</b><small>删除课程只会解除关联，待办和倒计时会保留。</small></div><span v-if="linkedReviewProgress !== null" class="link-progress">复习 {{ linkedReviewProgress }}%</span></div>
+        <div class="course-links-head"><div><b>关联事项</b><small>删除课程只会解除关联，待办和重要日期会保留。</small></div><span v-if="linkedReviewProgress !== null" class="link-progress">复习 {{ linkedReviewProgress }}%</span></div>
         <div class="course-link-columns">
-          <div><span class="link-label">待办 {{ linkedTasks.length }}</span><p v-if="!linkedTasks.length" class="link-empty">暂无关联待办</p><ul v-else class="link-list"><li v-for="task in linkedTasks.slice(0, 3)" :key="task.id"><span :class="{ done: task.done }">{{ task.title }}</span><small>{{ task.done ? '已完成' : (task.date || '未安排日期') }}</small></li></ul><RouterLink class="link-action" to="/tasks">管理待办 →</RouterLink></div>
-          <div><span class="link-label">学习类倒计时 {{ linkedCountdowns.length }}</span><p v-if="!linkedCountdowns.length" class="link-empty">暂无关联学习倒计时</p><ul v-else class="link-list"><li v-for="item in linkedCountdowns.slice(0, 3)" :key="item.id"><span>{{ item.name }}</span><small>{{ item.date }} · 复习 {{ item.reviewProgress || 0 }}%</small></li></ul><RouterLink class="link-action" to="/exams">管理倒计时 →</RouterLink></div>
+          <div><span class="link-label">待办 {{ linkedTasks.length }}</span><p v-if="!linkedTasks.length" class="link-empty">暂无关联待办</p><ul v-else class="link-list"><li v-for="task in linkedTasks.slice(0, 3)" :key="task.id"><span :class="{ done: taskStatus(task) === 'completed' }">{{ task.title }}</span><small>{{ taskStatus(task) === 'completed' ? '已完成' : (task.date || '未安排日期') }}</small></li></ul><div class="link-actions"><RouterLink class="link-action" to="/tasks">管理待办 →</RouterLink><button type="button" class="link-action" @click="emit('add-homework')">添加作业</button></div></div>
+          <div><span class="link-label">学习类重要日期 {{ linkedCountdowns.length }}</span><p v-if="!linkedCountdowns.length" class="link-empty">暂无关联学习类重要日期</p><ul v-else class="link-list"><li v-for="item in linkedCountdowns.slice(0, 3)" :key="item.id"><span>{{ item.name }}</span><small>{{ item.date }} · 复习 {{ item.reviewProgress || 0 }}%</small></li></ul><RouterLink class="link-action" to="/exams">管理重要日期 →</RouterLink></div>
         </div>
       </section>
 
       <label>标记颜色</label>
       <div class="colors"><button v-for="color in PALETTE" :key="color" type="button" class="swatch" :style="{ background: color }" :class="{ picked: draft.color === color }" @click="draft.color = color"></button></div>
       <p v-if="error.message" class="error">{{ error.message }}</p>
-      <div class="actions"><button v-if="editingId" class="btn btn-danger" @click="requestDelete">删除课程</button><button class="btn btn-primary" @click="save">保存</button></div>
+      <div class="actions"><button v-if="editingId" class="btn btn-ghost" @click="emit('archive', editingCourse)">{{ isArchived(editingCourse) ? '恢复课程' : '归档课程' }}</button><button v-if="editingId" class="btn btn-danger" @click="requestDelete">删除课程</button><button class="btn btn-primary" @click="save">保存</button></div>
       <p v-if="editingId" class="cell-add-hint">同一格子可以放不同周次的课（如 1-6 周上 A、7-16 周上 B） <button class="btn btn-ghost" @click="emit('add-another')">＋ 在此格添加另一门课</button></p>
     </div>
   </Modal>
@@ -168,6 +170,8 @@ function requestDelete() {
 
 <style scoped>
 .form { display: flex; flex-direction: column; gap: 8px; }
+.link-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.link-actions .link-action { padding: 0; color: var(--primary); font: inherit; background: transparent; border: 0; cursor: pointer; }
 .form label { color: var(--muted); font-size: 13px; margin-top: 6px; }
 .form input, .form select { width: 100%; }
 .row { display: flex; gap: 10px; margin-top: 6px; }

@@ -4,6 +4,7 @@ import Modal from './Modal.vue'
 import { useStoredRef } from '../composables/store/index.js'
 import { todayStr } from '../composables/store/utils.js'
 import { useDomainCommands } from '../composables/domain/commands.js'
+import { isTaskActionable, taskStatus } from '../composables/domain/state.js'
 import {
   DEFAULT_FOCUS_SETTINGS,
   buildFocusSession,
@@ -52,7 +53,7 @@ const recentTemporaries = computed(() => settings.value.recentTemporaries)
 const display = computed(() => (active.value ? focusDisplayState(active.value, now.value) : null))
 const selectedTodo = computed(() => tasks.value.find((task) => task.id === selectedTodoId.value) || null)
 const openTasks = computed(() => {
-  const open = tasks.value.filter((task) => task && !task.done && task.status !== 'archived' && task.status !== 'cancelled')
+  const open = tasks.value.filter((task) => task && isTaskActionable(task, new Date(now.value)))
   const dueTs = (task) => (task.dueDate ? new Date(`${task.dueDate}T${task.dueTime || '23:59'}`).getTime() : Infinity)
   return open.sort((a, b) => {
     const overdueA = dueTs(a) < Date.now() ? 0 : 1
@@ -84,7 +85,8 @@ const restClockText = computed(() => mmss(restRemainingSeconds.value))
 const linkedTodoDone = computed(() => {
   const session = lastSavedSession.value
   if (!session?.todoId) return false
-  return tasks.value.find((task) => task.id === session.todoId)?.done ?? false
+  const task = tasks.value.find((item) => item.id === session.todoId)
+  return task ? taskStatus(task) === 'completed' : false
 })
 
 const activeStateLine = computed(() => {
@@ -220,14 +222,7 @@ function saveFocus(status = 'completed') {
   const session = buildFocusSession(activeRef.value, new Date().toISOString(), status)
   if (!session) return
   focusSessions.value.unshift(session)
-  if (session.todoId) {
-    const task = tasks.value.find((item) => item.id === session.todoId)
-    if (task) {
-      task.focusCount = Math.max(0, Number(task.focusCount) || 0) + 1
-      task.focusTotalSeconds = Math.max(0, Number(task.focusTotalSeconds) || 0) + session.actualFocusSeconds
-      task.lastFocusedAt = session.endedAt
-    }
-  }
+  if (session.todoId) domain.recordTaskFocusSession(session.todoId, session)
   activeRef.value = null
   showEarly.value = false
   lastSavedSession.value = session
@@ -277,9 +272,7 @@ function addTempTodo() {
 function markTodoDone() {
   const session = lastSavedSession.value
   if (!session?.todoId || linkedTodoDone.value) return
-  const task = tasks.value.find((item) => item.id === session.todoId)
-  if (!task) return
-  domain.toggleTask(task.id)
+  domain.completeTask(session.todoId)
 }
 
 function startRest(minutes) {

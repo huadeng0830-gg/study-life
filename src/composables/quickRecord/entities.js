@@ -93,7 +93,7 @@ export function extractAmounts(text) {
   // 7) 其他位置的裸阿拉伯数字，例如“生活费到账500微信”，但跳过日期/时间上下文中的数字。
   for (const match of source.matchAll(/(?:¥|￥)?\s*(\d+(?:\.\d{1,2})?)\s*(?:元|块|rmb)?/gi)) {
     const next = source.slice(match.index + match[0].length, match.index + match[0].length + 1)
-    if (/^[年月日号点时]/.test(next)) continue
+    if (/^[年月日号点时天]/.test(next)) continue
     const amount = Number(match[1])
     addFromMatch(match, amount, match[0])
   }

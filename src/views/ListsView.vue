@@ -305,7 +305,7 @@ function undoDelete() {
   <div class="page">
     <header class="page-head">
       <div class="page-head-main">
-        <h1 class="page-title">我的清单</h1>
+        <h1 class="page-title">清单</h1>
         <p class="page-desc">购物、出行、杂物和各种准备事项，都可以快速建立清单。</p>
       </div>
       <div class="page-actions">

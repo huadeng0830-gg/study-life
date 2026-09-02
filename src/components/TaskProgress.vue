@@ -31,6 +31,15 @@ const activityText = computed(() => {
   if (props.activityAgeSeconds === null || props.activityAgeSeconds < 2) return '刚刚'
   return `${props.activityAgeSeconds} 秒前`
 })
+
+const stateText = computed(() => ({
+  waiting: '等待开始',
+  running: '进行中',
+  completed: '已完成',
+  warning: '已完成，需确认',
+  failed: '处理失败',
+  cancelled: '已取消',
+}[props.task.status] || '进行中'))
 </script>
 
 <template>
@@ -40,7 +49,7 @@ const activityText = computed(() => {
         <b>{{ task.title }}</b>
         <span>{{ ['completed', 'warning'].includes(task.status) ? `用时 ${elapsedText}` : `已用时 ${elapsedText}` }}</span>
       </div>
-      <span class="task-state">{{ task.status === 'completed' ? '已完成' : task.status === 'warning' ? '已完成，需确认' : task.status === 'failed' ? '处理失败' : task.status === 'cancelled' ? '已取消' : '处理中' }}</span>
+      <span class="task-state">{{ stateText }}</span>
     </header>
 
     <ol v-if="!compact || task.status !== 'running'" class="task-steps">

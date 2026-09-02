@@ -5,7 +5,7 @@ export const RECORD_TYPES = Object.freeze({
   expense: { label: '支出', icon: '💰' },
   income: { label: '收入', icon: '💵' },
   bill: { label: '固定账单', icon: '🧾' },
-  countdown: { label: '倒计时', icon: '⏳' },
+  countdown: { label: '重要日期', icon: '⏳' },
   note: { label: '快速笔记', icon: '📝' },
   unknown: { label: '不确定类型', icon: '❓' },
 })

@@ -2,28 +2,244 @@ import { useStoredRef } from '../store/index.js'
 import { createNextWeeklyTask } from '../taskRecurrence.js'
 import { classifyTask } from '../smartClassify.js'
 import { detectCategory } from '../ledger.js'
+import { detachCourseRelations } from './relations.js'
+import { defaultAccount, defaultReminderMinutes, policyDateKey } from '../settingsPolicy.js'
+import { clearTombstone, recordTombstone } from '../syncMetadata.js'
 
-function stamp() { return new Date().toISOString() }
+let lastStamp = 0
+function stamp() {
+  const now = Date.now()
+  lastStamp = Math.max(now, lastStamp + 1)
+  return new Date(lastStamp).toISOString()
+}
 function createId(prefix) { return `${prefix}${Date.now()}${Math.random().toString(36).slice(2, 6)}` }
 function origin(value = {}) { return { createdFrom: value.createdFrom || 'manual', sourceType: value.sourceType || '', sourceId: value.sourceId || '', relationId: value.relationId || '' } }
 function dateString(value) { const d = new Date(value); const p = (n) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}` }
 function addMonths(base, count) { const day = base.getDate(); const next = new Date(base.getFullYear(), base.getMonth() + count, 1); next.setDate(Math.min(day, new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate())); return next }
 function nextBillDate(bill) { const current = new Date(`${bill.nextDate}T00:00:00`); let next = bill.cycle === 'weekly' ? new Date(current.getTime() + 7 * 86400000) : bill.cycle === 'quarterly' ? addMonths(current, 3) : bill.cycle === 'yearly' ? addMonths(current, 12) : bill.cycle === 'once' ? current : addMonths(current, 1); const today = new Date(); today.setHours(0, 0, 0, 0); while (next <= today && bill.cycle !== 'once') next = bill.cycle === 'weekly' ? new Date(next.getTime() + 7 * 86400000) : bill.cycle === 'quarterly' ? addMonths(next, 3) : bill.cycle === 'yearly' ? addMonths(next, 12) : addMonths(next, 1); return dateString(next) }
 
+function archiveItem(list, id, { inactive = false } = {}) {
+  const item = list.value.find((entry) => entry.id === id)
+  if (!item) return null
+  item.archivedAt = item.archivedAt || stamp()
+  if (inactive) item.active = false
+  item.updatedAt = stamp()
+  return item
+}
+
+function restoreItem(list, id, { active = false } = {}) {
+  const item = list.value.find((entry) => entry.id === id)
+  if (!item) return null
+  item.archivedAt = null
+  if (active) item.active = true
+  item.updatedAt = stamp()
+  return item
+}
+
+function restoreDeletedItem(list, entityType, entity) {
+  if (!entity?.id) return null
+  const existing = list.value.find((item) => item.id === entity.id)
+  if (existing) return existing
+  const restored = { ...entity, archivedAt: null, updatedAt: stamp() }
+  delete restored.deletedAt
+  delete restored.tombstone
+  list.value.push(restored)
+  clearTombstone(entityType, restored.id)
+  return restored
+}
+
 export function useDomainCommands() {
   const tasks = useStoredRef('sl_tasks', []); const courses = useStoredRef('sl_courses', []); const milestones = useStoredRef('sl_exams', []); const bills = useStoredRef('sl_bills', []); const transactions = useStoredRef('sl_expenses', []); const events = useStoredRef('sl_events', []); const notes = useStoredRef('sl_quick_notes', [])
-  function createTask(value) { const now = stamp(); const task = classifyTask({ id: value.id || createId('t'), title: String(value.title || '').trim(), done: false, status: 'pending', createdAt: now, updatedAt: now, course: value.course || '', courseId: value.courseId || '', dueDate: value.dueDate || '', dueTime: value.dueTime || '', priority: value.priority || 'normal', note: value.note || '', sourceText: value.sourceText || '', estimateMinutes: Number(value.estimateMinutes) || 0, repeat: value.repeat || 'none', kind: value.kind || 'todo', ...origin(value) }, courses.value); if (!task.title) throw new Error('请填写待办内容'); tasks.value.push(task); return task }
+  function createTask(value) { const now = stamp(); const task = classifyTask({ id: value.id || createId('t'), title: String(value.title || '').trim(), done: false, status: 'pending', createdAt: now, updatedAt: now, course: value.course || '', courseId: value.courseId || '', dueDate: value.dueDate || '', dueTime: value.dueTime || '', priority: value.priority || 'normal', note: value.note || '', sourceText: value.sourceText || '', estimateMinutes: Number(value.estimateMinutes) || 0, reminderMinutes: defaultReminderMinutes('task', value.reminderMinutes), repeat: value.repeat || 'none', kind: value.kind || 'todo', ...origin(value) }, courses.value); if (!task.title) throw new Error('请填写待办内容'); tasks.value.push(task); return task }
   function updateTask(id, value) { const item = tasks.value.find((task) => task.id === id); if (!item) return null; Object.assign(item, value, { updatedAt: stamp() }); return item }
   function toggleTask(id) { const item = tasks.value.find((task) => task.id === id); if (!item) return null; const now = stamp(); item.done = !item.done; item.status = item.done ? 'completed' : 'pending'; item.completedAt = item.done ? now : null; item.updatedAt = now; if (item.done && item.repeat === 'weekly' && item.dueDate && !item.repeatGeneratedAt) { item.repeatGeneratedAt = now; const next = createNextWeeklyTask(item); if (next) tasks.value.push({ ...next, status: 'pending', updatedAt: now, createdFrom: item.createdFrom || 'manual', sourceType: 'task-repeat', sourceId: item.id }) } return item }
-  function createMilestone(value) { const now = stamp(); const item = { id: value.id || createId('e'), name: String(value.name || value.title || '').trim(), date: value.date || '', time: value.time || '', location: value.location || '', category: value.category || '学习', repeat: value.repeat || 'none', pinned: Boolean(value.pinned), courseId: value.courseId || '', courseName: value.courseName || value.course || '', reviewProgress: Number(value.reviewProgress) || 0, kind: value.kind || 'countdown', createdAt: now, updatedAt: now, ...origin(value) }; if (!item.name || !item.date) throw new Error('请补充名称和目标日期'); milestones.value.push(item); return item }
+  function deleteTask(id) {
+    const index = tasks.value.findIndex((item) => item.id === id)
+    if (index < 0) return null
+    const deleted = tasks.value.splice(index, 1)[0]
+    recordTombstone('Task', id, { entity: deleted })
+    return deleted
+  }
+  function restoreDeletedTask(entity) { return restoreDeletedItem(tasks, 'Task', entity) }
+  function createMilestone(value) { const now = stamp(); const item = { id: value.id || createId('e'), name: String(value.name || value.title || '').trim(), date: value.date || '', time: value.time || '', location: value.location || '', category: value.category || '学习', repeat: value.repeat || 'none', pinned: Boolean(value.pinned), courseId: value.courseId || '', courseName: value.courseName || value.course || '', reviewProgress: Number(value.reviewProgress) || 0, reminderMinutes: defaultReminderMinutes('milestone', value.reminderMinutes), kind: value.kind || 'countdown', createdAt: now, updatedAt: now, ...origin(value) }; if (!item.name || !item.date) throw new Error('请补充名称和目标日期'); milestones.value.push(item); return item }
   function updateMilestone(id, value) { const item = milestones.value.find((entry) => entry.id === id); if (!item) return null; Object.assign(item, value, { updatedAt: stamp() }); return item }
-  function createEvent(value) { const now = stamp(); const item = { id: value.id || createId('event'), title: String(value.title || '').trim(), date: value.date || '', time: value.time || '', endTime: value.endTime || '', location: value.location || '', courseId: value.courseId || '', courseName: value.courseName || value.course || '', note: value.note || '', sourceText: value.sourceText || '', normalizedText: value.normalizedText || '', noticeType: value.noticeType || '', createdAt: now, updatedAt: now, ...origin(value) }; if (!item.title) throw new Error('请填写日程内容'); events.value.push(item); return item }
+  const milestoneRestoreRelations = new Map()
+  function deleteMilestone(id) {
+    const index = milestones.value.findIndex((item) => item.id === id)
+    if (index < 0) return null
+    const [milestone] = milestones.value.splice(index, 1)
+    milestoneRestoreRelations.set(id, tasks.value
+      .filter((task) => task.sourceType === 'milestone-review' && task.sourceId === id)
+      .map((task) => ({ id: task.id, sourceType: task.sourceType, sourceId: task.sourceId, relationId: task.relationId })))
+    const now = stamp()
+    tasks.value = tasks.value.map((task) => {
+      if (task.sourceType !== 'milestone-review' || task.sourceId !== id) return task
+      return { ...task, sourceType: '', sourceId: '', relationId: '', updatedAt: now }
+    })
+    recordTombstone('Milestone', id, { entity: milestone })
+    return milestone
+  }
+  function restoreDeletedMilestone(entity) {
+    const restored = restoreDeletedItem(milestones, 'Milestone', entity)
+    if (!restored) return null
+    const relations = milestoneRestoreRelations.get(restored.id) || []
+    const now = stamp()
+    for (const relation of relations) {
+      const task = tasks.value.find((item) => item.id === relation.id)
+      if (!task || task.sourceType || task.sourceId) continue
+      Object.assign(task, relation, { updatedAt: now })
+    }
+    milestoneRestoreRelations.delete(restored.id)
+    return restored
+  }
+  function createEvent(value) { const now = stamp(); const item = { id: value.id || createId('event'), title: String(value.title || '').trim(), date: value.date || '', time: value.time || '', endTime: value.endTime || '', location: value.location || '', courseId: value.courseId || '', courseName: value.courseName || value.course || '', note: value.note || '', sourceText: value.sourceText || '', normalizedText: value.normalizedText || '', noticeType: value.noticeType || '', reminderMinutes: defaultReminderMinutes('event', value.reminderMinutes), createdAt: now, updatedAt: now, ...origin(value) }; if (!item.title) throw new Error('请填写日程内容'); events.value.push(item); return item }
   function createNote(value) { const now = stamp(); const content = String(value.content || value.note || value.title || '').trim(); const firstLine = content.split(/\r?\n/).map((line) => line.trim()).find(Boolean) || ''; const autoTitle = firstLine || content.replace(/\s+/g, ' '); const title = String(value.title || '').trim() || autoTitle.slice(0, 42); const item = { id: value.id || createId('note'), title: title.slice(0, 42), content, courseId: value.courseId || '', courseName: value.courseName || value.course || '', sourceText: value.sourceText || value.raw || content, tags: Array.isArray(value.tags) ? value.tags : [], createdAt: now, updatedAt: now, ...origin(value) }; if (!item.content) throw new Error('请填写笔记内容'); notes.value.unshift(item); return item }
   function updateNote(id, value) { const item = notes.value.find((note) => note.id === id); if (!item) return null; Object.assign(item, value, { updatedAt: stamp() }); return item }
-  function createTransaction(value) { const now = stamp(); const item = { id: value.id || createId('ex'), name: String(value.name || value.title || '').trim(), amount: Number(value.amount), cat: value.cat || value.category || detectCategory(value.name || value.title), date: value.date || now.slice(0, 10), time: value.time || now.slice(11, 16), note: value.note || '', account: value.account || '', direction: value.direction === 'income' || value.type === 'income' ? 'income' : 'expense', source: value.source || value.createdFrom || 'manual', billId: value.billId || '', billingPeriodKey: value.billingPeriodKey || '', createdAt: now, updatedAt: now, ...origin(value) }; if (!item.name || !(item.amount > 0)) throw new Error('请补充正确金额和用途'); transactions.value.push(item); return item }
+  function deleteNote(id) {
+    const index = notes.value.findIndex((item) => item.id === id)
+    if (index < 0) return null
+    const [note] = notes.value.splice(index, 1)
+    const now = stamp()
+    tasks.value = tasks.value.map((task) => task.sourceType === 'note' && task.sourceId === id ? { ...task, sourceType: '', sourceId: '', relationId: '', updatedAt: now } : task)
+    events.value = events.value.map((event) => event.sourceType === 'note' && event.sourceId === id ? { ...event, sourceType: '', sourceId: '', relationId: '', updatedAt: now } : event)
+    recordTombstone('Note', id, { entity: note })
+    return note
+  }
+  function createTransaction(value) { const now = stamp(); const item = { id: value.id || createId('ex'), name: String(value.name || value.title || '').trim(), amount: Number(value.amount), cat: value.cat || value.category || detectCategory(value.name || value.title), date: value.date || policyDateKey(now), time: value.time || now.slice(11, 16), note: value.note || '', account: defaultAccount(value.account), direction: value.direction === 'income' || value.type === 'income' ? 'income' : 'expense', source: value.source || value.createdFrom || 'manual', billId: value.billId || '', billingPeriodKey: value.billingPeriodKey || '', createdAt: now, updatedAt: now, ...origin(value) }; if (!item.name || !(item.amount > 0)) throw new Error('请补充正确金额和用途'); transactions.value.push(item); return item }
   function updateTransaction(id, value) { const item = transactions.value.find((entry) => entry.id === id); if (!item) return null; Object.assign(item, value, { updatedAt: stamp() }); return item }
-  function createBill(value) { const now = stamp(); const item = { id: value.id || createId('bill'), name: String(value.name || value.title || '').trim(), amount: Number(value.amount), cycle: value.cycle || 'monthly', nextDate: value.nextDate || value.date || '', remindDays: Number(value.remindDays ?? 3), autoRenew: value.autoRenew !== false, active: value.active !== false, note: value.note || '', account: value.account || '', createdAt: now, updatedAt: now, ...origin(value) }; if (!item.name || !(item.amount > 0) || !item.nextDate) throw new Error('请补充账单名称、金额和日期'); bills.value.push(item); return item }
+  function deleteTransaction(id) {
+    const item = transactions.value.find((entry) => entry.id === id)
+    if (!item) return null
+    const bill = bills.value.find((entry) => entry.id === item.billId || (item.sourceType === 'bill' && item.sourceId === entry.id))
+    if (bill && item.billingPeriodKey) {
+      return { blocked: true, reason: '这是固定账单的支付记录，请使用“撤销支付”，避免账单状态与账本不一致。' }
+    }
+    const index = transactions.value.findIndex((entry) => entry.id === id)
+    const [deleted] = transactions.value.splice(index, 1)
+    recordTombstone('Transaction', id, { entity: deleted })
+    return deleted
+  }
+  function restoreDeletedTransaction(entity) { return restoreDeletedItem(transactions, 'Transaction', entity) }
+  function undoBillPayment(id) {
+    const item = transactions.value.find((entry) => entry.id === id)
+    if (!item || !item.billingPeriodKey) return null
+    const bill = bills.value.find((entry) => entry.id === item.billId || (item.sourceType === 'bill' && item.sourceId === entry.id))
+    const index = transactions.value.findIndex((entry) => entry.id === id)
+    const [deleted] = transactions.value.splice(index, 1)
+    recordTombstone('Transaction', id, { entity: deleted })
+    if (bill && bill.nextDate > item.billingPeriodKey) {
+      bill.nextDate = item.billingPeriodKey
+      bill.updatedAt = stamp()
+    }
+    return deleted
+  }
+  function createBill(value) { const now = stamp(); const item = { id: value.id || createId('bill'), name: String(value.name || value.title || '').trim(), amount: Number(value.amount), cycle: value.cycle || 'monthly', nextDate: value.nextDate || value.date || '', remindDays: Number(value.remindDays ?? 3), autoRenew: value.autoRenew !== false, active: value.active !== false, note: value.note || '', account: defaultAccount(value.account), createdAt: now, updatedAt: now, ...origin(value) }; if (!item.name || !(item.amount > 0) || !item.nextDate) throw new Error('请补充账单名称、金额和日期'); bills.value.push(item); return item }
   function updateBill(id, value) { const item = bills.value.find((entry) => entry.id === id); if (!item) return null; Object.assign(item, value, { updatedAt: stamp() }); return item }
+  function deleteBill(id) {
+    const index = bills.value.findIndex((item) => item.id === id)
+    if (index < 0) return null
+    const [bill] = bills.value.splice(index, 1)
+    const now = stamp()
+    transactions.value = transactions.value.map((item) => {
+      const matchesBill = item.billId === id
+        || (item.sourceType === 'bill' && item.sourceId === id)
+        || item.relationId === `bill:${id}`
+      if (!matchesBill) return item
+      return {
+        ...item,
+        // 保留交易历史及其“来自账单”的可读来源，但不保留指向已删除 Bill 的 ID。
+        billId: '',
+        billingPeriodKey: '',
+        sourceType: item.sourceType === 'bill' && item.sourceId === id ? '' : item.sourceType,
+        sourceId: item.sourceType === 'bill' && item.sourceId === id ? '' : item.sourceId,
+        relationId: item.relationId === `bill:${id}` ? '' : item.relationId,
+        updatedAt: now,
+      }
+    })
+    recordTombstone('Bill', id, { entity: bill })
+    return bill
+  }
+  function deleteCourse(id) {
+    const index = courses.value.findIndex((item) => item.id === id)
+    if (index < 0) return null
+    const [course] = courses.value.splice(index, 1)
+    detachCourseRelations(course, { tasks: tasks.value, milestones: milestones.value, events: events.value, notes: notes.value })
+    recordTombstone('Course', id, { entity: course })
+    return course
+  }
+  function createCourse(value) {
+    const now = stamp()
+    const course = {
+      id: createId('c'),
+      name: String(value.name || '').trim(),
+      teacher: String(value.teacher || '').trim(),
+      room: String(value.room || '').trim(),
+      campusId: String(value.campusId || '').trim(),
+      travelMinutes: Math.max(0, Number(value.travelMinutes) || 0),
+      color: value.color || '#456fe8',
+      day: Number(value.day) || 0,
+      start: Number(value.start) || 1,
+      end: Number(value.end) || Number(value.start) || 1,
+      startWeek: Number(value.startWeek) || 1,
+      endWeek: Number(value.endWeek) || 20,
+      weekType: value.weekType || 'all',
+      createdAt: now,
+      updatedAt: now,
+      createdFrom: value.createdFrom || 'manual',
+    }
+    if (!course.name) throw new Error('请填写课程名称')
+    courses.value.push(course)
+    return course
+  }
+  function deleteEvent(id) {
+    const index = events.value.findIndex((item) => item.id === id)
+    if (index < 0) return null
+    const deleted = events.value.splice(index, 1)[0]
+    recordTombstone('Event', id, { entity: deleted })
+    return deleted
+  }
+  function restoreDeletedEvent(entity) { return restoreDeletedItem(events, 'Event', entity) }
+  function archiveTask(id) { return archiveItem(tasks, id) }
+  function restoreTask(id) { return restoreItem(tasks, id) }
+  function archiveCourse(id) { return archiveItem(courses, id) }
+  function restoreCourse(id) { return restoreItem(courses, id) }
+  function archiveMilestone(id) { return archiveItem(milestones, id) }
+  function restoreMilestone(id) { return restoreItem(milestones, id) }
+  function archiveEvent(id) { return archiveItem(events, id) }
+  function restoreEvent(id) { return restoreItem(events, id) }
+  function archiveNote(id) { return archiveItem(notes, id) }
+  function restoreNote(id) { return restoreItem(notes, id) }
+  function archiveBill(id) { return archiveItem(bills, id, { inactive: true }) }
+  function restoreBill(id) { return restoreItem(bills, id, { active: true }) }
+  function setBillActive(id, active) {
+    const item = bills.value.find((entry) => entry.id === id)
+    if (!item) return null
+    item.active = Boolean(active)
+    if (item.active) item.archivedAt = null
+    item.updatedAt = stamp()
+    return item
+  }
+  function skipBill(id) {
+    const item = bills.value.find((entry) => entry.id === id)
+    if (!item) return null
+    item.nextDate = nextBillDate(item)
+    item.updatedAt = stamp()
+    return item
+  }
   function payBill(id) { const bill = bills.value.find((item) => item.id === id); if (!bill) return null; const period = bill.nextDate; const duplicate = transactions.value.find((item) => item.billId === bill.id && item.billingPeriodKey === period); if (duplicate) return { bill, transaction: duplicate, duplicate: true }; const transaction = createTransaction({ name: bill.name, amount: bill.amount, category: bill.category, date: dateString(new Date()), note: '来自固定账单', account: bill.account, billId: bill.id, billingPeriodKey: period, source: 'bill', createdFrom: 'bill', sourceType: 'bill', sourceId: bill.id }); bill.nextDate = nextBillDate(bill); bill.updatedAt = stamp(); return { bill, transaction, duplicate: false } }
-  return { tasks, courses, milestones, bills, transactions, events, notes, createTask, updateTask, toggleTask, createMilestone, updateMilestone, createEvent, createNote, updateNote, createTransaction, updateTransaction, createBill, updateBill, payBill }
+  function completeTask(id) {
+    const item = tasks.value.find((task) => task.id === id)
+    if (!item) return null
+    return item.done || item.status === 'completed' ? item : toggleTask(id)
+  }
+  function recordTaskFocusSession(id, session) {
+    const task = tasks.value.find((item) => item.id === id)
+    if (!task || !session) return null
+    task.focusCount = Math.max(0, Number(task.focusCount) || 0) + 1
+    task.focusTotalSeconds = Math.max(0, Number(task.focusTotalSeconds) || 0) + Math.max(0, Number(session.actualFocusSeconds) || 0)
+    task.lastFocusedAt = session.endedAt || stamp()
+    task.updatedAt = stamp()
+    return task
+  }
+  return { tasks, courses, milestones, bills, transactions, events, notes, createTask, updateTask, toggleTask, completeTask, deleteTask, restoreDeletedTask, archiveTask, restoreTask, createMilestone, updateMilestone, deleteMilestone, restoreDeletedMilestone, archiveMilestone, restoreMilestone, createEvent, deleteEvent, restoreDeletedEvent, archiveEvent, restoreEvent, createNote, updateNote, deleteNote, archiveNote, restoreNote, createTransaction, updateTransaction, deleteTransaction, restoreDeletedTransaction, undoBillPayment, createBill, updateBill, deleteBill, archiveBill, restoreBill, setBillActive, skipBill, deleteCourse, createCourse, archiveCourse, restoreCourse, recordTaskFocusSession, payBill }
 }

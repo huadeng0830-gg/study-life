@@ -1,4 +1,4 @@
-// 快速录入引擎（旧版，已废弃）：仅保留给旧 QuickCapturePanel 和旧测试使用。
+// @deprecated 快速录入引擎（旧版）：仅保留给旧 QuickCapturePanel 和旧测试使用。
 // 新业务请使用 quickRecord/parser.js：那边的 parseQuickRecord 采用实体提取+意图判断，
 // 支持“花了五元买牛肉面”等语序变化和“12块5”等口语金额。
 import { parseNotice } from './noticeParser.js'

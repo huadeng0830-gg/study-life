@@ -67,6 +67,7 @@ async function bootstrap() {
       { path: '/lists', name: 'lists', component: routeLoaders['/lists'] },
       { path: '/bills', name: 'bills', component: routeLoaders['/bills'] },
       { path: '/food', name: 'food', component: routeLoaders['/food'] },
+      { path: '/review', name: 'review', component: routeLoaders['/review'] },
     ],
   })
 

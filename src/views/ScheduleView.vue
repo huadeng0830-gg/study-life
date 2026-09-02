@@ -2,7 +2,7 @@
 import { defineAsyncComponent, ref, reactive, computed, watch, onBeforeUnmount, onDeactivated } from 'vue'
 import Modal from '../components/Modal.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
-import { detachCourseRelations } from '../composables/domain/relations.js'
+import { useDomainCommands } from '../composables/domain/commands.js'
 import { appearance } from '../composables/appearance.js'
 import {
   useStoredRef,
@@ -16,8 +16,6 @@ import {
   timeConfig,
   campusName,
   seasonName,
-  currentCampusId,
-  currentSeasonId,
   courseUsesPeriod,
   currentTimes,
   periodIndex,
@@ -33,6 +31,9 @@ import {
   scheduleExceptions,
 } from '../composables/store/schedule.js'
 import { useTaskProgress } from '../composables/taskProgress.js'
+import { schedulePolicy } from '../composables/settingsPolicy.js'
+import { isArchived } from '../composables/domain/state.js'
+import QuickRecordPanel from '../components/QuickRecordPanel.vue'
 import ScheduleGrid from '../components/schedule/ScheduleGrid.vue'
 // 弹窗一律按需加载：仅“查看课程表”不再下载作息设置、批量录入等大体量模块，
 // 打开课程表更快，内存占用更小（这些弹窗只有在真正点开时才会加载）。
@@ -73,12 +74,16 @@ function loadCourseImport() {
 }
 
 const courses = useStoredRef('sl_courses', [])
+const showArchivedCourses = ref(false)
+const visibleCourses = computed(() => showArchivedCourses.value ? courses.value : courses.value.filter((course) => !isArchived(course)))
 const courseTemplates = useStoredRef('sl_course_templates', [])
 const tasks = useStoredRef('sl_tasks', [])
 const countdowns = useStoredRef('sl_exams', [])
 const events = useStoredRef('sl_events', [])
 const notes = useStoredRef('sl_quick_notes', [])
+const domain = useDomainCommands()
 const scheduleNote = useStoredRef('sl_schedule_note', '')
+const quickHomeworkCourse = ref(null)
 
 function saveScheduleNote() {
   // 备注内容已通过 useStoredRef 自动保存
@@ -101,6 +106,22 @@ async function extractTimetable(result) {
   const columnTable = parser.parseTimetableColumns(result.columns, timeConfig, MAX_WEEK)
   const layoutTable = parser.parseTimetableLayout(result.layout, timeConfig, MAX_WEEK)
   return { table: parser.selectBestTimetableExtraction(columnTable, layoutTable), toBatchLine: parser.toBatchLine }
+}
+
+function openHomeworkForCourse() {
+  const course = courses.value.find((item) => item.id === editingId.value)
+  if (!course) return
+  showForm.value = false
+  quickHomeworkCourse.value = course
+}
+
+function closeHomeworkRecord() {
+  quickHomeworkCourse.value = null
+}
+
+function onHomeworkSaved(payload) {
+  managerMessage.value = payload.message
+  closeHomeworkRecord()
 }
 
 async function extractExcelTimetable(file) {
@@ -128,6 +149,7 @@ async function applyTimetableVocabulary(table) {
   return changes
 }
 const showForm = ref(false)
+const showScheduleSettings = ref(false)
 const showTimeEditor = ref(false)
 const timeSettingsRef = ref(null)
 const showSemester = ref(false)
@@ -177,12 +199,13 @@ const form = reactive({
 
 
 // 当前生效季在当前校区的有效选择（供主页作息按钮渲染）
+const settingsSchedule = computed(() => schedulePolicy())
 const seasonsForCurrentCampus = computed(() =>
-  seasonsForCampus(currentCampusId(), timeConfig.value)
+  seasonsForCampus(settingsSchedule.value.campusId, timeConfig.value)
 )
 const showCampusSwitcher = computed(() => timeConfig.value.campuses.length > 1)
 const showSeasonSwitcher = computed(() => seasonsForCurrentCampus.value.length > 1)
-const currentAutoStatus = computed(() => autoSeasonStatusFor(currentCampusId(), timeConfig.value))
+const currentAutoStatus = computed(() => autoSeasonStatusFor(settingsSchedule.value.campusId, timeConfig.value))
 
 function selectScheduleCampus(campusId) {
   timeConfig.value.currentCampus = campusId
@@ -210,7 +233,7 @@ const autoModeInfo = computed(() => {
       return {
         mode: 'unavailable',
         text: '自动模式暂不可用',
-        hint: `${reason}；当前暂用「${seasonName(currentSeasonId()) || '—'}」`,
+        hint: `${reason}；当前暂用「${seasonName(settingsSchedule.value.seasonId) || '—'}」`,
       }
     }
     return {
@@ -309,20 +332,14 @@ function deleteSelectedCourses() {
   if (!window.confirm(`确定删除选中的 ${selectedCourses.value.length} 门课程吗？`)) return
   const ids = new Set(selectedCourseIds.value)
   // 默认只解除关联，保留历史任务、考试、日程与笔记。
-  courses.value.filter((course) => ids.has(course.id)).forEach((course) => detachCourseRelations(course, { tasks: tasks.value, milestones: countdowns.value, events: events.value, notes: notes.value }))
-  courses.value = courses.value.filter((course) => !ids.has(course.id))
+  ids.forEach((id) => domain.deleteCourse(id))
   selectedCourseIds.value = []
   managerMessage.value = '选中的课程已删除'
 }
 
 function duplicateSelectedCourses() {
   if (!selectedCourses.value.length) return
-  const stamp = Date.now()
-  const copies = selectedCourses.value.map((course, index) => ({
-    ...JSON.parse(JSON.stringify(course)),
-    id: `c${stamp}_copy_${index}`,
-  }))
-  courses.value.push(...copies)
+  const copies = selectedCourses.value.map((course) => domain.createCourse({ ...course, createdFrom: 'course-duplicate' }))
   selectedCourseIds.value = copies.map((course) => course.id)
   managerMessage.value = `已创建 ${copies.length} 门课程副本，可关闭窗口后逐项调整`
 }
@@ -330,8 +347,7 @@ function duplicateSelectedCourses() {
 function clearCurrentSchedule() {
   if (!courses.value.length) return
   if (!window.confirm('确定清空当前全部课程吗？建议先保存为学期模板或导出备份。')) return
-  courses.value.forEach((course) => detachCourseRelations(course, { tasks: tasks.value, milestones: countdowns.value, events: events.value, notes: notes.value }))
-  courses.value = []
+  for (const course of [...courses.value]) domain.deleteCourse(course.id)
   selectedCourseIds.value = []
   managerMessage.value = '当前课表已清空'
 }
@@ -788,7 +804,6 @@ async function runTimetableOCR(files) {
       const currentCourses = summaries.reduce((sum, item) => sum + item.table.courses.length, 0)
       const currentReviews = summaries.reduce((sum, item) => sum + item.table.diagnostics.reviewCount, 0)
       batchOcrProgress.setPartial({ 图片: `${summaries.length}/${files.length}`, 课程: currentCourses, 建议确认: currentReviews }, `第 ${index + 1}/${files.length} 张处理完成`)
-      if (import.meta.env.DEV) console.log(`[OCR] result: file=${file.name}, confidence=${result.confidence?.toFixed?.(2)}, words=${result.wordCount}, structureScore=${table.diagnostics.score.toFixed(1)}`)
       } catch (e) {
         if (e?.name === 'AbortError') return
         failures.push(`${file.name}：${e.message}`)
@@ -887,7 +902,7 @@ function openAdd(day = null, period = null) {
   form.name = ''
   form.teacher = ''
   form.room = ''
-  form.campusId = currentCampusId() || ''
+  form.campusId = settingsSchedule.value.campusId || ''
   form.travelMinutes = 0
   form.color = PALETTE[courses.value.length % PALETTE.length]
   form.day = day ?? todayIndex()
@@ -937,11 +952,17 @@ function removeCourseFromEditor(course) {
   if (course) deleteCourseTarget.value = course
 }
 
+function archiveCourseFromEditor(course) {
+  if (!course) return
+  if (isArchived(course)) domain.restoreCourse(course.id)
+  else domain.archiveCourse(course.id)
+  showForm.value = false
+}
+
 function confirmDeleteCourse() {
   const course = deleteCourseTarget.value
   if (!course) return
-  detachCourseRelations(course, { tasks: tasks.value, milestones: countdowns.value, events: events.value, notes: notes.value })
-  courses.value = courses.value.filter((item) => item.id !== course.id)
+  domain.deleteCourse(course.id)
   deleteCourseTarget.value = null
 }
 
@@ -959,14 +980,18 @@ const todayIdx = computed(() => todayIndex())
 <template>
   <div class="page">
     <div class="head">
-      <h2>📅 我的课程表</h2>
+      <h1 class="page-title">课程表</h1>
       <div class="head-btns">
-        <button class="btn btn-ghost" @click="openCourseManager">☷ 批量管理</button>
-        <button class="btn btn-ghost" @click="openExceptionManager">🗓 特殊日期</button>
-        <button class="btn btn-ghost" @click="showSemester = true">📅 学期设置</button>
-        <button class="btn btn-ghost" @click="openTimeSettings">🕐 作息与时间设置</button>
+        <button class="btn btn-ghost" @click="showArchivedCourses = !showArchivedCourses">{{ showArchivedCourses ? '返回当前课程' : '历史课程' }}</button>
+        <button class="btn btn-ghost" :aria-expanded="showScheduleSettings" @click="showScheduleSettings = !showScheduleSettings">{{ showScheduleSettings ? '收起设置' : '更多设置' }}</button>
       </div>
     </div>
+
+    <section v-if="showScheduleSettings" class="schedule-settings" aria-label="课程表设置">
+      <div><h3>课程</h3><button class="btn btn-ghost" @click="openCourseManager">☷ 批量管理</button><button class="btn btn-ghost" @click="openBatchShift">⇩ 导入课程表</button></div>
+      <div><h3>时间规则</h3><button class="btn btn-ghost" @click="showSemester = true">📅 学期</button><button class="btn btn-ghost" @click="openTimeSettings">🕐 作息与节次</button><button class="btn btn-ghost" @click="openExceptionManager">🗓 特殊日期</button></div>
+      <div><h3>显示</h3><button class="btn btn-ghost" @click="mobileView = mobileView === 'day' ? 'week' : 'day'">{{ mobileView === 'day' ? '切换整周视图' : '切换单日视图' }}</button></div>
+    </section>
 
     <div class="toolbar">
       <div class="seg-group skin-switcher">
@@ -977,20 +1002,20 @@ const todayIdx = computed(() => todayIndex())
           <button :class="{ on: appearance.scheduleSkin === 'timeline' }" @click="appearance.scheduleSkin = 'timeline'">极简</button>
         </div>
       </div>
-      <div v-if="showCampusSwitcher" class="seg-group">
+      <div v-if="showCampusSwitcher" class="seg-group schedule-campus">
         <span class="seg-label">校区</span>
         <div class="seg">
           <button
             v-for="campus in timeConfig.campuses"
             :key="campus.id"
-            :class="{ on: currentCampusId() === campus.id }"
+            :class="{ on: settingsSchedule.campusId === campus.id }"
             @click="selectScheduleCampus(campus.id)"
           >
             {{ campus.name }}
           </button>
         </div>
       </div>
-      <div v-if="showSeasonSwitcher" class="seg-group">
+      <div v-if="showSeasonSwitcher" class="seg-group schedule-season">
         <span class="seg-label">作息</span>
         <div class="seg">
           <button
@@ -1004,7 +1029,7 @@ const todayIdx = computed(() => todayIndex())
           <button
             v-for="season in seasonsForCurrentCampus"
             :key="season.id"
-            :class="{ on: !timeConfig.autoSeason && currentSeasonId() === season.id }"
+            :class="{ on: !timeConfig.autoSeason && settingsSchedule.seasonId === season.id }"
             @click="timeConfig.autoSeason = false; timeConfig.currentSeason = season.id"
           >
             {{ season.name }}
@@ -1041,13 +1066,12 @@ const todayIdx = computed(() => todayIndex())
       </p>
 
       <div class="add-actions">
-        <button class="btn btn-ghost" @click="openBatchShift">⇩ 批量录入</button>
         <button class="btn btn-primary" @click="openAdd()">＋ 添加课程</button>
       </div>
     </div>
 
     <ScheduleGrid
-      :courses="courses"
+      :courses="visibleCourses"
       :schedule-exceptions="scheduleExceptions"
       :view-week="viewWeek"
       :mobile-view="mobileView"
@@ -1081,13 +1105,23 @@ const todayIdx = computed(() => todayIndex())
       @close="showForm = false"
       @save="saveCourseFromEditor"
       @delete="removeCourseFromEditor"
+      @archive="archiveCourseFromEditor"
       @add-another="addAnotherInCell"
+      @add-homework="openHomeworkForCourse"
+    />
+
+    <QuickRecordPanel
+      v-if="quickHomeworkCourse"
+      :open="Boolean(quickHomeworkCourse)"
+      :context="{ preferredType: 'homework', courseId: quickHomeworkCourse.id, courseName: quickHomeworkCourse.name }"
+      @saved="onHomeworkSaved"
+      @close="closeHomeworkRecord"
     />
 
     <ConfirmDialog
       :open="Boolean(deleteCourseTarget)"
       title="删除课程"
-      :message="`确定删除课程“${deleteCourseTarget?.name || ''}”吗？关联待办和学习倒计时会保留，但将不再关联此课程。`"
+      :message="`确定删除课程“${deleteCourseTarget?.name || ''}”吗？关联待办和重要日期会保留，但将不再关联此课程。`"
       confirm-label="删除课程"
       @close="deleteCourseTarget = null"
       @confirm="confirmDeleteCourse"
@@ -1095,7 +1129,7 @@ const todayIdx = computed(() => todayIndex())
 
     <CourseManagerModal
       :open="showCourseManager"
-      :courses="courses"
+      :courses="visibleCourses"
       :templates="courseTemplates"
       :selected-ids="selectedCourseIds"
       :template-name="templateName"
@@ -1212,6 +1246,18 @@ const todayIdx = computed(() => todayIndex())
   display: flex;
   gap: 10px;
 }
+.schedule-settings {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-tint);
+}
+.schedule-settings > div { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; min-width: 0; }
+.schedule-settings h3 { width: 100%; color: var(--ink-faint); font-size: 11px; letter-spacing: .04em; }
+.schedule-settings .btn { padding: 7px 10px; font-size: 12px; }
 
 .toolbar {
   display: flex;
@@ -1556,6 +1602,8 @@ const todayIdx = computed(() => todayIndex())
 .mobile-day-empty { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 24px 4px 6px; color: var(--ink-soft); font-size: 13px; }
 
 @media (max-width: 760px) {
+  .skin-switcher, .schedule-campus, .schedule-season { display: none; }
+  .schedule-settings { grid-template-columns: 1fr; gap: 11px; }
   .head {
     align-items: flex-start;
     flex-direction: column;

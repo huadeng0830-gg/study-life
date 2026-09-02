@@ -22,6 +22,7 @@ import {
 } from '../composables/ledger.js'
 import { dayLabel, moneyHero, moneyRow, nowHM, pad2 } from '../utils/formatters.js'
 import { useDomainCommands } from '../composables/domain/commands.js'
+import QuickRecordPanel from '../components/QuickRecordPanel.vue'
 
 const bills = useStoredRef('sl_bills', [])
 const domain = useDomainCommands()
@@ -118,6 +119,9 @@ function clearFilters() {
 const feedItems = filteredExpenses
 
 const periodStats = computed(() => ledgerPeriodStatsFromIndex(ledgerIndex.value, todayStr()))
+const monthIncome = computed(() => expenses.value
+  .filter((item) => item.direction === 'income' && String(item.date || '').slice(0, 7) === todayStr().slice(0, 7))
+  .reduce((sum, item) => sum + Number(item.amount || 0), 0))
 
 /* ---------- 常记 ---------- */
 const frequent = computed(() => computeFrequentFromIndex(ledgerIndex.value, freqPrefs.value))
@@ -128,6 +132,7 @@ function useFrequent(item) {
 
 /* ---------- 记一笔（快速弹窗） ---------- */
 const showQuick = ref(false)
+const showQuickRecord = ref(false)
 const editingId = ref(null)
 const moreOpen = ref(false)
 const amountInput = ref('')
@@ -161,6 +166,19 @@ function openQuick(prefill = {}) {
   keepAdding.value = false
   showQuick.value = true
   nextTick(() => amountEl.value?.focus())
+}
+
+function openQuickRecord() {
+  showQuickRecord.value = true
+}
+
+function closeQuickRecord() {
+  showQuickRecord.value = false
+}
+
+function onQuickRecordSaved(payload) {
+  showToast(payload.message, payload.undo)
+  closeQuickRecord()
 }
 
 function onNameInput() {
@@ -221,9 +239,7 @@ async function saveExpense(keepOpen = false) {
       billId: billIdInput.value || '',
       createdFrom: sourceInput.value || 'manual',
     })
-    showToast(`已记下 ${moneyRow(amount)} · ${name}`, () => {
-      expenses.value = expenses.value.filter((e) => e.id !== saved.id)
-    })
+    showToast(`已记下 ${moneyRow(amount)} · ${name}`, () => domain.deleteTransaction(saved.id))
   }
   if (keepOpen) {
     amountInput.value = ''
@@ -273,10 +289,15 @@ function deleteFromDetail() {
   const e = detailExpense.value
   if (!e) return
   const snapshot = { ...e }
-  expenses.value = expenses.value.filter((x) => x.id !== e.id)
+  const deleted = domain.deleteTransaction(e.id)
+  if (deleted?.blocked) {
+    showToast(deleted.reason)
+    return
+  }
+  if (!deleted) return
   closeDetail()
   showToast(`已删除 ${moneyRow(snapshot.amount)} · ${snapshot.name}`, () => {
-    expenses.value = [...expenses.value, snapshot].sort((a, b) => (a.createdAt ?? '').localeCompare(b.createdAt ?? ''))
+    domain.restoreDeletedTransaction(snapshot)
   })
 }
 function togglePinName() {
@@ -362,14 +383,13 @@ function deleteBill(bill) {
 function confirmDeleteBill() {
   const bill = deleteBillTarget.value
   if (!bill) return
-  bills.value = bills.value.filter((entry) => entry.id !== bill.id)
+  domain.deleteBill(bill.id)
   deleteBillTarget.value = null
   showToast(`已删除「${bill.name}」`)
 }
 function toggleBillActive(bill) {
-  const target = bills.value.find((b) => b.id === bill.id)
+  const target = domain.setBillActive(bill.id, bill.active === false)
   if (!target) return
-  target.active = target.active === false
   showToast(target.active ? `已恢复「${bill.name}」` : `已暂停「${bill.name}」`)
 }
 
@@ -389,34 +409,6 @@ function billStatus(b) {
   return { cls: 'ok', text: `还有 ${d} 天` }
 }
 
-function addMonths(base, count) {
-  const day = base.getDate()
-  const next = new Date(base.getFullYear(), base.getMonth() + count, 1)
-  const lastDay = new Date(next.getFullYear(), next.getMonth() + 1, 0).getDate()
-  next.setDate(Math.min(day, lastDay))
-  return next
-}
-function advance(b) {
-  const cur = new Date(b.nextDate + 'T00:00:00')
-  let next
-  if (b.cycle === 'weekly') next = new Date(cur.getTime() + 7 * 86400000)
-  else if (b.cycle === 'monthly') next = addMonths(cur, 1)
-  else if (b.cycle === 'quarterly') next = addMonths(cur, 3)
-  else if (b.cycle === 'yearly') next = addMonths(cur, 12)
-  else next = cur
-  const today = new Date(todayStr() + 'T00:00:00')
-  while (next <= today && b.cycle !== 'once') {
-    next = b.cycle === 'weekly'
-      ? new Date(next.getTime() + 7 * 86400000)
-      : b.cycle === 'monthly' ? addMonths(next, 1)
-      : b.cycle === 'quarterly' ? addMonths(next, 3)
-      : b.cycle === 'yearly' ? addMonths(next, 12)
-      : new Date(today.getTime() + 86400000)
-  }
-  b.nextDate = `${next.getFullYear()}-${pad2(next.getMonth() + 1)}-${pad2(next.getDate())}`
-  b.updatedAt = new Date().toISOString()
-}
-
 // 已支付：生成账本记录 + 推进周期
 function markPaid(bill) {
   const result = domain.payBill(bill.id)
@@ -430,9 +422,8 @@ function markPaid(bill) {
 
 // 跳过本次：只推进周期，不生成记录
 function skipOnce(bill) {
-  const target = bills.value.find((b) => b.id === bill.id)
+  const target = domain.skipBill(bill.id)
   if (!target) return
-  advance(target)
   showToast(`已跳过本期「${target.name}」，下一期 ${target.nextDate}`)
 }
 
@@ -610,10 +601,10 @@ function createBillFromSuggest() {
     <header class="page-head">
       <div class="page-head-main">
         <h1 class="page-title">账本</h1>
-        <p class="page-desc">记下花销、别忘固定账单、偶尔回头看看。</p>
+        <p class="page-desc">看清本月收支，处理固定账单，记下刚刚发生的一笔。</p>
       </div>
       <div class="page-actions">
-        <button class="btn btn-primary" @click="openQuick()">＋ 记一笔</button>
+        <button class="btn btn-primary" @click="openQuickRecord">＋ 记一笔</button>
       </div>
     </header>
 
@@ -629,12 +620,12 @@ function createBillFromSuggest() {
       <section class="hero-stat card">
         <span class="hero-label">这个月记录了</span>
         <b class="hero-amount">{{ moneyHero(periodStats.monthTotal) }}</b>
-        <span class="hero-sub">今天 {{ moneyRow(periodStats.todayTotal) }} · 本月 {{ periodStats.monthCount }} 笔</span>
+          <span class="hero-sub">收入 {{ moneyRow(monthIncome) }} · 今天支出 {{ moneyRow(periodStats.todayTotal) }} · {{ periodStats.monthCount }} 笔记录</span>
       </section>
 
       <!-- 待处理：固定账单临近（无则整块隐藏） -->
       <section v-if="pendingBills.length" class="pending-block">
-        <h3 class="block-title">待处理</h3>
+        <h3 class="block-title">待处理固定账单</h3>
         <div class="pending-list">
           <div v-for="bill in pendingBills" :key="bill.id" class="pending-row" @click="tab = 'bills'">
             <div class="p-main">
@@ -642,7 +633,6 @@ function createBillFromSuggest() {
               <small>{{ moneyRow(bill.amount) }} · {{ bill.nextDate.slice(5).replace('-', '月') }}日 · {{ bill._s.text }}</small>
             </div>
             <button class="btn btn-sm btn-primary" @click.stop="markPaid(bill)">已支付</button>
-            <button class="p-close" title="稍后处理" @click.stop="dismissPending(bill)">✕</button>
           </div>
         </div>
       </section>
@@ -707,7 +697,7 @@ function createBillFromSuggest() {
             title="还没有记录"
             description="第一笔不用很认真，记下刚刚花的钱就可以。"
             primary-label="＋ 记一笔"
-            @primary="openQuick()"
+            @primary="openQuickRecord"
           />
         </div>
         <div v-else class="feed">
@@ -872,6 +862,14 @@ function createBillFromSuggest() {
     </div>
 
     <!-- ================= 记一笔 弹窗 ================= -->
+    <QuickRecordPanel
+      v-if="showQuickRecord"
+      :open="showQuickRecord"
+      :context="{ preferredType: 'expense' }"
+      @saved="onQuickRecordSaved"
+      @close="closeQuickRecord"
+    />
+
     <Modal v-if="showQuick" :open="showQuick" :title="editingId ? '编辑记录' : keepAdding ? '再记一笔' : '记一笔'" @close="closeQuick">
       <div class="quick-form">
         <input

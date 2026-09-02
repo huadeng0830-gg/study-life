@@ -51,4 +51,43 @@ describe('Modal 页面锁', () => {
     expect(document.body.dataset.modalOpen).toBe('true')
     expect(document.body.style.overflow).toBe('hidden')
   })
+
+  it('打开时把焦点放入弹窗，Tab 和 Shift+Tab 都在弹窗内循环', async () => {
+    const visible = ref(true)
+    mount(() => visible.value ? h(Modal, { open: true, title: '焦点测试' }, {
+      default: () => h('div', [
+        h('button', { id: 'first' }, '第一项'),
+        h('button', { id: 'last' }, '最后一项'),
+      ]),
+    }) : null)
+    await nextTick()
+    const last = document.querySelector('#last')
+    const close = document.querySelector('.close')
+    expect(document.activeElement).toBe(close)
+
+    last.focus()
+    document.querySelector('.modal').dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }))
+    expect(document.activeElement).toBe(close)
+
+    close.focus()
+    document.querySelector('.modal').dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true }))
+    expect(document.activeElement).toBe(last)
+  })
+
+  it('关闭嵌套弹窗后焦点回到外层触发位置', async () => {
+    const innerVisible = ref(false)
+    mount(() => h('div', [
+      h(Modal, { open: true, title: '外层' }, {
+        default: () => h('button', { id: 'outer-trigger' }, '内层'),
+      }),
+      innerVisible.value ? h(Modal, { open: true, title: '内层' }, { default: () => h('button', { id: 'inner-action' }, '操作') }) : null,
+    ]))
+    await nextTick()
+    document.querySelector('#outer-trigger').focus()
+    innerVisible.value = true
+    await nextTick()
+    innerVisible.value = false
+    await nextTick()
+    expect(document.activeElement?.id).toBe('outer-trigger')
+  })
 })

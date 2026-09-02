@@ -7,12 +7,19 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-node_modules
-coverage
-dist
+node_modules/
+coverage/
+dist/
 dist-bak
 dist-ssr
 *.cache
+test-results/
+playwright-report/
+screenshots/
+traces/
+*.tmp
+*.temp
+*.bak
 .npm-npx-cache
 *.local
 .wrangler
@@ -23,6 +30,7 @@ preview.log
 # 用户导出的备份与本地数据（不要提交到 GitHub）
 **/备份文件/
 **/backups/
+**/*backup*/
 *.backup.json
 *.export.json
 

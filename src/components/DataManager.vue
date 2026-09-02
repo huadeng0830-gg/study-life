@@ -30,7 +30,11 @@ import {
   remoteDevice,
   remoteUpdatedAt,
   syncRelationship,
+  syncPreview,
   syncStatus,
+  resolvePendingMerge,
+  restoreSyncRecovery,
+  syncRecovery,
   undoLastPull,
 } from '../composables/cloudSync.js'
 import { deviceProfile, setDeviceName } from '../composables/deviceIdentity.js'
@@ -63,6 +67,8 @@ const backupProgress = useTaskProgress()
 let syncController = null
 let backupController = null
 let lastSyncAction = ''
+let lastSyncOptions = {}
+const conflictChoices = ref({})
 
 // 选择性拉取：默认全选所有可同步模块，可一键全选/清空。
 const selectedPullModules = ref(SYNC_MODULES.map((mod) => mod.key))
@@ -222,6 +228,12 @@ async function refreshCloudStatus() {
   }
 }
 
+async function recoverSyncData() {
+  const result = await restoreSyncRecovery()
+  if (result.ok) message.value = '已恢复同步前数据；未自动拉取或推送。'
+  else error.value = result.error?.message || '同步恢复失败，请保留当前恢复数据并重试'
+}
+
 const SYNC_STEPS = {
   pull: [
     { id: 'request', label: '请求云端版本' },
@@ -244,10 +256,11 @@ function handleSyncProgress(event) {
   if (event.partial) syncProgress.setPartial(event.partial, event.message)
 }
 
-async function runSync(action, keys = null) {
+async function runSync(action, keys = null, options = {}) {
   closeConfirm()
   if (syncProgress.state.status === 'running') return
   lastSyncAction = action
+  lastSyncOptions = options
   const controller = new AbortController()
   syncController = controller
   syncProgress.start({
@@ -257,7 +270,7 @@ async function runSync(action, keys = null) {
   })
   try {
     const ok = action === 'pull'
-      ? await pullFromCloud({ signal: controller.signal, onProgress: handleSyncProgress, keys })
+      ? await pullFromCloud({ signal: controller.signal, onProgress: handleSyncProgress, keys, ...lastSyncOptions })
       : await pushToCloud({ signal: controller.signal, onProgress: handleSyncProgress })
     if (controller.signal.aborted) return
     if (!ok) {
@@ -280,12 +293,50 @@ function runPull() {
   return runSync('pull', pendingPullKeys)
 }
 
+function runPreview() {
+  return runSync('pull', pullScopeKeys.value, { previewOnly: true })
+}
+
 function runPush() {
   return runSync('push')
 }
 
 function retrySync() {
-  if (lastSyncAction) void runSync(lastSyncAction)
+  if (lastSyncAction) void runSync(lastSyncAction, lastSyncAction === 'pull' ? pendingPullKeys : null, lastSyncOptions)
+}
+
+function conflictChoiceKey(conflict) {
+  return `${conflict.key}:${conflict.entityId || conflict.key}`
+}
+
+function displayConflictValue(value) {
+  if (value === undefined || value === null || value === '') return '—'
+  if (typeof value === 'object') return JSON.stringify(value)
+  return String(value)
+}
+
+function previewChangeLabel(change) {
+  return {
+    'remote-only-change': '新增 / 云端变更',
+    'local-only-change': '本机变更',
+    'auto-merged': '自动合并',
+    deleted: '将删除',
+    conflict: '待确认',
+    'delete-update-conflict': '删除与修改冲突',
+  }[change.status] || change.status
+}
+
+async function commitConflictChoices() {
+  const ok = await resolvePendingMerge(conflictChoices.value)
+  if (ok) {
+    conflictChoices.value = {}
+    syncProgress.reset()
+  }
+}
+
+function closeMergePreview() {
+  syncPreview.value = null
+  conflictChoices.value = {}
 }
 
 function continueSyncResult() {
@@ -526,7 +577,7 @@ async function validateBackup(value) {
   }
   const data = value.data
   if (!Array.isArray(data.courses) || !Array.isArray(data.countdowns)) {
-    throw new Error('备份文件中的课程或倒计时数据不完整')
+    throw new Error('备份文件中的课程或重要日期数据不完整')
   }
   return {
     ...value,
@@ -609,7 +660,7 @@ const summary = computed(() => {
 async function restoreBackup() {
   const backup = selectedBackup.value
   if (!backup) return
-  if (!window.confirm('恢复后将覆盖当前浏览器中的课程、倒计时和待办数据，是否继续？')) return
+  if (!window.confirm('恢复后将覆盖当前浏览器中的课程、重要日期和待办数据，是否继续？')) return
 
   const { data } = backup
   // 校验层会为旧备份补齐显示用默认值；恢复时只能写入原文件实际携带的字段，
@@ -767,6 +818,11 @@ async function restoreBackup() {
         <div class="section-copy">
           <h4>云端同步（可选 · 手动模式）</h4>
           <p>连接只验证云端访问权限并读取必要版本信息，不会读取、上传或修改任何业务数据。</p>
+          <div v-if="['interrupted', 'recovering', 'recovered', 'recovery-required'].includes(syncRecovery.status)" class="sync-recovery" :class="{ danger: syncRecovery.status === 'recovery-required' }" role="alert">
+            <b>{{ syncRecovery.status === 'recovery-required' ? '同步已暂停' : '同步恢复状态' }}</b>
+            <span>{{ syncRecovery.message }}</span>
+            <button v-if="syncRecovery.status === 'recovery-required'" type="button" class="btn btn-danger" :disabled="syncRecovery.status === 'recovering'" @click="recoverSyncData">恢复同步前数据</button>
+          </div>
           <div class="device-name-row">
             <label>当前设备</label>
             <input v-model="deviceNameInput" maxlength="30" placeholder="例如：我的 iPhone" @keydown.enter="saveCurrentDeviceName" />
@@ -810,7 +866,7 @@ async function restoreBackup() {
 
             <div v-if="syncRelationship === 'both-changed' || syncRelationship === 'unknown'" class="conflict-guide" role="note">
               <b>{{ syncRelationship === 'both-changed' ? '需要你决定以哪个版本为准' : '无法自动判断同步方向' }}</b>
-              <span>{{ syncRelationship === 'both-changed' ? '如果两端都有想保留的内容，请先在“数据备份”导出本机备份；拉取前也会自动创建本机安全快照。' : '当前云端版本没有可靠的修订信息。请核对最后更新时间与来源设备后，再手动选择方向。' }}</span>
+              <span>{{ syncRelationship === 'both-changed' ? '建议先查看差异；拉取会按实体合并，只有双方都改过的记录才需要逐项选择。' : '当前云端版本没有可靠的修订信息。请核对最后更新时间与来源设备后，再手动选择方向。' }}</span>
               <div><button type="button" class="btn btn-sm" :disabled="isSyncing || !cloudExists || !selectedModuleCount" @click="requestPullConfirm(pullScopeKeys)">以云端为准（拉取）</button><button type="button" class="btn btn-sm btn-push" :disabled="isSyncing" @click="requestPushConfirm">以本机为准（推送）</button></div>
             </div>
 
@@ -843,6 +899,7 @@ async function restoreBackup() {
                 <button class="btn btn-push" :disabled="isSyncing" @click="requestPushConfirm">↑ 推送到云端</button>
               </div>
               <div class="sync-actions secondary">
+                <button class="btn" :disabled="isSyncing || !cloudExists || !selectedModuleCount" @click="runPreview">查看差异</button>
                 <button class="btn" :disabled="isSyncing || refreshingCloud" @click="refreshCloudStatus">
                   {{ refreshingCloud ? '正在刷新…' : '刷新云端状态' }}
                 </button>
@@ -865,6 +922,19 @@ async function restoreBackup() {
             />
             <span v-if="syncStatus === 'success' && !(syncProgress.state.active && syncProgress.state.visible)" class="success">{{ lastError }}</span>
             <span v-else-if="syncStatus === 'error' && !(syncProgress.state.active && syncProgress.state.visible)" class="error">⚠ {{ lastError }}</span>
+            <div v-if="syncPreview" class="sync-preview-card">
+              <b>{{ syncPreview.resolved ? '冲突已处理' : '最近一次同步预览' }}</b>
+              <span>新增 {{ syncPreview.summary.added }} · 变更 {{ syncPreview.summary.updated }} · 删除 {{ syncPreview.summary.deleted }} · 需确认 {{ syncPreview.conflicts.length }}</span>
+              <details v-if="syncPreview.changes?.length" class="sync-preview-details">
+                <summary>展开查看变更明细</summary>
+                <ul>
+                  <li v-for="change in syncPreview.changes" :key="`${change.key}:${change.entityId || change.status}`">
+                    <span>{{ change.label }}</span><small>{{ previewChangeLabel(change) }}</small>
+                  </li>
+                </ul>
+              </details>
+              <small v-if="syncPreview.remoteDevice">云端来源：{{ syncPreview.remoteDevice.name }}</small>
+            </div>
           </template>
         </div>
       </section>
@@ -887,11 +957,34 @@ async function restoreBackup() {
         </div>
       </Modal>
 
+      <Modal v-if="syncPreview?.conflicts?.length" :open="true" title="同步差异需要确认" :wide="true" @close="closeMergePreview">
+        <div class="merge-conflicts">
+          <p class="merge-intro">系统已暂停应用冲突记录。请选择每条记录保留本机或云端版本，未选择的项目不会提交。</p>
+          <article v-for="conflict in syncPreview.conflicts" :key="conflictChoiceKey(conflict)" class="merge-conflict">
+            <div class="merge-conflict-head">
+              <b>{{ conflict.label }}</b>
+              <small>{{ conflict.entityType || '设置' }} · {{ conflict.entityId }}</small>
+            </div>
+            <div v-if="conflict.fields.length" class="merge-fields">
+              <div v-for="field in conflict.fields" :key="field.field" class="merge-field">
+                <span>{{ field.field }}</span><em>本机：{{ displayConflictValue(field.local) }}</em><em>云端：{{ displayConflictValue(field.remote) }}</em>
+              </div>
+            </div>
+            <small v-else class="merge-reason">{{ conflict.reason || '两端内容均发生变化' }}</small>
+            <div class="merge-choice">
+              <button type="button" class="btn btn-sm" :class="{ selected: conflictChoices[conflictChoiceKey(conflict)] === 'local' || conflictChoices[conflictChoiceKey(conflict)] === 'restore-local' }" @click="conflictChoices[conflictChoiceKey(conflict)] = conflict.status === 'delete-update-conflict' ? 'restore-local' : 'local'">{{ conflict.status === 'delete-update-conflict' ? '恢复本机记录' : '保留本机' }}</button>
+              <button type="button" class="btn btn-sm" :class="{ selected: conflictChoices[conflictChoiceKey(conflict)] === 'remote' || conflictChoices[conflictChoiceKey(conflict)] === 'keep-deleted' }" @click="conflictChoices[conflictChoiceKey(conflict)] = conflict.status === 'delete-update-conflict' ? 'keep-deleted' : 'remote'">{{ conflict.status === 'delete-update-conflict' ? '接受删除' : '使用云端' }}</button>
+            </div>
+          </article>
+          <div class="actions"><button type="button" class="btn" @click="closeMergePreview">稍后处理</button><button type="button" class="btn btn-primary" @click="commitConflictChoices">提交已选决策</button></div>
+        </div>
+      </Modal>
+
       <div v-if="summary" class="restore-preview">
         <b>{{ selectedName }}</b>
         <span>{{ summary.courses }} 门课程</span>
         <span>{{ summary.scheduleExceptions }} 个特殊日期</span>
-        <span>{{ summary.countdowns }} 个倒计时</span>
+        <span>{{ summary.countdowns }} 个重要日期</span>
         <span>{{ summary.tasks }} 项待办</span>
         <span>{{ summary.courseTemplates }} 个课表模板</span>
         <span>{{ summary.checklists }} 份生活清单</span>
@@ -1156,8 +1249,39 @@ async function restoreBackup() {
   font-size: 12px;
   line-height: 1.6;
 }
+.sync-recovery {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin: 10px 0;
+  padding: 10px 12px;
+  color: #087a58;
+  border: 1px solid #b9e6d5;
+  border-radius: 9px;
+  background: #effaf6;
+  font-size: 12px;
+}
+.sync-recovery.danger { color: var(--danger); border-color: #f2c4c4; background: #fff5f4; }
 .sync-status .muted { color: var(--muted); }
 .device-history { display: block; margin-top: 3px; color: #5e6f85; font-size: 10px; }
+.sync-preview-card { display: flex; flex-wrap: wrap; gap: 6px 12px; margin-top: 9px; padding: 9px 11px; border: 1px solid #b9ddea; border-radius: 9px; background: #f1fbfe; color: #236175; font-size: 11px; line-height: 1.5; }
+.sync-preview-card small { width: 100%; color: #5d8290; }
+.sync-preview-details { width: 100%; color: #236175; }
+.sync-preview-details summary { cursor: pointer; }
+.sync-preview-details ul { display: grid; gap: 4px; margin: 6px 0 0; padding-left: 18px; }
+.sync-preview-details li { display: flex; justify-content: space-between; gap: 10px; }
+.sync-preview-details li small { width: auto; color: #5d8290; }
+.merge-conflicts { display: flex; flex-direction: column; gap: 10px; }
+.merge-intro { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.55; }
+.merge-conflict { padding: 11px 12px; border: 1px solid #f0c979; border-radius: 10px; background: #fffaf0; }
+.merge-conflict-head { display: flex; justify-content: space-between; gap: 10px; color: #684f1c; }
+.merge-conflict-head small, .merge-reason { color: #8b692b; font-size: 11px; }
+.merge-fields { display: grid; gap: 5px; margin-top: 8px; }
+.merge-field { display: grid; grid-template-columns: 90px 1fr 1fr; gap: 7px; font-size: 11px; line-height: 1.45; }
+.merge-field span { color: var(--muted); }
+.merge-field em { overflow-wrap: anywhere; color: var(--text); font-style: normal; }
+.merge-choice { display: flex; gap: 7px; margin-top: 9px; }
+.merge-choice .selected { color: #fff; border-color: var(--primary); background: var(--primary); }
 
 /* ---------- 拉取/推送 确认框 ---------- */
 .confirm-body { display: flex; flex-direction: column; gap: 9px; }

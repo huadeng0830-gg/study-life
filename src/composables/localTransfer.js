@@ -13,7 +13,7 @@ export const TRANSFER_MODULES = {
   courses: { label: '课程、课表模板、作息与特殊日期', keys: ['sl_courses', 'sl_course_templates', 'sl_timecfg', 'sl_semester', 'sl_schedule_exceptions', 'sl_ocr_vocabulary', 'sl_course_checkins'] },
   tasks: { label: '作业、待办、日程与笔记', keys: ['sl_tasks', 'sl_events', 'sl_quick_notes', 'sl_quick_record_settings', 'sl_capture_enabled'] },
   focus: { label: '专注记录与设置', keys: ['sl_focus_sessions', 'sl_focus_settings'] },
-  countdowns: { label: '考试与倒计时', keys: ['sl_exams', 'sl_countdown_show_past'] },
+  countdowns: { label: '重要日期', keys: ['sl_exams', 'sl_countdown_show_past'] },
   lists: { label: '生活清单', keys: ['sl_checklists'] },
   bills: { label: '固定账单', keys: ['sl_bills'] },
   expenses: { label: '消费记录与账本偏好', keys: ['sl_expenses', 'sl_ledger_categories', 'sl_ledger_freq'] },

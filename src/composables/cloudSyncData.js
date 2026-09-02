@@ -56,7 +56,7 @@ export const SYNC_MODULES = Object.freeze([
   { key: 'courses', label: '课程与课表', keys: ['sl_courses', 'sl_course_templates', 'sl_timecfg', 'sl_semester', 'sl_schedule_exceptions', 'sl_ocr_vocabulary', 'sl_course_checkins'] },
   { key: 'tasks', label: '待办与快速记录', keys: ['sl_tasks', 'sl_events', 'sl_quick_notes', 'sl_quick_record_settings', 'sl_capture_enabled'] },
   { key: 'focus', label: '专注记录', keys: ['sl_focus_sessions', 'sl_focus_settings'] },
-  { key: 'countdown', label: '倒计时', keys: ['sl_exams', 'sl_countdown_show_past'] },
+  { key: 'countdown', label: '重要日期', keys: ['sl_exams', 'sl_countdown_show_past'] },
   { key: 'checklists', label: '清单', keys: ['sl_checklists'] },
   { key: 'ledger', label: '账本', keys: ['sl_bills', 'sl_expenses', 'sl_ledger_categories', 'sl_ledger_freq'] },
   { key: 'food', label: '吃什么', keys: ['sl_food_places', 'sl_food_history', 'sl_food_filters'] },

@@ -8,6 +8,7 @@ import {
   extractSchedule,
   hasAmbiguousAmount,
 } from './entities.js'
+import { defaultAccount, policyDateKey, policyTimeKey } from '../settingsPolicy.js'
 
 // 快速记录解析层：先做实体提取，再做意图判断。不再只用固定语序和补丁正则，
 // 同一段文本无论“金额在前/在后”都会先被识别成实体，再组合成结构化草稿。
@@ -22,8 +23,17 @@ const BILL_WORDS = /每月|每周|每年|每季度|周期|自动续费|月租|�
 let uidSeq = 0
 function uid() { return `qr${Date.now().toString(36)}${uidSeq++}${Math.random().toString(36).slice(2, 7)}` }
 function pad(value) { return String(value).padStart(2, '0') }
-function today(now) { return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}` }
-function currentTime(now) { return `${pad(now.getHours())}:${pad(now.getMinutes())}` }
+function today(now) { return policyDateKey(now) }
+function currentTime(now) { return policyTimeKey(now) }
+
+function countdownDate(source, now) {
+  const match = String(source ?? '').match(/(?:还有|剩余)\s*(\d{1,3})\s*天/)
+  if (!match) return ''
+  const target = new Date(now)
+  target.setHours(0, 0, 0, 0)
+  target.setDate(target.getDate() + Number(match[1]))
+  return `${target.getFullYear()}-${pad(target.getMonth() + 1)}-${pad(target.getDate())}`
+}
 
 function timeOf(source, schedule) {
   if (schedule?.time) return schedule.time
@@ -54,7 +64,7 @@ function cleanTaskTitle(source, fallback) {
     .trim() || source
 }
 
-function splitStatements(text) {
+function splitStatements(text, forcedType = '') {
   const source = String(text ?? '').trim()
   if (!source) return []
   const lines = source.split(/\n+/).map((item) => item.trim()).filter(Boolean)
@@ -69,6 +79,17 @@ function splitStatements(text) {
       const raw = (afterName || before || `支出 ${amount.amount}元`).trim()
       return { statement: raw, amount: amount.amount, title: '' }
     })
+  }
+
+  // 一笔消费后接一个明确的计划动作时，拆成两个业务草稿。
+  // 例如“买六级真题39元，周五开始做第一套”应分别落到支出和待办。
+  // 仅在自动识别且存在明确分隔符/行动词时拆分，避免改变强制类型和普通消费标题。
+  if (!forcedType && amounts.length === 1) {
+    const amount = amounts[0]
+    const head = source.slice(0, amount.end).replace(/[，,；;。]+$/g, '').trim()
+    const tail = source.slice(amount.end).replace(/^[\s，,；;。]+/g, '').trim()
+    const followUp = /^(?:(?:今天|明天|后天|大后天|本周|这周|下周|周[一二三四五六日天])[^，,；;。]*|开始|做|完成|提交|交|复习|提醒|安排|准备|开会|组会|上课)/.test(tail)
+    if (head && tail && followUp) return [{ statement: head, amount: null, title: '' }, { statement: tail, amount: null, title: '' }]
   }
 
   return [{ statement: source, amount: null, title: '' }]
@@ -120,12 +141,13 @@ function parseStatement(statement, { courses = [], now = new Date(), forcedType 
   const knownAmount = typeof context.knownAmount === 'number' ? context.knownAmount : null
   const amounts = extractAmounts(source)
   const schedule = extractSchedule(source, courses, now)
+  const relativeCountdownDate = countdownDate(source, now)
   const account = extractAccount(source)
   const cycle = extractCycle(source)
   const amount = knownAmount ?? amounts[0]?.amount ?? 0
   const amountCount = knownAmount === null ? amounts.length : 1
   const intent = knownAmount === null
-    ? inferIntent(source, schedule, amountCount, forcedType, context.preferredType)
+    ? inferIntent(source, { ...schedule, date: schedule.date || relativeCountdownDate }, amountCount, forcedType, context.preferredType)
     : { type: forcedType || 'expense', confidence: 0.9, uncertain: false }
   const type = intent.type
 
@@ -136,7 +158,7 @@ function parseStatement(statement, { courses = [], now = new Date(), forcedType 
     title: '',
     course: schedule.course || context.courseName || '',
     courseId: context.courseId || '',
-    date: schedule.date || '',
+    date: schedule.date || relativeCountdownDate || '',
     dateRange: schedule.dateRange || '',
     time: timeOf(source, schedule),
     endTime: schedule.endTime || '',
@@ -146,7 +168,7 @@ function parseStatement(statement, { courses = [], now = new Date(), forcedType 
     note: schedule.note || '',
     amount,
     category: detectCategory(source),
-    account,
+    account: ['expense', 'income', 'bill'].includes(type) ? (account || defaultAccount()) : account,
     cycle: cycle?.cycle || 'monthly',
     questions: questionsFor(type, source, schedule, amount),
     confidence: intent.confidence,
@@ -163,7 +185,7 @@ function parseStatement(statement, { courses = [], now = new Date(), forcedType 
     }
   } else if (type === 'countdown') {
     base.title = cleanTaskTitle(source, schedule.title)
-    base.date = schedule.date || ''
+    base.date = schedule.date || relativeCountdownDate || ''
     base.time = schedule.time || ''
   } else if (type === 'event') {
     base.title = cleanTaskTitle(source, schedule.title)
@@ -184,7 +206,7 @@ function parseStatement(statement, { courses = [], now = new Date(), forcedType 
 }
 
 export function parseQuickRecord(text, { courses = [], now = new Date(), forcedType = '', context = {} } = {}) {
-  const statements = splitStatements(text)
+  const statements = splitStatements(text, forcedType)
   return statements
     .map(({ statement, amount: knownAmount, title: knownTitle }) => {
       const mergedContext = { ...context }

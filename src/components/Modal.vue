@@ -1,5 +1,8 @@
 <script setup>
-import { onActivated, onBeforeUnmount, onDeactivated, watch } from 'vue'
+import { nextTick, onActivated, onBeforeUnmount, onDeactivated, ref, watch } from 'vue'
+
+const modalStack = []
+let nextModalId = 0
 
 const emit = defineEmits(['close'])
 
@@ -10,8 +13,51 @@ const props = defineProps({
   medium: Boolean,
 })
 
+const modalEl = ref(null)
+const titleId = `modal-title-${++nextModalId}`
+const entry = { modalEl, previousFocus: null, active: false }
+const FOCUSABLE = 'a[href], area[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), iframe, object, embed, [contenteditable="true"], [tabindex]:not([tabindex="-1"])'
+
+function focusableElements() {
+  return [...(modalEl.value?.querySelectorAll(FOCUSABLE) || [])]
+    .filter((element) => {
+      if (element.hasAttribute('hidden') || element.getAttribute('aria-hidden') === 'true') return false
+      const style = window.getComputedStyle?.(element)
+      return !style || (style.display !== 'none' && style.visibility !== 'hidden')
+    })
+}
+
+function focusInitial() {
+  nextTick(() => {
+    if (!entry.active || modalStack[modalStack.length - 1] !== entry) return
+    const target = modalEl.value?.querySelector('[autofocus]') || focusableElements()[0] || modalEl.value
+    target?.focus?.({ preventScroll: true })
+  })
+}
+
 function onKeydown(event) {
-  if (event.key === 'Escape' && props.open) emit('close')
+  if (!props.open || modalStack[modalStack.length - 1] !== entry) return
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    emit('close')
+    return
+  }
+  if (event.key !== 'Tab') return
+  const elements = focusableElements()
+  if (!elements.length) {
+    event.preventDefault()
+    modalEl.value?.focus?.()
+    return
+  }
+  const first = elements[0]
+  const last = elements[elements.length - 1]
+  if (event.shiftKey && (document.activeElement === first || !modalEl.value?.contains(document.activeElement))) {
+    event.preventDefault()
+    last.focus()
+  } else if (!event.shiftKey && (document.activeElement === last || !modalEl.value?.contains(document.activeElement))) {
+    event.preventDefault()
+    first.focus()
+  }
 }
 
 let bodyLocked = false
@@ -39,13 +85,40 @@ function unlockBody() {
 }
 
 function activate() {
+  if (entry.active) return
+  entry.previousFocus = document.activeElement
+  entry.active = true
+  modalStack.push(entry)
   document.addEventListener('keydown', onKeydown)
   lockBody()
+  focusInitial()
 }
 
 function cleanup() {
+  if (!entry.active) return
+  const wasTop = modalStack[modalStack.length - 1] === entry
+  const index = modalStack.indexOf(entry)
+  if (index >= 0) modalStack.splice(index, 1)
+  entry.active = false
   document.removeEventListener('keydown', onKeydown)
   unlockBody()
+  if (!wasTop) return
+  const next = modalStack[modalStack.length - 1]
+  if (next) {
+    if (next.modalEl.value?.contains(entry.previousFocus)) entry.previousFocus?.focus?.({ preventScroll: true })
+    else focusInitialFor(next)
+  } else if (entry.previousFocus?.isConnected) {
+    entry.previousFocus.focus?.({ preventScroll: true })
+  }
+}
+
+function focusInitialFor(targetEntry) {
+  nextTick(() => {
+    if (modalStack[modalStack.length - 1] !== targetEntry) return
+    const element = targetEntry.modalEl.value
+    const target = element?.querySelector('[autofocus]') || [...(element?.querySelectorAll(FOCUSABLE) || [])][0] || element
+    target?.focus?.({ preventScroll: true })
+  })
 }
 
 watch(
@@ -73,10 +146,12 @@ onBeforeUnmount(cleanup)
         :class="{ wide, medium }"
         role="dialog"
         aria-modal="true"
-        :aria-labelledby="title ? 'modal-title' : undefined"
+        ref="modalEl"
+        tabindex="-1"
+        :aria-labelledby="title ? titleId : undefined"
       >
         <div class="modal-head">
-          <h3 id="modal-title">{{ title }}</h3>
+          <h3 :id="titleId">{{ title }}</h3>
           <button type="button" class="close" aria-label="关闭弹窗" @click="emit('close')">✕</button>
         </div>
         <div class="modal-body">

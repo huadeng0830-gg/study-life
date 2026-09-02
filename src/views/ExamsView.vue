@@ -11,11 +11,13 @@ import {
   useStoredRef,
 } from '../composables/store'
 import { useDomainCommands } from '../composables/domain/commands.js'
+import { isArchived, isTaskActionable, taskStatus } from '../composables/domain/state.js'
 
 const CATEGORIES = ['学习', '生活', '纪念日', '项目', '其他']
 const domain = useDomainCommands()
 const { milestones: exams, courses, tasks } = domain
 const showPast = useStoredRef('sl_countdown_show_past', false)
+const showHistory = ref(false)
 const showForm = ref(false)
 const editingId = ref(null)
 const error = ref('')
@@ -65,7 +67,7 @@ function openEdit(item) {
 
 function save() {
   if (!form.value.name.trim()) {
-    error.value = '请填写倒计时名称'
+    error.value = '请填写重要日期名称'
     return
   }
   if (!form.value.date) {
@@ -101,13 +103,14 @@ function remove() {
 
 const sorted = computed(() => sortCountdowns(exams.value))
 
-const visibleItems = computed(() =>
-  showPast.value ? sorted.value : sorted.value.filter((item) => !item.countdown.isPast)
-)
+const visibleItems = computed(() => {
+  const source = showHistory.value ? sorted.value.filter((item) => isArchived(item)) : sorted.value.filter((item) => !isArchived(item))
+  return showHistory.value || showPast.value ? source : source.filter((item) => !item.countdown.isPast)
+})
 
 function createReviewTask(item, event) {
   event?.stopPropagation()
-  const existing = tasks.value.find((task) => !task.done && task.sourceType === 'milestone-review' && task.sourceId === item.id)
+  const existing = tasks.value.find((task) => isTaskActionable(task) && task.sourceType === 'milestone-review' && task.sourceId === item.id)
   if (existing) {
     reviewMessage.value = `“${item.name}”已有待完成的复习任务`
     return
@@ -115,17 +118,29 @@ function createReviewTask(item, event) {
   const course = courses.value.find((entry) => entry.id === item.courseId)
   domain.createTask({
     title: `复习：${item.name}`,
+    kind: 'review',
     courseId: item.courseId || '',
     course: course?.name || item.courseName || '',
     dueDate: todayStr(),
     priority: 'high',
     estimateMinutes: 25,
-    note: `由学习倒计时「${item.name}」创建，可在今天页直接开始专注。`,
+    note: `由学习类重要日期「${item.name}」创建，可在今天页直接开始专注。`,
     createdFrom: 'milestone-review',
     sourceType: 'milestone-review',
     sourceId: item.id,
   })
   reviewMessage.value = `已安排“${item.name}”的 25 分钟复习，可在今天页开始专注`
+}
+
+function reviewTasksFor(item) {
+  return tasks.value.filter((task) => task.sourceType === 'milestone-review' && task.sourceId === item.id)
+}
+
+function reviewSummary(item) {
+  const reviewTasks = reviewTasksFor(item)
+  if (!reviewTasks.length) return ''
+  const completed = reviewTasks.filter((task) => taskStatus(task) === 'completed').length
+  return `复习任务 ${completed}/${reviewTasks.length}`
 }
 
 // 窄屏（单列）下清单很长时做虚拟滚动；宽屏保持多列网格原样渲染。
@@ -201,24 +216,31 @@ function menuDelete(item) {
   deleteTarget.value = item
 }
 
+function menuArchive(item) {
+  domain.archiveMilestone(item.id)
+  deleteUndo.value = { item, action: 'archive' }
+  window.clearTimeout(deleteUndoTimer)
+  deleteUndoTimer = window.setTimeout(() => { deleteUndo.value = null }, 6000)
+  closeMenu()
+}
+
 function confirmDelete() {
   const target = deleteTarget.value
   if (!target) return
   const index = exams.value.findIndex((entry) => entry.id === target.id)
   if (index < 0) return
-  exams.value.splice(index, 1)
+  domain.deleteMilestone(target.id)
   deleteTarget.value = null
-  deleteUndo.value = { item: target, index }
+  deleteUndo.value = { item: target, index, action: 'delete' }
   window.clearTimeout(deleteUndoTimer)
   deleteUndoTimer = window.setTimeout(() => { deleteUndo.value = null }, 6000)
 }
 
 function undoDelete() {
   if (!deleteUndo.value) return
-  const { item, index } = deleteUndo.value
-  if (!exams.value.some((entry) => entry.id === item.id)) {
-    exams.value.splice(Math.min(index, exams.value.length), 0, item)
-  }
+  const { item, action } = deleteUndo.value
+  if (action === 'archive') domain.restoreMilestone(item.id)
+  else domain.restoreDeletedMilestone(item)
   deleteUndo.value = null
   window.clearTimeout(deleteUndoTimer)
 }
@@ -240,15 +262,16 @@ onBeforeUnmount(() => {
   <div class="page">
     <header class="page-head">
       <div class="page-head-main">
-        <h1 class="page-title">我的倒计时</h1>
-        <p class="page-desc">考试、生日、纪念日等重要节点都可以放在这里。</p>
+        <h1 class="page-title">重要日期</h1>
+        <p class="page-desc">考试、生日、纪念日和重要截止都可以放在这里。</p>
       </div>
       <div class="page-actions">
+        <button class="btn btn-ghost" @click="showHistory = !showHistory">{{ showHistory ? '返回当前' : '历史' }}</button>
         <label class="past-toggle">
           <input v-model="showPast" type="checkbox" />
           显示已结束
         </label>
-        <button class="btn btn-primary" @click="openAdd">＋ 添加倒计时</button>
+        <button class="btn btn-primary" @click="openAdd">＋ 添加重要日期</button>
       </div>
     </header>
     <p v-if="reviewMessage" class="review-message" role="status">✓ {{ reviewMessage }}</p>
@@ -257,9 +280,9 @@ onBeforeUnmount(() => {
       v-if="exams.length === 0"
       class="card empty-box"
       icon="⏳"
-      title="还没有倒计时"
+      title="还没有重要日期"
       description="添加一个重要日期，未来的自己会感谢你。"
-      primary-label="＋ 添加倒计时"
+      primary-label="＋ 添加重要日期"
       @primary="openAdd"
     />
 
@@ -267,7 +290,7 @@ onBeforeUnmount(() => {
       v-else-if="visibleItems.length === 0"
       class="card empty-box"
       icon="✦"
-      title="已结束的倒计时已隐藏"
+      title="已结束的重要日期已隐藏"
       description="可在右上角重新显示已结束的项目。"
     />
 
@@ -302,6 +325,8 @@ onBeforeUnmount(() => {
           <div v-if="openMenuId === item.id" class="card-menu" @click.stop>
             <button @click="menuPin(item)">{{ item.pinned ? '取消置顶' : '置顶' }}</button>
             <button @click="menuEdit(item)">编辑</button>
+            <button v-if="!isArchived(item)" @click="menuArchive(item)">归档</button>
+            <button v-else @click="domain.restoreMilestone(item.id); closeMenu()">恢复</button>
             <button class="danger" @click="menuDelete(item)">删除</button>
           </div>
         </div>
@@ -316,6 +341,7 @@ onBeforeUnmount(() => {
             <div class="name">{{ item.name }}</div>
             <div class="date">{{ shortDateOf(item) }}</div>
             <div v-if="item.category === '学习' && courseLabel(item)" class="loc">{{ courseLabel(item) }} · 复习 {{ item.reviewProgress || 0 }}%</div>
+            <div v-if="reviewSummary(item)" class="loc">{{ reviewSummary(item) }}</div>
             <div v-if="item.location" class="loc">{{ item.location }}</div>
           </div>
           <div class="count" :class="item.countdown.cls">
@@ -332,14 +358,14 @@ onBeforeUnmount(() => {
           <span class="tl-label strong">{{ timelineOf(item).end }}</span>
           <span class="tl-dot" :class="{ on: timelineOf(item).sameDay }"></span>
         </div>
-        <button v-if="item.category === '学习' && !item.countdown.isPast" type="button" class="review-action" @click="createReviewTask(item, $event)">安排 25 分钟复习</button>
+        <button v-if="item.category === '学习' && !item.countdown.isPast" type="button" class="review-action" @click="createReviewTask(item, $event)">{{ reviewSummary(item) ? '再安排 25 分钟复习' : '安排 25 分钟复习' }}</button>
       </div>
       </template>
     </VirtualList>
 
-    <Modal v-if="showForm" :open="showForm" :title="editingId ? '编辑倒计时' : '添加倒计时'" @close="showForm = false">
+    <Modal v-if="showForm" :open="showForm" :title="editingId ? '编辑重要日期' : '添加重要日期'" @close="showForm = false">
       <div class="form">
-        <label>倒计时名称 *</label>
+        <label>名称 *</label>
         <input v-model="form.name" placeholder="例如：期末考试、生日或项目截止日" />
 
         <div class="form-row">
@@ -393,14 +419,14 @@ onBeforeUnmount(() => {
 
     <ConfirmDialog
       :open="Boolean(deleteTarget)"
-      title="删除倒计时"
-      :message="`确定删除倒计时“${deleteTarget?.name || ''}”吗？删除后可在短时间内撤销。`"
+      title="删除重要日期"
+      :message="`确定删除重要日期“${deleteTarget?.name || ''}”吗？删除后可在短时间内撤销。`"
       confirm-label="删除"
       @close="deleteTarget = null"
       @confirm="confirmDelete"
     />
     <div v-if="deleteUndo" class="undo-toast" role="status" aria-live="polite">
-      <span>倒计时已删除</span>
+      <span>重要日期已删除</span>
       <button type="button" @click="undoDelete">撤销</button>
     </div>
   </div>

@@ -1,9 +1,9 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import {
   clock,
   MAX_WEEK,
-  todayStr,
   dayName,
   todayIndex,
   weekOf,
@@ -11,8 +11,6 @@ import {
 } from '../composables/store'
 import {
   campusName,
-  currentCampusId,
-  currentSeasonId,
   currentTimes,
   periodIndex,
   seasonName,
@@ -27,30 +25,32 @@ import { festiveConfig, moodLog } from '../composables/atmosphereStore.js'
 import { moodOf, logMood as logMoodRecord } from '../composables/mood.js'
 import MemoryView from '../components/MemoryView.vue'
 import FestiveSettings from '../components/FestiveSettings.vue'
-import AgendaPanel from '../components/AgendaPanel.vue'
 import FocusPanel from '../components/FocusPanel.vue'
-import CourseFeedbackPanel from '../components/CourseFeedbackPanel.vue'
-import WeeklyPulsePanel from '../components/WeeklyPulsePanel.vue'
 import InboxPanel from '../components/InboxPanel.vue'
+import Modal from '../components/Modal.vue'
 import { useStoredRef } from '../composables/store/index.js'
 import { useDomainCommands } from '../composables/domain/commands.js'
-import { selectActionCenter, selectDayAgenda } from '../composables/domain/selectors.js'
-import { courseWorkload, rescueTaskPatch, upsertCourseCheckin, weeklyPulse } from '../composables/experience.js'
 import { useQuickRecordAdapters } from '../composables/quickRecord/adapters.js'
+import { selectTodayActionPanels, reminderAction } from '../composables/domain/selectors.js'
+import { isArchived, isTaskActionable, taskPlanningState, taskStatus } from '../composables/domain/state.js'
+import { weeklyPulse } from '../composables/experience.js'
+import { policyDateKey, schedulePolicy } from '../composables/settingsPolicy.js'
 
 const domain = useDomainCommands()
 const { courses, tasks, milestones: exams, bills, events, notes: quickNotes } = domain
+const router = useRouter()
 const focusSessions = useStoredRef('sl_focus_sessions', [])
-const courseCheckins = useStoredRef('sl_course_checkins', [])
+const eventDetail = ref(null)
+const showInbox = ref(false)
 const quickRecord = useQuickRecordAdapters()
 const now = computed(() => clock.value)
+const todayKey = () => policyDateKey(now.value)
+const activeSchedule = computed(() => schedulePolicy())
 const homeModuleVisible = (id) => homeModuleState(id).visible !== false
 
 /* ---------- 氛围问候 + 心情记录（模块 A） ---------- */
 const todayISO = computed(() => {
-  const d = now.value
-  const pad = (value) => String(value).padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
+  return todayKey()
 })
 const festive = computed(() => festiveFor(todayISO.value, festiveConfig.value))
 
@@ -75,7 +75,7 @@ watch(todayMood, (mood) => {
   moodNoteDraft.value = mood?.note ?? ''
 })
 const sessionQuoteIndex = Math.floor(Math.random() * 50)
-const weekNum = computed(() => Math.min(Math.max(weekOf(todayStr()), 1), MAX_WEEK))
+const weekNum = computed(() => Math.min(Math.max(weekOf(todayKey()), 1), MAX_WEEK))
 const dateText = computed(
   () => `${now.value.getFullYear()}年${now.value.getMonth() + 1}月${now.value.getDate()}日 · ${dayName(todayIndex())}`
 )
@@ -104,13 +104,8 @@ const currentQuote = computed(() => {
   const quotes = appearance.value.quotes.length ? appearance.value.quotes : ['今天也要漂亮通关。']
   if (appearance.value.quoteMode === 'fixed') return quotes[appearance.value.fixedQuoteIndex] ?? quotes[0]
   if (appearance.value.quoteMode === 'random') return quotes[sessionQuoteIndex % quotes.length]
-  return quotes[Number(todayStr().replace(/-/g, '')) % quotes.length]
+  return quotes[Number(todayKey().replace(/-/g, '')) % quotes.length]
 })
-
-/* ---------- 课程 ---------- */
-const todayCourses = computed(() =>
-  coursesForDate(courses.value, todayStr()).sort((a, b) => periodIndex(a.start) - periodIndex(b.start))
-)
 
 function minutesOf(value) {
   if (!value) return null
@@ -118,54 +113,52 @@ function minutesOf(value) {
   return hour * 60 + minute
 }
 
-function courseState(c) {
-  const times = currentTimes()
-  const cur = now.value.getHours() * 60 + now.value.getMinutes()
-  const s = minutesOf(times[periodIndex(c.start)]?.start)
-  const e = minutesOf(times[periodIndex(c.end)]?.end)
-  if (s === null || s === undefined || e === null || e === undefined) return 'upcoming'
-  if (cur < s) return 'upcoming'
-  if (cur > e) return 'done'
-  return 'live'
+/* ---------- 接下来：首页最高优先级 ---------- */
+function dateAfter(offset) {
+  const date = new Date(`${todayKey()}T00:00:00`)
+  date.setDate(date.getDate() + offset)
+  const pad = (value) => String(value).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
 }
 
-/* ---------- 接下来：首页最高优先级 ---------- */
-function findCourseOnDate(offset) {
-  const d = new Date(todayStr() + 'T00:00:00')
-  d.setDate(d.getDate() + offset)
-  const pad = (value) => String(value).padStart(2, '0')
-  const dateStr = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
-  const list = coursesForDate(courses.value, dateStr).sort((a, b) => periodIndex(a.start) - periodIndex(b.start))
-  return list.length ? { course: list[0], dateStr, dayOffset: offset } : null
+function itemAt(date, time = '23:59') {
+  return new Date(`${date}T${time || '23:59'}`).getTime()
 }
 
 const nextUp = computed(() => {
-  const live = todayCourses.value.find((c) => courseState(c) === 'live')
-  if (live) return { kind: 'live', course: live }
-
-  const upcomingToday = todayCourses.value.find((c) => courseState(c) === 'upcoming')
-  if (upcomingToday) return { kind: 'today', course: upcomingToday }
-
-  // 今天课程已结束或没课 → 向后找最多 7 天
-  for (let offset = 1; offset <= 7; offset++) {
-    const found = findCourseOnDate(offset)
-    if (found) {
-      const times = currentTimes()
-      const start = times[periodIndex(found.course.start)]?.start ?? ''
-      const dayText = offset === 1 ? '明天' : dayName(new Date(found.dateStr + 'T00:00:00').getDay() === 0 ? 6 : new Date(found.dateStr + 'T00:00:00').getDay() - 1)
-      return { kind: 'nextDay', course: found.course, dayOffset: offset, start, dayText }
+  const nowTs = now.value.getTime()
+  const candidates = []
+  for (let offset = 0; offset <= 7; offset++) {
+    const date = dateAfter(offset)
+    const dayCourses = coursesForDate(courses.value.filter((course) => !isArchived(course)), date)
+    for (const course of dayCourses) {
+      const start = currentTimes()[periodIndex(course.start)]?.start || '23:59'
+      const end = currentTimes()[periodIndex(course.end)]?.end || start
+      const startAt = itemAt(date, start)
+      const endAt = itemAt(date, end)
+      if (endAt >= nowTs) candidates.push({ kind: 'course', entity: course, date, time: start, dueAt: Math.max(startAt, nowTs), state: startAt <= nowTs ? 'live' : 'upcoming' })
     }
   }
-  return { kind: 'none' }
+  const add = (kind, entity, date, time = '') => {
+    if (!entity || !date) return
+    const dueAt = itemAt(date, time || '23:59')
+    if (dueAt >= nowTs && dueAt <= nowTs + 7 * 86400000) candidates.push({ kind, entity, date, time, dueAt, state: 'upcoming' })
+  }
+  events.value.filter((item) => !isArchived(item)).forEach((item) => add('event', item, item.date, item.time))
+  tasks.value.filter((item) => isTaskActionable(item, now.value)).forEach((item) => add('task', item, item.dueDate, item.dueTime))
+  bills.value.filter((item) => !isArchived(item) && item.active !== false).forEach((item) => add('bill', item, item.nextDate))
+  exams.value.filter((item) => !isArchived(item) && !item.countdown?.isPast).forEach((item) => add('milestone', item, item.date, item.time))
+  const next = candidates.sort((a, b) => a.dueAt - b.dueAt)[0]
+  return next || { kind: 'none' }
 })
 
 const nextUpTimeRange = computed(() => {
-  if (!nextUp.value.course) return ''
-  return courseTimeRange(nextUp.value.course)
+  if (nextUp.value.kind !== 'course') return ''
+  return courseTimeRange(nextUp.value.entity)
 })
 
 const nextDeparture = computed(() => {
-  const course = nextUp.value.course
+  const course = nextUp.value.kind === 'course' ? nextUp.value.entity : null
   const travelMinutes = Math.max(0, Number(course?.travelMinutes) || 0)
   if (!course || !travelMinutes) return ''
   const start = currentTimes()[periodIndex(course.start)]?.start
@@ -177,27 +170,14 @@ const nextDeparture = computed(() => {
 })
 
 const minutesUntilNext = computed(() => {
-  const item = nextUp.value
-  if (!item.course || item.kind === 'nextDay' || item.kind === 'none') return null
-  const times = currentTimes()
-  const start = minutesOf(times[periodIndex(item.course.start)]?.start)
+  if (nextUp.value.kind !== 'course') return null
+  const start = minutesOf(nextUp.value.time)
   if (start === null) return null
   const cur = now.value.getHours() * 60 + now.value.getMinutes()
   return start - cur
 })
 
-const dailyAgenda = computed(() => {
-  const times = currentTimes()
-  const agendaCourses = todayCourses.value.map((course) => ({
-    ...course,
-    time: times[periodIndex(course.start)]?.start || '',
-  }))
-  return selectDayAgenda({ courses: agendaCourses, tasks: tasks.value, bills: bills.value, milestones: exams.value, events: events.value }, now.value)
-})
-
-const todayCheckins = computed(() => courseCheckins.value.filter((item) => item.date === todayISO.value))
-const pulse = computed(() => weeklyPulse({ tasks: tasks.value, focusSessions: focusSessions.value, courseCheckins: courseCheckins.value, moodLog: moodLog.value }, now.value))
-const workload = computed(() => courseWorkload(courses.value, tasks.value, courseCheckins.value, now.value).slice(0, 3))
+const pulse = computed(() => weeklyPulse({ tasks: tasks.value, focusSessions: focusSessions.value, moodLog: moodLog.value }, now.value))
 const experienceMessage = ref('')
 let experienceMessageTimer = 0
 function showExperienceMessage(message) {
@@ -205,69 +185,15 @@ function showExperienceMessage(message) {
   window.clearTimeout(experienceMessageTimer)
   experienceMessageTimer = window.setTimeout(() => { experienceMessage.value = '' }, 3200)
 }
-function recordCourseFeedback(course, state) {
-  courseCheckins.value = upsertCourseCheckin(courseCheckins.value, { courseId: course.id, courseName: course.name, date: todayISO.value, state }, now.value)
-  showExperienceMessage(state === 'review' ? `已把「${course.name}」标为需要复习` : `已记录「${course.name}」的课后反馈`)
-}
-function rescueTask(taskId, action) {
-  const patch = rescueTaskPatch(action, now.value)
-  if (!patch || !domain.updateTask(taskId, patch)) return
-  showExperienceMessage(action === 'tonight' ? '已安排到今晚 20:00' : '已调整到明天')
-}
-function organizeInbox(note, type) {
-  const result = quickRecord.convertNote(note.id, type)
-  showExperienceMessage(result.ok ? result.message : result.error)
-}
-function archiveInbox(note) {
-  domain.updateNote(note.id, { inboxStatus: 'archived', archivedAt: new Date().toISOString() })
-  showExperienceMessage('已归档，随时可在快速记录中查看')
-}
-
 /* ---------- 待办 ---------- */
-function dueTime(task) {
-  return task.dueTime || '23:59'
-}
-function dateTime(date, time = '23:59') {
-  return new Date(`${date}T${time}`).getTime()
-}
-function taskCourseLabel(task) {
-  return courses.value.find((course) => course.id === task.courseId)?.name ?? task.course ?? ''
-}
-
-const todayTasksAll = computed(() =>
-  tasks.value.filter((task) => !task.done && task.dueDate === todayStr())
-)
-const todayTasksDone = computed(() =>
-  tasks.value.filter((task) => task.done && task.dueDate === todayStr())
-)
-const todayProgress = computed(() => {
-  const total = todayTasksAll.value.length + todayTasksDone.value.length
-  const done = todayTasksDone.value.length
-  return { total, done, percent: total ? Math.round((done / total) * 100) : 0 }
-})
-
-// 逾期优先，其次今天截止，再按时间排序；首页最多显示 5 条
-const displayTasks = computed(() => {
-  const nowTs = now.value.getTime()
-  const overdue = tasks.value
-    .filter((t) => !t.done && t.dueDate && t.dueDate !== todayStr() && dateTime(t.dueDate, dueTime(t)) < nowTs)
-    .sort((a, b) => dateTime(a.dueDate, dueTime(a)) - dateTime(b.dueDate, dueTime(b)))
-  const today = [...todayTasksAll.value].sort((a, b) => {
-    const pa = a.priority === 'high' ? 0 : 1
-    const pb = b.priority === 'high' ? 0 : 1
-    if (pa !== pb) return pa - pb
-    return dateTime(a.dueDate, dueTime(a)) - dateTime(b.dueDate, dueTime(b))
-  })
-  return [...overdue.slice(0, 2), ...today].slice(0, 5)
-})
-
-const overdueCount = computed(
-  () => tasks.value.filter((t) => !t.done && t.dueDate && t.dueDate !== todayStr() && dateTime(t.dueDate, dueTime(t)) < now.value.getTime()).length
-)
+const unscheduledCount = computed(() => tasks.value.filter((task) => taskPlanningState(task, now.value) === 'unplanned').length)
+const actionPanels = computed(() => selectTodayActionPanels({ tasks: tasks.value, bills: bills.value, milestones: exams.value, events: events.value }, now.value))
+const riskItems = computed(() => actionPanels.value.risk)
+const actionItems = computed(() => actionPanels.value.actions)
 
 function dayLabel(date) {
-  if (date === todayStr()) return '今天'
-  const tomorrow = new Date(`${todayStr()}T00:00:00`)
+  if (date === todayKey()) return '今天'
+  const tomorrow = new Date(`${todayKey()}T00:00:00`)
   tomorrow.setDate(tomorrow.getDate() + 1)
   const pad = (value) => String(value).padStart(2, '0')
   const tomorrowText = `${tomorrow.getFullYear()}-${pad(tomorrow.getMonth() + 1)}-${pad(tomorrow.getDate())}`
@@ -277,43 +203,72 @@ function dayLabel(date) {
 
 function taskDeadline(task) {
   if (!task?.dueDate) return '未设置截止'
-  if (task.dueDate === todayStr()) return task.dueTime ? `今天 ${task.dueTime}` : '今天截止'
+  if (taskStatus(task, now.value) === 'overdue') return '已逾期'
+  if (task.dueDate === todayKey()) return task.dueTime ? `今天 ${task.dueTime}` : '今天截止'
   const target = new Date(task.dueDate + 'T00:00:00')
-  const today = new Date(todayStr() + 'T00:00:00')
+  const today = new Date(todayKey() + 'T00:00:00')
   const days = Math.round((target - today) / 86400000)
   if (days < 0) return `已逾期 ${-days} 天`
   if (days === 1) return task.dueTime ? `明天 ${task.dueTime}` : '明天截止'
   return `${dayLabel(task.dueDate)}${task.dueTime ? ` ${task.dueTime}` : ''}`
 }
 
-function toggleTask(task) {
-  if (!task) return
-  domain.toggleTask(task.id)
+/* ---------- 倒计时 / 提醒 ---------- */
+const inboxCount = computed(() => quickNotes.value.filter((note) => note.inboxStatus !== 'organized' && note.inboxStatus !== 'archived' && !isArchived(note)).length)
+
+function organizeInbox(note, targetType) {
+  const result = quickRecord.convertNote(note.id, targetType)
+  showExperienceMessage(result.message || result.error || '已更新收件箱')
 }
 
-/* ---------- 倒计时 / 提醒 ---------- */
-const previewEvents = computed(() =>
-  events.value.filter((item) => !item.date || item.date >= todayStr()).sort((a, b) => `${a.date}${a.time}`.localeCompare(`${b.date}${b.time}`)).slice(0, 3)
-)
-const previewNotes = computed(() => quickNotes.value.slice(0, 2))
-const inboxNotes = computed(() => quickNotes.value.filter((note) => note.inboxStatus !== 'organized' && note.inboxStatus !== 'archived').slice(0, 4))
+function archiveInbox(note) {
+  domain.archiveNote(note.id)
+  showExperienceMessage('已归档')
+}
 
-// 近期提醒不拥有数据，只是统一投影；今日待办已在主区域展示的项目不会再次出现。
-const unifiedReminders = computed(() => {
-  const shownTasks = new Set(displayTasks.value.map((item) => item.id))
-  const actionCenter = selectActionCenter({ tasks: tasks.value, bills: bills.value, milestones: exams.value, events: events.value }, now.value)
-  return [...actionCenter.urgent, ...actionCenter.today, ...actionCenter.soon]
-    .filter((item) => item.sourceType !== 'task' || !shownTasks.has(item.sourceId))
-    .slice(0, 4)
-})
 function reminderMeta(item) {
   if (item.kind === 'overdue') return '已逾期'
+  if (item.sourceType === 'task') return taskDeadline(item.entity)
   if (item.sourceType === 'bill') return `${item.entity.nextDate?.slice(5).replace('-', '/')} · ¥${Number(item.entity.amount || 0).toFixed(2)}`
   if (item.sourceType === 'event') return `${item.entity.date || '待安排'}${item.entity.time ? ` ${item.entity.time}` : ''}`
   return item.entity.countdown?.text || countdownLabel(sortCountdowns([item.entity], now.value)[0])
 }
 function completeReminder(item) {
-  if (item.sourceType === 'task') domain.toggleTask(item.sourceId)
+  const action = reminderAction(item)
+  if (action.action === 'complete') domain.toggleTask(action.targetId)
+  else if (action.action === 'pay') {
+    const result = domain.payBill(action.targetId)
+    showExperienceMessage(result?.duplicate ? '本计费周期已经记过账' : '已记录本期账单')
+  } else if (action.action === 'view') {
+    if (action.targetType === 'event') {
+      eventDetail.value = events.value.find((event) => event.id === action.targetId) || null
+    } else router.push(action.targetType === 'milestone' ? '/exams' : action.targetType === 'bill' ? '/bills' : '/tasks')
+  }
+}
+
+function openNext() {
+  const item = nextUp.value
+  if (item.kind === 'course') router.push('/schedule')
+  else if (item.kind === 'event') eventDetail.value = item.entity
+  else if (item.kind === 'milestone') router.push('/exams')
+  else if (item.kind === 'bill') router.push('/bills')
+  else if (item.kind === 'task') router.push('/tasks')
+}
+
+function nextTitle(item) {
+  if (item.kind === 'course') return item.entity.name
+  if (item.kind === 'event') return item.entity.title
+  if (item.kind === 'task') return item.entity.title
+  if (item.kind === 'bill') return item.entity.name
+  if (item.kind === 'milestone') return item.entity.name
+  return ''
+}
+
+function nextMeta(item) {
+  const day = item.date === todayKey() ? '今天' : item.date?.slice(5).replace('-', '月') + '日'
+  if (item.kind === 'course') return `${day} ${nextUpTimeRange.value}${item.entity.room ? ` · ${item.entity.room}` : ''}`
+  if (item.kind === 'bill') return `${day} · ¥${Number(item.entity.amount || 0).toFixed(2)}`
+  return `${day}${item.time ? ` ${item.time}` : ''}`
 }
 
 function countdownLabel(item) {
@@ -324,182 +279,82 @@ function countdownLabel(item) {
   return `${state.text}天`
 }
 
-/* ---------- 本周概况 ---------- */
-const weekReview = computed(() => {
-  const monday = new Date(now.value)
-  monday.setHours(0, 0, 0, 0)
-  monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7))
-  const completed = tasks.value.filter((task) => task.completedAt && new Date(task.completedAt) >= monday).length
-  const plannedMinutes = tasks.value
-    .filter((task) => !task.done)
-    .reduce((total, task) => total + Number(task.estimateMinutes || 0), 0)
-  const focusHours = Math.floor(plannedMinutes / 60)
-  const focusMinutes = plannedMinutes % 60
-  return {
-    completed,
-    focus: plannedMinutes ? `${focusHours}h ${String(focusMinutes).padStart(2, '0')}m` : '—',
-    pending: overdueCount.value,
-  }
-})
-
 </script>
 
 <template>
-  <div class="page">
-    <!-- ① 顶部问候区：紧凑，不再使用大 Hero -->
+  <div class="page today-page">
     <header class="page-head">
       <div class="head-copy">
         <h1 class="greeting">{{ greeting() }}<template v-if="currentQuote">，{{ currentQuote }}</template></h1>
-        <p class="page-desc">{{ dateText }} · 第 {{ weekNum }} 周 · {{ campusName(currentCampusId()) }} · {{ seasonName(currentSeasonId()) }}</p>
+        <p class="page-desc">{{ dateText }} · 第 {{ weekNum }} 周 · {{ campusName(activeSchedule.campusId) }} · {{ seasonName(activeSchedule.seasonId) }}</p>
         <p v-if="festive" class="fest-greet" :style="{ color: festive.accentColor }">🎉 {{ festive.name }} · {{ festive.message }}</p>
       </div>
-      <div class="head-actions">
-        <button type="button" class="btn btn-ghost replay-btn" @click="showMemory = true">↺ 回放</button>
-      </div>
+      <div class="head-actions"><button type="button" class="btn btn-ghost replay-btn" @click="showMemory = true">↺ 回放</button></div>
     </header>
 
-    <!-- 心情记录：轻量一排，点一下即可 -->
-    <section class="mood-strip" aria-label="记录今天心情">
-      <span class="mood-label">今天心情</span>
-      <div class="mood-options">
-        <button
-          v-for="emoji in MOOD_OPTIONS"
-          :key="emoji"
-          type="button"
-          class="mood-btn"
-          :class="{ on: todayMood?.mood === emoji }"
-          :aria-label="`记录心情 ${emoji}`"
-          @click="logMood(emoji)"
-        >{{ emoji }}</button>
-      </div>
-      <input v-if="todayMood" v-model="moodNoteDraft" class="mood-note" placeholder="加一句心情备注…" @change="saveMoodNote" />
-      <span v-else class="mood-hint">点一个表情，记录此刻</span>
-      <button type="button" class="btn btn-ghost festive-set-btn" @click="showFestive = true">🎯 节日</button>
-    </section>
-
-    <!-- ② 接下来：首页最高优先级 -->
-    <section v-if="homeModuleVisible('next')" class="next-panel" :class="nextUp.kind" aria-label="接下来">
-      <div class="next-main">
-        <span class="next-label">接下来</span>
-        <template v-if="nextUp.kind === 'live' || nextUp.kind === 'today'">
-          <strong class="next-title">{{ nextUp.course.name }}</strong>
-          <span class="next-meta">{{ nextUpTimeRange }}<template v-if="nextUp.course.room"> · {{ nextUp.course.room }}</template><template v-if="nextDeparture"> · {{ nextDeparture }}</template></span>
-          <span v-if="nextUp.kind === 'live'" class="next-state live">▶ 进行中</span>
-          <span v-else-if="minutesUntilNext !== null && minutesUntilNext > 0" class="next-state">距开始 {{ minutesUntilNext }} 分钟</span>
-        </template>
-        <template v-else-if="nextUp.kind === 'nextDay'">
-          <span class="next-empty-line">今天课程已结束</span>
-          <strong class="next-title">下一节：{{ nextUp.dayText }} {{ nextUp.start }} · {{ nextUp.course.name }}</strong>
-        </template>
-        <template v-else>
-          <span class="next-empty-line">✓ 近一周没有课程安排</span>
-          <strong class="next-title is-muted">可以自由安排时间</strong>
-        </template>
-      </div>
-      <router-link to="/schedule" class="next-action">查看课程表 →</router-link>
-    </section>
-
-    <!-- ③-⑦ 基本入口以下模块：手机端等浏览器空闲后再补齐，先渲染问候与“接下来” -->
     <template v-if="entryReady">
-    <p v-if="experienceMessage" class="experience-message" role="status">✓ {{ experienceMessage }}</p>
-    <AgendaPanel v-if="homeModuleVisible('agenda')" :items="dailyAgenda" @complete-task="domain.toggleTask" @rescue-task="rescueTask" />
-    <FocusPanel v-if="homeModuleVisible('focus')" />
-    <!-- ③④ 课程 + 待办：桌面双栏，手机单列（待办在前） -->
-    <div v-if="homeModuleVisible('tasks') || homeModuleVisible('courses')" class="main-grid">
-      <section v-if="homeModuleVisible('tasks')" class="panel order-tasks">
-        <div class="panel-head">
-          <h2>今日待办</h2>
-          <span class="panel-progress">{{ todayProgress.done }} / {{ todayProgress.total }}<template v-if="todayProgress.percent"> · {{ todayProgress.percent }}%</template></span>
-          <router-link to="/tasks" class="panel-link">全部 →</router-link>
+      <section v-if="homeModuleVisible('next')" class="next-panel" :class="nextUp.kind" aria-label="接下来">
+        <div class="next-main">
+          <span class="next-label">接下来</span>
+          <template v-if="nextUp.kind !== 'none'">
+            <strong class="next-title">{{ nextTitle(nextUp) }}</strong>
+            <span class="next-meta">{{ nextMeta(nextUp) }}<template v-if="nextUp.kind === 'course' && nextDeparture"> · {{ nextDeparture }}</template></span>
+            <span v-if="nextUp.state === 'live'" class="next-state live">▶ 进行中</span>
+            <span v-else-if="minutesUntilNext !== null && minutesUntilNext > 0" class="next-state">距开始 {{ minutesUntilNext }} 分钟</span>
+          </template>
+          <template v-else><span class="next-empty-line">今天暂时没有紧接着要处理的事项。</span><strong class="next-title is-muted">可以自由安排时间</strong></template>
         </div>
+        <button v-if="nextUp.kind !== 'none'" type="button" class="next-action" @click="openNext">{{ nextUp.kind === 'course' ? '查看课程表' : '查看' }} →</button>
+      </section>
 
-        <p v-if="!displayTasks.length" class="empty-line">
-          <span class="empty-ok">✓</span>
-          <span>今天的任务都完成了</span>
-          <router-link to="/tasks" class="panel-link">查看全部 →</router-link>
-        </p>
-        <div v-else class="task-list">
-          <div v-for="task in displayTasks" :key="task.id" class="task-row" :class="{ overdue: overdueCount && task.dueDate !== todayStr() }">
-            <button
-              type="button"
-              class="task-check"
-              :aria-label="task.done ? '标记为未完成' : '标记为已完成'"
-              @click="toggleTask(task)"
-            >✓</button>
-            <div class="task-copy">
-              <b>{{ task.title }}</b>
-              <span :class="{ danger: task.dueDate !== todayStr() }">{{ taskDeadline(task) }}<template v-if="taskCourseLabel(task)"> · {{ taskCourseLabel(task) }}</template></span>
-            </div>
-            <em v-if="task.priority === 'high'" class="task-priority">优先</em>
+      <p v-if="experienceMessage" class="experience-message" role="status">✓ {{ experienceMessage }}</p>
+
+      <section v-if="homeModuleVisible('countdowns') && riskItems.length" class="action-panel risk-panel" aria-label="需要注意">
+        <div class="panel-head"><div><h2>需要注意</h2><span class="panel-subtitle">只显示逾期、临近截止和即将到期</span></div></div>
+        <div class="action-list">
+          <div v-for="item in riskItems" :key="item.key" class="action-row risk-row">
+            <span class="action-mark">⚠</span><div class="action-copy"><b>{{ item.title }}</b><span>{{ reminderMeta(item) }}</span></div>
+            <button type="button" class="reminder-action" @click="completeReminder(item)">{{ reminderAction(item).action === 'complete' ? '完成' : reminderAction(item).action === 'pay' ? '已支付' : '查看' }}</button>
           </div>
         </div>
       </section>
 
-      <section v-if="homeModuleVisible('courses')" class="panel order-courses">
-        <div class="panel-head">
-          <h2>今天课程</h2>
-          <router-link to="/schedule" class="panel-link">查看课程表 →</router-link>
-        </div>
-
-        <p v-if="!todayCourses.length" class="empty-line">
-          <span class="empty-ok">✓</span>
-          <span>今天没有课程</span>
-          <router-link to="/schedule" class="panel-link">查看课程表 →</router-link>
-        </p>
-        <div v-else class="course-list">
-          <router-link v-for="course in todayCourses" :key="course.id" to="/schedule" class="course-row" :class="courseState(course)">
-            <i :style="{ background: course.color }"></i>
-            <div class="course-copy">
-              <b>{{ course.name }}</b>
-              <span>{{ courseTimeRange(course) || '未设置时间' }}<template v-if="course.room"> · {{ course.room }}</template></span>
-            </div>
-            <em>{{ courseState(course) === 'live' ? '进行中' : courseState(course) === 'done' ? '已结束' : '' }}</em>
-          </router-link>
+      <section v-if="homeModuleVisible('tasks') && actionItems.length" class="action-panel" aria-label="现在该做">
+        <div class="panel-head"><div><h2>现在该做</h2><span class="panel-subtitle">最多显示 3 件，做完就会消失</span></div><router-link to="/tasks" class="panel-link">查看待办 →</router-link></div>
+        <div class="action-list">
+          <div v-for="item in actionItems" :key="item.key" class="action-row">
+            <span class="action-mark">○</span><div class="action-copy"><b>{{ item.title }}</b><span>{{ reminderMeta(item) }}</span></div>
+            <button type="button" class="reminder-action" @click="completeReminder(item)">{{ reminderAction(item).action === 'complete' ? '完成' : reminderAction(item).action === 'pay' ? '已支付' : '查看' }}</button>
+          </div>
         </div>
       </section>
-    </div>
+      <p v-else-if="homeModuleVisible('tasks')" class="quiet-empty">今天暂时没有需要马上处理的事项。</p>
 
-    <CourseFeedbackPanel v-if="homeModuleVisible('feedback')" :courses="todayCourses" :checkins="todayCheckins" @checkin="recordCourseFeedback" />
+      <section v-if="unscheduledCount" class="compact-link-row"><span>待安排 <b>{{ unscheduledCount }}</b></span><small>还没有日期的事项</small><router-link to="/tasks">去安排 →</router-link></section>
 
-    <section v-if="previewEvents.length" class="panel secondary-panel cvi-auto quick-record-summary">
-      <div class="panel-head"><h2>快速记录</h2><span class="panel-progress">日程与笔记</span></div>
-      <div v-for="item in previewEvents" :key="item.id" class="quick-record-row"><b>📅 {{ item.title }}</b><span>{{ item.date || '待安排' }}{{ item.time ? ` ${item.time}` : '' }}</span></div>
-    </section>
-    <InboxPanel v-if="homeModuleVisible('inbox')" :notes="inboxNotes" @convert="organizeInbox" @archive="archiveInbox" />
+      <section v-if="homeModuleVisible('week')" class="week-progress panel" aria-label="本周进展">
+        <div class="panel-head"><div><h2>本周进展</h2><span class="panel-subtitle">{{ pulse.suggestion }}</span></div><router-link class="panel-link" to="/review">查看回顾 →</router-link></div>
+        <p>{{ pulse.done }} 项完成 · 专注 {{ pulse.minutes ? `${pulse.minutes} 分钟` : '暂无记录' }}<template v-if="inboxCount"> · 待整理 {{ inboxCount }} 条笔记</template></p>
+      </section>
 
-    <section v-if="homeModuleVisible('workload') && workload.length" class="panel secondary-panel course-load" aria-label="课程负荷">
-      <div class="panel-head"><h2>课程负荷</h2><span class="panel-progress">先照顾需要帮助的课</span></div>
-      <div v-for="item in workload" :key="item.course.id" class="load-row"><b>{{ item.course.name }}</b><span><template v-if="item.overdue">{{ item.overdue }} 项逾期</template><template v-else-if="item.reviewCount">{{ item.reviewCount }} 项待复习</template><template v-else>{{ item.taskCount }} 项待办</template></span></div>
-    </section>
+      <section v-if="inboxCount" class="inbox-entry">
+        <button type="button" class="compact-link-row compact-button" @click="showInbox = !showInbox"><span>收件箱 <b>待整理 {{ inboxCount }}</b></span><small>保存的内容都在这里</small><span class="compact-action">{{ showInbox ? '收起 ↑' : '查看 →' }}</span></button>
+        <InboxPanel v-if="showInbox" :notes="quickNotes.filter((note) => note.inboxStatus !== 'organized' && note.inboxStatus !== 'archived' && !isArchived(note))" @convert="organizeInbox" @archive="archiveInbox" />
+      </section>
 
-    <!-- ⑤ 统一提醒：不保存业务数据，直接从待办/账单/节点/日程动态计算。 -->
-    <section v-if="homeModuleVisible('countdowns') && unifiedReminders.length" class="panel secondary-panel cvi-auto">
-      <div class="panel-head">
-        <h2>近期提醒</h2>
-        <router-link to="/exams" class="panel-link">查看倒计时 →</router-link>
-      </div>
-      <div class="exam-list">
-        <div v-for="item in unifiedReminders" :key="item.key" class="exam-row">
-          <b>{{ item.sourceType === 'bill' ? '🧾 ' : item.sourceType === 'event' ? '📅 ' : item.sourceType === 'milestone' ? '⏳ ' : '✓ ' }}{{ item.title }}</b>
-          <span :class="{ urgent: item.priority === 'high' || item.kind === 'overdue' }">{{ reminderMeta(item) }}</span>
-          <button v-if="item.sourceType === 'task'" type="button" class="reminder-action" @click="completeReminder(item)">完成</button>
-          <router-link v-else-if="item.sourceType === 'bill'" :to="{ path: '/bills', query: { tab: 'bills' } }" class="reminder-action">处理</router-link>
-        </div>
-      </div>
-    </section>
-
-    <!-- ⑥ 本周概况：降低优先级，紧凑一行 -->
-    <section v-if="homeModuleVisible('week')" class="week-strip secondary-panel cvi-auto" aria-label="本周概况">
-      <div><b>{{ weekReview.completed }}</b><span>本周完成</span></div>
-      <div><b>{{ weekReview.focus }}</b><span>计划专注</span></div>
-      <div :class="{ warn: weekReview.pending > 0 }"><b>{{ weekReview.pending }}</b><span>待处理</span></div>
-    </section>
-    <WeeklyPulsePanel v-if="homeModuleVisible('pulse')" :pulse="pulse" />
-
+      <section class="today-mood-lower" aria-label="记录今天心情">
+        <span class="mood-label">今天心情</span><div class="mood-options"><button v-for="emoji in MOOD_OPTIONS" :key="emoji" type="button" class="mood-btn" :class="{ on: todayMood?.mood === emoji }" :aria-label="`记录心情 ${emoji}`" @click="logMood(emoji)">{{ emoji }}</button></div>
+        <input v-if="todayMood" v-model="moodNoteDraft" class="mood-note" placeholder="加一句备注…" @change="saveMoodNote" />
+        <button type="button" class="btn btn-ghost festive-set-btn" @click="showFestive = true">🎯 节日</button>
+      </section>
+      <FocusPanel v-if="homeModuleVisible('focus')" />
     </template>
 
     <MemoryView :open="showMemory" @close="showMemory = false" />
     <FestiveSettings :open="showFestive" @close="showFestive = false" />
+    <Modal v-if="eventDetail" :open="Boolean(eventDetail)" title="日程详情" medium @close="eventDetail = null">
+      <div class="event-detail"><h3>{{ eventDetail.title }}</h3><p>{{ eventDetail.date || '待安排' }}<template v-if="eventDetail.time"> · {{ eventDetail.time }}</template><template v-if="eventDetail.endTime">–{{ eventDetail.endTime }}</template></p><p v-if="eventDetail.location">地点：{{ eventDetail.location }}</p><p v-if="eventDetail.courseName">课程：{{ eventDetail.courseName }}</p><p v-if="eventDetail.note" class="event-detail-note">{{ eventDetail.note }}</p></div>
+    </Modal>
   </div>
 </template>
 
@@ -579,6 +434,39 @@ const weekReview = computed(() => {
 .panel-link { color: var(--primary); font-size: 12px; font-weight: 700; text-decoration: none; white-space: nowrap; }
 .panel-link:hover { text-decoration: underline; }
 .experience-message { padding: 8px 12px; color: #087a58; font-size: 12.5px; border: 1px solid #b9e6d5; border-radius: 9px; background: #effaf6; }
+.action-panel { padding: 16px 18px; border: 1px solid var(--border); border-radius: var(--card-radius); background: var(--card); }
+.risk-panel { border-color: #f1c8c8; background: #fffafa; }
+.panel-head > div { min-width: 0; }
+.panel-subtitle { display: block; margin-top: 3px; color: var(--ink-faint); font-size: 11.5px; font-weight: 500; }
+.action-list { display: flex; flex-direction: column; }
+.action-row { display: flex; align-items: center; gap: 10px; min-height: 48px; border-top: 1px solid var(--border); }
+.action-row:first-child { border-top: 0; }
+.action-mark { display: grid; place-items: center; width: 24px; height: 24px; flex: 0 0 24px; color: var(--primary); font-size: 17px; }
+.risk-row .action-mark, .risk-row .action-copy span { color: var(--danger); }
+.action-copy { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.action-copy b { overflow: hidden; font-size: 13.5px; text-overflow: ellipsis; white-space: nowrap; }
+.action-copy span { color: var(--ink-soft); font-size: 11.5px; }
+.quiet-empty { padding: 14px 16px; color: var(--ink-soft); font-size: 13px; border: 1px dashed var(--border-strong); border-radius: var(--card-radius); background: var(--bg-tint); }
+.compact-link-row { display: flex; align-items: center; gap: 9px; min-height: 42px; padding: 0 4px; color: var(--text); font-size: 13px; }
+.compact-link-row > span { font-weight: 750; }
+.compact-link-row > span b { color: var(--primary); }
+.compact-link-row small { color: var(--ink-faint); font-size: 11.5px; }
+.compact-link-row a { margin-left: auto; color: var(--primary); font-size: 12px; font-weight: 750; text-decoration: none; white-space: nowrap; }
+.compact-button { width: 100%; border: 0; background: transparent; text-align: left; cursor: pointer; }
+.compact-action { margin-left: auto; color: var(--primary); font-size: 12px; font-weight: 750; white-space: nowrap; }
+.inbox-entry { display: flex; flex-direction: column; gap: 7px; }
+.inbox-entry > .inbox { margin: 0; }
+.week-progress { padding: 16px 18px; }
+.week-progress p { color: var(--ink-soft); font-size: 12px; }
+.today-mood-lower { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; padding: 3px 4px; }
+.today-mood-lower .mood-options { display: flex; gap: 2px; }
+.today-mood-lower .mood-btn { width: 32px; height: 32px; font-size: 17px; }
+.today-mood-lower .mood-note { min-width: 140px; flex: 1; max-width: 320px; padding: 7px 9px; }
+.today-mood-lower .festive-set-btn { margin-left: auto; min-height: 34px; padding: 6px 10px; }
+.event-detail { display: flex; flex-direction: column; gap: 8px; }
+.event-detail h3 { font-size: 18px; }
+.event-detail p { margin: 0; color: var(--ink-soft); font-size: 13px; }
+.event-detail .event-detail-note { padding-top: 8px; color: var(--text); white-space: pre-wrap; border-top: 1px solid var(--border); }
 
 /* 空状态：紧凑单行，高度自适应 */
 .empty-line { display: flex; align-items: center; gap: 8px; padding: 6px 0 2px; color: var(--ink-soft); font-size: 13px; }
@@ -657,7 +545,7 @@ const weekReview = computed(() => {
   .order-tasks { order: 1; }
   .order-courses { order: 2; }
   .next-panel { padding: 16px 18px; }
-  .next-action { display: none; }
+  .next-action { display: block; }
 }
 @media (max-width: 520px) {
   .page { gap: 12px; }
@@ -669,5 +557,10 @@ const weekReview = computed(() => {
   .week-strip { grid-template-columns: repeat(3, 1fr); gap: 8px; }
   .week-strip > div { flex-direction: column; align-items: center; gap: 3px; padding: 10px 6px; text-align: center; }
   .secondary-panel { margin-top: 2px; }
+  .action-panel { padding: 14px; }
+  .action-row { min-height: 52px; }
+  .compact-link-row { flex-wrap: wrap; gap: 5px 8px; padding-block: 4px; }
+  .compact-link-row small { flex: 1 0 100%; padding-left: 2px; }
+  .compact-link-row a { margin-left: auto; }
 }
 </style>

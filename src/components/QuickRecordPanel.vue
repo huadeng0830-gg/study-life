@@ -6,14 +6,14 @@ import { useQuickRecordAdapters } from '../composables/quickRecord/adapters.js'
 import { parseQuickRecord } from '../composables/quickRecord/parser.js'
 import { QUICK_ACTIONS, recordTypeMeta } from '../composables/quickRecord/types.js'
 import { ledgerCategories } from '../composables/ledger.js'
-import { useStoredRef } from '../composables/store/index.js'
+import { settings as quickRecordSettings } from '../composables/settingsPolicy.js'
 
 const props = defineProps({
   open: Boolean,
   initialText: { type: String, default: '' },
   context: { type: Object, default: () => ({}) },
 })
-const emit = defineEmits(['close'])
+const emit = defineEmits(['close', 'saved'])
 
 const { courses, save } = useQuickRecordAdapters()
 
@@ -29,11 +29,12 @@ const drafts = ref([])
 const expandedId = ref('')
 const feedback = ref('')
 const error = ref('')
+const saving = ref(false)
 const clipboardHint = ref('')
 const voiceState = ref(VOICE_STATES.idle)
 const voiceSeconds = ref(0)
 const listening = ref(false)
-const settings = useStoredRef('sl_quick_record_settings', { clipboardHint: true, recentTypes: [] })
+const settings = quickRecordSettings
 const voiceSupported = isSupported()
 let recognizer = null
 let feedbackTimer = 0
@@ -66,6 +67,12 @@ function autosize(el, maxHeight = 220) {
 function onSmartInput() {
   autosize(inputEl.value)
   parse()
+}
+
+function onSmartKeydown(event) {
+  if (event.isComposing) return
+  event.preventDefault()
+  saveAll()
 }
 
 function onNoteInput() {
@@ -116,43 +123,87 @@ function updateRecent(types) {
 
 function categoryLabel(key) { return ledgerCategories.value.find((item) => item.key === key)?.name || '' }
 
-function saveAll() {
-  if (!drafts.value.length) return
-  error.value = ''
-  const pending = [...drafts.value]
-  const messages = []
-  const savedIds = []
-  for (const draft of pending) {
-    try {
-      messages.push(save(draft))
-      savedIds.push(draft.id)
-    } catch (cause) {
-      drafts.value = drafts.value.filter((item) => !savedIds.includes(item.id))
-      const reason = cause?.message || '请补充必要信息'
-      error.value = savedIds.length
-        ? `前 ${savedIds.length} 项已保存；剩余内容未保存：${reason}`
-        : `保存失败：${reason}`
-      if (savedIds.length) updateRecent(pending.slice(0, savedIds.length).map((draft) => draft.type))
-      return
-    }
-  }
-  updateRecent(pending.map((draft) => draft.type))
-  showFeedback(`✓ ${messages.length === 1 ? messages[0] : `已添加 ${messages.length} 项记录`}`)
+function resetForNextSmartEntry() {
   input.value = ''
   drafts.value = []
   forcedType.value = ''
+  expandedId.value = ''
+  clipboardHint.value = ''
+  error.value = ''
+  feedback.value = ''
+  noteBeforeVoice = ''
+  smartBeforeVoice = ''
+  stopActiveVoice()
   focusInput()
 }
 
-function saveNote() {
+function savedMessage(results) {
+  return results.length === 1 ? results[0].message : `已添加 ${results.length} 项记录`
+}
+
+function requestClose() {
+  if (saving.value) return
+  emit('close')
+}
+
+function finishSave(results, keepOpen) {
+  updateRecent(results.map((result) => result.type).filter(Boolean))
+  const message = savedMessage(results)
+  const undo = () => results.forEach((result) => result.undo?.())
+  if (keepOpen) {
+    resetForNextSmartEntry()
+    showFeedback(`✓ ${message}`)
+    return
+  }
+  emit('saved', { message, undo })
+  emit('close')
+}
+
+async function saveAll(keepOpen = false) {
+  if (saving.value) return
+  if (!drafts.value.length) return
+  saving.value = true
+  error.value = ''
+  const pending = drafts.value.map((draft) => ({
+    ...draft,
+    questions: Array.isArray(draft.questions)
+      ? draft.questions.map((question) => ({ ...question, choices: [...(question.choices || [])] }))
+      : [],
+  }))
+  const results = []
+  const savedIds = []
+  try {
+    for (const draft of pending) {
+      try {
+        results.push({ ...(await save(draft)), type: draft.type })
+        savedIds.push(draft.id)
+      } catch (cause) {
+        drafts.value = drafts.value.filter((item) => !savedIds.includes(item.id))
+        const reason = cause?.message || '请补充必要信息'
+        error.value = savedIds.length
+          ? `前 ${savedIds.length} 项已保存；剩余内容未保存：${reason}`
+          : `保存失败：${reason}`
+        if (savedIds.length) updateRecent(pending.slice(0, savedIds.length).map((draft) => draft.type))
+        return
+      }
+    }
+    finishSave(results, keepOpen)
+  } finally {
+    saving.value = false
+  }
+}
+
+async function saveNote(keepOpen = false) {
+  if (saving.value) return
   const content = noteBody.value.trim()
   if (!content) {
     error.value = '请先写点什么'
     focusNote()
     return
   }
+  saving.value = true
   try {
-    save({
+    const result = await save({
       id: `qr-note-${Date.now()}`,
       type: 'note',
       raw: content,
@@ -172,12 +223,21 @@ function saveNote() {
       uncertain: false,
     })
     updateRecent(['note'])
-    showFeedback('✓ 已保存快速笔记')
-    noteBody.value = ''
-    noteTitle.value = ''
-    focusNote()
+    if (keepOpen) {
+      noteBody.value = ''
+      noteTitle.value = ''
+      error.value = ''
+      stopActiveVoice()
+      focusNote()
+      showFeedback('✓ 已保存快速笔记')
+      return
+    }
+    emit('saved', { message: result.message, undo: result.undo })
+    emit('close')
   } catch (cause) {
     error.value = cause?.message || '保存失败，请稍后重试'
+  } finally {
+    saving.value = false
   }
 }
 
@@ -188,12 +248,14 @@ function showFeedback(value) {
 }
 
 // 智能解析失败或不确定时，转为快速笔记保存，确保用户输入不丢失。
-function saveAsNote(draft) {
+async function saveAsNote(draft) {
+  if (saving.value) return
   if (!draft) return
+  saving.value = true
   try {
     const content = String(draft.raw || draft.title || draft.note || '').trim()
     if (!content) return
-    save({
+    const result = await save({
       ...draft,
       type: 'note',
       title: '',
@@ -203,10 +265,16 @@ function saveAsNote(draft) {
     })
     drafts.value = drafts.value.filter((item) => item.id !== draft.id)
     updateRecent(['note'])
-    showFeedback('✓ 已按原文保存为快速笔记')
-    if (!drafts.value.length) { input.value = ''; forcedType.value = '' }
+    if (drafts.value.length) {
+      showFeedback(`✓ ${result.message}`)
+      return
+    }
+    emit('saved', { message: result.message, undo: result.undo })
+    emit('close')
   } catch (cause) {
     error.value = cause?.message || '保存为笔记失败'
+  } finally {
+    saving.value = false
   }
 }
 
@@ -359,7 +427,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <Modal :open="open" title="⚡ 快速记录" medium @close="emit('close')">
+  <Modal :open="open" title="⚡ 快速记录" medium @close="requestClose">
     <section class="quick-record">
       <!-- 智能记录模式：自然语言 → 结构化预览 → 确认保存 -->
       <template v-if="mode === 'smart'">
@@ -373,7 +441,7 @@ onBeforeUnmount(() => {
             inputmode="text"
             placeholder="记点什么……例如：午饭18元 / 周五交高数作业 / 明天下午三点组会"
             @input="onSmartInput"
-            @keydown.enter.exact.prevent="!$event.isComposing && saveAll()"
+            @keydown.enter.exact="onSmartKeydown"
           />
           <button
             class="mic"
@@ -459,7 +527,7 @@ onBeforeUnmount(() => {
                   <option value="expense">支出</option>
                   <option value="income">收入</option>
                   <option value="bill">固定账单</option>
-                  <option value="countdown">倒计时</option>
+                  <option value="countdown">重要日期</option>
                   <option value="note">快速笔记</option>
                 </select></label>
                 <label v-if="!['note', 'expense', 'income', 'bill'].includes(draft.type)">课程<input v-model="draft.course" list="quick-course-options" /></label>
@@ -477,7 +545,10 @@ onBeforeUnmount(() => {
         <p v-if="error" class="error" role="alert">{{ error }}</p>
         <div class="footer">
           <p v-if="feedback" class="success" role="status">{{ feedback }}</p>
-          <button v-if="hasDrafts" type="button" class="btn btn-primary" @click="saveAll">{{ drafts.length > 1 ? '全部保存' : '确认添加' }}</button>
+          <div v-if="hasDrafts" class="save-actions">
+            <button type="button" class="btn btn-primary" :disabled="saving" @click="saveAll(false)">{{ drafts.length > 1 ? '全部保存' : '保存' }}</button>
+            <button type="button" class="btn btn-ghost" :disabled="saving" @click="saveAll(true)">保存并继续</button>
+          </div>
         </div>
       </template>
 
@@ -510,7 +581,10 @@ onBeforeUnmount(() => {
           <p v-if="error" class="error" role="alert">{{ error }}</p>
           <div class="footer note-footer">
             <p v-if="feedback" class="success" role="status">{{ feedback }}</p>
-            <button type="button" class="btn btn-primary" @click="saveNote">保存笔记</button>
+            <div class="save-actions">
+            <button type="button" class="btn btn-primary" :disabled="saving" @click="saveNote(false)">保存</button>
+            <button type="button" class="btn btn-ghost" :disabled="saving" @click="saveNote(true)">保存并继续</button>
+            </div>
           </div>
         </div>
       </template>
@@ -568,7 +642,8 @@ onBeforeUnmount(() => {
 .footer{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:38px}
 .success{margin:0;color:#087a58;font-size:12px}
 .error{margin:0;color:var(--danger);font-size:12px}
-.footer .btn{margin-left:auto;min-width:88px}
+.save-actions{display:flex;gap:8px;margin-left:auto}
+.save-actions .btn{min-width:88px}
 .note-mode{display:flex;flex-direction:column;gap:11px}
 .note-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
 .note-head b{font-size:14px}

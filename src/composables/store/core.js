@@ -239,7 +239,7 @@ export function migrateTaskCourseLinks(taskList, courseList) {
   return changed
 }
 
-export async function restoreStoredValues(values) {
+export async function restoreStoredValues(values, { markChanged = true } = {}) {
   const entries = Object.entries(values || {}).filter(([key]) => typeof key === 'string' && key.startsWith('sl_'))
   if (!entries.length) return
   const rawValues = Object.fromEntries(entries.map(([key, value]) => [key, JSON.stringify(value)]))
@@ -255,13 +255,22 @@ export async function restoreStoredValues(values) {
       if (storedRefs.has(key)) storedRefs.get(key).value = value
     }
     await mirrorLocalValues(rawValues)
-    markLocalChanged()
+    if (markChanged) markLocalChanged()
   } catch (error) {
-    for (const [key, raw] of Object.entries(previous)) {
-      if (raw === null) localStorage.removeItem(key)
-      else localStorage.setItem(key, raw)
+    let rollbackError = null
+    try {
+      for (const [key, raw] of Object.entries(previous)) {
+        if (raw === null) localStorage.removeItem(key)
+        else localStorage.setItem(key, raw)
+      }
+    } catch (cause) {
+      rollbackError = cause
     }
     for (const [key, value] of previousStates) storedRefs.get(key).value = value
+    if (rollbackError && error && typeof error === 'object') {
+      error.rollbackFailed = true
+      error.rollbackError = rollbackError
+    }
     throw error
   }
 }

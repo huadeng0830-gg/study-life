@@ -36,4 +36,20 @@ describe('useStoredRef 延迟持久化', () => {
       { id: 'before-pagehide' },
     ])
   })
+
+  it('批量写入回滚失败时明确标记 rollbackFailed', async () => {
+    const { restoreStoredValues } = await import('../src/composables/store')
+    localStorage.setItem('sl_rollback_a', JSON.stringify('old-a'))
+    localStorage.setItem('sl_rollback_b', JSON.stringify('old-b'))
+    const originalSetItem = localStorage.setItem.bind(localStorage)
+    let calls = 0
+    vi.spyOn(localStorage, 'setItem').mockImplementation((key, value) => {
+      calls += 1
+      if (calls === 2 || calls === 3) throw new Error('模拟存储失败')
+      return originalSetItem(key, value)
+    })
+
+    await expect(restoreStoredValues({ sl_rollback_a: 'new-a', sl_rollback_b: 'new-b' }, { markChanged: false }))
+      .rejects.toMatchObject({ rollbackFailed: true })
+  })
 })

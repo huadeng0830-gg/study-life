@@ -12,6 +12,8 @@ export const RELEASE_UPDATES = Object.freeze([
     notes: [
       '粘贴通知：升级为通知理解确认流程，按缴费、作业、会议、考试、课程和普通通知动态展示关键事实并推荐处理方式',
       '粘贴通知：支持行动结论可编辑、原文折叠与重新解析、可靠多事项选择，以及待办/作业/日程/仅保存通知分流',
+      '全局快速记录：完成普通保存、保存并继续、失败保留、重复点击保护、撤销与八类业务落点的收尾审计',
+      '快速记录解析：支持一句话中的支出与待办双动作，并支持“还有 N 天”的倒计时识别',
     ],
   },
   {
@@ -368,7 +370,7 @@ export const RELEASE_UPDATES = Object.freeze([
 export const RELEASE_VERSION = RELEASE_UPDATES[0].version
 
 // 与第一条签名保持一致，交给 vite.config.js 校验源码一致性。
-export const RELEASE_SOURCE_SIGNATURE = 'c7ccab6409'
+export const RELEASE_SOURCE_SIGNATURE = 'de864a7322'
 
 // 兼容旧引用：当前版本的更新说明。
 export const RELEASE_NOTES = RELEASE_UPDATES[0].notes

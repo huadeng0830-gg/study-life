@@ -315,7 +315,7 @@ const previewStyle = computed(() => ({
         <div class="swipe-category-header">
           <span class="swipe-category-icon">✅</span>
           <div>
-            <b>作业与待办</b>
+            <b>待办</b>
             <span>对单条待办生效</span>
           </div>
         </div>
@@ -339,7 +339,7 @@ const previewStyle = computed(() => ({
         <div class="swipe-category-header">
           <span class="swipe-category-icon">☑️</span>
           <div>
-            <b>我的清单</b>
+            <b>清单</b>
             <span>对清单中的单个项目生效</span>
           </div>
         </div>

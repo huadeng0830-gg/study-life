@@ -11,6 +11,7 @@ import { fmtDate, todayStr } from '../composables/store'
 import { findUniqueCourseByName } from '../composables/courseLinks.js'
 import { classifyTasks } from '../composables/smartClassify.js'
 import { useDomainCommands } from '../composables/domain/commands.js'
+import { TASK_PLAN_STATE, isArchived, taskPlanningState, taskStatus } from '../composables/domain/state.js'
 
 const domain = useDomainCommands()
 const { tasks, courses } = domain
@@ -19,10 +20,13 @@ const showNotice = ref(false)
 const noticeMessage = ref('')
 const editingId = ref(null)
 const error = ref('')
-const filter = ref('todo')
+const filter = ref(TASK_PLAN_STATE.scheduled)
+const showHistory = ref(false)
 const sortKey = ref('due')
 const form = ref(emptyForm())
 const deleteTarget = ref(null)
+const rescheduleTarget = ref(null)
+const rescheduleDate = ref('')
 const undoToast = ref(null)
 let undoTimer = 0
 
@@ -32,7 +36,17 @@ let organizeTimer = 0
 
 function smartOrganize() {
   const { list, changed } = classifyTasks(tasks.value, courses.value)
-  tasks.value = list
+  list.forEach((next, index) => {
+    const current = tasks.value[index]
+    if (!current || current.id !== next.id) return
+    if (current.courseId !== next.courseId || current.course !== next.course || current.priority !== next.priority) {
+      domain.updateTask(current.id, {
+        courseId: next.courseId,
+        course: next.course,
+        priority: next.priority,
+      })
+    }
+  })
   organizeMessage.value = changed ? `已智能整理 ${changed} 条待办` : '待办已经很整齐，无需整理'
   window.clearTimeout(organizeTimer)
   organizeTimer = window.setTimeout(() => { if (organizeMessage.value) organizeMessage.value = '' }, 3000)
@@ -130,9 +144,24 @@ function toggleTask(task) {
   domain.toggleTask(task.id)
 }
 
+function openReschedule(task) {
+  const tomorrow = new Date()
+  tomorrow.setHours(0, 0, 0, 0)
+  tomorrow.setDate(tomorrow.getDate() + 1)
+  const pad = (value) => String(value).padStart(2, '0')
+  rescheduleTarget.value = task
+  rescheduleDate.value = `${tomorrow.getFullYear()}-${pad(tomorrow.getMonth() + 1)}-${pad(tomorrow.getDate())}`
+}
+
+function saveReschedule() {
+  if (!rescheduleTarget.value || !rescheduleDate.value) return
+  domain.updateTask(rescheduleTarget.value.id, { dueDate: rescheduleDate.value, status: 'pending', done: false, completedAt: null })
+  rescheduleTarget.value = null
+}
+
 function swipeLabel(task, direction) {
   const action = appearance.value.swipeActions.tasks[direction]
-  if (action === 'complete') return task.done ? '恢复待办' : '完成'
+  if (action === 'complete') return taskStatus(task) === 'completed' ? '恢复待办' : '完成'
   if (action === 'edit') return '编辑'
   if (action === 'delete') return '删除'
   return ''
@@ -201,7 +230,7 @@ function dueInfo(task) {
   const targetDay = new Date(task.dueDate + 'T00:00:00')
   const todayDate = new Date(today + 'T00:00:00')
   const days = Math.round((targetDay - todayDate) / 86400000)
-  const isOverdue = !task.done && dueTimestamp(task) < Date.now()
+  const isOverdue = taskStatus(task) === 'overdue' && dueTimestamp(task) < Date.now()
   if (isOverdue) return { text: days < 0 ? `逾期 ${-days} 天` : '已逾期', cls: 'overdue' }
   if (days === 0) return { text: task.dueTime ? `今天 ${task.dueTime}` : '今天截止', cls: 'today' }
   if (days === 1) return { text: task.dueTime ? `明天 ${task.dueTime}` : '明天截止', cls: 'soon' }
@@ -209,14 +238,20 @@ function dueInfo(task) {
 }
 
 const taskView = computed(() => {
-  let todo = 0
+  let unplanned = 0
+  let scheduled = 0
   let done = 0
   for (const task of tasks.value) {
-    if (task.done) done++
-    else todo++
+    if (isArchived(task)) continue
+    const planState = taskPlanningState(task)
+    if (planState === TASK_PLAN_STATE.completed) done++
+    else if (planState === TASK_PLAN_STATE.scheduled) scheduled++
+    else if (planState === TASK_PLAN_STATE.unplanned) unplanned++
   }
   const sorted = [...tasks.value].sort((a, b) => {
-    if (Boolean(a.done) !== Boolean(b.done)) return a.done ? 1 : -1
+    const aCompleted = taskStatus(a) === 'completed'
+    const bCompleted = taskStatus(b) === 'completed'
+    if (aCompleted !== bCompleted) return aCompleted ? 1 : -1
     if (sortKey.value === 'priority') {
       const priorityDiff = (PRIORITIES[a.priority]?.order ?? 1) - (PRIORITIES[b.priority]?.order ?? 1)
       if (priorityDiff) return priorityDiff
@@ -231,10 +266,14 @@ const taskView = computed(() => {
     if (dueDiff) return dueDiff
     return (PRIORITIES[a.priority]?.order ?? 1) - (PRIORITIES[b.priority]?.order ?? 1)
   })
-  const visible = filter.value === 'all'
-    ? sorted
-    : sorted.filter((task) => filter.value === 'todo' ? !task.done : task.done)
-  return { counts: { todo, done, all: tasks.value.length }, visible }
+  const archived = tasks.value.filter(isArchived).length
+  const current = sorted.filter((task) => !isArchived(task))
+  const visible = showHistory.value
+    ? sorted.filter(isArchived)
+    : filter.value === 'all'
+      ? current
+      : current.filter((task) => taskPlanningState(task) === filter.value)
+  return { counts: { unplanned, scheduled, done, all: current.length, archived }, visible }
 })
 
 const counts = computed(() => taskView.value.counts)
@@ -243,42 +282,55 @@ function deleteTask(task) {
   deleteTarget.value = task
 }
 
+function archiveTask(task) {
+  if (!task || isArchived(task)) return
+  domain.archiveTask(task.id)
+  undoToast.value = { item: task, action: 'archive', text: '待办已归档' }
+  window.clearTimeout(undoTimer)
+  undoTimer = window.setTimeout(() => { undoToast.value = null }, 6000)
+}
+
 function confirmDelete() {
   const target = deleteTarget.value
   if (!target) return
   const index = tasks.value.findIndex((item) => item.id === target.id)
   if (index < 0) return
-  tasks.value.splice(index, 1)
+  domain.deleteTask(target.id)
   deleteTarget.value = null
-  undoToast.value = { item: target, index }
+  undoToast.value = { item: target, index, action: 'delete', text: '待办已删除' }
   window.clearTimeout(undoTimer)
   undoTimer = window.setTimeout(() => { undoToast.value = null }, 6000)
 }
 
 function undoDelete() {
   if (!undoToast.value) return
-  const { item, index } = undoToast.value
-  tasks.value.splice(Math.min(index, tasks.value.length), 0, item)
+  const { item, index, action } = undoToast.value
+  if (action === 'archive') domain.restoreTask(item.id)
+  else domain.restoreDeletedTask(item)
   undoToast.value = null
   window.clearTimeout(undoTimer)
 }
 
 // 空状态文案按当前筛选变化
 const emptyInfo = computed(() => {
+  if (showHistory.value) return { icon: '▱', title: '还没有归档待办', description: '已完成事项可以归档到这里，当前清单会更清爽。', hint: '', action: '' }
   if (tasks.value.length === 0) {
     return {
       icon: '✓',
-      title: '今天很轻松',
-      description: '目前没有待办任务。',
-      hint: '新任务会自动出现在这里。',
+       title: '今天很轻松',
+       description: '目前没有待办。',
+       hint: '新待办会自动出现在这里。',
       action: '添加待办',
     }
   }
-  if (filter.value === 'todo') {
-    return { icon: '✓', title: '没有未完成的待办', description: '当前筛选下暂无任务。', hint: '', action: '' }
+  if (filter.value === TASK_PLAN_STATE.unplanned) {
+    return { icon: '＋', title: '没有待安排日期的待办', description: '还没有日期的事项会留在这里。', hint: '', action: '' }
   }
-  if (filter.value === 'done') {
-    return { icon: '◐', title: '还没有已完成的任务', description: '完成任务后会出现在这里。', hint: '', action: '' }
+  if (filter.value === TASK_PLAN_STATE.scheduled) {
+    return { icon: '✓', title: '没有已安排待办', description: '有明确日期的事项会出现在这里。', hint: '', action: '' }
+  }
+  if (filter.value === TASK_PLAN_STATE.completed) {
+    return { icon: '◐', title: '还没有已完成的待办', description: '完成待办后会出现在这里。', hint: '', action: '' }
   }
   return { icon: '✦', title: '这个列表暂时是空的', description: '', hint: '', action: '' }
 })
@@ -309,10 +361,11 @@ function taskFocusSummary(task) {
   <div class="page">
     <header class="page-head">
       <div class="page-head-main">
-        <h1 class="page-title">作业与待办</h1>
+        <h1 class="page-title">待办</h1>
         <p class="page-desc">把要做的事情放这里，按截止时间轻松管理。</p>
       </div>
       <div class="page-actions">
+        <button class="btn btn-ghost" @click="showHistory = !showHistory">{{ showHistory ? '返回当前' : `历史 ${counts.archived || ''}` }}</button>
         <label class="sort-select">
           <span>排序</span>
           <select v-model="sortKey">
@@ -329,9 +382,13 @@ function taskFocusSummary(task) {
     <p v-if="organizeMessage && !noticeMessage" class="notice-success">✓ {{ organizeMessage }}</p>
 
     <div class="segmented task-toolbar" role="tablist" aria-label="待办筛选">
-      <button :class="{ on: filter === 'todo' }" @click="filter = 'todo'">待完成 <b>{{ counts.todo }}</b></button>
-      <button :class="{ on: filter === 'done' }" @click="filter = 'done'">已完成 <b>{{ counts.done }}</b></button>
+      <template v-if="!showHistory">
+         <button :class="{ on: filter === 'unplanned' }" @click="filter = 'unplanned'">待安排日期 <b>{{ counts.unplanned }}</b></button>
+      <button :class="{ on: filter === 'scheduled' }" @click="filter = 'scheduled'">已安排 <b>{{ counts.scheduled }}</b></button>
+      <button :class="{ on: filter === 'completed' }" @click="filter = 'completed'">已完成 <b>{{ counts.done }}</b></button>
       <button :class="{ on: filter === 'all' }" @click="filter = 'all'">全部 <b>{{ counts.all }}</b></button>
+      </template>
+      <span v-else class="history-label">归档历史 · {{ counts.archived }} 条</span>
     </div>
 
     <EmptyState
@@ -353,9 +410,9 @@ function taskFocusSummary(task) {
         :right-tone="swipeTone('right')"
         @swipe="handleTaskSwipe($event, task)"
       >
-        <article
-          class="card task"
-          :class="{ done: task.done }"
+          <article
+            class="card task"
+            :class="{ done: taskStatus(task) === 'completed', archived: isArchived(task) }"
           @click="openEdit(task)"
         >
           <span v-if="task.priority === 'high'" class="urgent-bar" aria-hidden="true"></span>
@@ -363,11 +420,11 @@ function taskFocusSummary(task) {
           <button
             type="button"
             class="check"
-            :class="{ checked: task.done }"
-            :aria-label="task.done ? '标记为未完成' : '标记为已完成'"
+            :class="{ checked: taskStatus(task) === 'completed' }"
+            :aria-label="taskStatus(task) === 'completed' ? '标记为未完成' : '标记为已完成'"
             @click="toggleDone($event, task.id)"
           >
-            {{ task.done ? '✓' : '' }}
+            {{ taskStatus(task) === 'completed' ? '✓' : '' }}
           </button>
 
 <span v-if="taskFocusSummary(task)" class="course-tag focus-tag">{{ taskFocusSummary(task) }}</span>
@@ -386,7 +443,10 @@ function taskFocusSummary(task) {
           <span class="due" :class="dueInfo(task).cls">{{ dueInfo(task).text }}</span>
 
           <div class="more" @click.stop>
+            <button v-if="!isArchived(task) && taskStatus(task) === 'overdue'" class="link-btn reschedule-link" title="重新安排日期" @click.stop="openReschedule(task)">重新安排</button>
+            <button v-if="isArchived(task)" class="link-btn" title="恢复待办" @click="domain.restoreTask(task.id)">↶</button>
             <button class="link-btn" title="编辑待办" @click="openEdit(task)">✎</button>
+            <button v-if="!isArchived(task) && taskStatus(task) === 'completed'" class="link-btn" title="归档待办" @click="archiveTask(task)">▱</button>
             <button class="link-btn danger" title="删除待办" @click="deleteTask(task)">🗑</button>
           </div>
         </article>
@@ -446,7 +506,14 @@ function taskFocusSummary(task) {
       @commit="onNoticeCommit"
     />
     <ConfirmDialog :open="Boolean(deleteTarget)" title="删除待办" :message="`确定删除待办“${deleteTarget?.title || ''}”吗？删除后可在短时间内撤销。`" confirm-label="删除" @close="deleteTarget = null" @confirm="confirmDelete" />
-    <div v-if="undoToast" class="undo-toast" role="status" aria-live="polite"><span>待办已删除</span><button type="button" @click="undoDelete">撤销</button></div>
+    <Modal v-if="rescheduleTarget" :open="Boolean(rescheduleTarget)" title="重新安排日期" @close="rescheduleTarget = null">
+      <div class="reschedule-form">
+        <p>为“{{ rescheduleTarget.title }}”选择一个新的截止日期。</p>
+        <label>新的截止日期<input v-model="rescheduleDate" type="date" /></label>
+        <div class="actions"><button class="btn" @click="rescheduleTarget = null">取消</button><button class="btn btn-primary" @click="saveReschedule">保存日期</button></div>
+      </div>
+    </Modal>
+    <div v-if="undoToast" class="undo-toast" role="status" aria-live="polite"><span>{{ undoToast.text }}</span><button type="button" @click="undoDelete">撤销</button></div>
   </div>
 </template>
 
@@ -502,6 +569,12 @@ function taskFocusSummary(task) {
   border-color: var(--border-strong);
   box-shadow: var(--shadow-md);
 }
+.reschedule-link { flex: 0 0 auto; padding-inline: 5px; color: var(--primary); }
+.reschedule-form { display: flex; flex-direction: column; gap: 14px; }
+.reschedule-form p { color: var(--ink-soft); font-size: 13px; line-height: 1.5; }
+.reschedule-form label { display: flex; flex-direction: column; gap: 6px; color: var(--ink-soft); font-size: 12px; font-weight: 700; }
+.reschedule-form input { width: 100%; }
+.reschedule-form .actions { display: flex; justify-content: flex-end; gap: 8px; }
 .task.done {
   opacity: 0.55;
 }

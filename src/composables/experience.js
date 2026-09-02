@@ -1,4 +1,5 @@
 import { normalizeFocusSession } from './focusTimer.js'
+import { isTaskActionable, taskStatus } from './domain/state.js'
 
 function pad(value) { return String(value).padStart(2, '0') }
 
@@ -96,10 +97,10 @@ export function courseWorkload(courses, tasks, checkins, now = new Date()) {
   const latestCheckins = latestCheckinsByCourse(checkins, now)
   const reviewExpiry = new Date(now).getTime() - 14 * 86400000
   const rows = [...courseMap.values()].map((course) => {
-    const related = (Array.isArray(tasks) ? tasks : []).filter((task) => task.courseId === course.id && !task.done && task.status !== 'archived')
+    const related = (Array.isArray(tasks) ? tasks : []).filter((task) => task.courseId === course.id && isTaskActionable(task, now))
     const latestCheckin = latestCheckins.get(course.id)
     const reviewCount = latestCheckin?.state === COURSE_CHECKIN_STATES.review && checkinTimestamp(latestCheckin) >= reviewExpiry ? 1 : 0
-    const overdue = related.filter((task) => task.dueDate && new Date(`${task.dueDate}T${task.dueTime || '23:59'}`).getTime() < new Date(now).getTime()).length
+    const overdue = related.filter((task) => taskStatus(task, now) === 'overdue').length
     return { course, taskCount: related.length, reviewCount, overdue, score: overdue * 4 + reviewCount * 3 + related.length }
   })
   return rows.filter((row) => row.score > 0).sort((left, right) => right.score - left.score || left.course.name.localeCompare(right.course.name, 'zh-CN'))

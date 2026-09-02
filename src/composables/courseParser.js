@@ -1,33 +1,14 @@
 // 课程表批量录入优化解析器
 // 解决问题：复制粘贴识别失败、OCR慢、识别错误
 
-// 调试日志系统
-const BATCH_LOG_PREFIX = '[BATCH_IMPORT]'
-const OCR_LOG_PREFIX = '[OCR]'
-const PARSER_LOG_PREFIX = '[PARSER]'
-const NORMALIZE_LOG_PREFIX = '[NORMALIZE]'
-const VALIDATION_LOG_PREFIX = '[VALIDATION]'
-
-function logDebug(prefix, message, data = null) {
-  if (import.meta.env.DEV) {
-    console.log(`${prefix} ${message}`, data || '')
-  }
-}
-
 // 常量定义
 const CN_DIGITS = { 零: 0, 〇: 0, 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 }
 const WEEKDAY_ALIAS = { 一: 0, 二: 1, 三: 2, 四: 3, 五: 4, 六: 5, 日: 6, 天: 6 }
 const FILLER_WORDS = /^(?:课程|课程名称|课程名|名称|星期|星期几|周几|周次|节次|节数|时间|上课时间|时段|类型|上课周类型|每周|地点|位置|教室|教师|老师|备注)$/
 const STRONG_ROOM = /^(?:[A-Za-z]{0,3}-?\d{2,4}|[^\s]*?(?:教学楼|实验楼|实训楼|教室|实验室|机房|报告厅|体育馆|图书馆|操场|楼|馆|栋|厅)[^\s]*)$/
 
-// OCR相关状态和缓存
-const ocrWorker = null
-const ocrInitialized = false
-const ocrInitPromise = null
-
 // 统一的文本标准化函数
 export function normalizeText(text) {
-  logDebug(NORMALIZE_LOG_PREFIX, '开始标准化文本', { originalText: text.substring(0, 50) })
   
   // 全角符号转半角
   let normalized = text
@@ -52,7 +33,6 @@ export function normalizeText(text) {
   // 统一换行符
   normalized = normalized.replace(/\r\n/g, '\n').replace(/\r/g, '\n')
   
-  logDebug(NORMALIZE_LOG_PREFIX, '标准化完成', { normalized: normalized.substring(0, 50) })
   
   return normalized.trim()
 }
@@ -82,7 +62,6 @@ export function parseWeekdayToken(token) {
 
 // OCR常见错误纠正
 export function correctOCRErrors(text) {
-  logDebug(OCR_LOG_PREFIX, '开始OCR错误纠正')
   
   const corrected = text
     .replace(/[Il][l1]-[l1][l1]节/g, '1-2节') // I-2节 -> 1-2节
@@ -92,7 +71,6 @@ export function correctOCRErrors(text) {
     .replace(/[lI]-[l1]/g, '1-2') // I-2 -> 1-2
     .replace(/[O0](\d{2,4})/g, '0$1') // 0201 -> 0201
   
-  logDebug(OCR_LOG_PREFIX, 'OCR错误纠正完成')
   
   return corrected
 }
@@ -111,7 +89,6 @@ export function extractStrongFeatures(segments, periodsMax, MAX_WEEK) {
     remainingSegments: []
   }
   
-  logDebug(PARSER_LOG_PREFIX, '开始强特征提取', { segments })
   
   for (let i = 0; i < segments.length; i++) {
     const segment = segments[i]
@@ -134,14 +111,12 @@ export function extractStrongFeatures(segments, periodsMax, MAX_WEEK) {
       const weekdayMatch = segment.match(/(?:周|星期|礼拜)\s*([一二三四五六日天]|[1-7])/)
       if (weekdayMatch) {
         features.weekday = parseWeekdayToken(weekdayMatch[1])
-        logDebug(PARSER_LOG_PREFIX, '识别到星期', { weekday: features.weekday, segment })
         continue
       }
       
       const dayMatch = segment.match(/^[一二三四五六日天]$/)
       if (dayMatch) {
         features.weekday = parseWeekdayToken(dayMatch[0])
-        logDebug(PARSER_LOG_PREFIX, '识别到星期(单字)', { weekday: features.weekday, segment })
         continue
       }
     }
@@ -155,7 +130,6 @@ export function extractStrongFeatures(segments, periodsMax, MAX_WEEK) {
         if (start >= 1 && end <= periodsMax && start <= end) {
           features.periodStart = start
           features.periodEnd = end
-          logDebug(PARSER_LOG_PREFIX, '识别到节次', { periodStart: features.periodStart, periodEnd: features.periodEnd, segment })
           continue
         }
       }
@@ -167,7 +141,6 @@ export function extractStrongFeatures(segments, periodsMax, MAX_WEEK) {
         if (num >= 1 && num <= periodsMax) {
           features.periodStart = num
           features.periodEnd = num
-          logDebug(PARSER_LOG_PREFIX, '识别到单节次', { periodStart: features.periodStart, segment })
           continue
         }
       }
@@ -176,13 +149,11 @@ export function extractStrongFeatures(segments, periodsMax, MAX_WEEK) {
     // 单双周可能写在周次范围之后，不能受 startWeek 是否已识别的限制。
     if (segment === '单周') {
       features.weekType = 'odd'
-      logDebug(PARSER_LOG_PREFIX, '识别到单周', segment)
       continue
     }
 
     if (segment === '双周') {
       features.weekType = 'even'
-      logDebug(PARSER_LOG_PREFIX, '识别到双周', segment)
       continue
     }
 
@@ -191,7 +162,6 @@ export function extractStrongFeatures(segments, periodsMax, MAX_WEEK) {
       if (segment === '全学期') {
         features.startWeek = 1
         features.endWeek = MAX_WEEK
-        logDebug(PARSER_LOG_PREFIX, '识别到全学期', segment)
         continue
       }
       
@@ -202,7 +172,6 @@ export function extractStrongFeatures(segments, periodsMax, MAX_WEEK) {
         if (start >= 1 && end <= MAX_WEEK && start <= end) {
           features.startWeek = start
           features.endWeek = end
-          logDebug(PARSER_LOG_PREFIX, '识别到周次', { startWeek: features.startWeek, endWeek: features.endWeek, segment })
           continue
         }
       }
@@ -214,7 +183,6 @@ export function extractStrongFeatures(segments, periodsMax, MAX_WEEK) {
         if (num >= 1 && num <= MAX_WEEK) {
           features.startWeek = num
           features.endWeek = num
-          logDebug(PARSER_LOG_PREFIX, '识别到单周次', { startWeek: features.startWeek, segment })
           continue
         }
       }
@@ -223,14 +191,12 @@ export function extractStrongFeatures(segments, periodsMax, MAX_WEEK) {
     // 识别教室特征
     if (features.room === null && STRONG_ROOM.test(segment)) {
       features.room = segment
-      logDebug(PARSER_LOG_PREFIX, '识别到教室', { room: features.room, segment })
       continue
     }
     
     // 识别教师特征
     if (features.teacher === null && (segment.includes('老师') || segment.includes('教授') || segment.includes('师'))) {
       features.teacher = segment
-      logDebug(PARSER_LOG_PREFIX, '识别到教师', { teacher: features.teacher, segment })
       continue
     }
     
@@ -238,7 +204,6 @@ export function extractStrongFeatures(segments, periodsMax, MAX_WEEK) {
     features.remainingSegments.push(segment)
   }
   
-  logDebug(PARSER_LOG_PREFIX, '强特征提取完成', features)
   return features
 }
 
@@ -302,7 +267,6 @@ export function calculateConfidence(features, periodsMax) {
     }
   }
   
-  logDebug(PARSER_LOG_PREFIX, '置信度计算', { confidence, details })
   
   return {
     score: Math.max(0, Math.min(1, confidence / 4)), // 归一化到0-1
@@ -313,7 +277,6 @@ export function calculateConfidence(features, periodsMax) {
 
 // 重构后的解析函数
 export function parseBatchLine(line, sourceIndex, timeConfig, MAX_WEEK) {
-  logDebug(PARSER_LOG_PREFIX, `开始解析第${sourceIndex}行`, { line: line.substring(0, 100) })
   
   const periods = timeConfig.value.periods
   const periodsMax = periods.length
@@ -404,7 +367,6 @@ export function parseBatchLine(line, sourceIndex, timeConfig, MAX_WEEK) {
     needsReview: confidence.level === 'very_low' || confidence.level === 'low'
   }
   
-  logDebug(PARSER_LOG_PREFIX, `第${sourceIndex}行解析完成`, result)
   
   return result
 }

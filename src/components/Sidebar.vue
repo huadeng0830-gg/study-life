@@ -20,16 +20,16 @@ const navGroups = [
     items: [
       { path: '/', label: '首页', icon: '☀️' },
       { path: '/schedule', label: '课程表', icon: '📅' },
-      { path: '/tasks', label: '作业与待办', icon: '✅' },
-      { path: '/exams', label: '倒计时', icon: '⏳' },
+      { path: '/tasks', label: '待办', icon: '✅' },
+      { path: '/exams', label: '重要日期', icon: '⏳' },
     ],
   },
   {
     label: '生活管理',
     items: [
-      { path: '/lists', label: '我的清单', icon: '☑️' },
+      { path: '/lists', label: '清单', icon: '☑️' },
       { path: '/bills', label: '账本', icon: '📒' },
-      { path: '/food', label: '今天吃什么', icon: '🍽️' },
+      { path: '/food', label: '吃什么', icon: '🍽️' },
     ],
   },
 ]
@@ -42,11 +42,22 @@ const mobileScheduleItems = [
 const mobileTrailingItems = [
   { path: '/tasks', label: '待办', icon: '✅' },
 ]
-const mobileMoreItems = [
-  { path: '/exams', label: '倒计时', icon: '⏳' },
-  { path: '/lists', label: '清单', icon: '☑️' },
-  { path: '/bills', label: '账本', icon: '📒' },
-  { path: '/food', label: '吃什么', icon: '🍽️' },
+const mobileMoreGroups = [
+  { label: '学习与回顾', items: [
+    { path: '/exams', label: '重要日期', icon: '⏳' },
+    { path: '/review', label: '本周回顾', icon: '↺' },
+  ] },
+  { label: '生活', items: [
+    { path: '/bills', label: '账本', icon: '📒' },
+    { path: '/lists', label: '清单', icon: '☑️', subdued: true },
+    { path: '/food', label: '吃什么', icon: '🍽️', subdued: true },
+  ] },
+]
+const mobileMoreTools = [
+  { key: 'appearance', label: '个性化', icon: '🎨' },
+  { key: 'focus', label: '专注设置', icon: '⏱' },
+  { key: 'quick-record', label: '快速记录设置', icon: '⚡' },
+  { key: 'data', label: '数据管理', icon: '💾' },
 ]
 const collapsed = ref(false)
 const showMobileMore = ref(false)
@@ -193,15 +204,20 @@ function chooseTheme(key) {
     <Transition name="more-sheet">
       <section v-if="showMobileMore" class="mobile-more-sheet" aria-label="更多功能">
         <div class="mobile-more-head"><b>更多功能</b><button type="button" aria-label="关闭更多功能" @click="showMobileMore = false">×</button></div>
-        <div class="mobile-more-grid">
-          <router-link v-for="item in mobileMoreItems" :key="item.path" :to="item.path" class="mobile-more-item" @click="showMobileMore = false" @pointerdown="warmRoute(item.path)">
-            <span>{{ item.icon }}</span><small>{{ item.label }}</small>
-          </router-link>
-          <button type="button" class="mobile-more-item" @click="showMobileMore = false; showAppearance = true"><span>🎨</span><small>个性化</small></button>
-<button type="button" class="mobile-more-item" @click="showMobileMore = false; showFocusSettings = true" @pointerdown="warmTool('focus')"><span>⏱</span><small>专注设置</small></button>
-          <button type="button" class="mobile-more-item" @click="showMobileMore = false; showQuickRecordSettings = true"><span>⚡</span><small>快速记录设置</small></button>
-          <button type="button" class="mobile-more-item" @click="showMobileMore = false; showDataManager = true"><span>💾</span><small>数据管理</small></button>
-          <button type="button" class="mobile-more-item" :disabled="checkingUpdate" @click="showMobileMore = false; checkUpdate()"><span>↻</span><small>{{ checkingUpdate ? '检查中…' : '检查更新' }}</small></button>
+        <div v-for="group in mobileMoreGroups" :key="group.label" class="mobile-more-group">
+          <h3>{{ group.label }}</h3>
+          <div class="mobile-more-grid">
+            <router-link v-for="item in group.items" :key="item.path" :to="item.path" class="mobile-more-item" :class="{ subdued: item.subdued }" @click="showMobileMore = false" @pointerdown="warmRoute(item.path)">
+              <span>{{ item.icon }}</span><small>{{ item.label }}</small>
+            </router-link>
+          </div>
+        </div>
+        <div class="mobile-more-group">
+          <h3>设置与数据</h3>
+          <div class="mobile-more-grid">
+            <button v-for="item in mobileMoreTools" :key="item.key" type="button" class="mobile-more-item subdued" @click="showMobileMore = false; item.key === 'appearance' ? showAppearance = true : item.key === 'focus' ? showFocusSettings = true : item.key === 'quick-record' ? showQuickRecordSettings = true : showDataManager = true" @pointerdown="item.key === 'focus' ? warmTool('focus') : item.key === 'data' ? warmTool('data') : item.key === 'appearance' ? warmTool('appearance') : null"><span>{{ item.icon }}</span><small>{{ item.label }}</small></button>
+            <button type="button" class="mobile-more-item subdued" :disabled="checkingUpdate" @click="showMobileMore = false; checkUpdate()"><span>↻</span><small>{{ checkingUpdate ? '检查中…' : '检查更新' }}</small></button>
+          </div>
         </div>
       </section>
     </Transition>
@@ -613,8 +629,11 @@ function chooseTheme(key) {
   .mobile-more-sheet { position: absolute; right: 10px; bottom: calc(70px + env(safe-area-inset-bottom)); left: 10px; padding: 14px; border: 1px solid var(--border); border-radius: 16px; background: var(--card); box-shadow: 0 -10px 34px rgba(29, 48, 93, 0.16); }
   .mobile-more-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
   .mobile-more-head button { width: 30px; height: 30px; color: var(--muted); font-size: 22px; border: 0; border-radius: 50%; background: var(--bg); }
+  .mobile-more-group + .mobile-more-group { margin-top: 13px; padding-top: 11px; border-top: 1px solid var(--border); }
+  .mobile-more-group h3 { margin: 0 0 7px 2px; color: var(--ink-faint); font-size: 11px; font-weight: 800; letter-spacing: .04em; }
   .mobile-more-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
   .mobile-more-item { min-height: 66px; color: var(--text); background: var(--bg); }
+  .mobile-more-item.subdued { color: var(--ink-soft); background: var(--bg-tint); }
   .mobile-more-item > span { font-size: 21px; }
   .more-sheet-enter-active,.more-sheet-leave-active { transition: opacity .16s ease, transform .16s ease; }
   .more-sheet-enter-from,.more-sheet-leave-to { opacity: 0; transform: translateY(8px); }

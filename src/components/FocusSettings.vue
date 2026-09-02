@@ -94,7 +94,7 @@ async function save() {
 
       <section>
         <h4>完成提醒</h4>
-        <label class="toggle-row"><input v-model="draft.soundEnabled" type="checkbox" /> <span><b>声音</b><small>倒计时完成时播放提示音</small></span></label>
+        <label class="toggle-row"><input v-model="draft.soundEnabled" type="checkbox" /> <span><b>声音</b><small>专注结束时播放提示音</small></span></label>
         <label class="toggle-row"><input v-model="draft.vibrationEnabled" type="checkbox" /> <span><b>震动</b><small>支持的移动设备会震动提醒</small></span></label>
         <label class="toggle-row"><input v-model="draft.systemNotificationEnabled" type="checkbox" /> <span><b>系统通知</b><small>需要浏览器通知权限；未授权时自动跳过</small></span></label>
       </section>

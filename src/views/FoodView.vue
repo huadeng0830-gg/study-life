@@ -507,7 +507,7 @@ const wheelGradient = computed(() => {
   <div class="page">
     <header class="page-head">
       <div class="page-head-main">
-        <h1 class="page-title">今天吃什么</h1>
+        <h1 class="page-title">吃什么</h1>
         <p class="page-desc">选择困难救急器，用偏好和等待时间帮你决定。</p>
       </div>
       <div class="page-actions">

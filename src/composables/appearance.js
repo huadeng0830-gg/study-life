@@ -4,25 +4,19 @@ export const WALLPAPER_TARGETS = {
   global: { label: '全站默认', path: '' },
   home: { label: '首页', path: '/' },
   schedule: { label: '课程表', path: '/schedule' },
-  tasks: { label: '作业与待办', path: '/tasks' },
-  exams: { label: '倒计时', path: '/exams' },
-  lists: { label: '我的清单', path: '/lists' },
+  tasks: { label: '待办', path: '/tasks' },
+  exams: { label: '重要日期', path: '/exams' },
+  lists: { label: '清单', path: '/lists' },
   bills: { label: '账本', path: '/bills' },
-  food: { label: '今天吃什么', path: '/food' },
+  food: { label: '吃什么', path: '/food' },
 }
 
 export const HOME_MODULES = [
   { id: 'next', label: '接下来' },
-  { id: 'agenda', label: '今日时间轴' },
-  { id: 'focus', label: '专注计时' },
-  { id: 'tasks', label: '今日待办' },
-  { id: 'courses', label: '今天课程' },
-  { id: 'feedback', label: '课程反馈' },
-  { id: 'inbox', label: '收件箱' },
-  { id: 'workload', label: '课程工作量' },
-  { id: 'countdowns', label: '近期提醒' },
-  { id: 'week', label: '本周概况' },
-  { id: 'pulse', label: '本周脉搏' },
+  { id: 'tasks', label: '现在该做' },
+  { id: 'countdowns', label: '需要注意' },
+  { id: 'focus', label: '专注' },
+  { id: 'week', label: '本周进展' },
 ]
 
 const DEFAULT_EFFECTS = {

@@ -10,6 +10,12 @@ describe('quickRecord.parser', () => {
     expect(draft.time).toBe('18:00')
   })
 
+  it('兼容入口通过上下文进入同一类型识别', () => {
+    expect(parseQuickRecord('午饭18', { context: { preferredType: 'expense' } })[0].type).toBe('expense')
+    expect(parseQuickRecord('买洗衣液', { context: { preferredType: 'todo' } })[0].type).toBe('todo')
+    expect(parseQuickRecord('周五交作业', { context: { preferredType: 'homework', courseId: 'c1', courseName: '高数' } })[0]).toMatchObject({ type: 'homework', courseId: 'c1', course: '高数' })
+  })
+
   it('识别收入、金额和支付账户', () => {
     const [draft] = parseQuickRecord('生活费到账500微信')
     expect(draft.type).toBe('income')
@@ -38,6 +44,12 @@ describe('quickRecord.parser', () => {
     expect(draft.type).toBe('bill')
     expect(draft.amount).toBe(39)
     expect(draft.cycle).toBe('monthly')
+  })
+
+  it('识别“还有 N 天”的倒计时', () => {
+    const [draft] = parseQuickRecord('距离六级考试还有90天', { now: new Date('2026-09-02T10:00:00') })
+    expect(draft.type).toBe('countdown')
+    expect(draft.date).toBe('2026-12-01')
   })
 
   it('没有日期的普通记录仍可成为待办', () => {
@@ -97,5 +109,16 @@ it('识别日程实体：组会/上课/实验室会议', () => {
     expect(draft.date).toBe('')
     expect(draft.time).toBe('')
     expect(draft.note).toBe('明天下午三点交作业')
+  })
+
+  it('一句话包含支出和后续待办时拆成两个业务动作', () => {
+    const drafts = parseQuickRecord('买六级真题39元，周五开始做第一套', {
+      courses: [],
+      now: new Date('2026-08-29T10:00:00'),
+    })
+    expect(drafts.map((draft) => draft.type)).toEqual(['expense', 'todo'])
+    expect(drafts[0].amount).toBe(39)
+    expect(drafts[1].date).toBe('2026-09-04')
+    expect(drafts[1].title).toContain('做第一套')
   })
 })

@@ -14,6 +14,8 @@ import {
 } from './composables/releaseNotes.js'
 import { lastGlobalError, dismissGlobalError, reloadAfterError } from './composables/globalError.js'
 import { DOMAIN_SCHEMA_VERSION, migrateDomainData } from './composables/domain/migrations.js'
+import { isTaskActionable } from './composables/domain/state.js'
+import { recoverInterruptedSync } from './composables/cloudSync.js'
 
 const UpdateNotes = defineAsyncComponent(() => import('./components/UpdateNotes.vue'))
 const QuickRecordPanel = defineAsyncComponent(() => import('./components/QuickRecordPanel.vue'))
@@ -27,7 +29,9 @@ let courses = null
 let stopTitleWatcher = null
 const showReleaseNotes = ref(false)
 const showQuickRecord = ref(false)
+const quickRecordToast = ref(null)
 let releaseTimer = 0
+let quickRecordToastTimer = 0
 
 /* ---------- 氛围与情绪引擎（模块 A） ---------- */
 const todayISO = computed(() => {
@@ -77,6 +81,21 @@ const quickRecordContext = computed(() => {
 })
 function openQuickRecord() { showQuickRecord.value = true }
 function closeQuickRecord() { showQuickRecord.value = false }
+function showQuickRecordToast(payload) {
+  quickRecordToast.value = payload
+  window.clearTimeout(quickRecordToastTimer)
+  quickRecordToastTimer = window.setTimeout(() => { quickRecordToast.value = null }, 5000)
+}
+function onQuickRecordSaved(payload) {
+  showQuickRecordToast(payload)
+  closeQuickRecord()
+}
+function undoQuickRecord() {
+  const undo = quickRecordToast.value?.undo
+  quickRecordToast.value = null
+  window.clearTimeout(quickRecordToastTimer)
+  undo?.()
+}
 
 // 按 1-8 快速切换页面（输入框聚焦时忽略）
 const routeOrder = ['/', '/schedule', '/tasks', '/exams', '/lists', '/bills', '/food']
@@ -87,10 +106,8 @@ function onKeydown(event) {
     openQuickRecord()
     return
   }
-  if (event.key === 'Escape' && showQuickRecord.value) {
-    showQuickRecord.value = false
-    return
-  }
+  // QuickRecordPanel/Modal 自己处理 Escape；这里不能绕过面板的保存中关闭保护。
+  if (event.key === 'Escape' && showQuickRecord.value) return
   if (event.metaKey || event.ctrlKey || event.altKey) return
   const el = document.activeElement
   const tag = el?.tagName
@@ -111,6 +128,8 @@ function onReleaseSeenInAnotherTab(event) {
 }
 
 onMounted(() => {
+  // 只恢复上次未完成的本地提交，不自动拉取或推送云端。
+  void recoverInterruptedSync()
   // 首帧之后再进行较大数据的同步读取与页面标题维护，手机端先渲染基本入口。
   tasks = useStoredRef('sl_tasks', [])
   courses = useStoredRef('sl_courses', [])
@@ -128,7 +147,7 @@ onMounted(() => {
   }
   // 浏览器标签页标题实时显示未完成待办数量
   stopTitleWatcher = watchEffect(() => {
-    const pending = tasks.value.filter((task) => !task.done).length
+    const pending = tasks.value.filter((task) => isTaskActionable(task, new Date())).length
     document.title = pending > 0 ? `学习生活台 · ${pending} 项待办` : '学习生活台'
   })
   window.addEventListener('keydown', onKeydown)
@@ -146,6 +165,7 @@ onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKeydown)
   window.removeEventListener('storage', onReleaseSeenInAnotherTab)
   window.clearTimeout(releaseTimer)
+  window.clearTimeout(quickRecordToastTimer)
 })
 
 // 按页面内容类型分配主区域宽度。
@@ -184,7 +204,20 @@ const pageCacheSize = isIOSDevice() ? 2 : 4
     </main>
   </div>
   <UpdateNotes v-if="showReleaseNotes" :open="showReleaseNotes" @close="showReleaseNotes = false" />
-  <QuickRecordPanel v-if="showQuickRecord" :open="showQuickRecord" :context="quickRecordContext" @close="closeQuickRecord" />
+  <QuickRecordPanel
+    v-if="showQuickRecord"
+    :open="showQuickRecord"
+    :context="quickRecordContext"
+    @saved="onQuickRecordSaved"
+    @close="closeQuickRecord"
+  />
+
+  <Transition name="quick-record-toast">
+    <div v-if="quickRecordToast" class="quick-record-toast" role="status" aria-live="polite">
+      <span>✓ {{ quickRecordToast.message }}</span>
+      <button v-if="quickRecordToast.undo" type="button" @click="undoQuickRecord">撤销</button>
+    </div>
+  </Transition>
 
   <Transition name="global-error">
     <div v-if="lastGlobalError" class="global-error-toast" role="alert">
@@ -250,6 +283,51 @@ const pageCacheSize = isIOSDevice() ? 2 : 4
 @media (max-width: 520px) {
   .content {
     padding: calc(18px + env(safe-area-inset-top)) 14px calc(84px + env(safe-area-inset-bottom));
+  }
+}
+
+/* 快速记录成功提示：弹窗关闭后仍保留在页面底部，不阻塞后续操作 */
+.quick-record-toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(18px + env(safe-area-inset-bottom));
+  z-index: 250;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: min(560px, calc(100vw - 32px));
+  padding: 9px 12px 9px 14px;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--card);
+  box-shadow: var(--shadow-md);
+  font-size: 13px;
+  pointer-events: none;
+}
+.quick-record-toast button {
+  padding: 4px 8px;
+  color: var(--primary);
+  font-size: 12px;
+  font-weight: 800;
+  border: 0;
+  border-radius: 6px;
+  background: var(--primary-soft);
+  pointer-events: auto;
+}
+.quick-record-toast-enter-active,
+.quick-record-toast-leave-active {
+  transition: opacity 0.16s ease, transform 0.16s ease;
+}
+.quick-record-toast-enter-from,
+.quick-record-toast-leave-to {
+  opacity: 0;
+  transform: translate(-50%, 8px);
+}
+@media (max-width: 900px) {
+  .quick-record-toast {
+    bottom: calc(86px + env(safe-area-inset-bottom));
   }
 }
 

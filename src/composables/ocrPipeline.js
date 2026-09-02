@@ -36,10 +36,6 @@ class OCRWorkerManager {
 const ocrWorker = new OCRWorkerManager()
 export const ocrState = ocrWorker.state
 
-function logInfo(message, data) {
-  if (import.meta.env.DEV) console.log(`[OCR] ${message}`, data ?? '')
-}
-
 function logError(message, error) {
   console.error(`[OCR] ${message}`, error)
 }
@@ -76,7 +72,6 @@ async function ensureWorker(signal = null) {
   ocrWorker.initPromise = (async () => {
     let interrupted = false
     const created = (async () => {
-      const startedAt = performance.now()
       ocrWorker.tesseractModule = await import('tesseract.js')
       const langPath = new URL('ocr', document.baseURI).href.replace(/\/$/, '')
       // chi_sim 同时覆盖中文、数字和常见拉丁字符；模型与图片均保持在本机。
@@ -91,7 +86,6 @@ async function ensureWorker(signal = null) {
         preserve_interword_spaces: '1',
         user_defined_dpi: '220',
       })
-      logInfo(`worker ready in ${(performance.now() - startedAt).toFixed(0)}ms`)
       return instance
     })()
     created.then((instance) => { if (interrupted) void instance.terminate() }).catch(() => {})
@@ -551,15 +545,6 @@ export async function performOCR(file, onProgress = null, options = {}) {
       structure: scheduleRows.grid,
       image: { width: prepared.width, height: prepared.height, sourceWidth: prepared.sourceWidth, sourceHeight: prepared.sourceHeight },
     }
-    if (import.meta.env.DEV) {
-      logInfo(`final diagnostics ${JSON.stringify({
-        confidence: result.confidence,
-        strategy: result.strategy,
-        quality: result.quality,
-        structure: result.structure,
-        regions: result.regions,
-      })}`)
-    }
     return result
   } catch (error) {
     const cause = error instanceof Error ? error : new Error(String(error))
@@ -596,7 +581,7 @@ async function destroyWorker() {
   ocrWorker.worker = null
   ocrWorker.initPromise = null
   if (instance) {
-    try { await instance.terminate(); logInfo('worker terminated') } catch (error) { logError('terminate failed', error) }
+    try { await instance.terminate() } catch (error) { logError('terminate failed', error) }
   }
 }
 
