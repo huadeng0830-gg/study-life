@@ -7,6 +7,14 @@
 // 3. 更早的版本逐条下移，最多保留 3 个版本，超出即删除。
 export const RELEASE_UPDATES = Object.freeze([
   {
+    version: '2026年09月02日-版本1',
+    signature: 'b8dfae7287',
+    notes: [
+      '固定账单：首页支付后自动推进周期，不再继续出现在“接下来”提醒中。',
+      '移动端重要日期：底部卡片的置顶、编辑、归档、删除菜单改为向上展开并解除裁剪，所有操作可正常触达。',
+    ],
+  },
+  {
     version: '2026年09月01日-版本22',
     signature: 'f2b194fba7',
     notes: [
@@ -370,7 +378,7 @@ export const RELEASE_UPDATES = Object.freeze([
 export const RELEASE_VERSION = RELEASE_UPDATES[0].version
 
 // 与第一条签名保持一致，交给 vite.config.js 校验源码一致性。
-export const RELEASE_SOURCE_SIGNATURE = 'de864a7322'
+export const RELEASE_SOURCE_SIGNATURE = 'b8dfae7287'
 
 // 兼容旧引用：当前版本的更新说明。
 export const RELEASE_NOTES = RELEASE_UPDATES[0].notes

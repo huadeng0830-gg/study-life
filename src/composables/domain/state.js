@@ -45,3 +45,16 @@ export function billStatus(bill, now = new Date()) {
   if (days === 0) return 'due'
   return 'upcoming'
 }
+
+// 首页“接下来”只展示当前到期或已进入提醒窗口的固定账单。
+export function isBillDueSoon(bill, now = new Date()) {
+  if (!bill || !isActiveEntity(bill) || !bill.nextDate) return false
+  const status = billStatus(bill, now)
+  if (status === 'due' || status === 'overdue') return true
+  if (status !== 'upcoming') return false
+  const today = policyDateKey(now)
+  const dueAt = policyDateTime(bill.nextDate, '00:00')
+  const todayAt = policyDateTime(today, '00:00')
+  const remindDays = Math.max(0, Number(bill.remindDays ?? 3) || 0)
+  return dueAt - todayAt <= remindDays * 86400000
+}

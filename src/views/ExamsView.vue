@@ -12,6 +12,7 @@ import {
 } from '../composables/store'
 import { useDomainCommands } from '../composables/domain/commands.js'
 import { isArchived, isTaskActionable, taskStatus } from '../composables/domain/state.js'
+import { menuPlacementFor } from '../composables/menuPlacement.js'
 
 const CATEGORIES = ['学习', '生活', '纪念日', '项目', '其他']
 const domain = useDomainCommands()
@@ -191,9 +192,14 @@ function timelineOf(item) {
 
 // ---------- 卡片右上 ··· 菜单：置顶 / 编辑 / 删除 ----------
 const openMenuId = ref(null)
+const menuPlacement = ref('down')
 
 function toggleMenu(item, event) {
   event.stopPropagation()
+  if (openMenuId.value !== item.id) {
+    const buttonRect = event.currentTarget?.getBoundingClientRect?.()
+    menuPlacement.value = menuPlacementFor(buttonRect, window.innerHeight)
+  }
   openMenuId.value = openMenuId.value === item.id ? null : item.id
 }
 
@@ -307,7 +313,7 @@ onBeforeUnmount(() => {
       <template #default="{ item }">
         <div
           class="card exam cvi-card"
-          :class="{ finished: item.countdown.isPast, pinned: item.pinned, hot: item.countdown.cls === 'hot' && !item.countdown.isPast }"
+          :class="{ finished: item.countdown.isPast, pinned: item.pinned, hot: item.countdown.cls === 'hot' && !item.countdown.isPast, 'menu-open': openMenuId === item.id }"
           @click="openEdit(item)"
         >
         <!-- 顶部：轻量标签 + 操作菜单 -->
@@ -322,7 +328,7 @@ onBeforeUnmount(() => {
             aria-label="更多操作"
             @click="toggleMenu(item, $event)"
           >···</button>
-          <div v-if="openMenuId === item.id" class="card-menu" @click.stop>
+          <div v-if="openMenuId === item.id" class="card-menu" :class="menuPlacement" @click.stop>
             <button @click="menuPin(item)">{{ item.pinned ? '取消置顶' : '置顶' }}</button>
             <button @click="menuEdit(item)">编辑</button>
             <button v-if="!isArchived(item)" @click="menuArchive(item)">归档</button>
@@ -493,6 +499,7 @@ onBeforeUnmount(() => {
 .exam.finished { opacity: 0.6; }
 .exam.pinned { border-color: #cfd8fb; background: linear-gradient(180deg, #fbfcff, #fff); }
 .exam.hot { border-color: #f3c2c2; }
+.exam.menu-open { z-index: 10; overflow: visible; content-visibility: visible; contain: none; }
 
 /* 顶部标签：小号浅色，不抢标题 */
 .exam-top { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
@@ -687,6 +694,7 @@ onBeforeUnmount(() => {
 .actions .btn-danger {
   margin-right: auto;
 }
+.card-menu.up { top: auto; bottom: 26px; }
 .undo-toast {
   position: fixed;
   right: 18px;

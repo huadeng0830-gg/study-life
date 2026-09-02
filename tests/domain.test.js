@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { migrateDomainData } from '../src/composables/domain/migrations.js'
 import { detachCourseRelations } from '../src/composables/domain/relations.js'
 import { reminderAction, selectActionCenter, selectDayAgenda, selectReminders } from '../src/composables/domain/selectors.js'
-import { taskPlanningState, taskStatus } from '../src/composables/domain/state.js'
+import { isBillDueSoon, taskPlanningState, taskStatus } from '../src/composables/domain/state.js'
 
 describe('domain state and projections', () => {
   it('keeps overdue as a derived task state', () => {
@@ -83,6 +83,12 @@ describe('domain state and projections', () => {
     expect(taskPlanningState(task, new Date('2026-08-29T09:00:00'))).toBe('unplanned')
     expect(selectDayAgenda({ tasks: [task] }, new Date('2026-08-29T09:00:00'))).toEqual([])
     expect(task.dueDate).toBe('')
+  })
+
+  it('does not project a paid bill after it advances beyond its reminder window', () => {
+    const paidBill = { id: 'b-paid', name: '会员订阅', nextDate: '2026-10-02', remindDays: 3, active: true }
+    expect(isBillDueSoon(paidBill, new Date('2026-09-02T10:00:00'))).toBe(false)
+    expect(isBillDueSoon({ ...paidBill, nextDate: '2026-09-04' }, new Date('2026-09-02T10:00:00'))).toBe(true)
   })
 })
 

@@ -32,7 +32,7 @@ import { useStoredRef } from '../composables/store/index.js'
 import { useDomainCommands } from '../composables/domain/commands.js'
 import { useQuickRecordAdapters } from '../composables/quickRecord/adapters.js'
 import { selectTodayActionPanels, reminderAction } from '../composables/domain/selectors.js'
-import { isArchived, isTaskActionable, taskPlanningState, taskStatus } from '../composables/domain/state.js'
+import { isArchived, isBillDueSoon, isTaskActionable, taskPlanningState, taskStatus } from '../composables/domain/state.js'
 import { weeklyPulse } from '../composables/experience.js'
 import { policyDateKey, schedulePolicy } from '../composables/settingsPolicy.js'
 
@@ -146,7 +146,7 @@ const nextUp = computed(() => {
   }
   events.value.filter((item) => !isArchived(item)).forEach((item) => add('event', item, item.date, item.time))
   tasks.value.filter((item) => isTaskActionable(item, now.value)).forEach((item) => add('task', item, item.dueDate, item.dueTime))
-  bills.value.filter((item) => !isArchived(item) && item.active !== false).forEach((item) => add('bill', item, item.nextDate))
+  bills.value.filter((item) => isBillDueSoon(item, now.value)).forEach((item) => add('bill', item, item.nextDate))
   exams.value.filter((item) => !isArchived(item) && !item.countdown?.isPast).forEach((item) => add('milestone', item, item.date, item.time))
   const next = candidates.sort((a, b) => a.dueAt - b.dueAt)[0]
   return next || { kind: 'none' }
