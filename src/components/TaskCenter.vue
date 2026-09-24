@@ -158,8 +158,9 @@ onBeforeUnmount(() => {
 <style scoped>
 .task-pill {
   position: fixed;
-  right: 16px;
-  bottom: calc(76px + env(safe-area-inset-bottom, 0px));
+  right: max(16px, env(safe-area-inset-right, 0px));
+  /* 移动端与 Toast/快速记录/全局错误同一底栏避让高度 86px（原先 76px 与其它浮层差 10px）。 */
+  bottom: calc(86px + env(safe-area-inset-bottom, 0px));
   z-index: 90;
   display: inline-flex;
   align-items: center;
@@ -333,9 +334,11 @@ onBeforeUnmount(() => {
   from { opacity: 0; transform: translateY(10px) scale(0.94); }
   to { opacity: 1; transform: none; }
 }
-@media (min-width: 900px) {
+/* 901 而非 900：底栏是 max-width:900px，视口恰为 900 时若这里写 min-width:900，
+   两条同时生效，胶囊会停在底栏高度内被压住；901 与 Sidebar/App 的桌面档对齐。 */
+@media (min-width: 901px) {
   .task-pill {
-    right: 24px;
+    right: max(24px, env(safe-area-inset-right, 0px));
     bottom: 24px;
   }
 }

@@ -599,9 +599,6 @@ function t(key) {
   opacity:0;
   transform:translateY(8px)}
 }
-@media (min-width:901px) {
-  
-}
 @keyframes task-spin-4add0040 {
   0%,to {
   opacity:1;
@@ -618,11 +615,13 @@ to {
   opacity:1;
   transform:none}
 }
-@media (min-width:900px) {
-}
 /* 层叠阶梯（改动前先看这里）：0 壁纸层 → 1 .layout → 20 .sidebar → 90 .task-pill →
-   240 同步告警 → 241 安全模式/持久化告警 → 250 快速记录提示 → 300 跳转主内容链接与全局错误提示。
-   跳转链接必须在**最上层**：它平时视觉隐藏，只有按 Tab 聚焦时才浮现，被任何浮层盖住就等于失效。 */
+   100–109 弹窗遮罩（Modal 内联按栈深度递增，上界停在 109，见 overlayStack.js）→
+   110 底部操作面板 → 130 右键菜单 → 200 Toast → 240 同步告警 → 241 安全模式/持久化告警 →
+   250 快速记录提示 → 300 全局错误提示 → 301 跳转主内容链接。
+   跳转链接必须在**最上层**（301 > 300）：它平时视觉隐藏，只有按 Tab 聚焦时才浮现，
+   被任何浮层盖住就等于失效——与全局错误提示同为 300 时，后渲染的错误条会盖住聚焦中的跳转条。
+   右键菜单(130)刻意低于告警层(240+)：同步/安全模式/错误提示是系统级状态，应盖过临时菜单。 */
 /* 浮层层叠档位（Modal 的**内联** z-index）：100 + min(栈深度, 9) → 100…109。
    `.overlay` 的 100 只是兜底值，真正生效的是 Modal 按**打开顺序**写上的内联值：
    Teleport 锚点在组件挂载时创建，"随页面常驻"的浮层（只有 :open）在 body 里永远排在
@@ -659,7 +658,7 @@ to {
   min-height:100dvh}
 }
 .skip-to-content {
-  z-index:300;
+  z-index:301;
   background:var(--primary);
   color:var(--on-primary);
   transition:transform var(--dur-fast) var(--ease-standard);
@@ -682,7 +681,9 @@ to {
   min-width:0;
   max-width:1280px;
   margin:0 auto;
-  padding:32px 40px 48px}
+  /* 横向也要让开刘海/灵动岛：index.html 是 viewport-fit=cover，横屏时左右会顶边。
+     max(…, env(safe-area-inset-*)) 在无安全区时退回原固定值，桌面不受影响。 */
+  padding:32px max(40px, env(safe-area-inset-right, 0px)) 48px max(40px, env(safe-area-inset-left, 0px))}
 .global-sync-alert {
   top:calc(12px + env(safe-area-inset-top));
   z-index:240;
@@ -736,24 +737,25 @@ to {
   flex-basis:100%}
 }
 @media (min-width:901px) {
-  
+
 .content-mid {
   max-width:1220px;
-  padding:30px 36px 46px}
+  padding:30px max(36px, env(safe-area-inset-right, 0px)) 46px max(36px, env(safe-area-inset-left, 0px))}
 .content-narrow {
   max-width:1080px;
-  padding:30px 36px 44px}
+  padding:30px max(36px, env(safe-area-inset-right, 0px)) 44px max(36px, env(safe-area-inset-left, 0px))}
 }
 @media (max-width:900px) {
   .layout {
   flex-direction:column}
 .content {
-  padding:calc(20px + env(safe-area-inset-top)) 16px calc(86px + env(safe-area-inset-bottom));
+  padding:calc(20px + env(safe-area-inset-top)) max(16px, env(safe-area-inset-right, 0px)) calc(86px + env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left, 0px));
   order:1}
 }
 @media (max-width:520px) {
   .content {
-  padding:calc(18px + env(safe-area-inset-top)) 14px calc(84px + env(safe-area-inset-bottom))}
+  /* 底部与 Toast/任务胶囊同一 86px 档（原先 84px 会让 86px 高的浮层压到最后一行内容）。 */
+  padding:calc(18px + env(safe-area-inset-top)) max(14px, env(safe-area-inset-right, 0px)) calc(86px + env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-left, 0px))}
 }
 .quick-record-toast {
   left:50%;

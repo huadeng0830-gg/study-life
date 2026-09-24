@@ -7,6 +7,13 @@
 // 3. 更早的版本逐条下移，最多保留 3 个版本，超出即删除。
 export const RELEASE_UPDATES = Object.freeze([
   {
+    version: '2026年09月24日-版本2',
+    signature: '1115d267e9',
+    notes: [
+      '阶段2（布局修复）：任务胶囊断点从 min-width:900 改为 901，消除与底栏 max-width:900 在恰 900px 视口重叠；移动端胶囊/内容底部统一 86px 浮起高度（原先 76/84 与 Toast 三套数）；.content/.content-mid/.content-narrow、Modal 头身脚、ActionSheet 遮罩横向补 safe-area-inset-left/right（横屏刘海不再顶边），ActionSheet max-height 扣除 top 安全区；删除 App.vue 两处空 @media；skip-to-content 提到 301 盖过全局错误提示 300；层叠阶梯注释补全 110/130/200/301 档位与右键菜单低于告警层的理由',
+    ],
+  },
+  {
     version: '2026年09月24日-版本1',
     signature: 'e459d185f7',
     notes: [
@@ -1383,7 +1390,7 @@ export const RELEASE_UPDATES = Object.freeze([
 export const RELEASE_VERSION = RELEASE_UPDATES[0].version
 
 // 与第一条签名保持一致，交给 vite.config.js 校验源码一致性。
-export const RELEASE_SOURCE_SIGNATURE = 'e459d185f7'
+export const RELEASE_SOURCE_SIGNATURE = '1115d267e9'
 
 // 兼容旧引用：当前版本的更新说明。
 export const RELEASE_NOTES = RELEASE_UPDATES[0].notes

@@ -415,11 +415,11 @@ onBeforeUnmount(cleanup)
   overflow-y: auto;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
-  padding: 18px 22px 22px;
+  padding: 18px max(22px, env(safe-area-inset-right, 0px)) 22px max(22px, env(safe-area-inset-left, 0px));
 }
 .modal-foot {
   flex: 0 0 auto;
-  padding: 12px 22px calc(14px + env(safe-area-inset-bottom, 0px));
+  padding: 12px max(22px, env(safe-area-inset-right, 0px)) calc(14px + env(safe-area-inset-bottom, 0px)) max(22px, env(safe-area-inset-left, 0px));
   border-top: 1px solid var(--border);
   background: var(--card);
 }
@@ -495,13 +495,13 @@ onBeforeUnmount(cleanup)
   }
 
   .modal-head {
-    padding: 15px 16px 10px;
+    padding: 15px max(16px, env(safe-area-inset-right, 0px)) 10px max(16px, env(safe-area-inset-left, 0px));
     border-bottom: 1px solid var(--border);
     background: var(--card);
   }
 
   .modal-body {
-    padding: 14px 16px calc(18px + env(safe-area-inset-bottom));
+    padding: 14px max(16px, env(safe-area-inset-right, 0px)) calc(18px + env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left, 0px));
   }
 }
 </style>

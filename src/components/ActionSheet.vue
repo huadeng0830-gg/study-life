@@ -165,7 +165,7 @@ function itemDelay(index) {
   display: flex;
   align-items: flex-end;
   justify-content: center;
-  padding: 12px 10px calc(10px + env(safe-area-inset-bottom));
+  padding: 12px max(10px, env(safe-area-inset-right, 0px)) calc(10px + env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left, 0px));
   background: rgba(30, 40, 70, 0.35);
   animation: sheet-overlay-in var(--dur-fast, 150ms) var(--ease-out, cubic-bezier(0.16, 1, 0.3, 1));
 }
@@ -174,7 +174,8 @@ function itemDelay(index) {
   flex-direction: column;
   gap: 8px;
   width: min(460px, 100%);
-  max-height: calc(100dvh - 40px);
+  /* 横屏刘海时顶部也会被吃掉：max-height 扣掉 top 安全区，不再只减固定 40px。 */
+  max-height: calc(100dvh - 40px - env(safe-area-inset-top, 0px));
   overflow-y: auto;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
