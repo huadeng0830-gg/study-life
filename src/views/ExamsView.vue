@@ -630,14 +630,14 @@ onBeforeUnmount(() => {
   background: var(--bg-tint);
 }
 .category { color: var(--primary); background: var(--primary-soft); }
-.repeat-tag { color: #8b6ad4; background: #f3eeff; }
+.repeat-tag { color: #5f3dc4; background: #f3eeff; }
 .menu-btn {
   display: grid;
   place-items: center;
-  width: 26px;
-  height: 22px;
+  width: 28px;
+  height: 24px;
   flex: 0 0 auto;
-  color: #aab2c2;
+  color: var(--ink-faint);
   font-size: 13px;
   font-weight: 900;
   letter-spacing: 0.05em;
@@ -695,7 +695,9 @@ onBeforeUnmount(() => {
   border-radius: 16px;
   background: linear-gradient(160deg, #eef2ff 0%, #f4f0ff 100%);
 }
-.date-tile small { color: #8a94d8; font-size: 11px; font-weight: 700; line-height: 1.2; }
+/* 渐变底取 #eef2ff→#f4f0ff 的中间值 #f1f1ff 作对比度基准；
+   #3d4ec0 在其上 6.15:1（AA 正文 4.5 余量充足）。原 #8a94d8 只有 2.57:1。 */
+.date-tile small { color: #3d4ec0; font-size: 11px; font-weight: 700; line-height: 1.2; }
 .date-tile b { color: #3d4ec0; font-size: 23px; font-weight: 900; line-height: 1.15; letter-spacing: 0.01em; }
 .exam-info { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .name {

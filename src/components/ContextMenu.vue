@@ -165,7 +165,8 @@ function choose(item) {
   box-shadow: 0 12px 32px rgba(24, 38, 76, 0.18);
   animation: context-menu-in var(--dur-fast, 150ms) var(--ease-out, cubic-bezier(0.16, 1, 0.3, 1));
   transform-origin: top left;
-  outline: none;
+  /* 容器带 tabindex="-1"，打开时会被程序聚焦；去掉裸 outline:none，
+     让全局 :focus-visible 焦点环在键盘路径上仍然可见。 */
 }
 .context-menu-title {
   padding: 6px 10px 5px;

@@ -479,7 +479,7 @@ onBeforeUnmount(() => {
           v-for="mins in quickTimes"
           :key="mins"
           type="button"
-          class="time-chip"
+          class="time-chip tap-target"
           :class="{ on: selectedMinutes === mins }"
           :aria-label="`${mins} 分钟`"
           :aria-pressed="selectedMinutes === mins"
@@ -693,7 +693,8 @@ onBeforeUnmount(() => {
   place-items: center;
   border-radius: 50%;
   background: #e7f8f1;
-  color: #14966d;
+  /* #14966d 在 #e7f8f1 上只有 3.40:1；#067654 得 5.12:1（与 AppearanceSettings 同步）。 */
+  color: #067654;
   font-size: 22px;
   font-weight: 900;
 }

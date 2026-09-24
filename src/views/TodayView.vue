@@ -339,7 +339,7 @@ function countdownLabel(item) {
             </template>
             <template v-else><span class="next-empty-line">今天暂时没有紧接着要处理的事项。</span><strong class="next-title is-muted">可以自由安排时间</strong></template>
           </div>
-          <button v-if="nextUp.kind !== 'none'" type="button" class="next-action" @click="openNext">{{ nextUp.kind === 'course' ? '查看课程表' : '查看' }} →</button>
+          <button v-if="nextUp.kind !== 'none'" type="button" class="next-action tap-target" @click="openNext">{{ nextUp.kind === 'course' ? '查看课程表' : '查看' }} →</button>
         </section>
 
         <template v-else-if="id === 'tasks'">
@@ -348,7 +348,7 @@ function countdownLabel(item) {
             <div class="action-list">
               <div v-for="item in actionItems" :key="item.key" class="action-row">
                 <span class="action-mark">○</span><div class="action-copy"><b>{{ item.title }}</b><span>{{ reminderMeta(item) }}</span></div>
-                <button type="button" class="reminder-action" @click="completeReminder(item)">{{ reminderAction(item).action === 'complete' ? '完成' : reminderAction(item).action === 'pay' ? '已支付' : '查看' }}</button>
+                <button type="button" class="reminder-action tap-target" @click="completeReminder(item)">{{ reminderAction(item).action === 'complete' ? '完成' : reminderAction(item).action === 'pay' ? '已支付' : '查看' }}</button>
               </div>
             </div>
           </section>
@@ -360,7 +360,7 @@ function countdownLabel(item) {
           <div class="action-list">
             <div v-for="item in riskItems" :key="item.key" class="action-row risk-row">
               <span class="action-mark">⚠</span><div class="action-copy"><b>{{ item.title }}</b><span>{{ reminderMeta(item) }}</span></div>
-              <button type="button" class="reminder-action" @click="completeReminder(item)">{{ reminderAction(item).action === 'complete' ? '完成' : reminderAction(item).action === 'pay' ? '已支付' : '查看' }}</button>
+              <button type="button" class="reminder-action tap-target" @click="completeReminder(item)">{{ reminderAction(item).action === 'complete' ? '完成' : reminderAction(item).action === 'pay' ? '已支付' : '查看' }}</button>
             </div>
           </div>
         </section>

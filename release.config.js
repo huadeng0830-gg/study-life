@@ -7,6 +7,14 @@
 // 3. 更早的版本逐条下移，最多保留 3 个版本，超出即删除。
 export const RELEASE_UPDATES = Object.freeze([
   {
+    version: '2026年09月24日-版本1',
+    signature: 'e459d185f7',
+    notes: [
+      '阶段1（无障碍全量修复）：清理裸 outline:0/none，保留 :focus-not(:focus-visible) 正确形式并让全局 :focus-visible 焦点环在容器类上生效；补齐 24px 最小命中区（记录头/收件箱操作/Toast按钮/自然条目链接等），粗指针下由 tap-target 兜底到 44px；审计盲区收口——新增同规则写死字色+写死底判据 sameRuleHardCodedOffenders 并接入主流程与 JSON 输出，修复其抓出的 7 处违规（复选框绿底、课程同步青、补课紫标签等）',
+      '新增 tests/contrastAudit.test.js 同规则盲区 describe（全仓零违规、判据非空转、fixture 自证），contrast/touchTarget/accessibleNames 守卫全绿',
+    ],
+  },
+  {
     version: '2026年09月21日-版本1',
     signature: '0afce96a67',
     notes: [
@@ -1375,7 +1383,7 @@ export const RELEASE_UPDATES = Object.freeze([
 export const RELEASE_VERSION = RELEASE_UPDATES[0].version
 
 // 与第一条签名保持一致，交给 vite.config.js 校验源码一致性。
-export const RELEASE_SOURCE_SIGNATURE = '0afce96a67'
+export const RELEASE_SOURCE_SIGNATURE = 'e459d185f7'
 
 // 兼容旧引用：当前版本的更新说明。
 export const RELEASE_NOTES = RELEASE_UPDATES[0].notes

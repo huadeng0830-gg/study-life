@@ -1757,7 +1757,7 @@ async function confirmRestoreBackup() {
   color:#7755d0;
   background:#f0ebff}
 .section-icon.sync {
-  color:#0891b2;
+  color:#0e7490;
   background:#e0f7ff}
 .update-message {
   color:var(--primary);

@@ -753,7 +753,7 @@ summary:focus:not(:focus-visible) {
   to { transform: scale(1.35); opacity: 0; }
 }
 .focus-target-highlight {
-  outline: 2px solid var(--primary);
+  outline: var(--focus-width) solid var(--focus-solid);
   outline-offset: 3px;
   animation: focus-target-pulse 2.4s ease;
 }

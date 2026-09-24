@@ -14,6 +14,7 @@ import {
   gradientSurfaceOffenders,
   inlineSurfaceOffenders,
   largeTextThreshold,
+  sameRuleHardCodedOffenders,
   stripPrintStyles,
   themePalettes,
 } from '../scripts/audit-contrast.mjs'
@@ -505,9 +506,45 @@ describe('跨规则对比度：底跟主题令牌、文字却写死', () => {
 })
 
 /**
- * §4 第 15 条剩下两类「逐条规则看不见」的假阴性：
- * `background-image` 渐变底，以及模板里写死的内联 `style="background:…"`。
+ * 同一条规则里「写死字色 + 写死底（含渐变）」——跨规则与渐变两条判据都不覆盖的盲区。
  */
+describe('同规则写死字色 + 写死底', () => {
+  const styles = () => collectStyles(srcDir)
+
+  it('全仓没有"同规则两侧都写死且不达 AA"的组合', () => {
+    const { offenders } = sameRuleHardCodedOffenders(styles())
+    expect(offenders).toEqual([])
+  })
+
+  it('判据真的跑到了东西（不是空转）', () => {
+    const { stats } = sameRuleHardCodedOffenders(styles())
+    expect(stats.pairedRules, '一条同规则写死配对都没扫到，判据与实现脱节').toBeGreaterThanOrEqual(1)
+    expect(stats.stopsChecked, '一组色值都没核').toBeGreaterThanOrEqual(1)
+  })
+
+  it('判定力自证：写死字压写死底不达标要报，达标或只有一侧写死不报', () => {
+    const fixture = [{
+      file: 'src/Fixture.vue',
+      css: [
+        // 该抓：同规则写死浅灰字 + 写死白底
+        '.bad { color: #cccccc; background: #ffffff; }',
+        // 不该抓：同规则但达标
+        '.good { color: #111111; background: #ffffff; }',
+        // 不该抓：字色是令牌（主题相关，交给 PAIRS / 跨规则）
+        '.token-fg { color: var(--text); background: #ffffff; }',
+        // 不该抓：只有字色写死、没有底（交给跨规则）
+        '.color-only { color: #cccccc; }',
+        // 该抓：写死字压在写死渐变的浅色停上
+        '.grad { color: #f0f0f0; background: linear-gradient(135deg, #ffffff, #f5f5f5); }',
+      ].join('\n'),
+    }]
+    const { offenders } = sameRuleHardCodedOffenders(fixture)
+    const selectors = [...new Set(offenders.map((entry) => entry.selector))].sort()
+    expect(selectors).toEqual(['.bad', '.grad'])
+    expect(offenders.every((entry) => entry.bgRule === '同一规则的 background')).toBe(true)
+    expect(Math.min(...offenders.map((entry) => entry.ratio))).toBeLessThan(1.5)
+  })
+})
 describe('渐变底与模板内联底', () => {
   const styles = () => collectStyles(srcDir)
 

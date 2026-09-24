@@ -33,7 +33,7 @@ const visibleNotes = computed(() => expanded.value ? filteredNotes.value : filte
 .inbox-tags button.on { color: var(--primary); border-color: var(--primary); background: var(--primary-soft); }
 .inbox-empty { margin: 10px 0 0; color: var(--ink-soft); font-size: 12px; }
 .inbox-actions { display: flex; gap: 4px; }
-.inbox-actions button { padding: 4px 6px; color: var(--primary); font-size: 10.5px; font-weight: 750; white-space: nowrap; border: 0; border-radius: 6px; background: var(--primary-soft); }
+.inbox-actions button { display: inline-flex; align-items: center; justify-content: center; min-width: 24px; min-height: 24px; padding: 4px 8px; color: var(--primary); font-size: 10.5px; font-weight: 750; white-space: nowrap; border: 0; border-radius: 6px; background: var(--primary-soft); }
 .inbox-actions button.quiet { color: var(--ink-soft); background: var(--bg-tint); }
 .inbox-toggle { align-self: flex-start; margin-top: 8px; padding: 5px 7px; color: var(--primary); font-size: 11px; font-weight: 750; border: 0; border-radius: 6px; background: var(--primary-soft); }
 @media (max-width: 520px) { .inbox-row { align-items: flex-start; flex-direction: column; padding: 9px 0; } .inbox-actions { width: 100%; } .inbox-actions button { flex: 1; } }

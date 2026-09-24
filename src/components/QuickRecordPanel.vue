@@ -763,7 +763,7 @@ onBeforeUnmount(() => {
 .quick-record{display:flex;flex-direction:column;gap:11px}
 .input-wrap{display:flex;align-items:flex-end;gap:7px;padding:6px 5px 6px 12px;border:1px solid var(--border-strong);border-radius:12px;background:var(--card)}
 .input-wrap:focus-within{border-color:var(--primary);box-shadow:0 0 0 3px var(--primary-soft)}
-.smart-input{flex:1;min-width:0;min-height:58px;max-height:220px;padding:9px 0;border:0;outline:0;background:transparent;resize:none;line-height:1.5;font:inherit;color:var(--text)}
+.smart-input{flex:1;min-width:0;min-height:58px;max-height:220px;padding:9px 0;border:0;background:transparent;resize:none;line-height:1.5;font:inherit;color:var(--text)}
 .mic{display:inline-flex;align-items:center;justify-content:center;gap:5px;min-width:44px;height:44px;padding:0 12px;border:0;border-radius:10px;background:var(--primary-soft);font-size:17px;cursor:pointer;touch-action:manipulation}
 .mic.on{color:var(--on-danger,#fff);background:var(--danger)}
 .note-mic{font-size:14px;width:auto}
@@ -793,16 +793,20 @@ onBeforeUnmount(() => {
 .record-head{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px}
 .record-head b{color:var(--primary)}
 .record-head-actions{display:inline-flex;align-items:center;gap:6px}
-.record-head button{padding:2px 4px;color:var(--ink-faint);font-size:11px;border:0;background:transparent}
+.record-head button{display:inline-flex;align-items:center;justify-content:center;min-width:24px;min-height:24px;padding:2px 6px;color:var(--ink-faint);font-size:11px;border:0;background:transparent}
 .type-switch{display:flex;align-items:center;gap:5px;overflow-x:auto;margin:8px 0 2px;padding-bottom:2px}
 .type-switch button{flex:0 0 auto;min-height:30px;padding:5px 8px;color:var(--ink-soft);font-size:11px;border:1px solid var(--border);border-radius:999px;background:var(--card);touch-action:manipulation}
 .type-switch button.on{color:var(--primary);font-weight:800;border-color:var(--primary);background:var(--primary-soft)}
 .human-confidence{flex:0 0 auto;color:var(--ink-soft);font-size:11px}
 .title-edit,.note-title-edit{width:100%;margin:7px 0 8px;padding:0;color:var(--text);font-size:15px;font-weight:750;border:0;border-bottom:1px solid transparent;background:transparent}
-.title-edit:focus,.note-title-edit:focus{outline:0;border-bottom-color:var(--primary)}
+.title-edit:focus,.note-title-edit:focus{border-bottom-color:var(--primary)}
+/* 键盘焦点必须保留全站 focus-visible 焦点环：原来的 :focus{outline:0} 特异性
+   压过 style.css 的 :focus-visible 规则，键盘用户几乎看不见焦点。 */
+.title-edit:focus:not(:focus-visible),.note-title-edit:focus:not(:focus-visible){outline:0}
 .note-title-edit{font-size:12px;font-weight:650}
 .note-body-edit{width:100%;min-height:104px;margin:8px 0 4px;padding:9px 10px;line-height:1.55;border:1px solid var(--border);border-radius:9px;resize:vertical;background:var(--card);color:var(--text)}
-.note-body-edit:focus{outline:0;border-color:var(--primary);box-shadow:0 0 0 2px var(--primary-soft)}
+.note-body-edit:focus{border-color:var(--primary);box-shadow:0 0 0 2px var(--primary-soft)}
+.note-body-edit:focus:not(:focus-visible){outline:0}
  .unknown-tip,.uncertain-tip,.category-tip{margin:6px 0;padding:7px 8px;color:var(--warning);font-size:11.5px;border-radius:7px;background:var(--card);display:flex;gap:8px;align-items:center;flex-wrap:wrap}
  .category-tip span{flex:1;min-width:0}
  .category-tip button{padding:4px 7px;color:var(--text);border:1px solid #e8c98e;border-radius:6px;background:var(--bg-tint);font-size:11px}
@@ -836,10 +840,12 @@ onBeforeUnmount(() => {
 .note-head b{font-size:14px}
 .note-head small{color:var(--ink-faint);font-size:11px}
 .note-body{width:100%;min-height:160px;max-height:45vh;max-height:45dvh;padding:12px;line-height:1.6;border:1px solid var(--border-strong);border-radius:12px;resize:none;background:var(--card);font:inherit;color:var(--text)}
-.note-body:focus{outline:0;border-color:var(--primary);box-shadow:0 0 0 3px var(--primary-soft)}
+.note-body:focus{border-color:var(--primary);box-shadow:0 0 0 3px var(--primary-soft)}
+.note-body:focus:not(:focus-visible){outline:0}
 .note-tools{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .note-title{width:100%;padding:10px 12px;font-size:13px;border:1px solid var(--border);border-radius:9px;background:var(--card)}
-.note-title:focus{outline:0;border-color:var(--primary)}
+.note-title:focus{border-color:var(--primary)}
+.note-title:focus:not(:focus-visible){outline:0}
 .note-footer{padding-top:4px}
 @media(max-width:520px){
 .note-body{min-height:150px;max-height:40vh;max-height:40dvh}

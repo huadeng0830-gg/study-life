@@ -540,7 +540,7 @@ function openMobileTool(key) {
         </button>
         <button
           type="button"
-          class="quick-add-button"
+          class="quick-add-button tap-target"
           :class="{ active: props.quickRecordOpen }"
           :aria-expanded="props.quickRecordOpen"
           aria-label="快速记录"

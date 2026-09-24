@@ -679,10 +679,9 @@ function taskFocusSummary(task) {
   width: 24px;
   height: 24px;
   flex: 0 0 24px;
-  color: #fff;
   font-weight: 800;
   font-size: 13px;
-  border: 2px solid #c3cbd9;
+  border: 2px solid #767f94;
   border-radius: 8px;
   background: #fff;
   transition: background var(--dur-fast) var(--ease-standard), border-color var(--dur-fast) var(--ease-standard);
@@ -690,9 +689,11 @@ function taskFocusSummary(task) {
 .check:hover {
   border-color: #19a878;
 }
+/* 勾选态白勾必须压在够深的绿上：#19a878/#fff 只有 3.04:1（AA 要 4.5:1），压到 #0c8058 得 4.95:1。 */
 .check.checked {
-  border-color: #19a878;
-  background: #19a878;
+  color: #fff;
+  border-color: #0c8058;
+  background: #0c8058;
 }
 .task-main {
   flex: 1;

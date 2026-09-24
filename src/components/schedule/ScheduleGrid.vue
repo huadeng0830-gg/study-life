@@ -354,7 +354,7 @@ async function onCellKeydown(event, day, periodIndex) {
 .tt-head.today { background: var(--primary-soft); color: var(--primary); }
 .today-tag { margin-left: 4px; font-size: 11px; background: var(--primary); color: var(--on-primary, #fff); padding: 1px 6px; border-radius: 999px; vertical-align: 2px; }
 .exception-tag { display: block; width: fit-content; margin: 3px auto 0; padding: 1px 5px; color: #b13f3f; font-size: 9px; font-weight: 800; border-radius: 5px; background: #feecec; }
-.exception-tag.makeup { color: #7a55e8; background: #f1ebff; }
+.exception-tag.makeup { color: #6b3fd4; background: #f1ebff; }
 .tt-period {
   display: flex;
   flex-direction: column;

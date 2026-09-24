@@ -317,7 +317,7 @@ function exceptionDetail(item) {
   border-radius: 5px;
   background: #feecec;
 }
-.exception-item span.makeup { color: #7a55e8; background: #f1ebff; }
+.exception-item span.makeup { color: #6b3fd4; background: #f1ebff; }
 .exception-item small { width: 100%; color: var(--muted); font-size: 10px; }
 .exception-item.editing { border-color: var(--primary); background: var(--primary-soft); }
 .exception-actions { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; }

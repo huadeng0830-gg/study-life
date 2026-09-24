@@ -135,6 +135,11 @@ const typeClass = computed(() => ({
   gap: 8px;
 }
 .toast-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  min-height: 24px;
   padding: 4px 9px;
   font-size: 11.5px;
   font-weight: 700;
@@ -142,10 +147,7 @@ const typeClass = computed(() => ({
   border-radius: 6px;
   cursor: pointer;
 }
-.toast-undo {
-  color: var(--primary);
-  background: var(--primary-soft);
-}
+.toast-undo,
 .toast-view {
   color: var(--primary);
   background: var(--primary-soft);

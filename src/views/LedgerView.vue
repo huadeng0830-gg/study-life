@@ -2574,7 +2574,7 @@ function createBillFromSuggest() {
   font-variant-numeric:tabular-nums;
   font-size:11.5px}
 .p-close {
-  color:#b6bdcb;
+  color:var(--ink-faint);
   cursor:pointer;
   background:0 0;
   border:none;
@@ -2733,7 +2733,8 @@ function createBillFromSuggest() {
   background:0 0;
   border:0;
   align-self:flex-end;
-  padding:3px 6px;
+  min-height:24px;
+  padding:3px 8px;
   font-size:12px;
   font-weight:700}
 .natural-entry-link:hover {
@@ -2810,7 +2811,8 @@ function createBillFromSuggest() {
   background:0 0;
   border:0;
   align-self:flex-start;
-  padding:2px 5px;
+  min-height:24px;
+  padding:2px 8px;
   font-size:11.5px}
 .more-grid label {
   color:var(--ink-soft);

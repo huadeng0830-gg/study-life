@@ -178,7 +178,7 @@ function itemDelay(index) {
   overflow-y: auto;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
-  outline: none;
+  /* 不写 outline:none：.sheet 带 tabindex="-1"，程序聚焦时需要可见焦点环。 */
 }
 .sheet-card {
   border: 1px solid var(--border);

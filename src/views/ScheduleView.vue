@@ -1834,11 +1834,12 @@ watch(
   touch-action:pan-y;
   transition:border-color var(--dur-base) var(--ease-standard), box-shadow var(--dur-base) var(--ease-standard);
   border-radius:10px;
-  outline:none;
   padding:10px 14px;
   font-size:14px;
   line-height:1.55;
   overflow-y:auto}
+/* 不再写 outline:none：scoped 类选择器的特异性会压过全局 :focus-visible 焦点环。
+   鼠标点击的默认 UA 环由全局 input:focus 样式（style.css 已统一处理）。 */
 .schedule-note-input:focus {
   border-color:var(--primary);
   box-shadow:0 0 0 3px var(--primary-soft)}

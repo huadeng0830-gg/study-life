@@ -385,6 +385,57 @@ function dedupeByWorst(entries) {
   return [...worst.values()].sort((a, b) => a.ratio - b.ratio)
 }
 
+/**
+ * 同一条规则里**写死的字色 + 写死的底**（含渐变色停）。
+ *
+ * 跨规则判据只收「底跟令牌、字写死」（`asVar` 底）与「渐变+同规则字色」
+ * （`gradientSurfaceOffenders`）；`color:#x; background:#y` 这种一条规则自己给底的
+ * 组合两边都不碰——那是审计盲区，不是达标。本判据补上这条路。
+ *
+ * 只报**同规则**能静态读全的组合：不猜祖先、不跨选择器。
+ */
+export function sameRuleHardCodedOffenders(styles) {
+  const offenders = []
+  const stats = { pairedRules: 0, stopsChecked: 0 }
+  for (const { file, css } of styles) {
+    for (const rule of cssRules(css)) {
+      const decls = declarations(rule.body)
+      const foreground = asHex(decls.color)
+      if (!foreground) continue
+      const backgrounds = []
+      const solid = asHex(decls.background) ?? asHex(decls['background-color'])
+      if (solid) backgrounds.push(solid)
+      const image = /gradient\(/i.test(decls['background-image'] ?? '') ? decls['background-image']
+        : (/gradient\(/i.test(decls.background ?? '') ? decls.background : null)
+      if (image) {
+        for (const match of image.matchAll(/#[0-9a-f]{3,8}\b/gi)) backgrounds.push(match[0])
+      }
+      if (!backgrounds.length) continue
+      stats.pairedRules += 1
+      const min = largeTextThreshold({
+        fontSize: decls['font-size'],
+        fontWeight: decls['font-weight'],
+      })
+      for (const background of backgrounds) {
+        stats.stopsChecked += 1
+        const ratio = contrastRatio(foreground, background)
+        if (ratio === null || ratio >= min) continue
+        offenders.push({
+          file: String(file).replace(/\\/g, '/'),
+          selector: rule.selector.replace(/\s+/g, ' '),
+          theme: '（与主题无关：两侧都写死了）',
+          fg: foreground,
+          bg: background,
+          bgRule: '同一规则的 background',
+          ratio: Number(ratio.toFixed(2)),
+          min,
+        })
+      }
+    }
+  }
+  return { offenders: dedupeByWorst(offenders), stats }
+}
+
 /** 主题名 → 该主题实际生效的令牌表，供测试按主题断言。 */
 export function themePalettes() {
   return themes
@@ -740,7 +791,8 @@ function main() {
   const gradient = gradientSurfaceOffenders(crossStyles)
   const inline = inlineSurfaceOffenders(sources)
   const focus = focusIndicatorOffenders()
-  const surfaceFailures = [...gradient.offenders, ...inline.offenders]
+  const sameRule = sameRuleHardCodedOffenders(crossStyles)
+  const surfaceFailures = [...gradient.offenders, ...inline.offenders, ...sameRule.offenders]
 
   const results = auditContrast()
   const failures = results.filter((entry) => !entry.pass)
@@ -752,6 +804,7 @@ function main() {
       crossRule: cross,
       gradientSurface: gradient,
       inlineSurface: inline,
+      sameRuleHardCoded: sameRule,
       focusIndicator: focus,
     }, null, 2))
     process.exit(failures.length || cross.offenders.length || surfaceFailures.length || focus.offenders.length ? 1 : 0)
@@ -766,6 +819,8 @@ function main() {
     console.log(`✅ 渐变与内联底审计通过：${gradient.stats.gradientRules} 条渐变规则`
       + `（其中 ${gradient.stats.gradientWithColor} 条同时给了字色、核了 ${gradient.stats.stopsChecked} 个色停），`
       + `静态内联背景 ${inline.stats.inlineBackgrounds} 处全部用令牌`)
+    console.log(`✅ 同规则写死字色+底审计通过：${sameRule.stats.pairedRules} 条同规则配对`
+      + `、核了 ${sameRule.stats.stopsChecked} 组色值`)
     console.log(`✅ 聚焦指示器审计通过：${focus.stats.themes} 个主题 × ${focus.stats.surfaces} 类相邻背景`
       + `共 ${focus.stats.combosChecked} 组，outline 与 halo 至少有一圈达到 ${NON_TEXT_MIN}:1`)
     process.exit(0)
