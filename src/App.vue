@@ -729,7 +729,7 @@ to {
 .global-safe-mode-alert .text-button {
   color:inherit;
   white-space:nowrap}
-@media (max-width:620px) {
+@media (max-width:760px) {
   .global-safe-mode-alert,.global-persistence-alert {
   flex-wrap:wrap;
   align-items:flex-start}

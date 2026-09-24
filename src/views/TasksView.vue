@@ -836,7 +836,7 @@ function taskFocusSummary(task) {
   margin-right: auto;
 }
 
-@media (max-width: 720px) {
+@media (max-width: 760px) {
   .page-head {
     align-items: stretch;
     flex-direction: column;

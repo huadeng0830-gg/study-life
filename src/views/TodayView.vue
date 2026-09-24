@@ -874,7 +874,7 @@ function countdownLabel(item) {
 
 
 
-@media (max-width:860px) {
+@media (max-width:760px) {
   
 
 

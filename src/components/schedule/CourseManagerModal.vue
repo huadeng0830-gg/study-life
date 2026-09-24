@@ -126,5 +126,5 @@ function selected(id) {
 .template-delete:hover { color: var(--danger); background: color-mix(in srgb, var(--danger) 12%, var(--card)); }
 /* 成功提示落在 Modal 的 var(--card) 上：写死的 #07805d 在深色卡片上只有 3.22:1。 */
 .manager-success { color: var(--success); font-size: 13px; }
-@media (max-width: 620px) { .manager-head, .clear-row { align-items: flex-start; flex-direction: column; } .manager-actions, .manager-actions .btn, .clear-row .btn { width: 100%; } .template-save { flex-direction: column; } }
+@media (max-width: 760px) { .manager-head, .clear-row { align-items: flex-start; flex-direction: column; } .manager-actions, .manager-actions .btn, .clear-row .btn { width: 100%; } .template-save { flex-direction: column; } }
 </style>

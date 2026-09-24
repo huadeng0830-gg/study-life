@@ -989,7 +989,7 @@ const previewStyle = computed(() => ({
   text-align:center;
   margin:8px 0 0;
   font-size:11px}
-@media (max-width:700px) {
+@media (max-width:760px) {
   .appearance-tabs {
   grid-template-columns:1fr 1fr;
   display:grid}

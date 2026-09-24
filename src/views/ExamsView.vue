@@ -160,11 +160,11 @@ function reviewSummary(item) {
 // 窄屏（单列）下清单很长时做虚拟滚动；宽屏保持多列网格原样渲染。
 // 入场动画只对少量卡片有意义，长列表直接禁用，避免一次挂载几十个动画。
 const EXAM_LIST_THRESHOLD = 16
-const isNarrow = ref(typeof window !== 'undefined' && window.matchMedia('(max-width: 620px)').matches)
+const isNarrow = ref(typeof window !== 'undefined' && window.matchMedia('(max-width: 760px)').matches)
 let narrowMql = null
 let narrowMqlHandler = null
 if (typeof window !== 'undefined') {
-  narrowMql = window.matchMedia('(max-width: 620px)')
+  narrowMql = window.matchMedia('(max-width: 760px)')
   narrowMqlHandler = (event) => { isNarrow.value = event.matches }
   narrowMql.addEventListener('change', narrowMqlHandler)
 }
@@ -815,7 +815,7 @@ onBeforeUnmount(() => {
 }
 .card-menu.up { top: auto; bottom: 26px; }
 
-@media (max-width: 720px) {
+@media (max-width: 760px) {
   .page-head {
     align-items: flex-start;
     flex-direction: column;

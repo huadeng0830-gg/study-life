@@ -7,6 +7,14 @@
 // 3. 更早的版本逐条下移，最多保留 3 个版本，超出即删除。
 export const RELEASE_UPDATES = Object.freeze([
   {
+    version: '2026年09月24日-版本3',
+    signature: 'b99640b659',
+    notes: [
+      '全站响应式断点收敛为520/760/900三档，统一各页面工具栏与页头换行节奏',
+      '考试页窄屏判定与课表页头断点对齐到760，账单与提醒表单并入520小屏档',
+    ],
+  },
+  {
     version: '2026年09月24日-版本2',
     signature: '1115d267e9',
     notes: [
@@ -1390,7 +1398,7 @@ export const RELEASE_UPDATES = Object.freeze([
 export const RELEASE_VERSION = RELEASE_UPDATES[0].version
 
 // 与第一条签名保持一致，交给 vite.config.js 校验源码一致性。
-export const RELEASE_SOURCE_SIGNATURE = '1115d267e9'
+export const RELEASE_SOURCE_SIGNATURE = 'b99640b659'
 
 // 兼容旧引用：当前版本的更新说明。
 export const RELEASE_NOTES = RELEASE_UPDATES[0].notes

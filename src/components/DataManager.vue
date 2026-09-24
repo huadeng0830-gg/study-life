@@ -2640,7 +2640,7 @@ async function confirmRestoreBackup() {
   color:var(--ink-soft);
   border-radius:5px;
   padding:3px 6px}
-@media (max-width:620px) {
+@media (max-width:760px) {
   .health-grid {
   grid-template-columns:repeat(2,minmax(0,1fr))}
 }

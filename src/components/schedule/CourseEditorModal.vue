@@ -237,5 +237,5 @@ function requestDelete() {
 .actions { display: flex; justify-content: flex-end; align-items: center; gap: 10px; margin-top: 14px; }
 .actions .btn-danger { margin-right: auto; }
 .cell-add-hint { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 10px; color: var(--ink-soft); font-size: 12px; }
-@media (max-width: 560px) { .row, .course-link-columns { grid-template-columns: 1fr; flex-direction: column; } }
+@media (max-width: 520px) { .row, .course-link-columns { grid-template-columns: 1fr; flex-direction: column; } }
 </style>

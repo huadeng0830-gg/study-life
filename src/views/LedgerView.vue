@@ -3486,7 +3486,7 @@ function createBillFromSuggest() {
   display:flex}
 .cat-add input {
   flex:1}
-@media (max-width:768px) {
+@media (max-width:760px) {
   .page {
   gap:14px}
 .hero-stat {
@@ -3534,7 +3534,7 @@ function createBillFromSuggest() {
   gap:8px}
 
 }
-@media (max-width:480px) {
+@media (max-width:520px) {
   .bill-form {
   gap:14px}
 .bill-form-grid,.bill-options {

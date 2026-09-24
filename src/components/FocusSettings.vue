@@ -188,7 +188,7 @@ async function save() {
   justify-content: flex-end;
   gap: 9px;
 }
-@media (max-width: 420px) {
+@media (max-width: 520px) {
   .time-grid {
     grid-template-columns: 1fr;
   }

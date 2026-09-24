@@ -253,5 +253,5 @@ watch(
 .relation-empty { color: var(--muted); font-size: 11px; }
 .note-convert-actions { display: inline-flex; }
 .note-detail-actions { display: flex; justify-content: flex-end; gap: 8px; }
-@media (max-width: 560px) { .notes-toolbar { align-items: stretch; flex-wrap: wrap; } .search-field { flex-basis: 100%; } .note-card { align-items: stretch; flex-direction: column; } .note-card-actions { width: 100%; } .note-card-actions button { flex: 1; } }
+@media (max-width: 520px) { .notes-toolbar { align-items: stretch; flex-wrap: wrap; } .search-field { flex-basis: 100%; } .note-card { align-items: stretch; flex-direction: column; } .note-card-actions { width: 100%; } .note-card-actions button { flex: 1; } }
 </style>

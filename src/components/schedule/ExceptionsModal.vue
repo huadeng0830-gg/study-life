@@ -328,7 +328,7 @@ function exceptionDetail(item) {
   .exception-note { grid-column: 1 / -1; }
 }
 
-@media (max-width: 480px) {
+@media (max-width: 520px) {
   .exception-form { grid-template-columns: 1fr; }
   .type-tabs { flex-direction: column; }
 }

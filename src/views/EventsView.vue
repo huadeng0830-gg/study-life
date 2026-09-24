@@ -382,7 +382,7 @@ function confirmRemove() {
 /* 提示落在 Modal 的 var(--card) 上，只改字色：原 #0d9463 在浅色 3.87:1、
    深色 4.11:1（深色卡片上写死的深绿一直读不出来）。 */
 .notice-success { margin: 12px 0 0; color: var(--success); font-size: 12px; text-align: center; }
-@media (max-width: 560px) {
+@media (max-width: 520px) {
   .events-toolbar { align-items: stretch; }
   .search-field { flex-basis: 100%; }
   .event-card { align-items: flex-start; flex-direction: column; }
