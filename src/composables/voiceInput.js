@@ -1,4 +1,9 @@
-// 语音输入（模块 C）：只用浏览器本地 Web Speech API，不接任何外部服务。
+// 语音输入（模块 C）：只用浏览器内置的 Web Speech API。
+// 应用自身不接任何外部服务、不带 API key、不请求第三方端点。
+//
+// 但要区分清楚「无自有后端」与「完全离线可用」：Chrome / Edge / Safari 对这个
+// API 的实现会把音频送给各自厂商的云端去识别，所以断网时识别会以 'network'
+// 错误失败（文案见 explainSpeechError）。离线场景请走手动输入或 OCR。
 // 不支持（Firefox 桌面版 / 非 HTTPS / 无 API）时 isSupported() 返回 false、transcribe() 返回 null，
 // UI 应隐藏或禁用语音按钮并给出一次性友好提示，保持可用不报错。
 // 语音状态机：idle → listening → transcribing → done / error。
@@ -15,7 +20,8 @@ export const VOICE_STATES = Object.freeze({
 export function speechRecognitionAPI() {
   if (typeof window === 'undefined') return null
   // Chrome/Edge 用 webkit 前缀，Safari 用无前缀；两者都不存在即为不可用环境。
-  return window.SpeechRecognition || window.webkitSpeechRecognition || null
+  // 部分 WebView 可能只有 mozSpeechRecognition 或 msSpeechRecognition
+  return window.SpeechRecognition || window.webkitSpeechRecognition || window.mozSpeechRecognition || window.msSpeechRecognition || null
 }
 
 export function isSupported() {

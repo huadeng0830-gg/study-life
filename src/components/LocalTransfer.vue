@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import QRCode from 'qrcode'
 import jsQR from 'jsqr'
 import Modal from './Modal.vue'
+import ConfirmDialog from './ConfirmDialog.vue'
 import TaskProgress from './TaskProgress.vue'
 import { markBackedUp } from '../composables/backupReminder.js'
 import {
@@ -19,11 +20,24 @@ import {
   transferSummary,
 } from '../composables/localTransfer.js'
 import { useTaskProgress } from '../composables/taskProgress.js'
+import { useTabKeys } from '../composables/tabKeys.js'
+import { transferTab } from '../composables/modalSections.js'
 
 const props = defineProps({ open: Boolean })
 const emit = defineEmits(['close'])
 
-const tab = ref('send')
+// 分区状态存在 composables/modalSections.js 的模块级 ref 里：关闭再打开回到上次所在的迁移方式。
+const tab = transferTab
+/** 切换迁移方式：进入"发送数据"时要停掉摄像头（原本写在按钮的 @click 里，键盘切换会绕过它）。 */
+function selectTransferTab(next) {
+  if (next === 'send') stopCamera()
+  tab.value = next
+}
+const { onKeydown: onTransferTabKeydown, tabIndexFor: transferTabIndex } = useTabKeys({
+  keys: ['send', 'receive'],
+  active: () => tab.value,
+  select: (key) => selectTransferTab(key),
+})
 const selectedModules = ref(Object.keys(TRANSFER_MODULES).filter((name) => name !== 'wallpapers'))
 const sendPassword = ref('')
 const generating = ref(false)
@@ -56,7 +70,8 @@ let lastScanAt = 0
 
 watch(() => props.open, (open) => {
   if (open) {
-    tab.value = 'send'
+    // 不再强制回到"发送"：关闭再打开回到上次所在的迁移方式（见 modalSections.js）。
+    // 摄像头不会因此泄漏：关闭与卸载时都会 stopCamera（见下面的 else 分支与 onBeforeUnmount）。
     sendError.value = ''
     scanError.value = ''
     importMessage.value = ''
@@ -348,7 +363,6 @@ async function decryptCodes() {
 
 async function doImport() {
   if (!decodedPackage.value) return
-  if (importMode.value === 'replace' && !window.confirm('覆盖会替换所选模块的本机数据，导入后仍可撤销。是否继续？')) return
   const showProgress = Boolean(decodedSummary.value?.wallpapers)
   const controller = new AbortController()
   importController = controller
@@ -413,8 +427,36 @@ function continueReceiveResult() {
   receiveProgress.reset()
 }
 
-async function undoImport() {
-  if (!window.confirm('确定撤销最近一次二维码导入吗？')) return
+// 覆盖式导入的确认与执行刻意拆成两个函数：
+//   - requestImport() 只负责弹确认（模板的「确认导入」按钮走它）；
+//   - doImport() 是纯执行，内部不再确认。
+// 为什么必须拆开：失败重试（retryReceiveTask）要直接重跑导入，确认若留在 doImport
+// 里，用户点一次「重试」就会被再问一遍——那是对同一次操作的重复确认。
+// 另外 AbortController 与 receiveProgress 都在**确认之后**才创建：确认期间不该出现
+// 任何"正在导入"的状态，否则用户点了取消还会看到进度条。
+const importConfirmOpen = ref(false)
+
+function requestImport() {
+  if (!decodedPackage.value) return
+  // 合并模式不覆盖本机任何数据，无需确认，直接透传（与改造前行为一致）。
+  if (importMode.value !== 'replace') { void doImport(); return }
+  importConfirmOpen.value = true
+}
+
+function confirmImport() {
+  importConfirmOpen.value = false
+  void doImport()
+}
+
+// 撤销同样拆开：reload() 只能排在确认之后，用户点取消时页面绝不能重载。
+const undoConfirmOpen = ref(false)
+
+function requestUndoImport() {
+  undoConfirmOpen.value = true
+}
+
+async function confirmUndoImport() {
+  undoConfirmOpen.value = false
   if (await restoreTransferUndo()) window.location.reload()
 }
 
@@ -423,9 +465,9 @@ const decodedSummary = computed(() => decodedPackage.value ? transferSummary(dec
 
 <template>
   <Modal :open="open" title="📲 本地二维码迁移" wide @close="emit('close')">
-    <div class="tabs"><button :class="{ on: tab === 'send' }" @click="tab = 'send'; stopCamera()">发送数据</button><button :class="{ on: tab === 'receive' }" @click="tab = 'receive'">扫码接收</button></div>
+    <div class="tabs" role="tablist" aria-label="二维码迁移方式" @keydown="onTransferTabKeydown"><button id="transfer-tab-send" role="tab" :tabindex="transferTabIndex('send')" :aria-selected="tab === 'send'" :class="{ on: tab === 'send' }" @click="selectTransferTab('send')">发送数据</button><button id="transfer-tab-receive" role="tab" :tabindex="transferTabIndex('receive')" :aria-selected="tab === 'receive'" :class="{ on: tab === 'receive' }" @click="selectTransferTab('receive')">扫码接收</button></div>
 
-    <div v-if="tab === 'send'" class="transfer-grid">
+    <div v-if="tab === 'send'" class="transfer-grid" role="tabpanel" aria-labelledby="transfer-tab-send">
       <section class="setup-panel">
         <h4>1. 选择要带走的数据</h4>
         <div class="module-list">
@@ -435,10 +477,12 @@ const decodedSummary = computed(() => decodedPackage.value ? transferSummary(dec
           </label>
         </div>
         <h4>2. 设置临时传输密码</h4>
-        <input v-model="sendPassword" type="password" autocomplete="new-password" placeholder="至少 8 个字符，不会写入二维码" />
+        <!-- 上方是 <h4> 标题而不是 <label>，标题不会给控件命名；这里的 placeholder 又
+             是输入后即消失的说明文字。用 aria-label 给一个稳定的名称，不动布局。 -->
+        <input v-model="sendPassword" aria-label="临时传输密码" type="password" autocomplete="new-password" placeholder="至少 8 个字符，不会写入二维码" />
         <p class="hint">接收设备需要输入相同密码。二维码和密码不会发送到服务器。</p>
         <button class="btn btn-primary" :disabled="generating" @click="generateCodes">{{ generating ? '正在加密…' : '生成加密二维码' }}</button>
-        <p v-if="sendError" class="error">{{ sendError }}</p>
+        <p v-if="sendError" class="error" role="alert">{{ sendError }}</p>
         <TaskProgress
           :task="sendProgress.state"
           :elapsed-seconds="sendProgress.elapsedSeconds.value"
@@ -454,16 +498,16 @@ const decodedSummary = computed(() => decodedPackage.value ? transferSummary(dec
       <section class="qr-panel">
         <template v-if="qrImages.length">
           <div class="qr-head"><div><b>请用另一台设备持续扫描</b><span>{{ qrImages.length === 1 ? '单张二维码' : `动态二维码 ${currentFrame + 1}/${qrImages.length}` }}</span></div><span class="lock">加密</span></div>
-          <img :src="qrImages[currentFrame]" alt="本地迁移二维码" class="qr-image" />
+          <img :src="qrImages[currentFrame]" alt="本地迁移二维码" class="qr-image" decoding="async" />
           <div v-if="qrImages.length > 1" class="frame-progress"><i :style="{ width: ((currentFrame + 1) / qrImages.length * 100) + '%' }"></i></div>
           <p>二维码会循环播放，接收设备会自动收集缺少的片段。</p>
-          <div v-if="packageInfo" class="summary-chips"><span>{{ packageInfo.courses }} 门课程</span><span>{{ packageInfo.tasks }} 项待办</span><span>{{ packageInfo.countdowns }} 个重要日期</span><span>{{ packageInfo.food }} 个吃饭选择</span><span v-if="packageInfo.wallpapers">{{ packageInfo.wallpapers }} 张壁纸</span></div>
+          <div v-if="packageInfo" class="summary-chips"><span>{{ packageInfo.courses }} 门课程</span><span>{{ packageInfo.tasks }} 项待办</span><span>{{ packageInfo.countdowns }} 个重要日期</span><span v-if="packageInfo.wallpapers">{{ packageInfo.wallpapers }} 张壁纸</span></div>
         </template>
         <template v-else><div class="qr-placeholder"><span>▦</span><p>选择数据并设置密码后生成二维码</p></div></template>
       </section>
     </div>
 
-    <div v-else class="receive-layout">
+    <div v-else class="receive-layout" role="tabpanel" aria-labelledby="transfer-tab-receive">
       <section class="scan-panel">
         <div class="scan-actions"><button class="btn btn-primary" @click="cameraRunning ? stopCamera() : startCamera()">{{ cameraRunning ? '停止摄像头' : '打开摄像头扫描' }}</button><label class="file-button">选择二维码图片<input type="file" accept="image/*" multiple @change="scanFiles" /></label></div>
         <div class="camera-box" :class="{ active: cameraRunning }">
@@ -491,24 +535,48 @@ const decodedSummary = computed(() => decodedPackage.value ? transferSummary(dec
         <template v-if="!encryptedPayload"><div class="import-empty"><span>1</span><p>完成二维码扫描后，可以在这里输入密码并预览数据。</p></div></template>
         <template v-else-if="!decodedPackage">
           <h4>二维码已收集完整</h4><p class="hint">输入发送设备设置的传输密码。</p>
-          <input v-model="receivePassword" type="password" placeholder="传输密码" @keyup.enter="decryptCodes" />
+          <input v-model="receivePassword" aria-label="传输密码" type="password" placeholder="传输密码" @keyup.enter="decryptCodes" />
           <button class="btn btn-primary" :disabled="decrypting" @click="decryptCodes">{{ decrypting ? '正在解密…' : '解密并预览' }}</button>
         </template>
         <template v-else>
           <div class="preview-title"><span>✓</span><div><b>数据已成功解密</b><p>{{ new Date(decodedPackage.createdAt).toLocaleString('zh-CN') }} 创建</p></div></div>
-          <div class="preview-summary"><span>课程 <b>{{ decodedSummary.courses }}</b></span><span>待办 <b>{{ decodedSummary.tasks }}</b></span><span>重要日期 <b>{{ decodedSummary.countdowns }}</b></span><span>清单 <b>{{ decodedSummary.lists }}</b></span><span>账单 <b>{{ decodedSummary.bills }}</b></span><span>吃饭选择 <b>{{ decodedSummary.food }}</b></span><span v-if="decodedSummary.wallpapers">壁纸 <b>{{ decodedSummary.wallpapers }}</b></span></div>
+          <div class="preview-summary"><span>课程 <b>{{ decodedSummary.courses }}</b></span><span>待办 <b>{{ decodedSummary.tasks }}</b></span><span>重要日期 <b>{{ decodedSummary.countdowns }}</b></span><span>清单 <b>{{ decodedSummary.lists }}</b></span><span>账单 <b>{{ decodedSummary.bills }}</b></span><span v-if="decodedSummary.wallpapers">壁纸 <b>{{ decodedSummary.wallpapers }}</b></span></div>
           <div class="mode-options"><label :class="{ on: importMode === 'merge' }"><input v-model="importMode" type="radio" value="merge" /><span><b>安全合并</b><small>保留本机数据，重复ID另存副本</small></span></label><label :class="{ on: importMode === 'replace' }"><input v-model="importMode" type="radio" value="replace" /><span><b>覆盖所选模块</b><small>使用发送设备的数据替换本机内容</small></span></label></div>
-          <button class="btn btn-primary" @click="doImport">确认导入</button>
+          <button class="btn btn-primary" @click="requestImport">确认导入</button>
         </template>
-        <p v-if="importMessage" class="success">{{ importMessage }}</p>
-        <p v-if="scanError" class="error">{{ scanError }}</p>
-        <button v-if="undoAvailable" class="undo-button" @click="undoImport">撤销最近一次二维码导入</button>
+        <p v-if="importMessage" class="success" role="status">{{ importMessage }}</p>
+        <p v-if="scanError" class="error" role="alert">{{ scanError }}</p>
+        <button v-if="undoAvailable" class="undo-button" @click="requestUndoImport">撤销最近一次二维码导入</button>
       </section>
     </div>
+
+    <!-- 确认框写在父 Modal 的插槽里：它自己会 Teleport 到 body，所以 DOM 上仍是
+         独立浮层（叠在父 Modal 之上，Escape 只关最上层的那一个）。
+         v-if 随目标挂载：锚点在打开这一刻才创建，顺序上必然排在父 Modal 之后
+         （见 ConfirmDialog 顶部的浮层顺序说明）。 -->
+    <ConfirmDialog
+      v-if="importConfirmOpen"
+      :open="importConfirmOpen"
+      title="覆盖式导入"
+      message="覆盖会替换所选模块的本机数据，导入后仍可撤销。是否继续？"
+      confirm-label="覆盖导入"
+      @close="importConfirmOpen = false"
+      @confirm="confirmImport"
+    />
+
+    <ConfirmDialog
+      v-if="undoConfirmOpen"
+      :open="undoConfirmOpen"
+      title="撤销导入"
+      message="确定撤销最近一次二维码导入吗？"
+      confirm-label="撤销导入"
+      @close="undoConfirmOpen = false"
+      @confirm="confirmUndoImport"
+    />
   </Modal>
 </template>
 
 <style scoped>
-.tabs{display:flex;gap:5px;margin-bottom:15px;padding:4px;border-radius:10px;background:var(--bg)}.tabs button{flex:1;padding:9px;border:none;border-radius:7px;background:transparent;color:var(--muted);font-weight:700}.tabs button.on{background:#fff;color:var(--primary);box-shadow:var(--shadow-sm)}.transfer-grid,.receive-layout{display:grid;grid-template-columns:minmax(0,.9fr) minmax(320px,1.1fr);gap:16px}.setup-panel,.qr-panel,.scan-panel,.import-panel{display:flex;flex-direction:column;gap:11px;padding:15px;border:1px solid var(--border);border-radius:12px}.setup-panel h4,.import-panel h4{font-size:13px}.module-list{display:grid;grid-template-columns:1fr 1fr;gap:7px}.module-list label{display:flex;align-items:center;gap:7px;padding:9px;border:1px solid var(--border);border-radius:8px;color:var(--muted);font-size:11px}.module-list label.on{border-color:var(--primary);background:var(--primary-soft);color:var(--primary);font-weight:700}.hint{color:var(--muted);font-size:11px;line-height:1.55}.setup-panel>.btn{align-self:flex-start}.qr-panel{align-items:center;justify-content:center;min-height:390px;background:#fafbfd}.qr-head{display:flex;justify-content:space-between;align-items:center;width:100%}.qr-head>div{display:flex;flex-direction:column;gap:2px}.qr-head b{font-size:12px}.qr-head span{color:var(--muted);font-size:10px}.lock{padding:4px 7px;border-radius:6px;background:#e8f7f1;color:#087a58!important}.qr-image{width:min(330px,100%);aspect-ratio:1;object-fit:contain}.frame-progress{width:80%;height:4px;border-radius:99px;background:var(--border);overflow:hidden}.frame-progress i{display:block;height:100%;background:var(--primary);transition:width .2s}.qr-panel>p{text-align:center;color:var(--muted);font-size:10px}.summary-chips{display:flex;flex-wrap:wrap;justify-content:center;gap:5px}.summary-chips span{padding:4px 7px;border-radius:5px;background:#fff;color:var(--muted);font-size:9px}.qr-placeholder{display:grid;place-items:center;gap:10px;color:var(--muted);text-align:center}.qr-placeholder span{font-size:70px;color:#cbd3e4}.scan-actions{display:flex;gap:7px}.file-button{display:inline-flex;align-items:center;justify-content:center;padding:8px 12px;border-radius:8px;background:var(--primary-soft);color:var(--primary);font-size:12px;font-weight:700;cursor:pointer}.file-button input{display:none}.camera-box{position:relative;display:grid;place-items:center;min-height:285px;overflow:hidden;border-radius:12px;background:#172033}.camera-box video{width:100%;height:100%;min-height:285px;object-fit:cover}.camera-empty{color:#cbd3e4;text-align:center}.camera-empty span{font-size:45px}.camera-empty p{margin-top:8px;font-size:11px;line-height:1.6}.scan-frame{position:absolute;width:190px;height:190px;border:2px solid #fff;border-radius:16px;box-shadow:0 0 0 999px rgba(0,0,0,.28)}.scan-progress{display:flex;flex-direction:column;gap:7px}.scan-progress>div{display:flex;justify-content:space-between}.scan-progress b{font-size:11px}.scan-progress span{color:var(--muted);font-size:10px}.scan-progress>i{display:block;height:5px;overflow:hidden;border-radius:99px;background:var(--border)}.scan-progress>i b{display:block;height:100%;background:#16a877}.reset-link{align-self:flex-start;padding:0;border:none;background:transparent;color:var(--muted);font-size:10px}.import-panel{justify-content:center;min-height:390px}.import-empty{display:grid;place-items:center;gap:10px;color:var(--muted);text-align:center}.import-empty span{display:grid;place-items:center;width:48px;height:48px;border-radius:50%;background:var(--primary-soft);color:var(--primary);font-size:18px;font-weight:900}.import-empty p{max-width:260px;font-size:11px;line-height:1.6}.preview-title{display:flex;gap:9px;align-items:center}.preview-title>span{display:grid;place-items:center;width:34px;height:34px;border-radius:50%;background:#e8f7f1;color:#087a58;font-weight:900}.preview-title b{font-size:12px}.preview-title p{margin-top:2px;color:var(--muted);font-size:9px}.preview-summary{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}.preview-summary span{display:flex;justify-content:space-between;padding:8px;border-radius:7px;background:var(--bg);font-size:10px}.mode-options{display:flex;flex-direction:column;gap:7px}.mode-options label{display:flex;align-items:flex-start;gap:8px;padding:10px;border:1px solid var(--border);border-radius:9px;cursor:pointer}.mode-options label.on{border-color:var(--primary);background:var(--primary-soft)}.mode-options span{display:flex;flex-direction:column;gap:2px}.mode-options b{font-size:11px}.mode-options small{color:var(--muted);font-size:9px}.error{color:var(--danger);font-size:11px;line-height:1.5}.success{color:#087a58;font-size:11px}.undo-button{align-self:flex-start;padding:0;border:none;background:transparent;color:var(--primary);font-size:10px;text-decoration:underline}
+.tabs{display:flex;gap:5px;margin-bottom:15px;padding:4px;border-radius:10px;background:var(--bg)}.tabs button{flex:1;padding:9px;border:none;border-radius:7px;background:transparent;color:var(--muted);font-weight:700}.tabs button.on{background:var(--card);color:var(--primary);box-shadow:var(--shadow-sm)}.transfer-grid,.receive-layout{display:grid;grid-template-columns:minmax(0,.9fr) minmax(320px,1.1fr);gap:16px}.setup-panel,.qr-panel,.scan-panel,.import-panel{display:flex;flex-direction:column;gap:11px;padding:15px;border:1px solid var(--border);border-radius:12px}.setup-panel h4,.import-panel h4{font-size:13px}.module-list{display:grid;grid-template-columns:1fr 1fr;gap:7px}.module-list label{display:flex;align-items:center;gap:7px;padding:9px;border:1px solid var(--border);border-radius:8px;color:var(--muted);font-size:11px}.module-list label.on{border-color:var(--primary);background:var(--primary-soft);color:var(--primary);font-weight:700}.hint{color:var(--muted);font-size:11px;line-height:1.55}.setup-panel>.btn{align-self:flex-start}.qr-panel{align-items:center;justify-content:center;min-height:390px;background:var(--bg-tint)}.qr-head{display:flex;justify-content:space-between;align-items:center;width:100%}.qr-head>div{display:flex;flex-direction:column;gap:2px}.qr-head b{font-size:12px}.qr-head span{color:var(--muted);font-size:10px}.lock{padding:4px 7px;border-radius:6px;background:#e8f7f1;color:#087a58!important}.qr-image{width:min(330px,100%);aspect-ratio:1;object-fit:contain}.frame-progress{width:80%;height:4px;border-radius:99px;background:var(--border);overflow:hidden}.frame-progress i{display:block;height:100%;background:var(--primary);transition: width var(--dur-base) var(--ease-standard)}.qr-panel>p{text-align:center;color:var(--muted);font-size:10px}.summary-chips{display:flex;flex-wrap:wrap;justify-content:center;gap:5px}.summary-chips span{padding:4px 7px;border-radius:5px;background:var(--card);color:var(--muted);font-size:9px}.qr-placeholder{display:grid;place-items:center;gap:10px;color:var(--muted);text-align:center}.qr-placeholder span{font-size:70px;color:var(--ink-faint)}/* 两个大号占位图形原来共用写死的 #cbd3e4：那个值是照着深色相机框（.camera-box 的 #172033）选的，配 .camera-empty 有 10.8:1 没问题；但 .qr-placeholder 在 .qr-panel 里，底是 var(--bg-tint)，浅色下 #cbd3e4 只有 1.44:1 —— 70px 的图形也要求 3:1，等于这个占位符在浅色主题里根本看不见。--ink-faint 是能达标的最浅一档（浅色 4.98、深色 5.39）。 */.scan-actions{display:flex;gap:7px}.file-button{display:inline-flex;align-items:center;justify-content:center;padding:8px 12px;border-radius:8px;background:var(--primary-soft);color:var(--primary);font-size:12px;font-weight:700;cursor:pointer}.file-button input{display:none}.camera-box{position:relative;display:grid;place-items:center;min-height:285px;overflow:hidden;border-radius:12px;background:#172033}.camera-box video{width:100%;height:100%;min-height:285px;object-fit:cover}.camera-empty{color:#cbd3e4;text-align:center}.camera-empty span{font-size:45px}.camera-empty p{margin-top:8px;font-size:11px;line-height:1.6}.scan-frame{position:absolute;width:190px;height:190px;border:2px solid #fff;border-radius:16px;box-shadow:0 0 0 999px rgba(0,0,0,.28)}.scan-progress{display:flex;flex-direction:column;gap:7px}.scan-progress>div{display:flex;justify-content:space-between}.scan-progress b{font-size:11px}.scan-progress span{color:var(--muted);font-size:10px}.scan-progress>i{display:block;height:5px;overflow:hidden;border-radius:99px;background:var(--border)}.scan-progress>i b{display:block;height:100%;background:#16a877}.reset-link{align-self:flex-start;padding:0;border:none;background:transparent;color:var(--muted);font-size:10px}.import-panel{justify-content:center;min-height:390px}.import-empty{display:grid;place-items:center;gap:10px;color:var(--muted);text-align:center}.import-empty span{display:grid;place-items:center;width:48px;height:48px;border-radius:50%;background:var(--primary-soft);color:var(--primary);font-size:18px;font-weight:900}.import-empty p{max-width:260px;font-size:11px;line-height:1.6}.preview-title{display:flex;gap:9px;align-items:center}.preview-title>span{display:grid;place-items:center;width:34px;height:34px;border-radius:50%;background:#e8f7f1;color:#087a58;font-weight:900}.preview-title b{font-size:12px}.preview-title p{margin-top:2px;color:var(--muted);font-size:9px}.preview-summary{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}.preview-summary span{display:flex;justify-content:space-between;padding:8px;border-radius:7px;background:var(--bg);font-size:10px}.mode-options{display:flex;flex-direction:column;gap:7px}.mode-options label{display:flex;align-items:flex-start;gap:8px;padding:10px;border:1px solid var(--border);border-radius:9px;cursor:pointer}.mode-options label.on{border-color:var(--primary);background:var(--primary-soft)}.mode-options span{display:flex;flex-direction:column;gap:2px}.mode-options b{font-size:11px}.mode-options small{color:var(--muted);font-size:9px}.error{color:var(--danger);font-size:11px;line-height:1.5}.success{color:var(--success);font-size:11px}.undo-button{align-self:flex-start;padding:0;border:none;background:transparent;color:var(--primary);font-size:10px;text-decoration:underline}
 @media(max-width:760px){.transfer-grid,.receive-layout{grid-template-columns:1fr}.module-list{grid-template-columns:1fr}.qr-panel,.import-panel{min-height:300px}.scan-actions{flex-direction:column}.scan-actions>*{width:100%}.preview-summary{grid-template-columns:1fr 1fr}}
 </style>

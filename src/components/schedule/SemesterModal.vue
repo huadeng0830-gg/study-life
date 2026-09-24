@@ -28,8 +28,8 @@ function save() {
 <template>
   <Modal v-if="show" :open="show" title="📅 学期设置" @close="emit('close')">
     <div class="form">
-      <label>本学期第一周的周一日期 *</label>
-      <input v-model="value" type="date" />
+      <label for="semester-start">本学期第一周的周一日期 *</label>
+      <input id="semester-start" v-model="value" type="date" />
       <p v-if="needsNormalization" class="date-warning">已按所在周的周一处理：{{ normalizedDate }}。</p>
       <p class="muted-tip">
         设置后自动计算当前周次。例如 9月1日开学（周一），今天若在开学后第 3 周内，则显示「第 3 周」。

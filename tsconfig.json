@@ -14,7 +14,7 @@
     "types": ["node", "vite/client"],
     "skipLibCheck": true,
     "noEmit": true,
-    "strict": false
+    "strict": true
   },
   "include": ["src/**/*.js", "src/**/*.ts", "src/**/*.vue", "vite.config.js", "release.config.js"]
 }

@@ -1,22 +1,29 @@
 <script setup>
-import { computed, ref, onBeforeUnmount } from 'vue'
+import { computed, nextTick, ref, onBeforeUnmount, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import EmptyState from '../components/EmptyState.vue'
 import Modal from '../components/Modal.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import VirtualList from '../components/VirtualList.vue'
+import ContextMenu from '../components/ContextMenu.vue'
+import Toast from '../components/Toast.vue'
 import {
   fmtCountdownDate,
   sortCountdowns,
-  todayStr,
   useStoredRef,
 } from '../composables/store'
 import { useDomainCommands } from '../composables/domain/commands.js'
 import { isArchived, isTaskActionable, taskStatus } from '../composables/domain/state.js'
 import { menuPlacementFor } from '../composables/menuPlacement.js'
+import { createLongPress } from '../composables/longPress.js'
+import { appToday } from '../composables/timeContext.js'
+import { clearFocusFromRoute, focusElementWhenReady, readFocusQuery } from '../composables/focusNavigation.js'
 
 const CATEGORIES = ['学习', '生活', '纪念日', '项目', '其他']
 const domain = useDomainCommands()
 const { milestones: exams, courses, tasks } = domain
+const route = useRoute()
+const router = useRouter()
 const showPast = useStoredRef('sl_countdown_show_past', false)
 const showHistory = ref(false)
 const showForm = ref(false)
@@ -25,8 +32,10 @@ const error = ref('')
 const form = ref(emptyForm())
 const deleteTarget = ref(null)
 const reviewMessage = ref('')
-const deleteUndo = ref(null)
-let deleteUndoTimer = 0
+const focusMessage = ref('')
+const focusedMilestoneId = ref('')
+const toast = ref({ open: false, message: '', type: 'info', actionLabel: '', undoFn: null, viewFn: null, duration: 3200 })
+let focusHandled = ''
 
 function emptyForm() {
   return {
@@ -102,6 +111,10 @@ function remove() {
   if (item) deleteTarget.value = item
 }
 
+function showToast(message, { type = 'info', actionLabel = '', undoFn = null, viewFn = null, duration = 3200 } = {}) {
+  toast.value = { open: true, message, type, actionLabel, undoFn, viewFn, duration }
+}
+
 const sorted = computed(() => sortCountdowns(exams.value))
 
 const visibleItems = computed(() => {
@@ -122,7 +135,7 @@ function createReviewTask(item, event) {
     kind: 'review',
     courseId: item.courseId || '',
     course: course?.name || item.courseName || '',
-    dueDate: todayStr(),
+    dueDate: appToday.value,
     priority: 'high',
     estimateMinutes: 25,
     note: `由学习类重要日期「${item.name}」创建，可在今天页直接开始专注。`,
@@ -162,20 +175,21 @@ onBeforeUnmount(() => {
 // ---------- 卡片展示辅助：日期牌 / 短日期 / 时间轴 ----------
 const WEEKDAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
 const pad2 = (v) => String(v).padStart(2, '0')
-const todayMid = new Date(new Date().toDateString())
+const todayKey = computed(() => appToday.value)
 
 // 日期牌：目标月 / 日（无法解析时显示 --）
 function tileOf(item) {
   const t = item.countdown.target
   if (!t) return { month: '--', day: '--' }
-  return { month: pad2(t.getMonth() + 1), day: pad2(t.getDate()) }
+  return { month: pad2(item.date.slice(5, 7)), day: pad2(item.date.slice(8, 10)) }
 }
 
 // 短日期行：8月30日 · 周日（含时间时追加），不再与「本周日」等信息重复
 function shortDateOf(item) {
   const t = item.countdown.target
   if (!t) return fmtCountdownDate(item, null)
-  let text = `${t.getMonth() + 1}月${t.getDate()}日 · ${WEEKDAYS[t.getDay()]}`
+  const weekday = new Date(`${item.date}T00:00:00Z`).getUTCDay()
+  let text = `${Number(item.date.slice(5, 7))}月${Number(item.date.slice(8, 10))}日 · ${WEEKDAYS[weekday]}`
   if (item.time) text += ` ${item.time}`
   return text
 }
@@ -184,11 +198,36 @@ function shortDateOf(item) {
 function timelineOf(item) {
   const t = item.countdown.target
   if (!t) return null
-  const start = `${todayMid.getMonth() + 1}/${todayMid.getDate()}`
-  const end = `${t.getMonth() + 1}/${t.getDate()}`
-  const sameDay = t.toDateString() === todayMid.toDateString()
+  const start = `${Number(todayKey.value.slice(5, 7))}/${Number(todayKey.value.slice(8, 10))}`
+  const end = `${Number(item.date.slice(5, 7))}/${Number(item.date.slice(8, 10))}`
+  const sameDay = item.date === todayKey.value
   return { start, end, sameDay }
 }
+
+async function focusRouteMilestone() {
+  const { id } = readFocusQuery(route)
+  if (!id || focusHandled === id) return
+  focusHandled = id
+  const item = exams.value.find((entry) => String(entry.id) === id)
+  if (!item) {
+    focusMessage.value = '这条重要日期可能已删除或已移动。'
+    await clearFocusFromRoute(router, route)
+    return
+  }
+  showHistory.value = isArchived(item)
+  showPast.value = showHistory.value || Boolean(item.countdown?.isPast)
+  focusedMilestoneId.value = id
+  await nextTick()
+  const element = await focusElementWhenReady(id)
+  if (!element) focusMessage.value = '这条重要日期可能已删除或已移动。'
+  await clearFocusFromRoute(router, route)
+}
+
+watch(
+  () => [route.query.focus, exams.value.length, showHistory.value, showPast.value],
+  () => { void focusRouteMilestone() },
+  { immediate: true }
+)
 
 // ---------- 卡片右上 ··· 菜单：置顶 / 编辑 / 删除 ----------
 const openMenuId = ref(null)
@@ -222,11 +261,77 @@ function menuDelete(item) {
   deleteTarget.value = item
 }
 
+/* ---------- 长按 / 右键：在触点附近弹出上下文菜单，操作只针对这一条 ---------- */
+const contextMenu = ref(null)
+let longPressItem = null
+
+const cardLongPress = createLongPress({
+  onLongPress: ({ x, y }) => {
+    if (!longPressItem) return
+    closeMenu()
+    contextMenu.value = { item: longPressItem, x, y }
+  },
+})
+
+function onCardPointerDown(item, event) {
+  longPressItem = item
+  cardLongPress.onPointerDown(event)
+}
+
+function onCardClick(item, event) {
+  // 长按刚弹过菜单，这一次 click 必须吃掉，否则会顺手打开编辑弹窗盖住菜单
+  if (cardLongPress.shouldSuppressClick()) {
+    event?.preventDefault?.()
+    event?.stopPropagation?.()
+    return
+  }
+  openEdit(item)
+}
+
+// 桌面端用右键，与移动端长按得到同一个菜单
+function openContextMenuAt(item, event) {
+  closeMenu()
+  contextMenu.value = { item, x: Number(event?.clientX) || 0, y: Number(event?.clientY) || 0 }
+}
+
+const contextMenuTarget = computed(() => contextMenu.value?.item ?? null)
+
+const contextMenuActions = computed(() => {
+  const item = contextMenuTarget.value
+  if (!item) return []
+  const actions = [
+    { key: 'pin', label: item.pinned ? '取消置顶' : '置顶', icon: '📌' },
+    { key: 'edit', label: '编辑', icon: '✏️' },
+  ]
+  actions.push(isArchived(item)
+    ? { key: 'restore', label: '恢复', icon: '↩️' }
+    : { key: 'archive', label: '归档', icon: '📥' })
+  actions.push({ key: 'delete', label: '删除', icon: '🗑️', tone: 'danger' })
+  return actions
+})
+
+function onContextMenuSelect(action) {
+  const item = contextMenuTarget.value
+  contextMenu.value = null
+  if (!item) return
+  if (action.key === 'pin') menuPin(item)
+  else if (action.key === 'edit') menuEdit(item)
+  else if (action.key === 'delete') menuDelete(item)
+  else if (action.key === 'archive') menuArchive(item)
+  else if (action.key === 'restore') {
+    domain.restoreMilestone(item.id)
+    closeMenu()
+  }
+}
+
 function menuArchive(item) {
   domain.archiveMilestone(item.id)
-  deleteUndo.value = { item, action: 'archive' }
-  window.clearTimeout(deleteUndoTimer)
-  deleteUndoTimer = window.setTimeout(() => { deleteUndo.value = null }, 6000)
+  showToast('重要日期已归档', {
+    type: 'success',
+    actionLabel: '撤销',
+    undoFn: () => domain.restoreMilestone(item.id),
+    duration: 6000,
+  })
   closeMenu()
 }
 
@@ -237,18 +342,12 @@ function confirmDelete() {
   if (index < 0) return
   domain.deleteMilestone(target.id)
   deleteTarget.value = null
-  deleteUndo.value = { item: target, index, action: 'delete' }
-  window.clearTimeout(deleteUndoTimer)
-  deleteUndoTimer = window.setTimeout(() => { deleteUndo.value = null }, 6000)
-}
-
-function undoDelete() {
-  if (!deleteUndo.value) return
-  const { item, action } = deleteUndo.value
-  if (action === 'archive') domain.restoreMilestone(item.id)
-  else domain.restoreDeletedMilestone(item)
-  deleteUndo.value = null
-  window.clearTimeout(deleteUndoTimer)
+  showToast('重要日期已删除', {
+    type: 'warning',
+    actionLabel: '撤销',
+    undoFn: () => domain.restoreDeletedMilestone(target),
+    duration: 6000,
+  })
 }
 
 function courseLabel(item) {
@@ -260,7 +359,6 @@ if (typeof document !== 'undefined') {
 }
 onBeforeUnmount(() => {
   if (typeof document !== 'undefined') document.removeEventListener('click', closeMenu)
-  window.clearTimeout(deleteUndoTimer)
 })
 </script>
 
@@ -272,7 +370,7 @@ onBeforeUnmount(() => {
         <p class="page-desc">考试、生日、纪念日和重要截止都可以放在这里。</p>
       </div>
       <div class="page-actions">
-        <button class="btn btn-ghost" @click="showHistory = !showHistory">{{ showHistory ? '返回当前' : '历史' }}</button>
+        <button class="btn btn-ghost" :aria-expanded="showHistory" @click="showHistory = !showHistory">{{ showHistory ? '返回当前' : '历史' }}</button>
         <label class="past-toggle">
           <input v-model="showPast" type="checkbox" />
           显示已结束
@@ -281,8 +379,9 @@ onBeforeUnmount(() => {
       </div>
     </header>
     <p v-if="reviewMessage" class="review-message" role="status">✓ {{ reviewMessage }}</p>
+    <p v-if="focusMessage" class="review-message" role="status">{{ focusMessage }}</p>
 
-    <EmptyState
+    <EmptyState :level="2"
       v-if="exams.length === 0"
       class="card empty-box"
       icon="⏳"
@@ -292,7 +391,7 @@ onBeforeUnmount(() => {
       @primary="openAdd"
     />
 
-    <EmptyState
+    <EmptyState :level="2"
       v-else-if="visibleItems.length === 0"
       class="card empty-box"
       icon="✦"
@@ -309,12 +408,19 @@ onBeforeUnmount(() => {
       :estimated-height="174"
       :gap="14"
       :threshold="isNarrow ? EXAM_LIST_THRESHOLD : Number.MAX_SAFE_INTEGER"
+      :reveal-key="focusedMilestoneId"
     >
       <template #default="{ item }">
         <div
           class="card exam cvi-card"
-          :class="{ finished: item.countdown.isPast, pinned: item.pinned, hot: item.countdown.cls === 'hot' && !item.countdown.isPast, 'menu-open': openMenuId === item.id }"
-          @click="openEdit(item)"
+          :class="{ finished: item.countdown.isPast, pinned: item.pinned, hot: item.countdown.cls === 'hot' && !item.countdown.isPast, 'menu-open': openMenuId === item.id, 'focus-target-highlight': focusedMilestoneId === item.id }"
+          :data-focus-id="item.id"
+          @pointerdown="onCardPointerDown(item, $event)"
+          @pointermove="cardLongPress.onPointerMove"
+          @pointerup="cardLongPress.onPointerUp"
+          @pointercancel="cardLongPress.onPointerCancel"
+          @contextmenu.prevent="openContextMenuAt(item, $event)"
+          @click="onCardClick(item, $event)"
         >
         <!-- 顶部：轻量标签 + 操作菜单 -->
         <div class="exam-top">
@@ -351,9 +457,12 @@ onBeforeUnmount(() => {
             <div v-if="item.location" class="loc">{{ item.location }}</div>
           </div>
           <div class="count" :class="item.countdown.cls">
-            <small v-if="!item.countdown.isPast && /^\d+$/.test(String(item.countdown.text))">还有</small>
-            <span class="num" :class="{ tiny: !/^\d+$/.test(String(item.countdown.text)) }">{{ item.countdown.text }}</span>
-            <span v-if="item.countdown.label && /^\d+$/.test(String(item.countdown.text))" class="unit">{{ item.countdown.label }}</span>
+            <span v-if="item.countdown.relativeText" class="countdown-human">{{ item.countdown.relativeText }}</span>
+            <template v-else>
+              <small v-if="!item.countdown.isPast && /^\d+$/.test(String(item.countdown.text))">还有</small>
+              <span class="num" :class="{ tiny: !/^\d+$/.test(String(item.countdown.text)) }">{{ item.countdown.text }}</span>
+              <span v-if="item.countdown.label && /^\d+$/.test(String(item.countdown.text))" class="unit">{{ item.countdown.label }}</span>
+            </template>
           </div>
         </div>
 
@@ -371,42 +480,42 @@ onBeforeUnmount(() => {
 
     <Modal v-if="showForm" :open="showForm" :title="editingId ? '编辑重要日期' : '添加重要日期'" @close="showForm = false">
       <div class="form">
-        <label>名称 *</label>
-        <input v-model="form.name" placeholder="例如：期末考试、生日或项目截止日" />
+        <label for="exams-name">名称 *</label>
+        <input id="exams-name" v-model="form.name" placeholder="例如：期末考试、生日或项目截止日" />
 
         <div class="form-row">
           <div>
-            <label>目标日期 *</label>
-            <input v-model="form.date" type="date" />
+            <label for="exams-target-date">目标日期 *</label>
+            <input id="exams-target-date" v-model="form.date" type="date" />
           </div>
           <div>
-            <label>具体时间</label>
-            <input v-model="form.time" type="time" />
+            <label for="exams-time">具体时间</label>
+            <input id="exams-time" v-model="form.time" type="time" />
           </div>
         </div>
 
         <div class="form-row">
           <div>
-            <label>类型</label>
-            <select v-model="form.category">
+            <label for="exams-category">类型</label>
+            <select id="exams-category" v-model="form.category">
               <option v-for="category in CATEGORIES" :key="category" :value="category">{{ category }}</option>
             </select>
           </div>
           <div>
-            <label>重复</label>
-            <select v-model="form.repeat">
+            <label for="exams-repeat">重复</label>
+            <select id="exams-repeat" v-model="form.repeat">
               <option value="none">不重复</option>
               <option value="yearly">每年重复</option>
             </select>
           </div>
         </div>
 
-        <label>备注或地点</label>
-        <input v-model="form.location" placeholder="选填，例如：教学楼 A101" />
+        <label for="exams-location">备注或地点</label>
+        <input id="exams-location" v-model="form.location" placeholder="选填，例如：教学楼 A101" />
 
         <div v-if="form.category === '学习'" class="form-row">
-          <div><label>关联课程</label><select v-model="form.courseId"><option value="">暂不关联</option><option v-for="course in courses" :key="course.id" :value="course.id">{{ course.name }}</option></select></div>
-          <div><label>复习完成度 {{ form.reviewProgress }}%</label><input v-model.number="form.reviewProgress" type="range" min="0" max="100" step="5" /></div>
+          <div><label for="exams-course">关联课程</label><select id="exams-course" v-model="form.courseId"><option value="">暂不关联</option><option v-for="course in courses" :key="course.id" :value="course.id">{{ course.name }}</option></select></div>
+          <div><label for="exams-review-progress">复习完成度 {{ form.reviewProgress }}%</label><input id="exams-review-progress" v-model.number="form.reviewProgress" type="range" min="0" max="100" step="5" /></div>
         </div>
 
         <label class="pin-option">
@@ -414,7 +523,7 @@ onBeforeUnmount(() => {
           在列表顶部显示
         </label>
 
-        <p v-if="error" class="error">{{ error }}</p>
+        <p v-if="error" class="error" role="alert">{{ error }}</p>
 
         <div class="actions">
           <button v-if="editingId" class="btn btn-danger" @click="remove">删除</button>
@@ -431,10 +540,17 @@ onBeforeUnmount(() => {
       @close="deleteTarget = null"
       @confirm="confirmDelete"
     />
-    <div v-if="deleteUndo" class="undo-toast" role="status" aria-live="polite">
-      <span>重要日期已删除</span>
-      <button type="button" @click="undoDelete">撤销</button>
-    </div>
+    <Toast v-model:open="toast.open" :message="toast.message" :type="toast.type" :action-label="toast.actionLabel" :undo-fn="toast.undoFn" :view-fn="toast.viewFn" :duration="toast.duration" @action="() => {}" @close="toast.open = false" />
+
+    <ContextMenu
+      :open="Boolean(contextMenu)"
+      :x="contextMenu?.x || 0"
+      :y="contextMenu?.y || 0"
+      :title="contextMenuTarget?.name || ''"
+      :items="contextMenuActions"
+      @select="onContextMenuSelect"
+      @close="contextMenu = null"
+    />
   </div>
 </template>
 
@@ -485,8 +601,8 @@ onBeforeUnmount(() => {
   gap: 14px;
   padding: 18px 20px 16px;
   cursor: pointer;
-  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
-  animation: exam-in 0.2s ease-out both;
+  transition: transform var(--dur-base) var(--ease-standard), box-shadow var(--dur-base) var(--ease-standard), border-color var(--dur-base) var(--ease-standard);
+  animation: exam-in var(--dur-base) var(--ease-out) both;
 }
 @keyframes exam-in {
   from { opacity: 0; transform: translateY(4px); }
@@ -497,8 +613,8 @@ onBeforeUnmount(() => {
   box-shadow: var(--shadow-md);
 }
 .exam.finished { opacity: 0.6; }
-.exam.pinned { border-color: #cfd8fb; background: linear-gradient(180deg, #fbfcff, #fff); }
-.exam.hot { border-color: #f3c2c2; }
+.exam.pinned { border-color: color-mix(in srgb, var(--primary) 30%, var(--card)); background: linear-gradient(180deg, var(--bg-tint), var(--card)); }
+.exam.hot { border-color: color-mix(in srgb, var(--danger) 30%, var(--card)); }
 .exam.menu-open { z-index: 10; overflow: visible; content-visibility: visible; contain: none; }
 
 /* 顶部标签：小号浅色，不抢标题 */
@@ -529,7 +645,7 @@ onBeforeUnmount(() => {
   border-radius: 7px;
   background: transparent;
   cursor: pointer;
-  transition: background 0.15s, color 0.15s;
+  transition: background var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard);
 }
 .menu-btn:hover { color: var(--ink-soft); background: var(--bg); }
 .card-menu {
@@ -543,7 +659,7 @@ onBeforeUnmount(() => {
   padding: 5px;
   border: 1px solid var(--border);
   border-radius: 10px;
-  background: #fff;
+  background: var(--card);
   box-shadow: var(--shadow-md);
 }
 .card-menu button {
@@ -555,11 +671,11 @@ onBeforeUnmount(() => {
   border-radius: 7px;
   background: transparent;
   cursor: pointer;
-  transition: background 0.14s;
+  transition: background var(--dur-fast) var(--ease-standard);
 }
 .card-menu button:hover { background: var(--bg); }
 .card-menu button.danger { color: var(--danger); }
-.card-menu button.danger:hover { background: #feecec; }
+.card-menu button.danger:hover { background: color-mix(in srgb, var(--danger) 12%, var(--card)); }
 
 /* 主体：日期牌 / 标题 / 剩余天数 同一横向视觉区 */
 .exam-main {
@@ -610,10 +726,11 @@ onBeforeUnmount(() => {
   line-height: 1.02;
   letter-spacing: -0.02em;
   font-variant-numeric: tabular-nums;
-  transition: opacity 0.2s ease;
+  transition: opacity var(--dur-base) var(--ease-standard);
 }
 .count .num.tiny { font-size: 22px; letter-spacing: 0; }
 .count .unit { margin-top: 2px; color: var(--ink-soft); font-size: 12px; font-weight: 700; }
+.countdown-human { display: block; max-width: 120px; color: inherit; font-size: 14px; font-weight: 800; line-height: 1.35; text-align: right; }
 .count.hot { color: var(--danger); }
 .count.hot .unit { color: var(--danger); }
 .count.past { color: var(--ink-faint); }
@@ -695,21 +812,6 @@ onBeforeUnmount(() => {
   margin-right: auto;
 }
 .card-menu.up { top: auto; bottom: 26px; }
-.undo-toast {
-  position: fixed;
-  right: 18px;
-  bottom: calc(24px + env(safe-area-inset-bottom));
-  z-index: 90;
-  display: flex;
-  align-items: center;
-  gap: 14px;
-  padding: 11px 14px;
-  color: #fff;
-  border-radius: 10px;
-  background: #263247;
-  box-shadow: var(--shadow-lg);
-}
-.undo-toast button { padding: 3px 6px; color: #9db6ff; font-weight: 800; border: 0; background: transparent; }
 
 @media (max-width: 720px) {
   .page-head {
@@ -750,5 +852,5 @@ onBeforeUnmount(() => {
 </style>
 
 <style scoped>
-.review-message{margin:0;color:var(--success);font-size:12.5px;font-weight:700}.review-action{align-self:flex-start;margin-top:12px;padding:7px 10px;color:var(--primary);font-size:12px;font-weight:750;border:1px solid var(--primary);border-radius:8px;background:var(--primary-soft)}.review-action:hover{background:var(--primary);color:#fff}
+.review-message{margin:0;color:var(--success);font-size:12.5px;font-weight:700}.review-action{align-self:flex-start;margin-top:12px;padding:7px 10px;color:var(--primary);font-size:12px;font-weight:750;border:1px solid var(--primary);border-radius:8px;background:var(--primary-soft)}.review-action:hover{background:var(--primary);color:var(--on-primary,#fff)}
 </style>

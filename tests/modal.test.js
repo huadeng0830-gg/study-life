@@ -4,6 +4,7 @@ import { createApp, h, nextTick, ref } from 'vue'
 import Modal from '../src/components/Modal.vue'
 
 const mountedApps = []
+const originalVisualViewport = window.visualViewport
 
 function mount(render) {
   const root = document.createElement('div')
@@ -21,6 +22,8 @@ afterEach(() => {
   delete document.body.dataset.modalLockCount
   delete document.body.dataset.modalOpen
   document.body.style.overflow = ''
+  if (originalVisualViewport === undefined) delete window.visualViewport
+  else Object.defineProperty(window, 'visualViewport', { configurable: true, value: originalVisualViewport })
 })
 
 describe('Modal 页面锁', () => {
@@ -50,6 +53,36 @@ describe('Modal 页面锁', () => {
     expect(document.body.dataset.modalLockCount).toBe('1')
     expect(document.body.dataset.modalOpen).toBe('true')
     expect(document.body.style.overflow).toBe('hidden')
+  })
+
+  it('键盘打开后弹层跟随视觉视口，底部输入区不落到键盘后面', async () => {
+    const listeners = new Map()
+    const visualViewport = {
+      height: 430,
+      offsetTop: 12,
+      addEventListener: (type, listener) => listeners.set(type, listener),
+      removeEventListener: (type, listener) => {
+        if (listeners.get(type) === listener) listeners.delete(type)
+      },
+    }
+    Object.defineProperty(window, 'visualViewport', { configurable: true, value: visualViewport })
+
+    mount(() => h(Modal, { open: true, title: '键盘测试' }, {
+      default: () => h('textarea', { 'aria-label': '记录输入框' }),
+    }))
+    await nextTick()
+
+    const overlay = document.querySelector('.overlay')
+    expect(overlay.style.top).toBe('12px')
+    expect(overlay.style.height).toBe('430px')
+
+    visualViewport.height = 286
+    visualViewport.offsetTop = 8
+    listeners.get('resize')?.()
+    await nextTick()
+
+    expect(overlay.style.top).toBe('8px')
+    expect(overlay.style.height).toBe('286px')
   })
 
   it('打开时把焦点放入弹窗，Tab 和 Shift+Tab 都在弹窗内循环', async () => {

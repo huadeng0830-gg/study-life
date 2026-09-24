@@ -120,4 +120,13 @@ describe('选择性拉取的分组与范围', () => {
     expect(sanitizeSyncPayload({ sl_performance_mode: 'high' }).values.sl_performance_mode).toBe('off')
     expect(sanitizeSyncPayload({ sl_performance_mode: 'turbo' }).invalidKeys).toEqual(['sl_performance_mode'])
   })
+
+  it('拒绝超大集合和过深嵌套，避免同步资源耗尽', () => {
+    const tooMany = Array.from({ length: 100001 }, (_, index) => ({ id: `task-${index}` }))
+    expect(sanitizeSyncPayload({ sl_tasks: tooMany }).invalidKeys).toEqual(['sl_tasks'])
+    let nested = 'value'
+    for (let index = 0; index < 30; index++) nested = { nested }
+    expect(sanitizeSyncPayload({ sl_appearance: nested }).invalidKeys).toEqual(['sl_appearance'])
+    expect(() => validateSyncPayload({ sl_tasks: tooMany })).toThrow('格式异常')
+  })
 })

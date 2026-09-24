@@ -8,7 +8,9 @@
       name="viewport"
       content="width=device-width, initial-scale=1.0, viewport-fit=cover"
     />
-    <meta name="theme-color" content="#4f7cff" />
+    <!-- 与 theme.js 的默认主题色保持一致（原来是 #4f7cff，与运行时 #456fe8 不同，
+         导致首屏状态栏颜色在 JS 生效后跳变一次）。 -->
+    <meta name="theme-color" content="#456fe8" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -18,14 +20,31 @@
   </head>
   <body>
     <div id="app">
-      <div class="startup-loading" role="status" aria-live="polite">
-        <div class="startup-loading__mark">学</div>
-        <strong>正在打开学习生活台</strong>
-        <span>本地资料读取较慢时，页面仍会优先显示</span>
+      <div class="startup-loading" data-startup-placeholder role="status" aria-live="polite">
+        <div class="startup-loading__head">
+          <div class="startup-loading__mark">学</div>
+          <div class="startup-loading__copy">
+            <strong>正在打开学习生活台</strong>
+            <span>先准备好本机数据与同步状态，再显示界面</span>
+          </div>
+        </div>
+        <ol class="startup-steps">
+          <li data-startup-step="vault" data-state="active"><i></i><span>检查本机数据安全</span></li>
+          <li data-startup-step="recovery" data-state="pending"><i></i><span>恢复未完成的同步</span></li>
+          <li data-startup-step="prepare" data-state="pending"><i></i><span>准备工作台数据</span></li>
+          <li data-startup-step="mount" data-state="pending"><i></i><span>打开界面</span></li>
+        </ol>
+        <div class="startup-skeleton" aria-hidden="true">
+          <span class="sk-line sk-w40"></span>
+          <span class="sk-card"></span>
+          <span class="sk-card"></span>
+          <span class="sk-line sk-w70"></span>
+          <span class="sk-line sk-w55"></span>
+        </div>
       </div>
     </div>
     <style>
-      .startup-loading,.startup-error{box-sizing:border-box;min-height:100vh;display:grid;place-content:center;justify-items:center;gap:12px;padding:24px;text-align:center;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#1f2937;background:#f4f6fa}.startup-loading__mark{display:grid;place-items:center;width:52px;height:52px;border-radius:16px;color:#fff;font-size:24px;font-weight:800;background:#456fe8;box-shadow:0 12px 28px rgba(69,111,232,.25)}.startup-loading span,.startup-error p{max-width:320px;color:#6b7280;font-size:13px;line-height:1.6}.startup-error h1{margin:0;font-size:22px}.startup-error button{padding:10px 18px;border:0;border-radius:10px;color:#fff;font-weight:700;background:#456fe8}
+      .startup-loading,.startup-error{box-sizing:border-box;min-height:100vh;display:grid;align-content:center;justify-items:center;gap:18px;padding:24px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#1f2937;background:#f4f6fa}.startup-loading__head{display:flex;align-items:center;gap:12px}.startup-loading__mark{display:grid;place-items:center;width:52px;height:52px;border-radius:16px;color:#fff;font-size:24px;font-weight:800;background:#456fe8;box-shadow:0 12px 28px rgba(69,111,232,.25)}.startup-loading__copy{display:grid;gap:3px}.startup-loading__copy strong{font-size:16px}.startup-loading__copy span{max-width:280px;color:#6b7280;font-size:12.5px;line-height:1.5}.startup-steps{display:grid;gap:7px;width:min(360px,100%);margin:0;padding:0;list-style:none;text-align:left}.startup-steps li{display:flex;align-items:center;gap:9px;color:#9aa3b2;font-size:12.5px}.startup-steps i{flex:0 0 12px;width:12px;height:12px;border:2px solid #cbd3e1;border-radius:50%}.startup-steps li[data-state="active"]{color:#1f2937;font-weight:700}.startup-steps li[data-state="active"] i{border-color:#456fe8;background:#456fe8;animation:startup-pulse 1.4s ease-in-out infinite}.startup-steps li[data-state="done"]{color:#5b6478}.startup-steps li[data-state="done"] i{border-color:#14966d;background:#14966d}.startup-skeleton{display:grid;gap:9px;width:min(360px,100%)}.sk-line,.sk-card{display:block;border-radius:10px;background:linear-gradient(90deg,#e8ecf4,#f2f5fa,#e8ecf4);background-size:200% 100%;animation:startup-shimmer 1.5s linear infinite}.sk-line{height:11px}.sk-w40{width:40%}.sk-w55{width:55%}.sk-w70{width:70%}.sk-card{height:58px;border-radius:14px}@keyframes startup-shimmer{from{background-position:200% 0}to{background-position:-200% 0}}@keyframes startup-pulse{0%,100%{box-shadow:0 0 0 3px rgba(69,111,232,.14)}50%{box-shadow:0 0 0 7px rgba(69,111,232,.06)}}.startup-error p{max-width:320px;color:#6b7280;font-size:13px;line-height:1.6}.startup-error h1{margin:0;font-size:22px}.startup-error button{padding:10px 18px;border:0;border-radius:10px;color:#fff;font-weight:700;background:#456fe8}@media (prefers-reduced-motion:reduce){.sk-line,.sk-card,.startup-steps li[data-state="active"] i{animation:none}}
     </style>
     <script type="module" src="/src/main.js"></script>
   </body>

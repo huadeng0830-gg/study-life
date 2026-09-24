@@ -1,6 +1,8 @@
 import { computed } from 'vue'
-import { useStoredRef } from './store/index.js'
+// 只依赖 core，避免时间工具 -> 设置策略 -> store/index -> countdown 的循环依赖。
+import { clock, useStoredRef } from './store/core.js'
 import { currentCampusId, currentSeasonId } from './store/timeConfig.js'
+import { autoSyncEnabled as boundAutoSyncEnabled } from './syncSpace.js'
 
 export const DEFAULT_SETTINGS_POLICY = Object.freeze({
   clipboardHint: true,
@@ -32,6 +34,7 @@ export function resolveSettingsPolicy() {
   const raw = settings.value && typeof settings.value === 'object' ? settings.value : {}
   const reminders = raw.defaultReminders && typeof raw.defaultReminders === 'object' ? raw.defaultReminders : {}
   return {
+    autoSyncEnabled: boundAutoSyncEnabled.value,
     timezone: validTimezone(raw.timezone),
     campusId: currentCampusId(),
     seasonId: currentSeasonId(),
@@ -55,6 +58,11 @@ export function defaultAccount(value = '') {
 }
 
 export function defaultReminderMinutes(type, value) {
+  // Number(null) 和 Number('') 都等于 0，会让「没填提醒时间」被当成
+  // 「提前 0 分钟提醒」，等于到点才提醒。空值必须先回退到设置里的默认值。
+  if (value === null || value === undefined || value === '') {
+    return settingsPolicy.value.defaultReminders[type] ?? 0
+  }
   const explicit = Number(value)
   if (Number.isFinite(explicit) && explicit >= 0) return Math.round(explicit)
   return settingsPolicy.value.defaultReminders[type] ?? 0
@@ -69,14 +77,48 @@ function formattedParts(value, timezone = settingsPolicy.value.timezone) {
   return Object.fromEntries(parts.filter((part) => part.type !== 'literal').map((part) => [part.type, part.value]))
 }
 
-export function policyDateKey(value = new Date(), timezone = settingsPolicy.value.timezone) {
+export function policyDateKey(value = clock.value, timezone = settingsPolicy.value.timezone) {
   const parts = formattedParts(value, timezone)
   return `${parts.year}-${parts.month}-${parts.day}`
 }
 
-export function policyTimeKey(value = new Date(), timezone = settingsPolicy.value.timezone) {
+export function policyTimeKey(value = clock.value, timezone = settingsPolicy.value.timezone) {
   const parts = formattedParts(value, timezone)
   return `${parts.hour}:${parts.minute}`
+}
+
+/**
+ * 把各种形态的时间戳统一成毫秒数。
+ *
+ * 历史数据里的 createdAt 既可能是 ISO 字符串（commands.js 的 stamp()），
+ * 也可能是毫秒数字（scheduleRecognition.js 写过 Date.now()）。
+ * 直接 `Date.parse(毫秒数字)` 会得到 NaN，于是"最近使用"加权、
+ * 重复记账提醒这类依赖时间差的逻辑会静默失效（而不是报错）。
+ */
+export function timestampOf(value) {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : 0
+  const text = String(value ?? '').trim()
+  if (!text) return 0
+  if (/^\d+$/.test(text)) {
+    const numeric = Number(text)
+    return Number.isFinite(numeric) ? numeric : 0
+  }
+  const parsed = Date.parse(text)
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+/**
+ * 把 createdAt 归一到「应用时区下的日期」（YYYY-MM-DD）。
+ *
+ * 原来各处用 `String(createdAt).slice(0, 10)` 直接切 ISO 字符串，取到的是
+ * **UTC 日期**；而业务的 `date` 字段走 policyDateKey（本地或用户配置的时区）。
+ * 在 UTC+8 的 00:00–08:00 两者会差一天，月度/年度回顾会把笔记算进前一天，
+ * 数字形态的 createdAt 更会直接得到空字符串。
+ */
+export function createdDateKey(value, timezone) {
+  const stamp = timestampOf(value)
+  if (!stamp) return ''
+  return policyDateKey(new Date(stamp), timezone)
 }
 
 // 将“配置时区中的日期时间”转换为时间戳；local 保持浏览器原有语义。

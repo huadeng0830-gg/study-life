@@ -1,5 +1,5 @@
 <script setup>
-import { computed, reactive, watch } from 'vue'
+import { computed, nextTick, reactive, ref, watch } from 'vue'
 import Modal from '../Modal.vue'
 import { PALETTE, MAX_WEEK } from '../../composables/store/utils.js'
 import { periodIndex, periodLabelById, periodRangeById } from '../../composables/store/timeConfig.js'
@@ -20,12 +20,40 @@ const props = defineProps({
 const emit = defineEmits(['close', 'save', 'delete', 'archive', 'add-another', 'add-homework'])
 
 const DAYS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
+
+// 标记颜色的色块按钮把「颜色」完全交给 background 表达，元素里一个字都没有。
+// 读屏用户听到的是一串无名按钮，只能靠试。这里给 PALETTE 里的每个色值配一个
+// 中文名，让色块能被念出来；值不在表里时回退成原始色值，至少不是空的。
+// 不复用 theme.js 的 THEMES：那是主题色（绿是 #0ea271），与课程标记色不是同一套。
+const COLOR_NAMES = {
+  '#456fe8': '蓝色',
+  '#10b981': '绿色',
+  '#f59e0b': '琥珀色',
+  '#ef4444': '红色',
+  '#8b5cf6': '紫色',
+  '#ec4899': '粉色',
+  '#14b8a6': '青色',
+  '#f97316': '橙色',
+}
+const colorName = (hex) => COLOR_NAMES[hex] || hex
 const draft = reactive({})
-const error = reactive({ message: '' })
+const error = reactive({ message: '', field: '' })
+const nameInput = ref(null)
+
+// 单一入口，保证 error.message 与 error.field 不会各自漂移
+//（与 NotesView / LedgerView / EventsView 同一套约定）。
+// field 非空表示这是字段校验错误：控件标 aria-invalid，并把焦点移回去。
+// 补这套的原因是：此前「请填写课程名称」只渲染在表单最底部的 <p class="error">，
+// 既不关联到 #course-name、也没有 role="alert"——读屏用户点保存后什么都听不到。
+function setError(message, field = '') {
+  error.message = message
+  error.field = message ? field : ''
+  if (message && field === 'name') nextTick(() => nameInput.value?.focus())
+}
 
 function syncDraft() {
   Object.assign(draft, JSON.parse(JSON.stringify(props.form)))
-  error.message = ''
+  setError('')
 }
 
 watch(() => [props.open, props.editingId], ([open]) => {
@@ -82,7 +110,7 @@ function coursePeriodText(course) {
 
 function save() {
   if (!String(draft.name ?? '').trim()) {
-    error.message = '请填写课程名称'
+    setError('请填写课程名称', 'name')
     return
   }
   let start = draft.start
@@ -119,37 +147,46 @@ function requestDelete() {
 <template>
   <Modal :open="open" :title="editingId ? '编辑课程' : '添加课程'" @close="emit('close')">
     <div class="form">
-      <label>课程名称 *</label>
-      <input v-model="draft.name" placeholder="例如：高等数学" />
+      <label for="course-name">课程名称 *</label>
+      <input
+          id="course-name"
+          ref="nameInput"
+          v-model="draft.name"
+          :aria-invalid="error.field === 'name' || undefined"
+          :aria-describedby="error.message ? 'course-editor-error' : undefined"
+          placeholder="例如：高等数学"
+        />
 
-      <label>任课老师</label>
-      <input v-model="draft.teacher" placeholder="选填" />
+      <label for="course-teacher">任课老师</label>
+      <input id="course-teacher" v-model="draft.teacher" placeholder="选填" />
 
-      <label>上课地点</label>
-      <input v-model="draft.room" placeholder="例如：教学楼 A201" />
+      <label for="course-room">上课地点</label>
+      <input id="course-room" v-model="draft.room" placeholder="例如：教学楼 A201" />
 
       <div class="row">
-        <div><label>校区</label><select v-model="draft.campusId"><option value="">跟随当前校区</option><option v-for="campus in timeConfig.campuses" :key="campus.id" :value="campus.id">{{ campus.name }}</option></select></div>
-        <div><label>提前出发（分钟）</label><input v-model.number="draft.travelMinutes" type="number" min="0" max="180" inputmode="numeric" placeholder="选填" /></div>
+        <div><label for="course-campus">校区</label><select id="course-campus" v-model="draft.campusId"><option value="">跟随当前校区</option><option v-for="campus in timeConfig.campuses" :key="campus.id" :value="campus.id">{{ campus.name }}</option></select></div>
+        <div><label for="course-travel-minutes">提前出发（分钟）</label><input id="course-travel-minutes" v-model.number="draft.travelMinutes" type="number" min="0" max="180" inputmode="numeric" placeholder="选填" /></div>
       </div>
 
       <div class="row">
-        <div><label>星期</label><select v-model.number="draft.day"><option v-for="(day, index) in DAYS" :key="day" :value="index">{{ day }}</option></select></div>
-        <div><label>开始</label><select v-model="draft.start"><option v-for="period in timeConfig.periods" :key="period.id" :value="period.id">{{ periodOption(period.id) }}</option></select></div>
-        <div><label>结束</label><select v-model="draft.end"><option v-for="period in timeConfig.periods" :key="period.id" :value="period.id">{{ periodOption(period.id) }}</option></select></div>
+        <div><label for="course-day">星期</label><select id="course-day" v-model.number="draft.day"><option v-for="(day, index) in DAYS" :key="day" :value="index">{{ day }}</option></select></div>
+        <div><label for="course-start">开始</label><select id="course-start" v-model="draft.start"><option v-for="period in timeConfig.periods" :key="period.id" :value="period.id">{{ periodOption(period.id) }}</option></select></div>
+        <div><label for="course-end">结束</label><select id="course-end" v-model="draft.end"><option v-for="period in timeConfig.periods" :key="period.id" :value="period.id">{{ periodOption(period.id) }}</option></select></div>
       </div>
 
       <div class="row">
-        <div><label>开始周</label><select v-model.number="draft.startWeek"><option v-for="week in MAX_WEEK" :key="week" :value="week">第{{ week }}周</option></select></div>
-        <div><label>结束周</label><select v-model.number="draft.endWeek"><option v-for="week in MAX_WEEK" :key="week" :value="week">第{{ week }}周</option></select></div>
-        <div><label>上课周类型</label><select v-model="draft.weekType"><option value="all">每周上</option><option value="odd">单周上</option><option value="even">双周上</option></select></div>
+        <div><label for="course-start-week">开始周</label><select id="course-start-week" v-model.number="draft.startWeek" :aria-describedby="formCellClash ? 'course-week-clash' : undefined"><option v-for="week in MAX_WEEK" :key="week" :value="week">第{{ week }}周</option></select></div>
+        <div><label for="course-end-week">结束周</label><select id="course-end-week" v-model.number="draft.endWeek" :aria-describedby="formCellClash ? 'course-week-clash' : undefined"><option v-for="week in MAX_WEEK" :key="week" :value="week">第{{ week }}周</option></select></div>
+        <div><label for="course-week-type">上课周类型</label><select id="course-week-type" v-model="draft.weekType"><option value="all">每周上</option><option value="odd">单周上</option><option value="even">双周上</option></select></div>
       </div>
 
       <div v-if="formCellCourses.length" class="cell-existing">
         <span class="ce-label">此格已有：</span>
         <span v-for="course in formCellCourses" :key="course.id" class="cell-chip" :class="{ clash: overlaps(course) }">{{ course.name }}（{{ weekLabel(course) }}）</span>
       </div>
-      <p v-if="formCellClash" class="error">⚠️ 周次与「{{ formCellClash.name }}」重叠，请调整开始/结束周，否则两门课会叠在一起</p>
+      <!-- 周次冲突是随着开始/结束周的选择实时出现的，用 role="alert" 让它一出现就被念出来，
+             并让两个周次下拉框通过 aria-describedby 指向它——否则读屏用户只看到两个「正常」的下拉框。 -->
+      <p v-if="formCellClash" id="course-week-clash" class="error" role="alert">⚠️ 周次与「{{ formCellClash.name }}」重叠，请调整开始/结束周，否则两门课会叠在一起</p>
 
       <section v-if="editingId" class="course-links" aria-label="课程关联事项">
         <div class="course-links-head"><div><b>关联事项</b><small>删除课程只会解除关联，待办和重要日期会保留。</small></div><span v-if="linkedReviewProgress !== null" class="link-progress">复习 {{ linkedReviewProgress }}%</span></div>
@@ -160,8 +197,8 @@ function requestDelete() {
       </section>
 
       <label>标记颜色</label>
-      <div class="colors"><button v-for="color in PALETTE" :key="color" type="button" class="swatch" :style="{ background: color }" :class="{ picked: draft.color === color }" @click="draft.color = color"></button></div>
-      <p v-if="error.message" class="error">{{ error.message }}</p>
+      <div class="colors"><button v-for="color in PALETTE" :key="color" type="button" class="swatch" :style="{ background: color }" :class="{ picked: draft.color === color }" :aria-label="`标记颜色 ${colorName(color)}`" :aria-pressed="draft.color === color" @click="draft.color = color"></button></div>
+      <p v-if="error.message" id="course-editor-error" class="error" role="alert">{{ error.message }}</p>
       <div class="actions"><button v-if="editingId" class="btn btn-ghost" @click="emit('archive', editingCourse)">{{ isArchived(editingCourse) ? '恢复课程' : '归档课程' }}</button><button v-if="editingId" class="btn btn-danger" @click="requestDelete">删除课程</button><button class="btn btn-primary" @click="save">保存</button></div>
       <p v-if="editingId" class="cell-add-hint">同一格子可以放不同周次的课（如 1-6 周上 A、7-16 周上 B） <button class="btn btn-ghost" @click="emit('add-another')">＋ 在此格添加另一门课</button></p>
     </div>
@@ -182,8 +219,8 @@ function requestDelete() {
 .error { color: var(--danger); font-size: 13px; }
 .cell-existing { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 8px 10px; background: var(--bg-tint); border-radius: 9px; }
 .ce-label { color: var(--ink-faint); font-size: 11px; font-weight: 700; }
-.cell-chip { padding: 3px 8px; color: var(--text); font-size: 12px; border: 1px solid var(--border); border-radius: 999px; background: #fff; }
-.cell-chip.clash { color: var(--danger); border-color: var(--danger); background: #fff5f4; }
+.cell-chip { padding: 3px 8px; color: var(--text); font-size: 12px; border: 1px solid var(--border); border-radius: 999px; background: var(--card); }
+.cell-chip.clash { color: var(--danger); border-color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, var(--card)); }
 .course-links { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
 .course-links-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
 .course-links-head b { font-size: 13px; }

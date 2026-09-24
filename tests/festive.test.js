@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { builtInFestivalTable, DEFAULT_FESTIVE_CONFIG, festiveFor, normalizeFestiveConfig } from '../src/composables/festive.js'
+import { builtInFestivalTable, DEFAULT_FESTIVE_CONFIG, festiveFor, festiveForAsync, normalizeFestiveConfig } from '../src/composables/festive.js'
 
 describe('festive.js', () => {
   it('配置归一化修复坏数据（非法日期 / 空标签纪念日）', () => {
@@ -28,8 +28,8 @@ describe('festive.js', () => {
     expect(result.accentColor).toBeTruthy()
   })
 
-  it('命中 2026 春节（农历表）并返回 lantern 装饰', () => {
-    const result = festiveFor('2026-02-17', DEFAULT_FESTIVE_CONFIG)
+  it('命中 2026 春节（内置农历日期表）并返回 lantern 装饰', async () => {
+    const result = await festiveForAsync('2026-02-17', DEFAULT_FESTIVE_CONFIG)
     expect(result.key).toBe('spring')
     expect(result.decor).toBe('lantern')
   })
@@ -52,15 +52,15 @@ describe('festive.js', () => {
     expect(result.message).toContain('一年')
   })
 
-  it('使用历法计算，而非手填年份表：可识别 2031 春节', () => {
-    expect(festiveFor('2031-01-23', DEFAULT_FESTIVE_CONFIG)?.key).toBe('spring')
+  it('使用内置农历日期表识别 2031 春节（超出年份表则跳过）', async () => {
+    expect((await festiveForAsync('2031-01-23', DEFAULT_FESTIVE_CONFIG))?.key).toBe('spring')
   })
 
-  it('内置节日对照表与内置常量一致', () => {
-    const defaultTable = builtInFestivalTable()
+  it('内置节日对照表与内置常量一致', async () => {
+    const defaultTable = await builtInFestivalTable()
     expect(defaultTable.solar.map((item) => item.name)).toEqual(['元旦', '情人节', '愚人节', '儿童节', '国庆节', '圣诞节'])
     expect(defaultTable.lunarFestivals.map((item) => item.name)).toEqual(['春节', '元宵节', '清明节', '端午节', '中秋节', '重阳节', '冬至'])
-    const table = builtInFestivalTable(2026)
+    const table = await builtInFestivalTable(2026)
     expect(table.lunar.map((row) => row.year)).toEqual([2020, 2021, 2022, 2023, 2024, 2025, 2026, 2027, 2028, 2029, 2030, 2031, 2032])
     for (const row of table.lunar) {
       expect(Object.values(row.cells).filter(Boolean)).toHaveLength(7)

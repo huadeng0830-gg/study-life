@@ -139,4 +139,32 @@ describe('QuickRecordPanel 保存交互', () => {
     expect(document.body.querySelector('.results')).toBeNull()
     expect(document.body.querySelector('[role="alert"]')).toBeNull()
   })
+
+  it('预览提供人话确认与就地切换类型，不展示技术置信度', async () => {
+    mountPanel()
+    await enterSmartText('午饭18元')
+
+    expect(document.body.querySelector('.type-switch')?.textContent).toContain('支出')
+    expect(document.body.querySelector('.confidence')).toBeNull()
+    buttonWithText('收入').click()
+    await nextTick()
+    expect(document.body.querySelector('.record-head')?.textContent).toContain('收入')
+  })
+
+  it('手机端 Enter 保留换行，Ctrl/Cmd + Enter 才提交', async () => {
+    const originalWidth = window.innerWidth
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 })
+    try {
+      const events = mountPanel()
+      await enterSmartText('午饭18元')
+      const input = document.body.querySelector('.smart-input')
+      const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+      input.dispatchEvent(enter)
+      await nextTick()
+      expect(enter.defaultPrevented).toBe(false)
+      expect(events).toEqual([])
+    } finally {
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: originalWidth })
+    }
+  })
 })

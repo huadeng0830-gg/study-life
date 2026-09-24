@@ -1,6 +1,7 @@
 <script setup>
-import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import Modal from '../Modal.vue'
+import ConfirmDialog from '../ConfirmDialog.vue'
 import TaskProgress from '../TaskProgress.vue'
 import { useTaskProgress } from '../../composables/taskProgress.js'
 import {
@@ -29,6 +30,8 @@ import {
   seasonConflicts,
 } from '../../composables/store/timeConfig.js'
 import { useStoredRef } from '../../composables/store/core.js'
+import { useTabKeys } from '../../composables/tabKeys.js'
+import { timeImportTab, timeSettingsTab } from '../../composables/modalSections.js'
 
 const props = defineProps({
   show: { type: Boolean, required: true },
@@ -40,7 +43,16 @@ const emit = defineEmits(['close'])
 const courses = useStoredRef('sl_courses', [])
 
 const settingError = ref('')
-const settingsTab = ref('plans')
+// 分区状态存在 composables/modalSections.js 的模块级 ref 里。这个浮层的父级没有 v-if，
+// 实例常驻，原本就已经"跨开关保留"；改成模块级 ref 是为了与外观/本地迁移统一语义。
+const settingsTab = timeSettingsTab
+// 设置分区的键盘模型。select 走 switchSettingsTab：它会先过草稿守卫，
+// 被否决时返回 false，useTabKeys 就不会把焦点移到一个并未选中的 tab 上。
+const { onKeydown: onSettingsTabKeydown, tabIndexFor: settingsTabIndex } = useTabKeys({
+  keys: ['plans', 'base'],
+  active: () => settingsTab.value,
+  select: (key) => switchSettingsTab(key),
+})
 const tabHints = {
   plans: '一次只编辑一个「作息季 × 校区」方案。支持导入、复制与批量平移，修改需点击保存才会生效。',
   base: '管理校区、作息季与节次。删除前会检查影响范围；作息季可设置生效日期与适用校区。',
@@ -65,6 +77,13 @@ function onAddCampus() {
   else settingError.value = '请输入校区名称'
 }
 
+// 删除校区 / 作息季的确认文案依赖**确认前**算出的 planCount / isCurrent，
+// 所以整段文案在打开对话框之前就定稿存进目标 ref，确认时不再重算。
+// 晚算会读到用户已经改过的配置（对话框期间还能从别处改数据），
+// 于是"将删除 3 个方案"与真正删掉的对不上。
+const removeCampusTarget = ref(null)
+const removeSeasonTarget = ref(null)
+
 function onRemoveCampus(id) {
   settingError.value = ''
   const cfg = timeConfig.value
@@ -74,8 +93,14 @@ function onRemoveCampus(id) {
   const isCurrent = currentCampusId() === id
   const lines = [`确定删除校区「${campus?.name}」？`, `将同时删除 ${planCount} 个作息季在该校区的时间方案。`]
   if (isCurrent) lines.push('该校区是当前查看的校区，删除后会切换到其他校区。')
-  if (!window.confirm(lines.join('\n'))) return
-  removeCampus(id)
+  removeCampusTarget.value = { id, message: lines.join('\n') }
+}
+
+function confirmRemoveCampus() {
+  const target = removeCampusTarget.value
+  removeCampusTarget.value = null
+  if (!target) return
+  removeCampus(target.id)
   initPlanSelection()
 }
 
@@ -103,8 +128,15 @@ function onRemoveSeason(id) {
   const activeId = timeConfig.value.autoSeason ? autoSeasonIdFor(currentCampusId()) : currentSeasonId()
   const lines = [`确定删除作息季「${season?.name}」？`, `将同时删除 ${campusCount} 个校区在该季的时间方案。`]
   if (activeId === id) lines.push('该季是当前生效的作息季，删除后会自动切换到其他作息季。')
-  if (!window.confirm(lines.join('\n'))) return
-  removeSeason(id)
+  // 文案同上：确认前定稿，不晚算。
+  removeSeasonTarget.value = { id, message: lines.join('\n') }
+}
+
+function confirmRemoveSeason() {
+  const target = removeSeasonTarget.value
+  removeSeasonTarget.value = null
+  if (!target) return
+  removeSeason(target.id)
   initPlanSelection()
 }
 
@@ -245,23 +277,67 @@ function initPlanSelection() {
   }
 }
 
-// 切换组合前检查未保存修改
-function guardDraft() {
+/* ---------- 放弃未保存草稿：两阶段确认 ---------- */
+// 【为什么不能把守卫改成 async】它的返回值决定"要不要把焦点移到新 tab"：
+//   1. useTabKeys 是**同步**判定的（`if (select(key) === false) return`，见
+//      composables/tabKeys.js 的注释）。改成异步就会让焦点先跑到一个并未选中的
+//      tab 上，与 roving tabindex 的状态自相矛盾；而 tabKeys.js 有多个调用方，
+//      不能为了这一处把整个键盘模型改成 await。
+//   2. switchPlan 与 tryCloseTimeEditor 原本也是同步消费这个布尔值。
+// 所以改成两阶段：现阶段只把"用户想做的事"挂起并立刻返回，真正的动作放到
+// ConfirmDialog 的 @confirm 里执行。三个入口（切方案 / 切分区 / 关闭弹窗）问的是
+// 同一个问题（是否放弃未保存修改），因此共用一份待确认状态与一个对话框——
+// 三个入口各挂一个文案相同的对话框，只会让浮层栈与文案都变成三份。
+const pendingDraftAction = ref(null)
+
+// 返回 true = 可以立即继续；false = 已把动作挂起，等用户在对话框里决定。
+function guardDraft(action) {
   if (!draftDirty.value) return true
-  return window.confirm('当前方案有未保存的修改，确定放弃这些修改吗？')
+  pendingDraftAction.value = action
+  return false
 }
 
 function switchPlan(seasonId, campusId) {
   if (planKeyOf(seasonId, campusId) === currentPlanKey.value) return
-  if (!guardDraft()) return
+  if (!guardDraft({ kind: 'plan', seasonId, campusId })) return
   loadPlanDraft(seasonId, campusId)
 }
 
 function switchSettingsTab(tab) {
-  if (tab === settingsTab.value) return
-  if (draftDirty.value && !guardDraft()) return
-  if (draftDirty.value) discardDraft()
+  if (tab === settingsTab.value) return true
+  // 返回 false：useTabKeys 因此不会移动焦点（焦点移动改由下面手动补）。
+  if (!guardDraft({ kind: 'tab', tab })) return false
   settingsTab.value = tab
+  return true
+}
+
+/** 用户确认放弃：按挂起的动作继续执行。 */
+function confirmDiscardDraft() {
+  const action = pendingDraftAction.value
+  pendingDraftAction.value = null
+  if (!action) return
+  if (action.kind === 'plan') {
+    loadPlanDraft(action.seasonId, action.campusId)
+    return
+  }
+  if (action.kind === 'tab') {
+    // 与改造前一致：确认放弃后先把草稿复位，再切分区。
+    if (draftDirty.value) discardDraft()
+    settingsTab.value = action.tab
+    // useTabKeys 因为 select 返回 false 而没有移动焦点，这里必须手动补上，
+    // 否则焦点会停在一个并未选中的 tab 上。用 nextTick 是因为 ConfirmDialog
+    // 关闭时 Modal 会先把焦点还给它的 previousFocus（就是原来那个 tab 按钮），
+    // 同步 focus 会被那一步覆盖掉。
+    nextTick(() => {
+      document.getElementById(`time-settings-tab-${action.tab}`)?.focus?.()
+    })
+    return
+  }
+  if (action.kind === 'close') {
+    // 顺序不能反：先按原样复位草稿，再关闭（改造前 loadPlanDraft 就在 emit('close') 之前）。
+    loadPlanDraft(planSeasonId.value, planCampusId.value)
+    emit('close')
+  }
 }
 
 function markDirty() {
@@ -288,30 +364,21 @@ function discardDraft() {
   loadPlanDraft(planSeasonId.value, planCampusId.value)
 }
 
-function openTimeSettings() {
-  const periods = timeConfig.value.periods
-  if (!gen.startId || periodIndex(gen.startId) < 0) {
-    gen.startId = periods[1]?.id ?? periods[0]?.id ?? null
-  }
-  if (gen.lunchAfterIdx >= periods.length - 1) gen.lunchAfterIdx = Math.max(1, periods.length - 3)
-  if (gen.dinnerAfterIdx >= periods.length - 1) gen.dinnerAfterIdx = Math.max(2, periods.length - 2)
-  settingError.value = ''
-  settingsTab.value = 'plans'
-}
+// 这里曾有一个 `openTimeSettings()`：它做的是「按当前 periods 修正 gen.startId /
+// lunchAfterIdx / dinnerAfterIdx、清 settingError、并把 settingsTab 复位成 plans」。
+// 初始化已经搬进下面那个 watcher（所以它早就**零引用**），而「打开时把分区复位」正是
+// 分区持久化改造要删掉的行为（见 composables/modalSections.js 与其静态棘轮），
+// 所以整个函数一并删除：它从未被调用，删除不可能改变任何运行时行为。
 
-// 组件以 v-if 方式首次挂载时 props.show 已经是 true；普通 watch 不会在
-// 首次执行，导致草稿数组为空，时间输入框访问 draft[index] 时直接报错。
-watch(() => props.show, (open) => {
-  if (open) initPlanSelection()
-}, { immediate: true })
+// 打开设置时初始化（watcher 本体在下面 importOpen/importTab 声明之后）
 
-// 关闭弹窗时守卫（确认放弃则重置草稿）
+// 关闭弹窗时守卫（确认放弃才复位草稿并关闭）。
+// 【取消时必须什么都不做】Modal 的 close 有 4 个来源（Esc / 遮罩点击 / ✕ / 抽屉下拖），
+// 全是**同步 emit**、不会 await 处理器。所以这里既不清草稿也不 emit('close')——
+// 一旦在挂起前就动了草稿，用户点「继续编辑」回来会发现改动已经没了。
 function tryCloseTimeEditor() {
   if (!draftDirty.value) { emit('close'); return }
-  if (window.confirm('当前方案有未保存的修改，确定放弃这些修改吗？')) {
-    loadPlanDraft(planSeasonId.value, planCampusId.value)
-    emit('close')
-  }
+  pendingDraftAction.value = { kind: 'close' }
 }
 
 // ---------- 上午/下午/晚上 视觉分组（按开始时间自动划分，不写死节次区间） ----------
@@ -477,8 +544,33 @@ function toggleGenPreview() {
 
 /* ---------- 新建 / 导入作息（图片 OCR + 粘贴文本，统一预览确认） ---------- */
 const importOpen = ref(false)
-const importTab = ref('paste') // paste | image
+const importTab = timeImportTab // paste | image
+const { onKeydown: onImportTabKeydown, tabIndexFor: importTabIndex } = useTabKeys({
+  keys: ['paste', 'image'],
+  active: () => importTab.value,
+  select: (key) => {
+    importTab.value = key
+  },
+})
 const pasteText = ref('')
+
+/**
+ * 打开设置时初始化：优先当前生效组合，否则第一个有效组合。
+ *
+ * 【为什么这个 watcher 单独放在这里，而不跟其它 watch 排在一起】
+ * 它必须是 `immediate`：组件以 `v-if` 方式首次挂载时 `props.show` 已经是 true，
+ * 普通 watch 不会在首次执行，草稿数组就会是空的，模板里的时间输入框访问
+ * `draft[index]` 时直接报错。而 `immediate` 的回调是在 setup 期间**同步**跑的，
+ * `initPlanSelection()` → `loadPlanDraft()` 会去写 `batchOpen` / `copyOpen` /
+ * `genPreview` / `importOpen` 这几个 ref —— 它们都声明在本行之上几百行。
+ * 之前这个 watcher 放在文件靠上的位置（紧随 `initPlanSelection` 之后），
+ * 于是 `props.show` 一开始就是 true 的挂载路径会抛
+ * `ReferenceError: Cannot access 'batchOpen' before initialization`，组件连挂载都完不成。
+ * 移到这些声明**之后**，既保住"首次渲染前完成初始化"，又不再踩暂时性死区。
+ */
+watch(() => props.show, (open) => {
+  if (open) initPlanSelection()
+}, { immediate: true })
 const importError = ref('')
 const lastScheduleImage = ref(null)
 
@@ -556,7 +648,9 @@ function toggleImport() {
   genPreview.value = null
   if (importOpen.value) {
     importError.value = ''
-    importTab.value = recognitionDraft.value ? importTab.value : 'paste'
+    // 不再把导入方式重置为"粘贴"：与主分区一致，记住上次用的方式（见 modalSections.js）。
+    // 原来那行是 `importTab.value = recognitionDraft.value ? importTab.value : 'paste'`，
+    // 即"有识别草稿时保留、否则重置"；现在两种情况都保留，语义只增不减。
   }
 }
 
@@ -1021,24 +1115,65 @@ defineExpose({ stopBackgroundWork })
 <template>
   <Modal v-if="show" :open="show" title="🕐 作息与时间设置" @close="tryCloseTimeEditor">
     <div class="settings">
-      <div class="tab-bar" role="tablist">
+      <!-- 同页另两个 tablist（AppearanceSettings 的「个性化设置分区」、LocalTransfer 的
+           「二维码迁移方式」）都带 aria-label，只有这里漏了；tablist 没有名称时读屏
+           只念「标签页列表」，说不出这是在切什么分区。 -->
+      <div class="tab-bar" role="tablist" aria-label="设置分区" @keydown="onSettingsTabKeydown">
+        <!-- 这里原本是 v-for="(hint, tab) in tabHints"，id 只能动态生成。
+             改成两个显式按钮是为了让 id 变成**静态**的：两个面板要用
+             aria-labelledby 指回各自的 tab，而静态悬空引用守卫只认静态 id——
+             动态 id 会让这条引用在守卫眼里"找不到该 id"，关系就失去校验。
+             代价是多了两行重复标记；分区是固定的两个（作息方案 / 基础设置），
+             提示文字仍由 tabHints 提供。 -->
         <button
-          v-for="(hint, tab) in tabHints"
-          :key="tab"
+          id="time-settings-tab-plans"
           type="button"
+          :tabindex="settingsTabIndex('plans')"
           class="tab-btn"
-          :class="{ on: settingsTab === tab }"
-          @click="switchSettingsTab(tab)"
-        >{{ tabLabel(tab) }}</button>
+          role="tab"
+          :aria-selected="settingsTab === 'plans'"
+          :class="{ on: settingsTab === 'plans' }"
+          @click="switchSettingsTab('plans')"
+        >{{ tabLabel('plans') }}</button>
+        <button
+          id="time-settings-tab-base"
+          type="button"
+          :tabindex="settingsTabIndex('base')"
+          class="tab-btn"
+          role="tab"
+          :aria-selected="settingsTab === 'base'"
+          :class="{ on: settingsTab === 'base' }"
+          @click="switchSettingsTab('base')"
+        >{{ tabLabel('base') }}</button>
       </div>
       <p class="settings-hint">{{ tabHints[settingsTab] }}</p>
-      <p v-if="settingError" class="error">{{ settingError }}</p>
+      <p v-if="settingError" class="error" role="alert">{{ settingError }}</p>
       <Transition name="toast">
         <p v-if="settingsToast" class="settings-toast">✓ {{ settingsToast }}</p>
       </Transition>
 
+      <!-- OCR 进度与导入错误刻意放在**标签区之外**，与上面的 settingError 同级。
+           原因：这两块原来住在 `v-show="settingsTab === 'plans'"` 的作息方案区里，
+           而 OCR 要跑好几秒，用户几乎一定会切到别的标签页等。一旦切走，这个区就是
+           display:none——里面的元素**根本不在无障碍树里**，于是进度看不到、
+           失败与「图片质量提示」也听不到（role="alert" 在 display:none 子树里不会播报）。
+           提到区外之后两个问题一起消失：切到任何标签页都能继续看到进度、听到结果。 -->
+      <TaskProgress
+        :task="scheduleOcrProgress.state"
+        :elapsed-seconds="scheduleOcrProgress.elapsedSeconds.value"
+        :activity-age-seconds="scheduleOcrProgress.activityAgeSeconds.value"
+        :stalled="scheduleOcrProgress.isStalled.value"
+        compact
+        @cancel="scheduleOcrProgress.cancel"
+        @retry="retryScheduleOCR"
+        @continue="continueScheduleResults"
+        @wait="scheduleOcrProgress.continueWaiting"
+      />
+
+      <p v-if="importError && !(scheduleOcrProgress.state.active && scheduleOcrProgress.state.visible)" class="error" role="alert">{{ importError }}</p>
+
       <!-- ============ 作息方案 ============ -->
-      <section v-show="settingsTab === 'plans'" class="setting-section plan-section">
+      <section v-show="settingsTab === 'plans'" id="time-settings-panel-plans" role="tabpanel" aria-labelledby="time-settings-tab-plans" class="setting-section plan-section">
         <!-- 方案选择器：按复杂度自动简化 -->
         <div v-if="timeConfig.campuses.length > 1 || seasonsForPlanCampus.length > 1" class="plan-picker">
           <div v-if="timeConfig.campuses.length > 1" class="plan-picker-row">
@@ -1100,14 +1235,14 @@ defineExpose({ stopBackgroundWork })
         <div v-if="batchOpen" class="tool-panel">
           <div class="tool-panel-title">批量调整时间（先预览，确认后应用到草稿）</div>
           <div class="batch-controls">
-            <select v-model.number="batchFrom">
+            <select v-model.number="batchFrom" aria-label="批量调整起始节次">
               <option v-for="(p, i) in timeConfig.periods" :key="p.id" :value="i">{{ p.label }}</option>
             </select>
             <i>至</i>
-            <select v-model.number="batchTo">
+            <select v-model.number="batchTo" aria-label="批量调整结束节次">
               <option v-for="(p, i) in timeConfig.periods" :key="p.id" :value="i">{{ p.label }}</option>
             </select>
-            <select v-model.number="batchDelta">
+            <select v-model.number="batchDelta" aria-label="批量调整偏移量">
               <option :value="-30">−30 分钟</option>
               <option :value="-15">−15 分钟</option>
               <option :value="-10">−10 分钟</option>
@@ -1123,6 +1258,7 @@ defineExpose({ stopBackgroundWork })
               v-model="batchCustom"
               class="num"
               type="number"
+              aria-label="批量调整自定义分钟数"
               placeholder="±分钟"
             />
           </div>
@@ -1143,7 +1279,10 @@ defineExpose({ stopBackgroundWork })
           <button type="button" class="gen-title as-btn" @click="toggleGenPreview">
             ⚡ 快速生成时间（辅助填充）<i>{{ genPreview ? '▴' : '▾' }}</i>
           </button>
-          <div v-show="genPreview !== null || true" class="gen-body" v-if="1">
+          <!-- 生成控件始终可见：这里曾是 `v-show="genPreview !== null || true"` + `v-if="1"`，
+               两个条件都恒真，等于没写——而且比没写更糟，因为它看起来像在门控
+               （预览部分由下面独立的 `v-if="genPreview"` 负责）。别再把条件加回来。 -->
+          <div class="gen-body">
             <div class="gen-grid">
               <label class="gen-item">
                 <span>从</span>
@@ -1208,22 +1347,23 @@ defineExpose({ stopBackgroundWork })
         <!-- 新建 / 导入 -->
         <div v-if="importOpen" class="tool-panel import-panel">
           <div class="tool-panel-title">新建 / 导入作息</div>
-          <div class="seg import-tabs">
-            <button :class="{ on: importTab === 'paste' }" @click="importTab = 'paste'">📋 粘贴时间表</button>
-            <button :class="{ on: importTab === 'image' }" @click="importTab = 'image'">📷 从图片识别</button>
+          <div class="seg import-tabs" role="tablist" aria-label="作息导入方式" @keydown="onImportTabKeydown">
+            <button id="time-import-tab-paste" role="tab" :tabindex="importTabIndex('paste')" :aria-selected="importTab === 'paste'" :class="{ on: importTab === 'paste' }" @click="importTab = 'paste'">📋 粘贴时间表</button>
+            <button id="time-import-tab-image" role="tab" :tabindex="importTabIndex('image')" :aria-selected="importTab === 'image'" :class="{ on: importTab === 'image' }" @click="importTab = 'image'">📷 从图片识别</button>
           </div>
 
-          <div v-if="importTab === 'paste'">
+          <div v-if="importTab === 'paste'" role="tabpanel" aria-labelledby="time-import-tab-paste">
             <textarea
               v-model="pasteText"
               class="paste-area"
               rows="6"
+              aria-label="粘贴作息时间"
               placeholder="粘贴学校官网或通知里的作息时间，每行一条：&#10;第一节 8:00-8:45&#10;第二节 8:55-9:40&#10;夏季时间 / 南校区 等标题会被自动识别"
             />
             <button class="btn btn-sm btn-ghost" @click="runParsePaste">解析预览</button>
           </div>
 
-          <div v-else class="image-import">
+          <div v-else class="image-import" role="tabpanel" aria-labelledby="time-import-tab-image">
             <label class="file-button" for="schedule-import-image" :class="{ busy: scheduleOcrProgress.state.status === 'running' }">
               <span v-if="scheduleOcrProgress.state.status === 'running'">🔄 {{ scheduleOcrProgress.state.latestActivity }}</span>
               <span v-else>📷 上传学校官方作息表图片</span>
@@ -1234,20 +1374,6 @@ defineExpose({ stopBackgroundWork })
               使用精准模式重新识别
             </button>
           </div>
-
-          <TaskProgress
-            :task="scheduleOcrProgress.state"
-            :elapsed-seconds="scheduleOcrProgress.elapsedSeconds.value"
-            :activity-age-seconds="scheduleOcrProgress.activityAgeSeconds.value"
-            :stalled="scheduleOcrProgress.isStalled.value"
-            compact
-            @cancel="scheduleOcrProgress.cancel"
-            @retry="retryScheduleOCR"
-            @continue="continueScheduleResults"
-            @wait="scheduleOcrProgress.continueWaiting"
-          />
-
-          <p v-if="importError && !(scheduleOcrProgress.state.active && scheduleOcrProgress.state.visible)" class="error">{{ importError }}</p>
 
           <!-- 第一级：识别结果总览（多组作息、自动匹配、批量导入） -->
           <div v-if="recognitionDraft" class="recognition-overview">
@@ -1307,12 +1433,14 @@ defineExpose({ stopBackgroundWork })
                 <input
                   type="time"
                   v-model="draft[row.index].start"
+                  :aria-label="`${row.period.label} 开始时间`"
                   @input="markDirty"
                 />
                 <i>—</i>
                 <input
                   type="time"
                   v-model="draft[row.index].end"
+                  :aria-label="`${row.period.label} 结束时间`"
                   @input="markDirty"
                 />
               </div>
@@ -1324,7 +1452,7 @@ defineExpose({ stopBackgroundWork })
       </section>
 
       <!-- ============ 基础设置 ============ -->
-      <template v-if="settingsTab === 'base'">
+      <div v-if="settingsTab === 'base'" id="time-settings-panel-base" role="tabpanel" aria-labelledby="time-settings-tab-base" class="settings-panel">
         <section class="setting-section">
           <div class="setting-head">
             <h4>🏫 校区（{{ timeConfig.campuses.length }}）</h4>
@@ -1332,17 +1460,19 @@ defineExpose({ stopBackgroundWork })
           <div v-for="campus in timeConfig.campuses" :key="campus.id" class="setting-row">
             <input
               :value="campus.name"
+              :aria-label="`校区名称：${campus.name}`"
               @change="renameCampus(campus.id, $event.target.value)"
             />
             <button
               class="setting-del"
               :disabled="timeConfig.campuses.length <= 1"
+              aria-label="删除校区"
               title="删除校区"
               @click="onRemoveCampus(campus.id)"
             >✕</button>
           </div>
           <div class="setting-add">
-            <input v-model="newCampusName" placeholder="新校区名称，例如：东校区" @keyup.enter="onAddCampus" />
+            <input v-model="newCampusName" aria-label="新校区名称" placeholder="新校区名称，例如：东校区" @keyup.enter="onAddCampus" />
             <button class="btn btn-ghost" @click="onAddCampus">＋ 添加</button>
           </div>
         </section>
@@ -1352,7 +1482,7 @@ defineExpose({ stopBackgroundWork })
             <h4>☀️ 作息季（{{ timeConfig.seasons.length }}）</h4>
             <span class="setting-note">按起始日期自动切换；同一天开始会无法判断先后</span>
           </div>
-          <p v-if="seasonDateConflicts.length" class="error conflict-tip">
+          <p v-if="seasonDateConflicts.length" class="error conflict-tip" role="alert">
             ⚠ 生效日期冲突：{{ seasonDateConflicts.map((c) => `${c.campusName} · ${c.date}（${c.names.join(' / ')}）`).join('；') }} —— 对应校区的自动模式无法判断先后，请调整日期。
           </p>
           <div v-for="season in timeConfig.seasons" :key="season.id" class="season-block">
@@ -1360,18 +1490,21 @@ defineExpose({ stopBackgroundWork })
               <input
                 class="grow"
                 :value="season.name"
+                :aria-label="`作息季名称：${season.name}`"
                 @change="renameSeason(season.id, $event.target.value, null)"
               />
               <input
                 class="date"
                 :class="{ invalid: !isValidSeasonDate(season.startDate) }"
                 :value="season.startDate"
+                :aria-label="`作息季生效日期（MM-DD）：${season.name}`"
                 placeholder="05-01"
                 @blur="onSeasonDateChange(season, $event.target.value, $event.target)"
               />
               <button
                 class="setting-del"
                 :disabled="timeConfig.seasons.length <= 1"
+                aria-label="删除作息季"
                 title="删除作息季"
                 @click="onRemoveSeason(season.id)"
               >✕</button>
@@ -1392,8 +1525,8 @@ defineExpose({ stopBackgroundWork })
             </div>
           </div>
           <div class="setting-add">
-            <input v-model="newSeasonName" class="grow" placeholder="新作息季名称，例如：春季时间" @keyup.enter="onAddSeason" />
-            <input v-model="newSeasonDate" class="date" placeholder="03-01" />
+            <input v-model="newSeasonName" class="grow" aria-label="新作息季名称" placeholder="新作息季名称，例如：春季时间" @keyup.enter="onAddSeason" />
+            <input v-model="newSeasonDate" class="date" aria-label="新作息季生效日期（MM-DD）" placeholder="03-01" />
             <button class="btn btn-ghost" @click="onAddSeason">＋ 添加</button>
           </div>
         </section>
@@ -1407,6 +1540,7 @@ defineExpose({ stopBackgroundWork })
             <div v-for="period in timeConfig.periods" :key="period.id" class="setting-row">
               <input
                 :value="period.label"
+                :aria-label="`节次名称：${period.label}`"
                 @change="renamePeriod(period.id, $event.target.value)"
               />
               <small v-if="periodUseCount(period.id)" class="period-use-count">
@@ -1415,17 +1549,18 @@ defineExpose({ stopBackgroundWork })
               <button
                 class="setting-del"
                 :disabled="timeConfig.periods.length <= 1 || periodUseCount(period.id) > 0"
+                aria-label="删除节次"
                 :title="periodUseCount(period.id) ? `有 ${periodUseCount(period.id)} 门课程或模板课程占用` : '删除节次'"
                 @click="onRemovePeriod(period.id)"
               >✕</button>
             </div>
           </div>
           <div class="setting-add">
-            <input v-model="newPeriodLabel" placeholder="新节次名称，例如：第十三节课" @keyup.enter="onAddPeriod" />
+            <input v-model="newPeriodLabel" aria-label="新节次名称" placeholder="新节次名称，例如：第十三节课" @keyup.enter="onAddPeriod" />
             <button class="btn btn-ghost" @click="onAddPeriod">＋ 添加</button>
           </div>
         </section>
-      </template>
+      </div>
 
       <!-- 底部操作栏：草稿模式 -->
       <div class="draft-bar" :class="{ sticky: draftDirty }">
@@ -1469,6 +1604,7 @@ defineExpose({ stopBackgroundWork })
           <input
             class="grow"
             :value="activeScheme.target.newCampusName"
+            aria-label="新校区名"
             :placeholder="activeScheme.detectedCampus || '例如：东校区'"
             @input="updateSchemeTarget(activeScheme, { newCampusName: $event.target.value })"
           />
@@ -1494,6 +1630,7 @@ defineExpose({ stopBackgroundWork })
           <input
             class="grow"
             :value="activeScheme.target.newSeasonName"
+            aria-label="新方案名"
             :placeholder="activeScheme.detectedSeason || '例如：夏季时间'"
             @input="updateSchemeTarget(activeScheme, { newSeasonName: $event.target.value })"
           />
@@ -1509,9 +1646,9 @@ defineExpose({ stopBackgroundWork })
         </p>
       </div>
 
-      <div class="seg detail-tabs">
-        <button :class="{ on: detailFilter === 'all' }" @click="detailFilter = 'all'">全部 {{ activeScheme.rows.length }}</button>
-        <button :class="{ on: detailFilter === 'issues' }" @click="detailFilter = 'issues'">
+      <div class="seg detail-tabs" role="group" aria-label="作息识别结果筛选">
+        <button :aria-pressed="detailFilter === 'all'" :class="{ on: detailFilter === 'all' }" @click="detailFilter = 'all'">全部 {{ activeScheme.rows.length }}</button>
+        <button :aria-pressed="detailFilter === 'issues'" :class="{ on: detailFilter === 'issues' }" @click="detailFilter = 'issues'">
           异常 {{ activeSchemeIssueCount }}
         </button>
       </div>
@@ -1524,11 +1661,11 @@ defineExpose({ stopBackgroundWork })
           :class="{ issue: rowIssuesFor(row).length }"
         >
           <div class="detail-row-main">
-            <input v-model="row.label" class="grow" placeholder="节次名称" @input="onSchemeRowInput(row)" />
-            <input v-model="row.start" type="time" @input="onSchemeRowInput(row)" />
+            <input v-model="row.label" class="grow" aria-label="节次名称" placeholder="节次名称" @input="onSchemeRowInput(row)" />
+            <input v-model="row.start" aria-label="开始时间" type="time" @input="onSchemeRowInput(row)" />
             <i>—</i>
-            <input v-model="row.end" type="time" @input="onSchemeRowInput(row)" />
-            <button class="setting-del" title="删除该行" @click="removeSchemeRow(activeScheme, index)">✕</button>
+            <input v-model="row.end" aria-label="结束时间" type="time" @input="onSchemeRowInput(row)" />
+            <button class="setting-del" aria-label="删除该行" title="删除该行" @click="removeSchemeRow(activeScheme, index)">✕</button>
           </div>
           <div v-if="rowIssuesFor(row).length" class="detail-row-issues">
             <span v-for="issue in rowIssuesFor(row)" :key="issue.message">⚠ {{ issue.message }}</span>
@@ -1578,7 +1715,7 @@ defineExpose({ stopBackgroundWork })
         >
           <div class="plan-item-head">
             <b class="plan-item-label">{{ item.label }}</b>
-            <select class="plan-action" :value="item.action" @change="setPlanItemAction(item, $event.target.value)">
+            <select class="plan-action" :value="item.action" :aria-label="`${item.label} 的处理方式`" @change="setPlanItemAction(item, $event.target.value)">
               <option v-if="canReplaceItem(item)" value="replace">替换已有</option>
               <option v-if="canImportItem(item)" value="create">{{ createActionLabel(item) }}</option>
               <option value="skip">跳过</option>
@@ -1633,10 +1770,55 @@ defineExpose({ stopBackgroundWork })
       />
     </template>
   </Modal>
+
+  <!-- 确认框与上面三个 Modal 平级：ConfirmDialog 自己 Teleport 到 body，
+       所以始终叠在最上层，Escape 只会关掉它（Modal.vue 的 isTopOverlay 机制）。 -->
+  <!-- 这三个确认框都叠在本组件自己的设置弹窗（`<Modal v-if="show">`）之上，
+       所以一律 v-if 随目标挂载：本组件在 `show` 还是 false 时就已挂载，若那时就建好
+       Teleport 锚点，后打开的设置弹窗会排到它后面并把它盖住
+       （见 ConfirmDialog 顶部的浮层顺序说明）。 -->
+  <ConfirmDialog
+    v-if="pendingDraftAction"
+    :open="Boolean(pendingDraftAction)"
+    title="放弃未保存的修改"
+    message="当前方案有未保存的修改，确定放弃这些修改吗？"
+    confirm-label="放弃修改"
+    cancel-label="继续编辑"
+    @close="pendingDraftAction = null"
+    @confirm="confirmDiscardDraft"
+  />
+
+  <ConfirmDialog
+    v-if="removeCampusTarget"
+    :open="Boolean(removeCampusTarget)"
+    title="删除校区"
+    :message="removeCampusTarget?.message || ''"
+    confirm-label="删除校区"
+    @close="removeCampusTarget = null"
+    @confirm="confirmRemoveCampus"
+  />
+
+  <ConfirmDialog
+    v-if="removeSeasonTarget"
+    :open="Boolean(removeSeasonTarget)"
+    title="删除作息季"
+    :message="removeSeasonTarget?.message || ''"
+    confirm-label="删除作息季"
+    @close="removeSeasonTarget = null"
+    @confirm="confirmRemoveSeason"
+  />
 </template>
 
 <style scoped>
 .settings {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+/* base 面板的包裹层必须复制 .settings 的纵向排布与间距：
+   原来三个 section 是 .settings 的直接子元素，靠它的 gap 分隔；
+   换成包裹层后若不复制，间距会从 18px 变成 0。 */
+.settings-panel {
   display: flex;
   flex-direction: column;
   gap: 18px;
@@ -1680,9 +1862,11 @@ defineExpose({ stopBackgroundWork })
   flex: 0 0 90px;
   text-align: center;
 }
+/* 校验失败的输入框：琥珀色底/边同样是写死的，而输入框文字是 var(--text)——
+   深色主题下 #fffaf0 白底会让输入内容掉到 1.15:1。 */
 .setting-row input.invalid {
-  border-color: #e4b85b;
-  background: #fffaf0;
+  border-color: color-mix(in srgb, var(--warning) 35%, var(--card));
+  background: color-mix(in srgb, var(--warning) 10%, var(--card));
 }
 .setting-del {
   flex: 0 0 30px;
@@ -1691,7 +1875,7 @@ defineExpose({ stopBackgroundWork })
   font-size: 12px;
   border: 1px solid var(--border);
   border-radius: 7px;
-  background: #fff;
+  background: var(--card);
 }
 .setting-del:hover:not(:disabled) {
   color: var(--danger);
@@ -1721,7 +1905,8 @@ defineExpose({ stopBackgroundWork })
 }
 .period-use-count {
   flex: 0 0 auto;
-  color: #9a6414;
+  /* 这一行没有自己的底色，落在 Modal 的 var(--card) 上：写死的 #9a6414 在深色只有 3.18:1。 */
+  color: var(--warning);
   font-size: 10.5px;
   white-space: nowrap;
 }
@@ -1736,10 +1921,10 @@ defineExpose({ stopBackgroundWork })
   color: var(--muted);
   border: 1px solid var(--border);
   border-radius: 9px;
-  background: #fff;
+  background: var(--card);
 }
 .tab-btn.on {
-  color: #fff;
+  color: var(--on-primary, #fff);
   font-weight: 700;
   border-color: var(--primary);
   background: var(--primary);
@@ -1762,12 +1947,15 @@ defineExpose({ stopBackgroundWork })
   z-index: 3;
   margin: 0;
   padding: 7px 12px;
-  color: #07805d;
+  /* 自动保存提示是「绿字 + 写死浅绿底」成对写法，只改字会让深色主题下的 #e7f8f1
+     白条配上亮绿字（约 1.7:1），所以底一起从 --card 混出来。改前浅/深都是 4.49:1
+     （本身就差一点不到 AA），改后浅 4.88、深 6.72:1。 */
+  color: var(--success);
   font-size: 12px;
   border-radius: 8px;
-  background: #e7f8f1;
+  background: color-mix(in srgb, var(--success) 10%, var(--card));
 }
-.toast-enter-active, .toast-leave-active { transition: opacity .2s ease; }
+.toast-enter-active, .toast-leave-active { transition: opacity var(--dur-base) var(--ease-standard); }
 .toast-enter-from, .toast-leave-to { opacity: 0; }
 
 /* ---------- 作息方案编辑器 ---------- */
@@ -1777,7 +1965,9 @@ defineExpose({ stopBackgroundWork })
 .pp-label { flex: 0 0 44px; color: var(--ink-faint); font-size: 11.5px; font-weight: 700; }
 .plan-head { display: flex; align-items: center; gap: 10px; margin-top: 4px; }
 .plan-title { font-size: 15px; font-weight: 800; }
-.dirty-dot { color: #b86b16; font-size: 11.5px; font-weight: 700; }
+/* 「有未保存改动」的小圆点是琥珀语义，落在 var(--card) 上：
+   写死的 #b86b16 在深色卡片上只有 3.36:1。 */
+.dirty-dot { color: var(--warning); font-size: 11.5px; font-weight: 700; }
 .plan-tools { display: flex; flex-wrap: wrap; gap: 7px; }
 .plan-tools .btn-sm { padding: 6px 11px; font-size: 12px; }
 .tool-panel {
@@ -1792,7 +1982,7 @@ defineExpose({ stopBackgroundWork })
 .tool-panel-title { color: var(--ink-soft); font-size: 12px; font-weight: 700; }
 .tool-tip { margin: 0; color: var(--ink-faint); font-size: 11px; line-height: 1.5; }
 .copy-list { display: flex; flex-wrap: wrap; gap: 7px; }
-.copy-item { padding: 7px 12px; font-size: 12.5px; border: 1px solid var(--border); border-radius: 9px; background: #fff; cursor: pointer; transition: border-color .14s, color .14s, background .14s; }
+.copy-item { padding: 7px 12px; font-size: 12.5px; border: 1px solid var(--border); border-radius: 9px; background: var(--card); cursor: pointer; transition: border-color var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard), background var(--dur-fast) var(--ease-standard); }
 .copy-item:hover { border-color: var(--primary); color: var(--primary); background: var(--primary-soft); }
 .batch-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .batch-controls select, .batch-controls input { width: auto; min-width: 0; }
@@ -1809,7 +1999,7 @@ defineExpose({ stopBackgroundWork })
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 12px 14px;
-  background: #fafbfd;
+  background: var(--bg-tint);
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -1855,7 +2045,7 @@ defineExpose({ stopBackgroundWork })
   padding: 9px 14px;
   border-radius: 8px;
   background: var(--primary);
-  color: #fff;
+  color: var(--on-primary, #fff);
   font-size: 12px;
   font-weight: 700;
   cursor: pointer;
@@ -1869,7 +2059,7 @@ defineExpose({ stopBackgroundWork })
   display: flex;
   max-width: 100%;
   overflow-x: auto;
-  background: #fff;
+  background: var(--card);
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 3px;
@@ -1889,9 +2079,10 @@ defineExpose({ stopBackgroundWork })
 }
 .seg button.on {
   background: var(--primary);
-  color: #fff;
+  color: var(--on-primary, #fff);
   font-weight: 600;
 }
+/* 导入结果横幅：绿字 + 写死浅绿底成对写法，底一起从 --card 混出来。 */
 .import-result-banner {
   display: flex;
   align-items: center;
@@ -1899,8 +2090,8 @@ defineExpose({ stopBackgroundWork })
   gap: 8px;
   padding: 9px 11px;
   border-radius: 9px;
-  background: #e7f8f1;
-  color: #08785a;
+  background: color-mix(in srgb, var(--success) 10%, var(--card));
+  color: var(--success);
   font-size: 12px;
   font-weight: 700;
 }
@@ -1918,8 +2109,8 @@ defineExpose({ stopBackgroundWork })
   padding: 9px 11px;
   border: 1px solid var(--border);
   border-radius: 11px;
-  background: #fff;
-  transition: opacity .15s ease;
+  background: var(--card);
+  transition: opacity var(--dur-fast) var(--ease-standard);
 }
 .scheme-card.off { opacity: .55; }
 .scheme-card.active { border-color: var(--primary); }
@@ -1928,8 +2119,10 @@ defineExpose({ stopBackgroundWork })
 .scheme-card-main { min-width: 0; cursor: pointer; display: flex; flex-direction: column; gap: 3px; }
 .scheme-card-title { font-size: 13px; font-weight: 750; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .scheme-card-status { font-size: 11.5px; line-height: 1.4; }
-.scheme-card-status.ok { color: #08785a; }
-.scheme-card-status.warn { color: #9a6414; }
+/* .ok / .warn 是同一组状态色（都在 .scheme-card 的 var(--card) 上），一起换成令牌：
+   写死的 #08785a / #9a6414 在深色卡片上分别只有 2.91 / 3.18:1。 */
+.scheme-card-status.ok { color: var(--success); }
+.scheme-card-status.warn { color: var(--warning); }
 .detected-title { margin: 2px 0 0; color: var(--ink-faint); font-size: 11px; }
 .import-foot { display: flex; justify-content: space-between; gap: 8px; }
 .overview-foot { align-items: center; }
@@ -1937,40 +2130,51 @@ defineExpose({ stopBackgroundWork })
 
 /* ---------- 详情编辑（第二级） ---------- */
 .detail-target { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 11px; background: var(--bg-tint); }
-.assignment-message { margin: 0; padding: 8px 10px; border-radius: 8px; background: #e7f8f1; color: #08785a; font-size: 11.5px; line-height: 1.5; }
-.assignment-message.missing { background: #fff9e9; color: #9a6414; }
+/* 三种（命中 / 缺失 / 不适用）提示原本只有一条跟主题走；这里把另外两条也成对迁移：
+   底色一起从 --card 混出来，深色下才不是两条白条配亮色字。 */
+.assignment-message { margin: 0; padding: 8px 10px; border-radius: 8px; background: color-mix(in srgb, var(--success) 10%, var(--card)); color: var(--success); font-size: 11.5px; line-height: 1.5; }
+.assignment-message.missing { background: color-mix(in srgb, var(--warning) 10%, var(--card)); color: var(--warning); }
 .assignment-message.matched { background: #eef4ff; color: #2456b8; }
 .detail-tabs { align-self: flex-start; }
 .detail-tabs button { padding: 7px 14px; }
-.detail-rows { display: flex; flex-direction: column; gap: 6px; max-height: 46vh; overflow-y: auto; padding-right: 2px; }
+.detail-rows { display: flex; flex-direction: column; gap: 6px; max-height: 46vh;max-height:46dvh; overflow-y: auto; padding-right: 2px; }
 .detail-row { padding: 4px 6px; border-radius: 9px; }
-.detail-row.issue { padding: 7px; border: 1px solid #efd59d; background: #fff9e9; }
+/* 异常行的底/边是写死的琥珀浅色，行内的琥珀文字要跟着令牌走，底就必须一起迁移。
+   这里刻意只用 6% 而不是 Toast 那套 10%：这一行里还有 var(--muted) 的间隔箭头，
+   10% 混合底会让它在浅色掉到 4.34:1（10% 深底同理 4.31:1）；实测 6% 是同时保住
+   琥珀文字（浅 5.44 / 深 7.32）与灰箭头（浅 4.58 / 深 4.69）的最大比例。 */
+.detail-row.issue { padding: 7px; border: 1px solid color-mix(in srgb, var(--warning) 35%, var(--card)); background: color-mix(in srgb, var(--warning) 6%, var(--card)); }
 .detail-row-main { display: grid; grid-template-columns: minmax(0, 1fr) 110px 14px 110px 26px; align-items: center; gap: 6px; }
 .detail-row-main i { color: var(--muted); font-style: normal; text-align: center; }
 .detail-row-main input[type='time'] { padding: 6px; font-size: 12.5px; }
-.detail-row-issues { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px; margin-top: 5px; color: #9a6414; font-size: 11px; line-height: 1.45; }
+.detail-row-issues { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px; margin-top: 5px; color: var(--warning); font-size: 11px; line-height: 1.45; }
 .detail-foot { display: flex; justify-content: space-between; gap: 10px; }
 .detail-foot .btn-primary { margin-left: auto; }
 .it-row { display: grid; grid-template-columns: 54px minmax(0,1fr); align-items: center; gap: 8px; }
 .it-row > span { color: var(--ink-faint); font-size: 11.5px; font-weight: 700; }
 .choice-chips { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
-.choice-chips button { padding: 7px 11px; border: 1px solid var(--border); border-radius: 999px; background: #fff; color: var(--ink-soft); font-size: 12px; cursor: pointer; }
+.choice-chips button { padding: 7px 11px; border: 1px solid var(--border); border-radius: 999px; background: var(--card); color: var(--ink-soft); font-size: 12px; cursor: pointer; }
 .choice-chips button.on { border-color: var(--primary); background: var(--primary-soft); color: var(--primary); font-weight: 700; }
 .grow { min-width: 0; flex: 1; }
 
 /* ---------- 导入计划（第三级） ---------- */
 .plan-summary { margin: 0 0 4px; font-size: 13px; color: var(--text); }
-.plan-summary b.ok-text { color: #08785a; }
-.plan-summary b.warning-text { color: #9a6414; }
-.plan-items { display: flex; flex-direction: column; gap: 8px; max-height: 46vh; overflow-y: auto; padding-right: 2px; }
-.plan-item { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 11px; background: #fff; }
-.plan-item.blocked { border-color: #e5b4b4; background: #fffafa; }
+/* .ok-text / .warning-text 是同一句汇总里的状态对，一起换成令牌
+   （写死的 #08785a / #9a6414 在深色卡片上只有 2.91 / 3.18:1）。 */
+.plan-summary b.ok-text { color: var(--success); }
+.plan-summary b.warning-text { color: var(--warning); }
+.plan-items { display: flex; flex-direction: column; gap: 8px; max-height: 46vh;max-height:46dvh; overflow-y: auto; padding-right: 2px; }
+.plan-item { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 11px; background: var(--card); }
+/* 原来写死 #e5b4b4 / #fffafa：深色主题下整个 .plan-item 会变成一块白底，
+   而它的兄弟条目用的是 var(--card)，同一个列表里两种底色。改成从 --danger 混出来，
+   两个主题都跟着主题走。 */
+.plan-item.blocked { border-color: color-mix(in srgb, var(--danger) 30%, var(--card)); background: color-mix(in srgb, var(--danger) 8%, var(--card)); }
 .plan-item-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .plan-item-label { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.plan-action { padding: 5px 8px; font-size: 12px; border: 1px solid var(--border); border-radius: 8px; background: #fff; color: var(--text); }
+.plan-action { padding: 5px 8px; font-size: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); color: var(--text); }
 .plan-diff-summary { margin: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; color: var(--ink-soft); font-size: 11.5px; }
 .plan-diff-list { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border-radius: 8px; background: var(--bg-tint); }
-.plan-warning { margin: 0; color: #9a6414; font-size: 11.5px; }
+.plan-warning { margin: 0; color: var(--warning); font-size: 11.5px; }
 .plan-blocker { margin: 0; color: var(--danger); font-size: 11.5px; font-weight: 700; }
 .plan-skip-note { margin: 0; color: var(--ink-faint); font-size: 11.5px; }
 .plan-foot { display: flex; justify-content: flex-end; gap: 10px; margin-top: 12px; }
@@ -2010,7 +2214,10 @@ defineExpose({ stopBackgroundWork })
   z-index: 3;
   margin-top: 18px;
   padding: 10px 2px 4px;
-  background: linear-gradient(180deg, rgba(255,255,255,0), #fff 34%);
+  /* 淡出终点必须跟着主题走：写死 #fff 会在深色主题下铺出一条白条。
+   起点保持显式「白色全透明」，避免个别引擎在 transparent 上做非预乘插值时
+   插出灰带。 */
+background: linear-gradient(180deg, rgba(255, 255, 255, 0), var(--card) 34%);
 }
 
 /* 季适用校区 chips */
@@ -2019,7 +2226,7 @@ defineExpose({ stopBackgroundWork })
 .scope-label { color: var(--ink-faint); font-size: 11px; font-weight: 700; }
 .scope-note { flex-basis: 100%; color: var(--ink-faint); font-size: 10.5px; }
 .conflict-tip { margin: 0 0 8px; }
-.season-date-warning { display: block; margin: 4px 0 0 6px; color: #9a6414; font-size: 10.5px; }
+.season-date-warning { display: block; margin: 4px 0 0 6px; color: var(--warning); font-size: 10.5px; }
 
 @media (max-width: 520px) {
   .it-row { grid-template-columns: 48px minmax(0, 1fr); }

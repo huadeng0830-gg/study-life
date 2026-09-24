@@ -9,6 +9,15 @@ function defaultDeviceName() {
   return '我的电脑'
 }
 
+function defaultDevicePlatform() {
+  const ua = typeof navigator === 'undefined' ? '' : navigator.userAgent
+  if (/iPhone|iPad|iPod/i.test(ua)) return 'iPhone'
+  if (/Android/i.test(ua)) return 'Android'
+  if (/Macintosh|Mac OS X/i.test(ua)) return 'Mac'
+  if (/Windows/i.test(ua)) return 'Windows'
+  return '浏览器'
+}
+
 function newId() {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID()
   return `device-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
@@ -17,9 +26,9 @@ function newId() {
 function loadProfile() {
   try {
     const saved = JSON.parse(localStorage.getItem(DEVICE_KEY))
-    if (saved?.id && typeof saved.name === 'string') return saved
+    if (saved?.id && typeof saved.name === 'string') return { ...saved, platform: saved.platform || defaultDevicePlatform() }
   } catch {}
-  const profile = { id: newId(), name: defaultDeviceName(), createdAt: new Date().toISOString() }
+  const profile = { id: newId(), name: defaultDeviceName(), platform: defaultDevicePlatform(), createdAt: new Date().toISOString() }
   try { localStorage.setItem(DEVICE_KEY, JSON.stringify(profile)) } catch {}
   return profile
 }
@@ -38,6 +47,7 @@ export function encryptedDeviceMeta() {
   return {
     id: deviceProfile.value.id,
     name: deviceProfile.value.name,
+    platform: deviceProfile.value.platform,
     pushedAt: new Date().toISOString(),
   }
 }

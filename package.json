@@ -14,12 +14,18 @@
     "test:coverage": "vitest run --coverage",
     "typecheck": "vue-tsc --noEmit",
     "check": "npm run lint && npm run typecheck && npm test && npm run build",
-    "release:bump": "node scripts/bump-release.mjs"
+    "release:bump": "node scripts/bump-release.mjs",
+    "audit:contrast": "node scripts/audit-contrast.mjs",
+    "audit:release": "node scripts/audit/release-integrity.mjs https://study-life.pages.dev",
+    "audit:first-visit": "node scripts/audit/first-visit.mjs https://study-life.pages.dev",
+    "audit:reload-loop": "node scripts/audit/reload-loop.mjs dist",
+    "audit:iphone-boot": "node scripts/audit/iphone-boot.mjs https://study-life.pages.dev",
+    "sync:health": "node scripts/check-sync-health.mjs",
+    "deploy:sync:production": "npm run check && npx wrangler deploy --config sync-coordinator/wrangler.jsonc && npx wrangler pages deploy dist --project-name=study-life --branch=main && npm run sync:health"
   },
   "dependencies": {
     "@e965/xlsx": "^0.20.3",
     "jsqr": "^1.4.0",
-    "lunar-javascript": "^1.7.7",
     "qrcode": "^1.5.4",
     "tesseract.js": "^7.0.0",
     "vue": "^3.5.41",

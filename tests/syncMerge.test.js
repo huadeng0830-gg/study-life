@@ -47,6 +47,55 @@ describe('P2-B Local/Base/Remote 实体合并', () => {
     expect(changed.conflicts[0].status).toBe(MERGE_STATUS.deleteUpdateConflict)
   })
 
+  it.each([
+    ['远端 updatedAt 超前十年', { updatedAt: '2035-01-01T00:00:00.000Z' }],
+    ['远端 updatedAt 缺失', {}],
+    ['远端 updatedAt 与墓碑相同', { updatedAt: '2026-09-02T00:00:00.000Z' }],
+    ['手机时钟超前而电脑时钟落后', { updatedAt: '2027-09-02T00:00:00.000Z' }],
+  ])('%s 不能复活本机删除的记录', (_, remoteChanges) => {
+    const original = task('基线')
+    const tombstone = {
+      tombstoneId: 'clock-skew-tombstone',
+      entityType: 'Task',
+      entityId: original.id,
+      baseHash: hashSyncValue(original),
+      deletedAt: '2026-09-02T00:00:00.000Z',
+    }
+    const result = mergeSyncPayload({
+      baseManifest: baseFor({ sl_tasks: [original] }),
+      localValues: { sl_tasks: [] },
+      remoteValues: { sl_tasks: [task('陈旧设备版本', remoteChanges)] },
+      localTombstones: [tombstone],
+      keys: ['sl_tasks'],
+    })
+
+    expect(result.conflicts[0].status).toBe(MERGE_STATUS.deleteUpdateConflict)
+    expect(result.values.sl_tasks).toEqual([])
+  })
+
+  it('只有指向同一墓碑的显式恢复标记才能自动恢复记录', () => {
+    const original = task('基线')
+    const tombstone = {
+      tombstoneId: 'delete-operation-1',
+      entityType: 'Task',
+      entityId: original.id,
+      baseHash: hashSyncValue(original),
+      deletedAt: '2026-09-02T00:00:00.000Z',
+    }
+    const result = mergeSyncPayload({
+      baseManifest: baseFor({ sl_tasks: [original] }),
+      localValues: { sl_tasks: [] },
+      remoteValues: { sl_tasks: [task('用户明确恢复', { updatedAt: '2026-09-01T00:00:00.000Z' })] },
+      localTombstones: [tombstone],
+      remoteRestoreMarkers: [{ entityType: 'Task', entityId: original.id, tombstoneId: tombstone.tombstoneId, operationId: 'restore-operation-1' }],
+      keys: ['sl_tasks'],
+    })
+
+    expect(result.conflicts).toEqual([])
+    expect(result.values.sl_tasks).toHaveLength(1)
+    expect(result.values.sl_tasks[0].title).toBe('用户明确恢复')
+  })
+
   it('归档是普通实体更新，不等同于删除', () => {
     const base = { sl_tasks: [task('保留记录')] }
     const result = mergeSyncPayload({ baseManifest: baseFor(base), localValues: base, remoteValues: { sl_tasks: [task('保留记录', { archivedAt: '2026-09-02T00:00:00.000Z' })] }, keys: ['sl_tasks'] })

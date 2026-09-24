@@ -56,6 +56,28 @@ export function normalizeTimes(cfg) {
     const [h = '0', m = '00'] = String(value ?? '').split(':')
     return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
   }
+  // `useStoredRef` 的形状修复只到**顶层**：默认值是对象时它只做 `{...default, ...saved}`，
+  // 嵌套值是什么就用什么。而 seasons / campuses / periods 以前是被直接 `for...of` / `.map()`
+  // 使用的，于是 `sl_timecfg = {"periods":"oops"}` 会让本函数在**模块求值期**抛
+  // `cfg.periods.map is not a function`——那一行在本文件末尾，位于 `useStoredRef` 的读
+  // try/catch **之外**，任何应用级错误边界都接不住，表现是启动即白屏。
+  // 修法与下面 times 的修复保持同一套写法：形状不对就回落到默认值。changed 是给调用方看的；
+  // 落盘不靠它的返回值（模块顶层那次调用并不接收），而靠 useStoredRef 的 baselineRaw 比对（core.js L242）。
+  if (!Array.isArray(cfg.periods) || !Array.isArray(cfg.seasons) || !Array.isArray(cfg.campuses)) {
+    const fallback = defaultTimeConfig()
+    if (!Array.isArray(cfg.periods)) {
+      cfg.periods = fallback.periods
+      changed = true
+    }
+    if (!Array.isArray(cfg.seasons)) {
+      cfg.seasons = fallback.seasons
+      changed = true
+    }
+    if (!Array.isArray(cfg.campuses)) {
+      cfg.campuses = fallback.campuses
+      changed = true
+    }
+  }
   if (!cfg.times || typeof cfg.times !== 'object' || Array.isArray(cfg.times)) {
     cfg.times = {}
     changed = true

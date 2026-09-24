@@ -5,6 +5,8 @@ const PBKDF2_ITERATIONS = 150000
 const KEY_LENGTH = 256
 const IV_LENGTH = 12
 const SALT_LENGTH = 16
+export const MAX_ENCRYPTED_PAYLOAD_LENGTH = 8 * 1024 * 1024
+export const MAX_DECOMPRESSED_PAYLOAD_BYTES = 16 * 1024 * 1024
 
 const encoder = new TextEncoder()
 const decoder = new TextDecoder()
@@ -34,13 +36,28 @@ export async function deriveKey(code, salt) {
 
 // 压缩（gzip）
 async function compress(data) {
+  if (typeof CompressionStream !== 'function') return { data: new Uint8Array(data), compressed: false }
   const stream = new Blob([data]).stream().pipeThrough(new CompressionStream('gzip'))
-  return new Uint8Array(await new Response(stream).arrayBuffer())
+  return { data: new Uint8Array(await new Response(stream).arrayBuffer()), compressed: true }
 }
 
 async function decompress(data) {
+  if (typeof DecompressionStream !== 'function') throw new Error('当前浏览器不支持 gzip 解压')
   const stream = new Blob([data]).stream().pipeThrough(new DecompressionStream('gzip'))
-  return new Uint8Array(await new Response(stream).arrayBuffer())
+  if (typeof TransformStream === 'function') {
+    let size = 0
+    const limited = stream.pipeThrough(new TransformStream({
+      transform(chunk, controller) {
+        size += chunk.byteLength
+        if (size > MAX_DECOMPRESSED_PAYLOAD_BYTES) throw new Error('解压后同步数据过大')
+        controller.enqueue(chunk)
+      },
+    }))
+    return new Uint8Array(await new Response(limited).arrayBuffer())
+  }
+  const result = new Uint8Array(await new Response(stream).arrayBuffer())
+  if (result.byteLength > MAX_DECOMPRESSED_PAYLOAD_BYTES) throw new Error('解压后同步数据过大')
+  return result
 }
 
 // 加密：明文对象 → base64url 密文（含 salt/iv/ciphertext）
@@ -51,8 +68,13 @@ export async function encryptData(plainObj, code) {
   const iv = crypto.getRandomValues(new Uint8Array(IV_LENGTH))
   const key = await deriveKey(code, salt)
 
-  const compressed = await compress(encoder.encode(json))
-  const cipher = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, compressed)
+  const plain = encoder.encode(json)
+  if (plain.byteLength > MAX_DECOMPRESSED_PAYLOAD_BYTES) throw new Error('同步数据过大')
+  const compressed = await compress(plain)
+  const marked = new Uint8Array(compressed.data.byteLength + 1)
+  marked[0] = compressed.compressed ? 1 : 0
+  marked.set(compressed.data, 1)
+  const cipher = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, marked)
 
   // 组装：salt(16) + iv(12) + ciphertext
   const combined = new Uint8Array(SALT_LENGTH + IV_LENGTH + cipher.byteLength)
@@ -74,6 +96,7 @@ export async function encryptData(plainObj, code) {
 // 解密：base64url 密文 → 明文对象
 export async function decryptData(payload, code) {
   try {
+    if (typeof payload !== 'string' || payload.length > MAX_ENCRYPTED_PAYLOAD_LENGTH) throw new Error('数据长度超限')
     const binary = atob(payload.replace(/-/g, '+').replace(/_/g, '/'))
     const combined = Uint8Array.from(binary, c => c.charCodeAt(0))
 
@@ -84,8 +107,11 @@ export async function decryptData(payload, code) {
     const cipher = combined.slice(SALT_LENGTH + IV_LENGTH)
 
     const key = await deriveKey(code, salt)
-    const compressed = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, cipher)
-    const decompressed = await decompress(compressed)
+    const decrypted = new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, cipher))
+    const isMarkedEnvelope = decrypted[0] === 0 || decrypted[0] === 1
+    const body = isMarkedEnvelope ? decrypted.slice(1) : decrypted
+    const decompressed = isMarkedEnvelope && decrypted[0] === 0 ? body : await decompress(body)
+    if (decompressed.byteLength > MAX_DECOMPRESSED_PAYLOAD_BYTES) throw new Error('解压后同步数据过大')
     return JSON.parse(decoder.decode(decompressed))
   } catch {
     throw new Error('解密失败：访问码错误或数据已损坏')

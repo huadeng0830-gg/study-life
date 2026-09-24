@@ -91,21 +91,15 @@ export default defineConfig({
           // 预缓存全部页面与共享代码：安装后点击任意入口都直接进入，不再现场下载。
           'assets/*.{js,css}',
         ],
-        // 体积大或极少用到的模块保持按需下载（首次访问由运行时缓存接管），
-        // 避免拖慢首次安装体积与流量。课程表弹窗已按需加载，同样不预缓存。
+        // 预缓存全部应用分包，只保留两个体积大、且仅特定功能才用到的供应商库按需加载：
+        // Excel 解析（课程表导入）+ OCR 引擎（图片识课）。
+        // 其余分包（数据管理、同步绑定、课程弹窗、二维码迁移等）全部预缓存，
+        // 避免发版后这些懒加载入口因分包 hash 变更而打不开（PWA 缓存错位）。
         globIgnores: [
-          'assets/LocalTransfer-*',
-          'assets/transfer-vendor-*',
+          'assets/xlsx-*',
           'assets/ocr-vendor-*',
-          'assets/TimeSettingsModal-*',
-          'assets/CourseEditorModal-*',
-          'assets/CourseManagerModal-*',
-          'assets/BatchImportModal-*',
-          'assets/ImportConflictModal-*',
-          'assets/ExceptionsModal-*',
-          'assets/SemesterModal-*',
         ],
-        maximumFileSizeToCacheInBytes: 3 * 1024 * 1024,
+        maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
         skipWaiting: true,
         clientsClaim: true,
         // 旧懒加载资源保留一个发布周期，用户点击旧页面链接时仍有机会离线回退。

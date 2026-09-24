@@ -4,10 +4,12 @@ export function useQuickRecordAdapters() {
   const domain = useDomainCommands()
   const { courses } = domain
 
-  function savedResult(message, undo) {
+  function savedResult(message, undo, entityType = '', entityId = '') {
     return {
       message,
       undo,
+      entityType,
+      entityId,
     }
   }
 
@@ -19,27 +21,27 @@ export function useQuickRecordAdapters() {
       .join('；')
     if (draft.type === 'todo' || draft.type === 'homework') {
       const task = domain.createTask({ ...base, kind: draft.type, dueDate: draft.date, dueTime: draft.time, note: contextNote, sourceText: draft.raw })
-      return savedResult(`已添加「${task.title}」`, () => domain.deleteTask(task.id))
+      return savedResult(`已添加「${task.title}」`, () => domain.deleteTask(task.id), 'task', task.id)
     }
     if (draft.type === 'expense' || draft.type === 'income') {
       const transaction = domain.createTransaction({ ...base, name: draft.title, direction: draft.type, category: draft.category, source: 'quick-record' })
-      return savedResult(`已记录${draft.type === 'income' ? '收入' : '支出'}「${draft.title}」`, () => domain.deleteTransaction(transaction.id))
+      return savedResult(`${draft.type === 'income' ? '已记录并记入收入' : '已记录并记入账本'} · ¥${Number(transaction.amount).toFixed(2)}`, () => domain.deleteTransaction(transaction.id), 'transaction', transaction.id)
     }
     if (draft.type === 'bill') {
       const bill = domain.createBill({ ...base, name: draft.title, nextDate: draft.date })
-      return savedResult(`已添加固定账单「${draft.title}」`, () => domain.deleteBill(bill.id))
+      return savedResult(`已添加固定账单「${draft.title}」`, () => domain.deleteBill(bill.id), 'bill', bill.id)
     }
     if (draft.type === 'countdown') {
       const milestone = domain.createMilestone({ ...base, name: draft.title, courseName: draft.course, kind: 'countdown' })
-      return savedResult(`已添加重要日期「${draft.title}」`, () => domain.deleteMilestone(milestone.id))
+      return savedResult(`已添加重要日期「${draft.title}」`, () => domain.deleteMilestone(milestone.id), 'milestone', milestone.id)
     }
     if (draft.type === 'event') {
       const event = domain.createEvent({ ...base, courseName: draft.course })
-      return savedResult(`已添加日程「${draft.title}」`, () => domain.deleteEvent(event.id))
+      return savedResult(`已添加日程「${draft.title}」`, () => domain.deleteEvent(event.id), 'event', event.id)
     }
     // 笔记与“识别不清”的输入都落到自由笔记，确保用户输入不丢失。
     const note = domain.createNote({ ...base, content: draft.note || draft.title || draft.raw || '', courseName: draft.course })
-    return savedResult('已保存快速笔记', () => domain.deleteNote(note.id))
+    return savedResult('已保存快速笔记', () => domain.deleteNote(note.id), 'note', note.id)
   }
 
   function convertNote(noteId, targetType) {
@@ -50,14 +52,18 @@ export function useQuickRecordAdapters() {
     if (!title) return { ok: false, error: '笔记内容为空，无法转换' }
 
     if (targetType === 'todo') {
+      const existing = domain.tasks.value.find((item) => item.sourceType === 'note' && item.sourceId === noteId)
+      if (existing) return { ok: true, duplicate: true, entityType: 'task', entityId: existing.id, message: `已存在待办「${existing.title}」` }
       const task = domain.createTask({ title, note: content, sourceText: content, sourceId: noteId, sourceType: 'note', createdFrom: 'note-organize' })
       domain.updateNote(noteId, { inboxStatus: 'organized', organizedAt: new Date().toISOString() })
-      return { ok: true, message: `已转为待办「${task.title}」` }
+      return { ok: true, entityType: 'task', entityId: task.id, message: `已转为待办「${task.title}」` }
     }
     if (targetType === 'event') {
+      const existing = domain.events.value.find((item) => item.sourceType === 'note' && item.sourceId === noteId)
+      if (existing) return { ok: true, duplicate: true, entityType: 'event', entityId: existing.id, message: `已存在日程「${existing.title}」` }
       const event = domain.createEvent({ title, note: content, sourceId: noteId, sourceType: 'note', createdFrom: 'note-organize' })
       domain.updateNote(noteId, { inboxStatus: 'organized', organizedAt: new Date().toISOString() })
-      return { ok: true, message: `已转为日程「${event.title}」` }
+      return { ok: true, entityType: 'event', entityId: event.id, message: `已转为日程「${event.title}」` }
     }
     return { ok: false, error: '暂不支持这个转换类型' }
   }

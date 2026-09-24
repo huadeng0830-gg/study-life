@@ -26,7 +26,7 @@ describe('课表日期使用学期真实首周日期', () => {
 
   it('移动端课表标题使用学期首周的真实日期', async () => {
     const { useScheduleGrid } = await import('../src/composables/schedule/useScheduleGrid.js')
-    const grid = useScheduleGrid(ref([]), ref([]), ref(0), ref('day'), ref(0))
+    const grid = useScheduleGrid(ref([]), ref(0), ref('day'), ref(0))
 
     expect(grid.mobileDayLabel.value).toBe('周一 · 08月31日')
   })
@@ -37,5 +37,17 @@ describe('课表日期使用学期真实首周日期', () => {
     expect(mondayOfDate('2026-09-07')).toBe('2026-09-07')
     expect(mondayOfDate('2026-09-10')).toBe('2026-09-07')
     expect(mondayOfDate('')).toBe('')
+  })
+
+  it('批量查询多天课程时保留每一天的展示日期与星期筛选', async () => {
+    const { coursesForDates } = await import('../src/composables/store/schedule.js')
+    const result = coursesForDates([
+      { id: 'monday', name: '周一课程', day: 0, startWeek: 1, endWeek: 1 },
+      { id: 'tuesday', name: '周二课程', day: 1, startWeek: 1, endWeek: 1 },
+    ], ['2026-09-07', '2026-09-08'])
+
+    expect(result.map((day) => day.map((course) => course.id))).toEqual([['monday'], ['tuesday']])
+    expect(result[0][0]).toMatchObject({ displayDay: 0, sourceDay: 0, exceptionDate: '' })
+    expect(result[1][0]).toMatchObject({ displayDay: 1, sourceDay: 1, exceptionDate: '' })
   })
 })

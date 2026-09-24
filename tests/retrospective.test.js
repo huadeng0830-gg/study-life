@@ -33,6 +33,26 @@ describe('retrospective.js', () => {
     expect(snap.stats.focusMinutes).toBe(45)
   })
 
+  it('回顾只统计可见且金额、日期有效的账本记录', () => {
+    const mixedRecords = {
+      ...data,
+      expenses: [
+        { id: 'cent-a', name: '早餐', amount: 0.1, date: '2026-08-28' },
+        { id: 'cent-b', name: '咖啡', amount: 0.2, direction: 'income', date: '2026-08-28' },
+        { id: 'archived', name: '旧支出', amount: 40, date: '2026-08-28', archivedAt: '2026-08-29T00:00:00Z' },
+        { id: 'deleted', name: '已删除支出', amount: 50, date: '2026-08-28', deletedAt: '2026-08-29T00:00:00Z' },
+        { id: 'invalid-amount', name: '脏金额', amount: '1.234', date: '2026-08-28' },
+      ],
+    }
+
+    const snap = daySnapshot('2026-08-28', mixedRecords)
+
+    expect(snap.expenses.map((item) => item.id)).toEqual(['cent-a', 'cent-b'])
+    expect(snap.stats).toMatchObject({ expensesCount: 2, expensesTotal: 0.1, incomeTotal: 0.2 })
+    const monthStat = monthReport('2026-08', mixedRecords).blocks.find((block) => block.type === 'stat')
+    expect(monthStat.items.find((item) => item.label === '支出').value).toBe('¥0.10')
+  })
+
   it('dayStory 生成标题与 p/stat/list blocks', () => {
     const story = dayStory('2026-08-28', data)
     expect(story.title).toContain('那天')

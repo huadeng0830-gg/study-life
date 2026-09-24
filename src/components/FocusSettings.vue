@@ -99,7 +99,7 @@ async function save() {
         <label class="toggle-row"><input v-model="draft.systemNotificationEnabled" type="checkbox" /> <span><b>系统通知</b><small>需要浏览器通知权限；未授权时自动跳过</small></span></label>
       </section>
 
-      <p v-if="error" class="error">{{ error }}</p>
+      <p v-if="error" class="error" role="alert">{{ error }}</p>
       <div class="actions">
         <button class="btn btn-ghost" @click="emit('close')">取消</button>
         <button class="btn btn-primary" @click="save">保存设置</button>

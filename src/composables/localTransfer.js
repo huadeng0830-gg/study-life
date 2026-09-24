@@ -8,6 +8,7 @@ import { throwIfAborted } from './asyncTask.js'
 import { restoreStoredValues } from './store/index.js'
 import { markLocalChanged } from './cloudSync.js'
 import { validateSyncPayload } from './cloudSyncData.js'
+import { RETIRED_IMPORT_KEYS } from './retiredData.js'
 
 export const TRANSFER_MODULES = {
   courses: { label: '课程、课表模板、作息与特殊日期', keys: ['sl_courses', 'sl_course_templates', 'sl_timecfg', 'sl_semester', 'sl_schedule_exceptions', 'sl_ocr_vocabulary', 'sl_course_checkins'] },
@@ -16,17 +17,16 @@ export const TRANSFER_MODULES = {
   countdowns: { label: '重要日期', keys: ['sl_exams', 'sl_countdown_show_past'] },
   lists: { label: '生活清单', keys: ['sl_checklists'] },
   bills: { label: '固定账单', keys: ['sl_bills'] },
-  expenses: { label: '消费记录与账本偏好', keys: ['sl_expenses', 'sl_ledger_categories', 'sl_ledger_freq'] },
-  food: { label: '吃什么选择库', keys: ['sl_food_places', 'sl_food_history', 'sl_food_filters'] },
+  expenses: { label: '消费记录与账本偏好', keys: ['sl_expenses', 'sl_ledger_categories', 'sl_ledger_freq', 'sl_ledger_fx', 'sl_ledger_budget', 'sl_ledger_templates'] },
   appearance: { label: '励志语、首页布局与页面皮肤', keys: ['sl_appearance', 'sl_performance_mode'] },
   wallpapers: { label: '壁纸图片（可选，二维码较多）', keys: ['sl_wallpaper_config', 'sl_auto_wallpaper_color', 'sl_wallpaper_accent'] },
   preferences: { label: '主题与显示偏好', keys: ['sl_theme', 'sl_custom_theme_color'] },
-  atmosphere: { label: '节日、纪念日与心情', keys: ['sl_festive_config', 'sl_festive_birthday_full', 'sl_mood_log'] },
+  atmosphere: { label: '节日、纪念日与心情', keys: ['sl_festive_config', 'sl_festive_birthday_full', 'sl_mood_log', 'sl_festive_lunar', 'sl_ui_language'] },
 }
 
 const ARRAY_KEYS = new Set([
   'sl_courses', 'sl_course_templates', 'sl_schedule_exceptions', 'sl_course_checkins', 'sl_tasks', 'sl_events', 'sl_quick_notes', 'sl_focus_sessions', 'sl_exams', 'sl_checklists',
-  'sl_bills', 'sl_expenses', 'sl_food_places', 'sl_food_history',
+  'sl_bills', 'sl_expenses', 'sl_ledger_templates', 'sl_festive_lunar',
 ])
 const KEYED_ARRAY_KEYS = new Map([['sl_ledger_categories', 'key']])
 const UNDO_KEY = 'sl_transfer_undo'
@@ -173,7 +173,6 @@ export function transferSummary(pkg) {
     countdowns: Array.isArray(data.sl_exams) ? data.sl_exams.length : 0,
     lists: Array.isArray(data.sl_checklists) ? data.sl_checklists.length : 0,
     bills: Array.isArray(data.sl_bills) ? data.sl_bills.length : 0,
-    food: Array.isArray(data.sl_food_places) ? data.sl_food_places.length : 0,
     wallpapers: data.__wallpaper_images && typeof data.__wallpaper_images === 'object'
       ? Object.keys(data.__wallpaper_images).length
       : 0,
@@ -236,6 +235,38 @@ function mergeQuickRecordSettings(current, incoming) {
   }
 }
 
+// 账本偏好是对象而非实体数组。合并时保留两端的置顶、隐藏和自然语言分类覆盖，
+// 但以本机较新的覆盖规则优先，避免导入旧设备设置后把用户刚修正的分类冲掉。
+function mergeLedgerFreq(current, incoming) {
+  const local = isPlainObject(current) ? current : {}
+  const remote = isPlainObject(incoming) ? incoming : {}
+  const mergeStrings = (key) => [...new Set([
+    ...(Array.isArray(local[key]) ? local[key] : []),
+    ...(Array.isArray(remote[key]) ? remote[key] : []),
+  ].filter((item) => typeof item === 'string' && item.trim()))]
+  const overrides = []
+  const seen = new Set()
+  for (const item of [
+    ...(Array.isArray(local.categoryOverrides) ? local.categoryOverrides : []),
+    ...(Array.isArray(remote.categoryOverrides) ? remote.categoryOverrides : []),
+  ]) {
+    const term = String(item?.term ?? '').trim().replace(/\s+/g, ' ')
+    const key = String(item?.key ?? item?.category ?? '').trim()
+    const direction = item?.direction === 'income' ? 'income' : 'expense'
+    const identity = `${direction}:${term}`
+    if (!term || !key || seen.has(identity)) continue
+    seen.add(identity)
+    overrides.push({ term, key, direction, ...(item?.updatedAt ? { updatedAt: item.updatedAt } : {}) })
+  }
+  return {
+    ...remote,
+    ...local,
+    pinned: mergeStrings('pinned'),
+    hidden: mergeStrings('hidden'),
+    categoryOverrides: overrides.slice(0, 100),
+  }
+}
+
 function periodMapping(incomingConfig, currentConfig) {
   const current = currentConfig?.periods ?? []
   const map = new Map()
@@ -260,7 +291,7 @@ export async function importTransferPackage(pkg, mode = 'merge', { signal = null
   if (mode !== 'merge' && mode !== 'replace') throw new Error('迁移模式不受支持')
   const supportedKeys = new Set(Object.values(TRANSFER_MODULES).flatMap((module) => module.keys))
   const incomingKeys = Object.keys(pkg.data).filter((key) => key !== '__wallpaper_images')
-  const unknownKeys = incomingKeys.filter((key) => !supportedKeys.has(key))
+  const unknownKeys = incomingKeys.filter((key) => !supportedKeys.has(key) && !RETIRED_IMPORT_KEYS.includes(key))
   if (unknownKeys.length) throw new Error(`迁移包包含不受支持的数据：${unknownKeys.join('、')}`)
   const validatedData = validateSyncPayload(
     Object.fromEntries(incomingKeys.map((key) => [key, pkg.data[key]]))
@@ -310,6 +341,10 @@ export async function importTransferPackage(pkg, mode = 'merge', { signal = null
 
       if (mode === 'merge' && key === 'sl_quick_record_settings') {
         const value = mergeQuickRecordSettings(readStored(key), incoming)
+        nextValues[key] = value
+        details.push({ key, mergedSettings: true })
+      } else if (mode === 'merge' && key === 'sl_ledger_freq') {
+        const value = mergeLedgerFreq(readStored(key), incoming)
         nextValues[key] = value
         details.push({ key, mergedSettings: true })
       } else if (mode === 'merge' && (ARRAY_KEYS.has(key) || KEYED_ARRAY_KEYS.has(key))) {

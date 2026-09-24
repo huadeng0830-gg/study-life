@@ -2,9 +2,9 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import Modal from './Modal.vue'
 import { useStoredRef } from '../composables/store/index.js'
-import { todayStr } from '../composables/store/utils.js'
 import { useDomainCommands } from '../composables/domain/commands.js'
 import { isTaskActionable, taskStatus } from '../composables/domain/state.js'
+import { appDateTime, getAppToday } from '../composables/timeContext.js'
 import {
   DEFAULT_FOCUS_SETTINGS,
   buildFocusSession,
@@ -19,8 +19,9 @@ import {
 } from '../composables/focusTimer.js'
 
 const domain = useDomainCommands()
+// 这里只取 tasks；专注记录用 domain.recordFocusSession 写入，
+// 面板本身不读取会话列表（统计在专注统计视图里）。
 const { tasks } = domain
-const focusSessions = useStoredRef('sl_focus_sessions', [])
 const activeRef = useStoredRef('sl_focus_active', null)
 const focusSettings = useStoredRef('sl_focus_settings', DEFAULT_FOCUS_SETTINGS)
 
@@ -54,7 +55,7 @@ const display = computed(() => (active.value ? focusDisplayState(active.value, n
 const selectedTodo = computed(() => tasks.value.find((task) => task.id === selectedTodoId.value) || null)
 const openTasks = computed(() => {
   const open = tasks.value.filter((task) => task && isTaskActionable(task, new Date(now.value)))
-  const dueTs = (task) => (task.dueDate ? new Date(`${task.dueDate}T${task.dueTime || '23:59'}`).getTime() : Infinity)
+  const dueTs = (task) => (task.dueDate ? appDateTime(task.dueDate, task.dueTime || '23:59') : Infinity)
   return open.sort((a, b) => {
     const overdueA = dueTs(a) < Date.now() ? 0 : 1
     const overdueB = dueTs(b) < Date.now() ? 0 : 1
@@ -221,8 +222,7 @@ function requestEnd() {
 function saveFocus(status = 'completed') {
   const session = buildFocusSession(activeRef.value, new Date().toISOString(), status)
   if (!session) return
-  focusSessions.value.unshift(session)
-  if (session.todoId) domain.recordTaskFocusSession(session.todoId, session)
+  domain.recordFocusSession(session)
   activeRef.value = null
   showEarly.value = false
   lastSavedSession.value = session
@@ -425,7 +425,7 @@ onBeforeUnmount(() => {
     </div>
 
     <div v-else-if="lastSavedSession" class="focus-completed">
-      <div class="focus-done-mark">✓</div>
+      <div class="focus-done-mark" aria-hidden="true">✓</div>
       <p class="focus-done-title">{{ lastSavedSession.title || '自由专注' }}</p>
       <p class="focus-done-time">本次专注 {{ formatFocusDuration(lastSavedSession.actualFocusSeconds) }}</p>
       <div class="focus-done-actions">
@@ -469,16 +469,26 @@ onBeforeUnmount(() => {
 
       <b class="focus-clock">{{ clockText }}</b>
 
-      <div class="time-chips" aria-label="专注时间">
+      <div class="time-chips" role="group" aria-label="专注时间">
+        <!-- 这些格子的可访问名称默认就是裸数字，读屏只会念「25」，听不出单位，
+             所以逐个补上「25 分钟」。aria-label 会覆盖内容成为可访问名称，
+             可视文字保持原样。
+             role="group" 是为了让外层的 aria-label 真正生效：aria-label 加在
+             普通 div 上是被忽略的，加了角色之后读屏才会把这一组当成「专注时间」。 -->
         <button
           v-for="mins in quickTimes"
           :key="mins"
           type="button"
           class="time-chip"
           :class="{ on: selectedMinutes === mins }"
+          :aria-label="`${mins} 分钟`"
+          :aria-pressed="selectedMinutes === mins"
           @click="selectQuick(mins)"
         >{{ mins }}</button>
-        <button type="button" class="time-chip custom-chip" :class="{ on: !quickTimes.includes(selectedMinutes) }" @click="openCustomTime">＋</button>
+        <!-- 这一格只有一个全角「＋」，读屏会把可访问名称念成符号本身，听不出它就是「自定义时长」。
+             aria-label 会覆盖按钮内容成为可访问名称，符号保持可见，因此不需要再给符号加 aria-hidden。
+             顺带补 tap-target：.time-chip 高 40px，在粗指针设备上够不到 44px 的最小命中区。 -->
+        <button type="button" class="time-chip custom-chip tap-target" aria-label="自定义专注时长" :class="{ on: !quickTimes.includes(selectedMinutes) }" :aria-pressed="!quickTimes.includes(selectedMinutes)" @click="openCustomTime">＋</button>
       </div>
 
       <button type="button" class="btn btn-primary start-btn" @click="start">开始专注 · {{ selectedMinutes }}分钟</button>
@@ -490,7 +500,7 @@ onBeforeUnmount(() => {
         <p v-if="!openTasks.length" class="empty-line">没有未完成的待办，直接开始自由专注吧。</p>
         <button v-for="task in openTasks" :key="task.id" type="button" class="todo-option" @click="selectTodo(task)">
           <span class="todo-option-title">{{ task.title }}</span>
-          <small>{{ task.dueDate ? (task.dueDate === todayStr() ? '今天' : task.dueDate) : '无截止日期' }}</small>
+          <small>{{ task.dueDate ? (task.dueDate === getAppToday() ? '今天' : task.dueDate) : '无截止日期' }}</small>
         </button>
       </div>
     </Modal>
@@ -500,7 +510,7 @@ onBeforeUnmount(() => {
         <label for="custom-minutes">专注时长（分钟）</label>
         <input id="custom-minutes" v-model.number="customMinutes" type="number" min="5" max="180" inputmode="numeric" placeholder="5～180" />
         <p class="custom-hint">允许 5～180 分钟，例如 37、50、90。</p>
-        <p v-if="customError" class="custom-error">{{ customError }}</p>
+        <p v-if="customError" class="custom-error" role="alert">{{ customError }}</p>
         <div class="modal-actions">
           <button type="button" class="btn btn-ghost" @click="showCustomTime = false">取消</button>
           <button type="button" class="btn btn-primary" @click="applyCustomTime">使用</button>
@@ -709,7 +719,9 @@ onBeforeUnmount(() => {
   display: inline-flex;
   align-items: center;
   min-height: 44px;
-  color: #087a58;
+  /* 写死的 #087a58 落在主题卡片的 var(--card) 上，深色主题只有 2.97:1
+     （浅色 5.34:1）——13px/600 属正文，门槛 4.5。改用令牌后浅色 5.63、深色 8.15。 */
+  color: var(--success);
   font-size: 13px;
   font-weight: 600;
 }
@@ -732,6 +744,7 @@ onBeforeUnmount(() => {
   flex-direction: column;
   gap: 8px;
   max-height: 55vh;
+  max-height: 55dvh;
   overflow-y: auto;
 }
 .todo-option {

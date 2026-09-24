@@ -4,10 +4,11 @@ export const routeLoaders = Object.freeze({
   '/schedule': () => import('../views/ScheduleView.vue'),
   '/tasks': () => import('../views/TasksView.vue'),
   '/exams': () => import('../views/ExamsView.vue'),
+  '/events': () => import('../views/EventsView.vue'),
   '/lists': () => import('../views/ListsView.vue'),
   '/bills': () => import('../views/LedgerView.vue'),
-  '/food': () => import('../views/FoodView.vue'),
   '/review': () => import('../views/WeeklyReviewView.vue'),
+  '/notes': () => import('../views/NotesView.vue'),
 })
 
 function connectionAllowsPrefetch() {

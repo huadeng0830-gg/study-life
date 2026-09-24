@@ -3,10 +3,15 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   code,
   connectCloud,
+  connectSyncSpace,
   connectionState,
   cloudExists,
   deriveSyncRelationship,
+  disconnectCloud,
+  isSyncing,
   lastError,
+  lastCheckedAt,
+  lastSyncedAt,
   localChanged,
   pullFromCloud,
   pushToCloud,
@@ -18,9 +23,17 @@ import {
   LAST_KNOWN_GOOD_KEY,
   resolvePendingMerge,
   syncPreview,
+  syncUndoStorageKey,
 } from '../src/composables/cloudSync.js'
 import { encryptData } from '../src/utils/crypto.js'
+import { SYNC_DEFAULTS, SYNC_KEYS } from '../src/composables/cloudSyncData.js'
 import { buildSyncManifest, hashSyncValue, readSyncMetadata, saveSyncBaseline } from '../src/composables/syncMetadata.js'
+import { clearSyncSpaceSettings, randomSecret, saveSyncSpaceSettings, syncSpaceSettings } from '../src/composables/syncSpace.js'
+import { registerMirrorTeardown } from './helpers/mirrorTeardown.js'
+
+// 收尾取消影子副本的待写盘：否则防抖/退避定时器会在环境拆除之后才触发，
+// 那一声没有归属的 console 会让 vitest 记成 `Errors 1 error`（用例全绿也 exit 1）。
+registerMirrorTeardown()
 
 describe('云同步长任务控制', () => {
   beforeEach(() => {
@@ -32,6 +45,9 @@ describe('云同步长任务控制', () => {
     syncPreview.value = null
     syncRecovery.value = { status: 'idle', marker: null, message: '' }
     connectionState.value = 'disconnected'
+    lastCheckedAt.value = null
+    lastSyncedAt.value = null
+    clearSyncSpaceSettings()
     vi.restoreAllMocks()
     vi.unstubAllGlobals()
   })
@@ -70,6 +86,114 @@ describe('云同步长任务控制', () => {
     await expect(refreshCloudMetadata()).resolves.toMatchObject({ ok: true, revision: 9 })
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(fetchMock.mock.calls[0][0]).toBe('/api/auth/verify')
+  })
+
+  it('把最后检查与最近同步分开记录，刷新 metadata 不冒充一次业务同步', async () => {
+    code.value = '123456'
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ exists: true, revision: 9, updatedAt: '2026-08-28T01:00:00.000Z' }),
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await refreshCloudMetadata()
+    expect(lastCheckedAt.value).toEqual(expect.any(String))
+    expect(lastSyncedAt.value).toBeNull()
+  })
+
+  it('撤销快照按同步空间命名，切换空间不会读取另一空间的恢复点', () => {
+    const spaceA = 'AB7K-P9M2-X4DQ'
+    const spaceB = 'CDE4-FGH5-JK67'
+    saveSyncSpaceSettings({ spaceId: spaceA, deviceCredential: randomSecret(), payloadKey: randomSecret(), autoSyncEnabled: false })
+    const keyA = syncUndoStorageKey()
+    localStorage.setItem(keyA, JSON.stringify({ version: 1, createdAt: '2026-09-01T00:00:00.000Z', values: {} }))
+
+    saveSyncSpaceSettings({ spaceId: spaceB, deviceCredential: randomSecret(), payloadKey: randomSecret(), autoSyncEnabled: false })
+    expect(syncUndoStorageKey()).not.toBe(keyA)
+    expect(localStorage.getItem(keyA)).not.toBeNull()
+  })
+
+  it('revision check 与另一个同步入口共享 single-flight，不会并发发起两个请求', async () => {
+    code.value = '123456'
+    const resolvers = []
+    const fetchMock = vi.fn(() => new Promise((resolve) => { resolvers.push(resolve) }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const first = refreshCloudMetadata()
+    await Promise.resolve()
+    const second = refreshCloudMetadata()
+    await Promise.resolve()
+    resolvers.forEach((resolve) => resolve({ ok: true, json: async () => ({ exists: true, revision: 1 }) }))
+    await expect(first).resolves.toMatchObject({ ok: true, revision: 1 })
+    await expect(second).resolves.toMatchObject({ ok: false })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('recovery-required 时手动 revision check 也被锁定，不触发网络同步', async () => {
+    code.value = '123456'
+    syncRecovery.value = { status: 'recovery-required', marker: { operationId: 'recovery-lock' }, message: '请先恢复本机数据' }
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+
+    await expect(refreshCloudMetadata()).resolves.toMatchObject({ ok: false })
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('recovery-required 时手动拉取不会遗留同步互斥锁', async () => {
+    code.value = '123456'
+    syncRecovery.value = { status: 'recovery-required', marker: { operationId: 'recovery-lock' }, message: '请先恢复本机数据' }
+
+    expect(await pullFromCloud()).toBe(false)
+    expect(isSyncing.value).toBe(false)
+    syncRecovery.value = { status: 'idle', marker: null, message: '' }
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ exists: false, revision: null }) })))
+    expect(await refreshCloudMetadata()).toMatchObject({ ok: true })
+  })
+
+  it('重连验证占用同一同步 guard，期间手动 revision 不会并发发请求', async () => {
+    const settings = { spaceId: 'AB7K-P9M2-X4DQ', deviceCredential: randomSecret(), payloadKey: randomSecret(), autoSyncEnabled: false }
+    saveSyncSpaceSettings(settings)
+    let release
+    const fetchMock = vi.fn(() => new Promise((resolve) => { release = resolve }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const reconnect = connectSyncSpace({ ...settings, persist: false })
+    await Promise.resolve()
+    expect(await refreshCloudMetadata()).toMatchObject({ ok: false })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    release({ ok: true, json: async () => ({ ok: true, spaceId: settings.spaceId, exists: false, revision: null }) })
+    expect(await reconnect).toMatchObject({ ok: true })
+  })
+
+  it('空间切换后迟到的旧空间响应不会提交到新空间', async () => {
+    const { flushStoredWrites, useStoredRef } = await import('../src/composables/store')
+    const tasks = useStoredRef('sl_tasks', [])
+    tasks.value = [{ id: 'space-b-task', title: 'B 的任务' }]
+    flushStoredWrites()
+    const spaceAKey = randomSecret()
+    saveSyncSpaceSettings({ spaceId: 'AB7K-P9M2-X4DQ', deviceCredential: randomSecret(), payloadKey: spaceAKey, autoSyncEnabled: false })
+    connectionState.value = 'connected'
+    const values = { sl_tasks: [{ id: 'space-a-task', title: 'A 的任务' }] }
+    const encrypted = await encryptData({
+      format: 'study-life-sync', version: 3, values,
+      manifest: buildSyncManifest(values, { tombstones: [] }),
+    }, spaceAKey)
+    let resolveRequest
+    vi.stubGlobal('fetch', vi.fn(() => new Promise((resolve) => { resolveRequest = resolve })))
+
+    const pending = pullFromCloud()
+    await Promise.resolve()
+    const spaceBKey = randomSecret()
+    const oldSpaceId = syncSpaceSettings.value.spaceId
+    disconnectCloud()
+    saveSyncSpaceSettings({ spaceId: 'CDE4-FGH5-JK67', deviceCredential: randomSecret(), payloadKey: spaceBKey, autoSyncEnabled: false })
+    connectionState.value = 'connected'
+    resolveRequest({ ok: true, json: async () => ({ exists: true, revision: 2, data: encrypted }) })
+
+    expect(await pending).toBe(false)
+    expect(syncSpaceSettings.value.spaceId).not.toBe(oldSpaceId)
+    expect(tasks.value).toEqual([{ id: 'space-b-task', title: 'B 的任务' }])
+    disconnectCloud()
   })
 
   it('拉取空云端时只报告真实发生的请求阶段', async () => {
@@ -132,7 +256,7 @@ describe('云同步长任务控制', () => {
   })
 
   it('拉取后立刻编辑同一模块仍会标记为本机修改', async () => {
-    const { flushStoredWrites, useStoredRef } = await import('../src/composables/store')
+    const { flushStoredWrites } = await import('../src/composables/store')
     flushStoredWrites()
     localChanged.value = false
     code.value = '123456'
@@ -143,8 +267,8 @@ describe('云同步长任务控制', () => {
     })))
 
     expect(await pullFromCloud()).toBe(true)
-    const tasks = useStoredRef('sl_tasks', [])
-    tasks.value.push({ id: 'local', title: '刚刚新增' })
+    const { useDomainCommands } = await import('../src/composables/domain/commands.js')
+    useDomainCommands().createTask({ id: 'local', title: '刚刚新增' })
     flushStoredWrites()
 
     expect(localChanged.value).toBe(true)
@@ -174,6 +298,49 @@ describe('云同步长任务控制', () => {
     expect(courses.value).toEqual([{ id: 'local-course', name: '本地课程' }])
   })
 
+  it('选择性拉取只合并所选模块的墓碑，后续全量推送不会传播未选模块删除', async () => {
+    const { flushStoredWrites, useStoredRef } = await import('../src/composables/store')
+    const tasks = useStoredRef('sl_tasks', [])
+    const courses = useStoredRef('sl_courses', [])
+    const course = { id: 'local-course-tombstone', name: '本地课程', updatedAt: '2026-08-01T00:00:00.000Z' }
+    tasks.value = [{ id: 'local-task', title: '本地待办', updatedAt: '2026-08-01T00:00:00.000Z' }]
+    courses.value = [course]
+    flushStoredWrites()
+    saveSyncBaseline({ sl_tasks: tasks.value, sl_courses: courses.value }, { remoteRevision: 1, tombstones: [] })
+    code.value = '123456'
+
+    const remoteValues = {
+      sl_tasks: [{ id: 'remote-task', title: '云端待办', updatedAt: '2026-09-01T00:00:00.000Z' }],
+      sl_courses: [],
+    }
+    const courseTombstone = {
+      tombstoneId: 'remote-course-delete-1', entityType: 'Course', entityId: course.id,
+      baseHash: hashSyncValue(course), deletedAt: '2026-09-01T00:00:00.000Z', updatedAt: '2026-09-01T00:00:00.000Z',
+    }
+    const encrypted = await encryptData({
+      format: 'study-life-sync', version: 3, values: remoteValues,
+      manifest: buildSyncManifest(remoteValues, { tombstones: [courseTombstone] }),
+    }, code.value)
+    let pushBody
+    vi.stubGlobal('fetch', vi.fn(async (url, init) => {
+      if (url.endsWith('/pull')) return { ok: true, json: async () => ({ exists: true, revision: 2, data: encrypted }) }
+      pushBody = JSON.parse(init.body)
+      return { ok: true, json: async () => ({ exists: true, revision: 3, updatedAt: '2026-09-02T00:00:00.000Z' }) }
+    }))
+
+    expect(await pullFromCloud({ keys: ['sl_tasks'] })).toBe(true)
+    expect(courses.value).toEqual([course])
+    expect(readSyncMetadata().tombstones).toEqual([])
+
+    localChanged.value = true
+    expect(await pushToCloud()).toBe(true)
+    expect(readSyncMetadata().tombstones).toEqual([])
+    if (pushBody) {
+      const pushed = await (await import('../src/utils/crypto.js')).decryptData(pushBody.data, code.value)
+      expect(pushed.manifest.tombstones).toEqual([])
+    }
+  })
+
   it('新版双改冲突只生成预览，不在用户决策前修改本地', async () => {
     const { flushStoredWrites, useStoredRef } = await import('../src/composables/store')
     const tasks = useStoredRef('sl_tasks', [])
@@ -192,6 +359,8 @@ describe('云同步长任务控制', () => {
     expect(await pullFromCloud({ keys: ['sl_tasks'] })).toBe(false)
     expect(tasks.value).toEqual([{ ...base, title: '本机修改' }])
     expect(syncPreview.value.conflicts).toHaveLength(1)
+    expect(await resolvePendingMerge({})).toBe(false)
+    expect(lastError.value).toContain('仍有 1 个冲突')
     expect(await resolvePendingMerge({ 'sl_tasks:same-task': 'remote' })).toBe(true)
     expect(tasks.value).toEqual([{ ...base, title: '云端修改' }])
   })
@@ -377,6 +546,47 @@ describe('云同步长任务控制', () => {
     expect(lastError.value).toContain('manifest')
   })
 
+  it('未知同步 envelope version fail closed，不更新本地 Base 或已知 revision', async () => {
+    const { flushStoredWrites, useStoredRef } = await import('../src/composables/store/cloudAccess.js')
+    const tasks = useStoredRef('sl_tasks', [])
+    tasks.value = [{ id: 'unknown-version-task', title: '本机值' }]
+    flushStoredWrites()
+    code.value = '123456'
+    const encrypted = await encryptData({
+      format: 'study-life-sync', version: 999,
+      values: { sl_tasks: [{ id: 'remote', title: '未知版本' }] },
+    }, code.value)
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ exists: true, revision: 99, data: encrypted }),
+    })))
+
+    expect(await pullFromCloud()).toBe(false)
+    expect(lastError.value).toContain('版本')
+    expect(tasks.value).toEqual([{ id: 'unknown-version-task', title: '本机值' }])
+    expect(readSyncMetadata().hasBaseline).toBe(false)
+    expect(remoteRevision.value).toBeNull()
+  })
+
+  it('无 format 的未知对象不降级为 Legacy，且不更新本地同步元数据', async () => {
+    const { flushStoredWrites, useStoredRef } = await import('../src/composables/store/cloudAccess.js')
+    const tasks = useStoredRef('sl_tasks', [])
+    const before = [{ id: 'legacy-shape-task', title: '本机值' }]
+    tasks.value = before
+    flushStoredWrites()
+    code.value = '123456'
+    const encrypted = await encryptData({ wrapper: { sl_tasks: [{ id: 'remote' }] } }, code.value)
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ exists: true, revision: 88, data: encrypted }),
+    })))
+
+    expect(await pullFromCloud()).toBe(false)
+    expect(tasks.value).toEqual(before)
+    expect(readSyncMetadata().hasBaseline).toBe(false)
+    expect(remoteRevision.value).toBeNull()
+  })
+
   it('已建立干净基线后重复 Push 不产生新的 remote revision', async () => {
     code.value = '123456'
     cloudExists.value = true
@@ -388,6 +598,27 @@ describe('云同步长任务控制', () => {
 
     expect(await pushToCloud()).toBe(true)
     expect(lastError.value).toContain('没有需要推送')
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('当前 sync payload 与 Base 相同，即使 dirty 被误标也不发起 Push', async () => {
+    const { flushStoredWrites, useStoredRef } = await import('../src/composables/store')
+    const tasks = useStoredRef('sl_tasks', [])
+    const value = [{ id: 'same-as-base', title: '基线任务' }]
+    tasks.value = value
+    flushStoredWrites()
+    const states = Object.fromEntries(SYNC_KEYS.map((key) => [key, useStoredRef(key, SYNC_DEFAULTS[key])]))
+    saveSyncBaseline({ ...Object.fromEntries(SYNC_KEYS.map((key) => [key, states[key].value])), sl_tasks: value }, { remoteRevision: 4, tombstones: [] })
+    code.value = '123456'
+    cloudExists.value = true
+    remoteRevision.value = 4
+    localChanged.value = true
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+
+    expect(await pushToCloud()).toBe(true)
+    expect(lastError.value).toContain('没有需要推送')
+    expect(localChanged.value).toBe(false)
     expect(fetchMock).not.toHaveBeenCalled()
   })
 

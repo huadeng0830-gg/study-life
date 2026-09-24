@@ -1,18 +1,18 @@
 import { computed } from 'vue'
 import { periodIndex, timeConfig } from '../store/timeConfig.js'
-import { coursesForDate, dateForWeekDay } from '../store/schedule.js'
+import { coursesForDate, coursesForDates, dateForWeekDay, scheduleExceptionForDate } from '../store/schedule.js'
 
-export function useScheduleGrid(courses, scheduleExceptions, viewWeek, mobileView, mobileDay) {
+export function useScheduleGrid(courses, viewWeek, mobileView, mobileDay) {
   const DAYS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
 
   const viewDates = computed(() => DAYS.map((_, day) => dateForWeekDay(viewWeek.value, day)))
 
   const viewExceptions = computed(() =>
-    viewDates.value.map((date) => scheduleExceptions.value.find((item) => item.date === date) ?? null)
+    viewDates.value.map((date) => scheduleExceptionForDate(date))
   )
 
   const visibleCourses = computed(() =>
-    viewDates.value.flatMap((date) => coursesForDate(courses.value, date))
+    coursesForDates(courses.value, viewDates.value).flat()
   )
 
   const mobileDate = computed(() => dateForWeekDay(viewWeek.value, mobileDay.value))

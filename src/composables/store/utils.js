@@ -1,7 +1,8 @@
 const DAY_NAMES = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
+import { clock } from './core.js'
 
-export function todayIndex() {
-  const d = new Date().getDay()
+export function todayIndex(value = clock.value) {
+  const d = new Date(value).getDay()
   return d === 0 ? 6 : d - 1
 }
 
@@ -15,17 +16,29 @@ export function fmtDate(dateStr) {
   return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日 ${week}`
 }
 
-export function daysUntil(dateStr) {
+export function daysUntil(dateStr, now = clock.value) {
   const target = new Date(dateStr + 'T00:00:00')
-  const now = new Date()
-  now.setHours(0, 0, 0, 0)
-  return Math.round((target - now) / 86400000)
+  const current = new Date(now)
+  current.setHours(0, 0, 0, 0)
+  return Math.round((target - current) / 86400000)
 }
 
-export function todayStr() {
-  const d = new Date()
+export function todayStr(value = clock.value) {
+  const d = new Date(value)
   const p = (n) => String(n).padStart(2, '0')
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+}
+
+export function minutesUntilStart(date, time, now = clock.value, maxMinutes = 24 * 60) {
+  if (!date || !time) return null
+  const [year, month, day] = String(date).split('-').map(Number)
+  const [hour, minute] = String(time).split(':').map(Number)
+  if (![year, month, day, hour, minute].every(Number.isFinite)) return null
+
+  const target = new Date(year, month - 1, day, hour, minute, 0, 0)
+  const diff = target.getTime() - now.getTime()
+  if (diff <= 0 || diff > maxMinutes * 60000) return null
+  return Math.ceil(diff / 60000)
 }
 
 function dateString(date) {

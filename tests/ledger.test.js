@@ -2,10 +2,16 @@
 import { describe, expect, it } from 'vitest'
 import {
   buildLedgerIndex,
+  classifyTransaction,
+  commonCategories,
   computeFrequent,
   computeFrequentFromIndex,
+  DEFAULT_CATEGORIES,
+  DEFAULT_EXPENSE_CATEGORIES,
+  DEFAULT_INCOME_CATEGORIES,
   ledgerPeriodStatsFromIndex,
 } from '../src/composables/ledger.js'
+import { normalizeLedgerCategories } from '../src/composables/ledgerCategories.js'
 
 const NOW = new Date('2026-08-28T12:00:00').getTime()
 
@@ -68,5 +74,72 @@ describe('ledger index', () => {
       monthCount: 1,
       todayTotal: 18,
     })
+  })
+})
+
+describe('ledger category system', () => {
+  it('默认分类使用稳定 ID，并把收入与支出分开', () => {
+    expect(DEFAULT_EXPENSE_CATEGORIES.map((item) => item.key)).toContain('drink')
+    expect(DEFAULT_EXPENSE_CATEGORIES.map((item) => item.key)).toContain('bathing')
+    expect(DEFAULT_INCOME_CATEGORIES.map((item) => item.key)).toEqual(expect.arrayContaining(['salary', 'part-time', 'scholarship', 'allowance', 'refund']))
+    expect(DEFAULT_EXPENSE_CATEGORIES.every((item) => item.scope === 'expense')).toBe(true)
+    expect(DEFAULT_INCOME_CATEGORIES.every((item) => item.scope === 'income')).toBe(true)
+    expect(DEFAULT_CATEGORIES.some((item) => item.key === 'food' && item.name === '餐饮')).toBe(true)
+    expect(commonCategories('expense')).toHaveLength(8)
+    expect(commonCategories('income').every((item) => item.scope === 'income')).toBe(true)
+  })
+
+  it.each([
+    ['买牛肉面花了5元', 'food'],
+    ['花了5元买牛肉面', 'food'],
+    ['外卖20元', 'food'],
+    ['奶茶12元', 'drink'],
+    ['买咖啡18', 'drink'],
+    ['可乐3元', 'drink'],
+    ['买薯片6元', 'snack'],
+    ['地铁4元', 'transit'],
+    ['滴滴打车26元', 'transit'],
+    ['买洗衣液28元', 'daily-supplies'],
+    ['买数据线19元', 'digital'],
+    ['打印论文12元', 'study'],
+    ['买书本35元', 'study'],
+    ['理发35元', 'daily-service'],
+    ['校园网20元', 'utilities'],
+    ['iCloud 6元', 'sub'],
+    ['洗浴20元', 'bathing'],
+    ['沐浴露28元', 'daily-supplies'],
+  ])('自然语言“%s”归入 %s', (text, expected) => {
+    expect(classifyTransaction(text).categoryId).toBe(expected)
+  })
+
+  it('复合语句、平台词和收入词遵守优先级', () => {
+    expect(classifyTransaction('午饭加可乐一共25元').categoryId).toBe('food')
+    expect(classifyTransaction('美团买奶茶12元').categoryId).toBe('drink')
+    expect(classifyTransaction('淘宝买洗衣液30元').categoryId).toBe('daily-supplies')
+    expect(classifyTransaction('京东买耳机199元').categoryId).toBe('digital')
+    expect(classifyTransaction('便利店买矿泉水和纸巾20元')).toMatchObject({
+      categoryId: 'daily-supplies', uncertain: true, ambiguous: true,
+    })
+    expect(classifyTransaction('兼职赚了200元', { direction: 'income' }).categoryId).toBe('part-time')
+    expect(classifyTransaction('收到生活费500元', { direction: 'income' }).categoryId).toBe('allowance')
+    expect(classifyTransaction('淘宝退款39元', { direction: 'income' }).categoryId).toBe('refund')
+    expect(classifyTransaction('奖学金1000', { direction: 'income' }).categoryId).toBe('scholarship')
+  })
+
+  it('用户覆盖优先于系统规则，旧分类只补充新定义不改 ID', () => {
+    expect(classifyTransaction('京东买洗衣液30元', {
+      overrides: [{ term: '洗衣液', key: 'custom-cleaning', direction: 'expense' }],
+    })).toMatchObject({ categoryId: 'custom-cleaning', matchedBy: 'user', confidence: 0.99 })
+
+    const migrated = normalizeLedgerCategories([
+      { key: 'food', name: '餐饮', icon: '🍜', hidden: false },
+      { key: 'transit', name: '出行', icon: '🚇', hidden: false },
+      { key: 'life', name: '生活', icon: '🏠', hidden: false },
+      { key: 'other', name: '其他', icon: '📦', hidden: false },
+    ])
+    expect(migrated.find((item) => item.key === 'transit')).toMatchObject({ key: 'transit', name: '交通' })
+    expect(migrated.find((item) => item.key === 'life')).toMatchObject({ key: 'life', name: '生活', hidden: true, legacy: true })
+    expect(migrated.find((item) => item.key === 'drink')).toBeTruthy()
+    expect(migrated.find((item) => item.key === 'bathing')).toBeTruthy()
   })
 })

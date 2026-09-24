@@ -91,6 +91,26 @@ describe('P2-A weekly review selectors', () => {
     expect(summary.completed).toBe(1)
   })
 
+  it('weekly task summary uses one pass instead of materializing repeated filters', () => {
+    const tasks = new Proxy([
+      { id: 'completed-homework', status: 'completed', createdAt: '2026-09-01T01:00:00Z', completedAt: '2026-09-02T01:00:00Z', kind: 'homework', estimateMinutes: 25 },
+      { id: 'pending', status: 'pending' },
+    ], {
+      get(target, property, receiver) {
+        if (property === 'filter') throw new Error('周待办摘要不应重复物化筛选数组')
+        return Reflect.get(target, property, receiver)
+      },
+    })
+
+    expect(selectWeeklyTaskSummary({ tasks }, new Date('2026-09-02T10:00:00'))).toMatchObject({
+      created: 1,
+      completed: 1,
+      homeworkCompleted: 1,
+      pending: 1,
+      focusMinutes: 25,
+    })
+  })
+
   it('summarizes weekly income, expense, bill payment, mood and deduplicated next-week items', () => {
     const now = new Date('2026-09-02T10:00:00')
     const finance = selectWeeklyFinanceSummary({ transactions: [

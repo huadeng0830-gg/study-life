@@ -1,16 +1,16 @@
 <script setup>
-import { defineAsyncComponent, ref, reactive, computed, watch, onBeforeUnmount, onDeactivated } from 'vue'
+import { defineAsyncComponent, ref, reactive, computed, watch, onBeforeUnmount, onDeactivated, onMounted, nextTick } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import Modal from '../components/Modal.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import { useDomainCommands } from '../composables/domain/commands.js'
+import { useCourseTemplateCommands } from '../composables/courseTemplates.js'
 import { appearance } from '../composables/appearance.js'
 import {
   useStoredRef,
-  todayIndex,
   PALETTE,
   DEFAULT_TIMES,
   MAX_WEEK,
-  todayStr,
 } from '../composables/store'
 import {
   timeConfig,
@@ -27,14 +27,19 @@ import {
 import {
   semester,
   weekOf,
-  currentWeek,
+  dateForWeekDay,
   scheduleExceptions,
+  upsertScheduleException,
+  removeScheduleException,
 } from '../composables/store/schedule.js'
 import { useTaskProgress } from '../composables/taskProgress.js'
 import { schedulePolicy } from '../composables/settingsPolicy.js'
 import { isArchived } from '../composables/domain/state.js'
+import { appToday, currentDayIndex, currentWeek as appCurrentWeek } from '../composables/timeContext.js'
+import { clearFocusFromRoute, focusElementWhenReady, readFocusQuery } from '../composables/focusNavigation.js'
 import QuickRecordPanel from '../components/QuickRecordPanel.vue'
 import ScheduleGrid from '../components/schedule/ScheduleGrid.vue'
+import Toast from '../components/Toast.vue'
 // 弹窗一律按需加载：仅“查看课程表”不再下载作息设置、批量录入等大体量模块，
 // 打开课程表更快，内存占用更小（这些弹窗只有在真正点开时才会加载）。
 const CourseEditorModal = defineAsyncComponent(() => import('../components/schedule/CourseEditorModal.vue'))
@@ -73,21 +78,34 @@ function loadCourseImport() {
   return courseImportTask
 }
 
-const courses = useStoredRef('sl_courses', [])
+const domain = useDomainCommands()
+const { courses, tasks, milestones: countdowns, events, notes } = domain
 const showArchivedCourses = ref(false)
 const visibleCourses = computed(() => showArchivedCourses.value ? courses.value : courses.value.filter((course) => !isArchived(course)))
-const courseTemplates = useStoredRef('sl_course_templates', [])
-const tasks = useStoredRef('sl_tasks', [])
-const countdowns = useStoredRef('sl_exams', [])
-const events = useStoredRef('sl_events', [])
-const notes = useStoredRef('sl_quick_notes', [])
-const domain = useDomainCommands()
+const courseTemplateCommands = useCourseTemplateCommands()
+const { templates: courseTemplates } = courseTemplateCommands
+const route = useRoute()
+const router = useRouter()
+const focusedCourseId = ref('')
+const focusMessage = ref('')
+let focusHandled = ''
+const toast = ref({ open: false, message: '', type: 'info', actionLabel: '', undoFn: null, viewFn: null, duration: 3200 })
 const scheduleNote = useStoredRef('sl_schedule_note', '')
+const scheduleNoteEl = ref(null)
 const quickHomeworkCourse = ref(null)
 
 function saveScheduleNote() {
   // 备注内容已通过 useStoredRef 自动保存
 }
+
+function resizeScheduleNote() {
+  const element = scheduleNoteEl.value
+  if (!element) return
+  element.style.height = 'auto'
+  element.style.height = `${Math.min(Math.max(element.scrollHeight, 38), 180)}px`
+}
+
+onMounted(resizeScheduleNote)
 
 // OCR 引擎、版面解析和本地纠错词典只在用户真正选择图片后才下载。
 // 普通查看/编辑课程表不再为这些重模块付出初始化成本。
@@ -179,9 +197,9 @@ const templateName = ref('')
 const managerMessage = ref('')
 const managerError = ref('')
 const clampViewWeek = (week) => Math.min(Math.max(week, 0), MAX_WEEK)
-const viewWeek = ref(clampViewWeek(currentWeek()))
+const viewWeek = ref(clampViewWeek(appCurrentWeek.value))
 const mobileView = ref(typeof window !== 'undefined' && window.matchMedia('(max-width: 760px)').matches ? 'day' : 'week')
-const mobileDay = ref(todayIndex())
+const mobileDay = ref(currentDayIndex.value)
 const form = reactive({
   name: '',
   teacher: '',
@@ -311,7 +329,7 @@ function openCourseManager() {
   selectedCourseIds.value = []
   managerMessage.value = ''
   managerError.value = ''
-  templateName.value = `${new Date().getFullYear()}年课表`
+  templateName.value = `${Number(appToday.value.slice(0, 4))}年课表`
   showCourseManager.value = true
 }
 
@@ -327,14 +345,48 @@ function toggleAllCourses() {
     : courses.value.map((course) => course.id)
 }
 
+// 批量删除课程与清空课表共用一个确认框：两者形状完全一样——都是「把确认前快照下来的
+// 一批课程 id 从当前课表里删掉」，只有文案不同。拆成两个对话框会把同一段
+// 「快照 → 删除 → 清空选中」的收尾逻辑抄两遍。
+// 【为什么快照一定要在弹确认之前】对话框打开期间用户仍然可以继续勾选课程，
+// 确认后才去读 selectedCourseIds 会把「提示里说的 N 门」和「真正删掉的」变成两回事，
+// 并连带删掉当时根本没在提示里出现过的课程。
+const coursesRemovalTarget = ref(null) // { ids: string[], message, confirmLabel, doneMessage }
+
+function requestCoursesRemoval(target) {
+  coursesRemovalTarget.value = target
+}
+
 function deleteSelectedCourses() {
-  if (!selectedCourses.value.length) return
-  if (!window.confirm(`确定删除选中的 ${selectedCourses.value.length} 门课程吗？`)) return
-  const ids = new Set(selectedCourseIds.value)
+  const ids = selectedCourses.value.map((course) => course.id)
+  if (!ids.length) return
+  requestCoursesRemoval({
+    ids,
+    message: `确定删除选中的 ${ids.length} 门课程吗？`,
+    confirmLabel: '删除课程',
+    doneMessage: '选中的课程已删除',
+  })
+}
+
+function clearCurrentSchedule() {
+  const ids = courses.value.map((course) => course.id)
+  if (!ids.length) return
+  requestCoursesRemoval({
+    ids,
+    message: '确定清空当前全部课程吗？建议先保存为学期模板或导出备份。',
+    confirmLabel: '清空课表',
+    doneMessage: '当前课表已清空',
+  })
+}
+
+function confirmCoursesRemoval() {
+  const target = coursesRemovalTarget.value
+  coursesRemovalTarget.value = null
+  if (!target) return
   // 默认只解除关联，保留历史任务、考试、日程与笔记。
-  ids.forEach((id) => domain.deleteCourse(id))
+  for (const id of target.ids) domain.deleteCourse(id)
   selectedCourseIds.value = []
-  managerMessage.value = '选中的课程已删除'
+  managerMessage.value = target.doneMessage
 }
 
 function duplicateSelectedCourses() {
@@ -342,14 +394,6 @@ function duplicateSelectedCourses() {
   const copies = selectedCourses.value.map((course) => domain.createCourse({ ...course, createdFrom: 'course-duplicate' }))
   selectedCourseIds.value = copies.map((course) => course.id)
   managerMessage.value = `已创建 ${copies.length} 门课程副本，可关闭窗口后逐项调整`
-}
-
-function clearCurrentSchedule() {
-  if (!courses.value.length) return
-  if (!window.confirm('确定清空当前全部课程吗？建议先保存为学期模板或导出备份。')) return
-  for (const course of [...courses.value]) domain.deleteCourse(course.id)
-  selectedCourseIds.value = []
-  managerMessage.value = '当前课表已清空'
 }
 
 function saveCourseTemplate() {
@@ -363,21 +407,33 @@ function saveCourseTemplate() {
     managerError.value = '当前没有课程可以保存'
     return
   }
-  courseTemplates.value.unshift({
-    id: 'tpl' + Date.now(),
-    name,
-    createdAt: new Date().toISOString(),
-    courses: JSON.parse(JSON.stringify(courses.value)),
-  })
+  courseTemplateCommands.saveTemplate({ name, courses: courses.value })
   templateName.value = ''
   managerMessage.value = `“${name}”已保存，可在新学期重新导入`
 }
 
+// 模板导入 / 模板删除的确认由子 Modal（CourseManagerModal）的 emit 驱动，确认框会叠成
+// 第三层浮层；叠加顺序、Escape 只关最上层、取消后的焦点归还都由 Modal.vue 现有的
+// isTopOverlay + 焦点还原机制负责，这里不需要额外处理。
+const importTemplateTarget = ref(null)
+const deleteTemplateTarget = ref(null)
+
 function importCourseTemplate(template) {
+  // 文案里的 action（追加 / 导入为空课表）依赖 courses.value.length，必须在弹确认
+  // 之前定稿：确认期间课程数还可能变化，晚算会让提示与实际导入行为对不上。
   const action = courses.value.length ? '追加到当前课表' : '导入为空课表'
-  if (!window.confirm(`确定将“${template.name}”中的 ${template.courses.length} 门课程${action}吗？`)) return
+  importTemplateTarget.value = {
+    courses: template.courses,
+    message: `确定将“${template.name}”中的 ${template.courses.length} 门课程${action}吗？`,
+  }
+}
+
+function confirmImportCourseTemplate() {
+  const target = importTemplateTarget.value
+  importTemplateTarget.value = null
+  if (!target) return
   const stamp = Date.now()
-  const copies = template.courses.map((course, index) => ({
+  const copies = target.courses.map((course, index) => ({
     ...JSON.parse(JSON.stringify(course)),
     id: `c${stamp}_tpl_${index}`,
   }))
@@ -385,8 +441,14 @@ function importCourseTemplate(template) {
 }
 
 function deleteCourseTemplate(template) {
-  if (!window.confirm(`确定删除课表模板“${template.name}”吗？`)) return
-  courseTemplates.value = courseTemplates.value.filter((item) => item.id !== template.id)
+  deleteTemplateTarget.value = template
+}
+
+function confirmDeleteCourseTemplate() {
+  const target = deleteTemplateTarget.value
+  deleteTemplateTarget.value = null
+  if (!target) return
+  courseTemplateCommands.deleteTemplate(target.id)
 }
 
 async function openBatchShift() {
@@ -550,13 +612,33 @@ function applyAllImportDecisions(action) {
     if (action === 'skip') draft.decisions[item.index] = 'skip'
   }
 }
+// 整张替换的确认。
+// 【为什么把 draft 一起快照进 ref】commitCourseImport 开头会**再读一次**
+// importDraft.value 并在为空时静默 return。确认期间用户可以把审阅面板关掉
+// （cancelCourseImportReview 会把 importDraft 置 null），那样点了「替换」却什么都
+// 不会发生。所以这里把 draft 快照进目标 ref，确认时按**显式参数**提交，
+// 不再回读响应式引用；文案也一并定稿（它依赖 courses.value.length）。
+const replaceAllTarget = ref(null) // { draft, message }
+
 function commitWholeScheduleReplacement() {
   const draft = importDraft.value
-  if (!draft || !window.confirm(`确认替换当前整张课表？\n将移除现有 ${courses.value.length} 门课程，仅保留本次导入的 ${draft.items.length} 门课程。`)) return
-  commitCourseImport('replace-all')
+  if (!draft) return
+  replaceAllTarget.value = {
+    draft,
+    message: `确认替换当前整张课表？\n将移除现有 ${courses.value.length} 门课程，仅保留本次导入的 ${draft.items.length} 门课程。`,
+  }
 }
-async function commitCourseImport(mode = 'smart') {
-  const draft = importDraft.value
+
+function confirmWholeScheduleReplacement() {
+  const target = replaceAllTarget.value
+  replaceAllTarget.value = null
+  if (!target) return
+  void commitCourseImport('replace-all', target.draft)
+}
+
+async function commitCourseImport(mode = 'smart', draftOverride = null) {
+  // draftOverride：整张替换的确认路径显式传入确认前快照的 draft（见上）。
+  const draft = draftOverride || importDraft.value
   if (!draft || importCommitBusy.value) return
   const api = await loadCourseImport()
   const plan = api.buildImportPlan({ existingCourses: draft.existing, items: draft.items, decisions: draft.decisions, mode, options: courseConflictOptions.value })
@@ -567,7 +649,7 @@ async function commitCourseImport(mode = 'smart') {
   }
   importCommitBusy.value = true
   try {
-    courses.value = plan.courses
+    domain.replaceCourses(plan.courses)
     // Only accepted import results train the on-device correction memory.
     // OCR suggestions never leave this browser and never alter cloud data by themselves.
     void import('../composables/ocrVocabulary.js').then(({ rememberOcrCourses }) => rememberOcrCourses(plan.courses))
@@ -579,14 +661,14 @@ async function commitCourseImport(mode = 'smart') {
     showImportConflict.value = false
     importDraft.value = null
   } catch (e) {
-    courses.value = draft.snapshot
+    domain.replaceCourses(draft.snapshot)
     batchError.value = '写入失败，已自动恢复导入前课表'
   } finally { importCommitBusy.value = false }
 }
 function undoLastCourseImport() {
   const undo = lastImportUndo.value
   if (!undo || Date.now() > undo.expiresAt) return
-courses.value = JSON.parse(JSON.stringify(undo.snapshot))
+  domain.replaceCourses(JSON.parse(JSON.stringify(undo.snapshot)))
   lastImportUndo.value = null
   message.value = '已撤销本次导入，课表已恢复'
 }
@@ -632,15 +714,9 @@ function isOcrEngineFailure(progress, message) {
     || /初始化|语言模型|OCR 内核|Worker|Failed to fetch|NetworkError|script load|动态导入/i.test(message)
 }
 
-// 手动保存课程后的轻量提示：不新增全局 toast 组件，仅在课表页内短暂显示。
-const toastMessage = ref('')
-let toastTimer = 0
-function showToast(text) {
-  toastMessage.value = text
-  window.clearTimeout(toastTimer)
-  toastTimer = window.setTimeout(() => { toastMessage.value = '' }, 3200)
+function showToast(message, { type = 'info', actionLabel = '', undoFn = null, viewFn = null, duration = 3200 } = {}) {
+  toast.value = { open: true, message, type, actionLabel, undoFn, viewFn, duration }
 }
-onBeforeUnmount(() => window.clearTimeout(toastTimer))
 
 async function ocrImage(event) {
   const files = [...(event.target.files || [])]
@@ -844,7 +920,7 @@ function continueBatchResults() {
   batchOcrProgress.reset()
 }
 
-const curWeek = computed(() => clampViewWeek(currentWeek()))
+const curWeek = computed(() => clampViewWeek(appCurrentWeek.value))
 
 function goWeek(delta) {
   const next = viewWeek.value + delta
@@ -859,7 +935,7 @@ function saveSemester(value) {
 }
 
 function semesterPreview() {
-  return weekOf(todayStr())
+  return weekOf(appToday.value)
 }
 
 function shiftMobileDay(delta) {
@@ -876,22 +952,11 @@ function openExceptionManager() {
 }
 
 function saveException(payload) {
-  if (!payload?.date) return
-  const value = {
-    id: `exception-${payload.date}`,
-    date: payload.date,
-    type: payload.type,
-    sourceDay: payload.sourceDay,
-    note: payload.note,
-    updatedAt: new Date().toISOString(),
-  }
-  const index = scheduleExceptions.value.findIndex((item) => item.date === value.date)
-  if (index >= 0) scheduleExceptions.value[index] = value
-  else scheduleExceptions.value.push(value)
+  upsertScheduleException(payload)
 }
 
 function removeException(id) {
-  scheduleExceptions.value = scheduleExceptions.value.filter((item) => item.id !== id)
+  removeScheduleException(id)
 }
 
 function openAdd(day = null, period = null) {
@@ -905,7 +970,7 @@ function openAdd(day = null, period = null) {
   form.campusId = settingsSchedule.value.campusId || ''
   form.travelMinutes = 0
   form.color = PALETTE[courses.value.length % PALETTE.length]
-  form.day = day ?? todayIndex()
+  form.day = day ?? currentDayIndex.value
   form.start = period ?? fallbackStart
   const startIdx = periodIndex(form.start)
   form.end = period ? (periods[startIdx + 1]?.id ?? period) : (periods[startIdx + 1]?.id ?? fallbackStart)
@@ -972,7 +1037,41 @@ function periodOption(id) {
   return t ? `${label}（${t}）` : label
 }
 
-const todayIdx = computed(() => todayIndex())
+const todayIdx = currentDayIndex
+
+function weekdayIndex(date) {
+  const day = new Date(`${date}T00:00:00Z`).getUTCDay()
+  return day === 0 ? 6 : day - 1
+}
+
+async function focusRouteCourse() {
+  const { id, date } = readFocusQuery(route)
+  if (!id || focusHandled === id) return
+  focusHandled = id
+  const course = courses.value.find((item) => String(item.id) === id)
+  if (!course) {
+    focusMessage.value = '这门课程可能已删除或已移动。'
+    await clearFocusFromRoute(router, route)
+    return
+  }
+  showArchivedCourses.value = isArchived(course)
+  const targetDate = /^\d{4}-\d{2}-\d{2}$/.test(date)
+    ? date
+    : dateForWeekDay(clampViewWeek(appCurrentWeek.value), course.day)
+  viewWeek.value = clampViewWeek(weekOf(targetDate))
+  mobileDay.value = weekdayIndex(targetDate)
+  focusedCourseId.value = id
+  await nextTick()
+  const element = await focusElementWhenReady(id, { date: targetDate }) || await focusElementWhenReady(id)
+  if (!element) focusMessage.value = '这门课程可能已删除或已移动。'
+  await clearFocusFromRoute(router, route)
+}
+
+watch(
+  () => [route.query.focus, route.query.date, courses.value.length, viewWeek.value, mobileDay.value],
+  () => { void focusRouteCourse() },
+  { immediate: true }
+)
 
 // OCR Worker 是模块级单例，返回课表时仍可复用已经加载的模型。
 </script>
@@ -982,15 +1081,15 @@ const todayIdx = computed(() => todayIndex())
     <div class="head">
       <h1 class="page-title">课程表</h1>
       <div class="head-btns">
-        <button class="btn btn-ghost" @click="showArchivedCourses = !showArchivedCourses">{{ showArchivedCourses ? '返回当前课程' : '历史课程' }}</button>
+        <button class="btn btn-ghost" :aria-expanded="showArchivedCourses" @click="showArchivedCourses = !showArchivedCourses">{{ showArchivedCourses ? '返回当前课程' : '历史课程' }}</button>
         <button class="btn btn-ghost" :aria-expanded="showScheduleSettings" @click="showScheduleSettings = !showScheduleSettings">{{ showScheduleSettings ? '收起设置' : '更多设置' }}</button>
       </div>
     </div>
 
     <section v-if="showScheduleSettings" class="schedule-settings" aria-label="课程表设置">
-      <div><h3>课程</h3><button class="btn btn-ghost" @click="openCourseManager">☷ 批量管理</button><button class="btn btn-ghost" @click="openBatchShift">⇩ 导入课程表</button></div>
-      <div><h3>时间规则</h3><button class="btn btn-ghost" @click="showSemester = true">📅 学期</button><button class="btn btn-ghost" @click="openTimeSettings">🕐 作息与节次</button><button class="btn btn-ghost" @click="openExceptionManager">🗓 特殊日期</button></div>
-      <div><h3>显示</h3><button class="btn btn-ghost" @click="mobileView = mobileView === 'day' ? 'week' : 'day'">{{ mobileView === 'day' ? '切换整周视图' : '切换单日视图' }}</button></div>
+      <div><h2>课程</h2><button class="btn btn-ghost" @click="openCourseManager">☷ 批量管理</button><button class="btn btn-ghost" @click="openBatchShift">⇩ 导入课程表</button></div>
+      <div><h2>时间与日期</h2><button class="btn btn-ghost" @click="showSemester = true">📅 学期</button><button class="btn btn-ghost" @click="openTimeSettings">🕐 作息与节次</button><button class="btn btn-ghost" @click="openExceptionManager">🗓 特殊日期</button></div>
+      <div><h2>显示</h2><button class="btn btn-ghost" @click="mobileView = mobileView === 'day' ? 'week' : 'day'">{{ mobileView === 'day' ? '切换整周视图' : '切换单日视图' }}</button></div>
     </section>
 
     <div class="toolbar">
@@ -1038,12 +1137,19 @@ const todayIdx = computed(() => todayIndex())
       </div>
       <div class="seg-group">
         <span class="seg-label">周次</span>
+        <!-- 翻周按钮内部只有「‹」「›」，读屏会把它念成符号，方向信息完全丢失，所以用
+             aria-label 说清是上一周还是下一周；符号本身保持可见，不需要 aria-hidden。
+             .seg button 的命中区在手机上偏小，一并标记 tap-target 由粗指针样式放大。 -->
         <div class="seg">
-          <button :disabled="viewWeek <= 0" @click="goWeek(-1)">‹</button>
-          <button class="wn" :class="{ thisweek: viewWeek === curWeek }">
+          <button class="tap-target" aria-label="上一周" :disabled="viewWeek <= 0" @click="goWeek(-1)">‹</button>
+          <!-- 周次本身不是一个动作，只是把「现在在第几周」显示在两个翻周按钮中间。
+               它原来写成一个 button 元素，于是变成一个按下去什么都不会发生的 Tab
+               停靠点，读屏也会念「第 5 周 按钮」暗示可以点。这里改成非交互的 span：
+               它不该出现在 Tab 顺序里，也不该被当成控件。 -->
+          <span class="wn" :class="{ thisweek: viewWeek === curWeek }" aria-live="polite">
             {{ viewWeek < 1 ? '开学前' : `第 ${viewWeek} 周` }}
-          </button>
-          <button :disabled="viewWeek >= MAX_WEEK" @click="goWeek(1)">›</button>
+          </span>
+          <button class="tap-target" aria-label="下一周" :disabled="viewWeek >= MAX_WEEK" @click="goWeek(1)">›</button>
         </div>
         <button v-if="viewWeek !== curWeek" class="btn btn-ghost" @click="viewWeek = curWeek">
           回到本周
@@ -1070,13 +1176,16 @@ const todayIdx = computed(() => todayIndex())
       </div>
     </div>
 
+    <p v-if="focusMessage" class="notice-success" role="status">{{ focusMessage }}</p>
+
     <ScheduleGrid
       :courses="visibleCourses"
-      :schedule-exceptions="scheduleExceptions"
       :view-week="viewWeek"
       :mobile-view="mobileView"
       :mobile-day="mobileDay"
       :current-week="curWeek"
+      :current-day-index="todayIdx"
+      :focused-course-id="focusedCourseId"
       :appearance="appearance"
       @open-add="openAdd"
       @open-edit="openEdit"
@@ -1084,13 +1193,16 @@ const todayIdx = computed(() => todayIndex())
     />
 
     <div class="schedule-note">
-      <input
+      <textarea
+        ref="scheduleNoteEl"
         v-model="scheduleNote"
-        type="text"
+        rows="1"
+        aria-label="课程表备注"
         placeholder="📝 课程表备注..."
         class="schedule-note-input"
+        @input="resizeScheduleNote"
         @blur="saveScheduleNote"
-      />
+      ></textarea>
     </div>
 
     <CourseEditorModal
@@ -1125,6 +1237,49 @@ const todayIdx = computed(() => todayIndex())
       confirm-label="删除课程"
       @close="deleteCourseTarget = null"
       @confirm="confirmDeleteCourse"
+    />
+
+    <!-- 下面四个都由子 Modal（课程管理器 / 导入冲突审阅）的 emit 驱动，会叠在那一层之上，
+         所以一律 v-if 随目标挂载：锚点在打开这一刻才创建，才排得到浮层栈顶端
+         （见 ConfirmDialog 顶部的浮层顺序说明）。 -->
+    <ConfirmDialog
+      v-if="coursesRemovalTarget"
+      :open="Boolean(coursesRemovalTarget)"
+      title="删除课程"
+      :message="coursesRemovalTarget?.message || ''"
+      :confirm-label="coursesRemovalTarget?.confirmLabel || '删除'"
+      @close="coursesRemovalTarget = null"
+      @confirm="confirmCoursesRemoval"
+    />
+
+    <ConfirmDialog
+      v-if="importTemplateTarget"
+      :open="Boolean(importTemplateTarget)"
+      title="导入课表模板"
+      :message="importTemplateTarget?.message || ''"
+      confirm-label="导入"
+      @close="importTemplateTarget = null"
+      @confirm="confirmImportCourseTemplate"
+    />
+
+    <ConfirmDialog
+      v-if="deleteTemplateTarget"
+      :open="Boolean(deleteTemplateTarget)"
+      title="删除课表模板"
+      :message="`确定删除课表模板“${deleteTemplateTarget?.name || ''}”吗？`"
+      confirm-label="删除模板"
+      @close="deleteTemplateTarget = null"
+      @confirm="confirmDeleteCourseTemplate"
+    />
+
+    <ConfirmDialog
+      v-if="replaceAllTarget"
+      :open="Boolean(replaceAllTarget)"
+      title="替换整张课表"
+      :message="replaceAllTarget?.message || ''"
+      confirm-label="确认替换"
+      @close="replaceAllTarget = null"
+      @confirm="confirmWholeScheduleReplacement"
     />
 
     <CourseManagerModal
@@ -1222,795 +1377,472 @@ const todayIdx = computed(() => todayIndex())
       @close="showTimeEditor = false"
     />
 
-    <Transition name="toast">
-      <div v-if="toastMessage" class="page-toast" role="status">{{ toastMessage }}</div>
-    </Transition>
+    <Toast v-model:open="toast.open" :message="toast.message" :type="toast.type" :action-label="toast.actionLabel" :undo-fn="toast.undoFn" :view-fn="toast.viewFn" :duration="toast.duration" @action="() => {}" @close="toast.open = false" />
   </div>
 </template>
 
 <style scoped>
-.page {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-.head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-.head h2 {
-  font-size: 22px;
-}
-.head-btns {
-  display: flex;
-  gap: 10px;
-}
-.schedule-settings {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-  padding: 14px;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--bg-tint);
-}
-.schedule-settings > div { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; min-width: 0; }
-.schedule-settings h3 { width: 100%; color: var(--ink-faint); font-size: 11px; letter-spacing: .04em; }
-.schedule-settings .btn { padding: 7px 10px; font-size: 12px; }
-
-.toolbar {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  flex-wrap: wrap;
-}
-.seg-group {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-.seg-label {
-  font-size: 13px;
-  color: var(--muted);
-}
-.seg {
-  display: flex;
-  max-width: 100%;
-  overflow-x: auto;
-  background: #fff;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 3px;
-}
-.seg button {
-  flex: 0 0 auto;
-  border: none;
-  background: transparent;
-  padding: 7px 14px;
-  border-radius: 8px;
-  font-size: 14px;
-  color: var(--muted);
-}
-.seg button:disabled {
-  opacity: 0.35;
-  cursor: default;
-}
-.seg button.on {
-  background: var(--primary);
-  color: #fff;
-  font-weight: 600;
-}
-.seg button.wn {
-  min-width: 84px;
-  font-weight: 700;
-  color: var(--text);
-}
-.seg button.wn.thisweek {
-  color: var(--primary);
-}
-.add-actions {
-  display: flex;
-  min-width: 0;
-  gap: 8px;
-  margin-left: auto;
-}
-
-.warn-banner {
-  background: #fef3c7;
-  border: 1px solid #fcd34d;
-  color: #92400e;
-  border-radius: 10px;
-  padding: 10px 16px;
-  font-size: 14px;
-}
-
-.timetable-wrap {
-  overflow-x: auto;
-  padding: 16px;
-}
+/* 第三十七轮说明：本样式块曾因一次删除器 bug 被破坏，内容由删除前的构建产物
+   （dist/assets 的编译 CSS，去掉 scope 属性后反压缩）整体重建，**原有注释在重建中丢失**。
+   第三十八轮已按 scope 归属清掉其中属于别组件的同值副本。新增规则时请照常写注释。 */
 .timetable {
-  display: grid;
-  grid-template-columns: 84px repeat(7, minmax(96px, 1fr));
-  gap: 5px;
-  min-width: 820px;
-}
-.corner {
-  grid-column: 1;
-  grid-row: 1;
-}
-.tt-head {
-  grid-row: 1;
-  text-align: center;
-  padding: 8px 0;
-  font-weight: 600;
-  color: var(--muted);
-  border-radius: 8px;
-}
-.tt-head.today {
-  background: var(--primary-soft);
-  color: var(--primary);
-}
-.today-tag {
-  margin-left: 4px;
-  font-size: 11px;
-  background: var(--primary);
-  color: #fff;
-  padding: 1px 6px;
-  border-radius: 999px;
-  vertical-align: 2px;
-}
-.exception-tag {
-  display: block;
-  width: fit-content;
-  margin: 3px auto 0;
-  padding: 1px 5px;
-  color: #b13f3f;
-  font-size: 9px;
-  font-weight: 800;
-  border-radius: 5px;
-  background: #feecec;
-}
-.exception-tag.makeup { color: #7a55e8; background: #f1ebff; }
-.tt-period {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 2px;
-  color: var(--muted);
-  font-size: 11px;
-  text-align: center;
-  padding: 2px;
-}
-.tt-period b {
-  font-size: 12px;
-  color: var(--text);
-  white-space: nowrap;
-}
-.tt-cell {
-  background: #fafbfd;
-  border: 1px dashed var(--border);
-  border-radius: 8px;
-  min-height: 48px;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-.tt-cell:hover {
-  background: var(--primary-soft);
-}
-.tt-cell.isToday {
-  background: #f6f9ff;
-}
-.course {
-  z-index: 2;
-  margin: 2px;
-  padding: 6px 8px;
-  border-radius: 8px;
-  border-left: 4px solid;
-  cursor: pointer;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-  transition: transform 0.1s;
-}
-.course:hover {
-  transform: scale(1.02);
-}
+  grid-template-columns:84px repeat(7,minmax(96px,1fr));
+  gap:5px;
+  min-width:820px;
+  display:grid}
 .course.conflict {
-  outline: 2px dashed var(--danger);
-  outline-offset: -2px;
-}
-.c-name {
-  font-size: 13px;
-  font-weight: 600;
-}
-.c-week {
-  font-size: 10px;
-  color: var(--primary);
-  font-weight: 600;
-}
-.c-sub {
-  font-size: 11px;
-  color: var(--muted);
-}
-.tip {
-  color: var(--muted);
-  font-size: 13px;
-}
+  outline:2px dashed var(--danger);
+  outline-offset:-2px}
 
-/* ---------- 课表皮肤 ---------- */
+/* `.skin-*` 是 ScheduleGrid 动态拼出来的类（` :class="`skin-${appearance.scheduleSkin}`" `），
+   不是死类。第三十七轮的死类清理正是把这类动态前缀当成了没人用，误删了 6 个文件约 259 条规则；
+   这一族规则是在用构建产物恢复时一并搬进来的，**别在没有比对 ScheduleGrid 的定义之前删它们**。
+   另外本文件里 `.skin-notebook` 一族出现了两次、声明逐字相同（记在 §4 第 23 条待清理）。 */
 .skin-notebook {
-  border-color: #ddcfab;
-  background:
-    linear-gradient(90deg, transparent 58px, rgba(218, 94, 94, 0.22) 59px, transparent 60px),
-    repeating-linear-gradient(#fffdf7 0 31px, #dce7ef 32px);
-  box-shadow: 0 10px 28px rgba(108, 83, 35, 0.09);
-}
-.skin-notebook .tt-head {
-  color: #735f39;
-  font-family: 'KaiTi', 'STKaiti', serif;
-}
-.skin-notebook .tt-cell {
-  border-color: rgba(155, 128, 78, 0.32);
-  background: rgba(255, 253, 247, 0.52);
-}
-.skin-notebook .tt-period b,
-.skin-notebook .course {
-  font-family: 'KaiTi', 'STKaiti', serif;
-}
-.skin-notebook .course {
-  border-left-width: 3px;
-  border-radius: 5px 12px 7px 10px;
-  box-shadow: 1px 2px 5px rgba(89, 68, 31, 0.1);
-}
-.skin-timeline {
-  border: none;
-  background: rgba(255, 255, 255, 0.9);
-  box-shadow: none;
-}
-.skin-timeline .timetable {
-  gap: 2px 8px;
-}
-.skin-timeline .tt-head {
-  border-bottom: 2px solid var(--border);
-  border-radius: 0;
-}
-.skin-timeline .tt-cell {
-  min-height: 54px;
-  border: none;
-  border-bottom: 1px solid var(--border);
-  border-radius: 0;
-  background: transparent;
-}
-.skin-timeline .tt-cell.isToday {
-  background: color-mix(in srgb, var(--primary) 5%, transparent);
-}
-.skin-timeline .tt-period {
-  padding-right: 9px;
-  border-right: 2px solid var(--border);
-}
-.skin-timeline .course {
-  margin: 4px 2px;
-  border-left-width: 3px;
-  border-radius: 6px;
-}
+  background:linear-gradient(90deg,#0000 58px,#da5e5e38 59px,#0000 60px),repeating-linear-gradient(#fffdf7 0 31px,#dce7ef 32px);
+  border-color:#ddcfab;
+  box-shadow:0 10px 28px #6c532317}
+.page {
+  flex-direction:column;
+  gap:16px;
+  display:flex}
+.head {
+  justify-content:space-between;
+  align-items:center;
+  display:flex}
+.head h2 {
+  font-size:22px}
+.head-btns {
+  gap:10px;
+  display:flex}
+.schedule-settings {
+  border:1px solid var(--border);
+  background:var(--bg-tint);
+  border-radius:12px;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:12px;
+  padding:14px;
+  display:grid}
+.schedule-settings>div {
+  flex-wrap:wrap;
+  align-items:center;
+  gap:7px;
+  min-width:0;
+  display:flex}
+.schedule-settings h2 {
+  width:100%;
+  color:var(--ink-faint);
+  letter-spacing:.04em;
+  font-size:11px}
+.schedule-settings .btn {
+  padding:7px 10px;
+  font-size:12px}
+.toolbar {
+  flex-wrap:wrap;
+  align-items:center;
+  gap:16px;
+  display:flex}
+.seg-group {
+  align-items:center;
+  gap:8px;
+  min-width:0;
+  display:flex}
+.seg-label {
+  color:var(--muted);
+  font-size:13px}
+.seg {
+  background:var(--card);
+  border:1px solid var(--border);
+  border-radius:10px;
+  max-width:100%;
+  padding:3px;
+  display:flex;
+  overflow-x:auto}
+.seg button {
+  color:var(--muted);
+  background:0 0;
+  border:none;
+  border-radius:8px;
+  flex:none;
+  padding:7px 14px;
+  font-size:14px}
+.seg button:disabled {
+  opacity:.35;
+  cursor:default}
+.seg button.on {
+  background:var(--primary);
+  color:var(--on-primary,#fff);
+  font-weight:600}
+.seg .wn {
+  min-width:84px;
+  color:var(--text);
+  border-radius:8px;
+  flex:none;
+  place-items:center;
+  padding:7px 14px;
+  font-size:14px;
+  font-weight:700;
+  display:grid}
+.seg .wn.thisweek {
+  color:var(--primary)}
+.add-actions {
+  gap:8px;
+  min-width:0;
+  margin-left:auto;
+  display:flex}
+.exception-tag.makeup {
+  color:#6a45c4;
+  background:#f1ebff}
+/* 这一条**必须**排在上一条之后，位置别再挪。两者特异性相同（都是 0,2,0）、都设 background，
+   所以顺序直接决定"笔记本皮肤下悬停或今天是格用哪个底色"。第五十一轮做同值规则去重时，
+   后出现的那份 `.skin-notebook` 一族被删掉，顺序因此翻转；这里把这一条移回它最后一次出现的
+   位置，恢复去重前的级联结果。改位置前先看 tests/cssRules.test.js 里的顺序判据。 */
+
+
+
+
+
+
 
 .form {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
+  flex-direction:column;
+  gap:8px;
+  display:flex}
 .form label {
-  font-size: 13px;
-  color: var(--muted);
-  margin-top: 6px;
-}
-.form input,
-.form select {
-  width: 100%;
-}
+  color:var(--muted);
+  margin-top:6px;
+  font-size:13px}
+.form input,.form select {
+  width:100%}
 .row {
-  display: flex;
-  gap: 10px;
-  margin-top: 6px;
-}
-.row > div {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
+  gap:10px;
+  margin-top:6px;
+  display:flex}
+.row>div {
+  flex-direction:column;
+  flex:1;
+  gap:8px;
+  display:flex}
 .colors {
-  display: flex;
-  gap: 8px;
-  margin: 4px 0;
-}
+  gap:8px;
+  margin:4px 0;
+  display:flex}
 .swatch {
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  border: 3px solid transparent;
-}
-.swatch.picked {
-  border-color: var(--text);
-}
+  border:3px solid #0000;
+  border-radius:50%;
+  width:28px;
+  height:28px}
+
 .error {
-  color: var(--danger);
-  font-size: 13px;
-}
+  color:var(--danger);
+  font-size:13px}
 .muted-tip {
-  font-size: 13px;
-  color: var(--muted);
-  line-height: 1.6;
-  background: var(--bg);
-  border-radius: 8px;
-  padding: 10px 12px;
-}
-.actions {
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-  gap: 10px;
-  margin-top: 14px;
-}
-.actions .btn-danger {
-  margin-right: auto;
-}
+  color:var(--muted);
+  background:var(--bg);
+  border-radius:8px;
+  padding:10px 12px;
+  font-size:13px;
+  line-height:1.6}
 
-/* ---------- 自动/手动作息提示（主页 toolbar 下） ---------- */
 .auto-mode-hint {
-  display: flex;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin: -6px 0 0;
-  color: var(--ink-soft);
-  font-size: 12px;
-  line-height: 1.5;
+  color:var(--ink-soft);
+  flex-wrap:wrap;
+  align-items:baseline;
+  gap:10px;
+  margin:-6px 0 0;
+  font-size:12px;
+  line-height:1.5;
+  display:flex}
+.auto-mode-hint small {
+  color:var(--ink-faint);
+  font-size:11px}
+.auto-mode-hint.auto small:before {
+  content:"·";
+  margin:0 6px}
+.auto-mode-hint.unavailable {
+  color:var(--warning)}
+.mobile-view-switcher {
+  display:none}
+@media (max-width:760px) {
+  .skin-switcher,.schedule-campus,.schedule-season {
+  display:none}
+.schedule-settings {
+  grid-template-columns:1fr;
+  gap:11px}
+.head {
+  flex-direction:column;
+  align-items:flex-start;
+  gap:12px}
+.head-btns {
+  flex-wrap:nowrap;
+  width:100%;
+  padding-bottom:2px;
+  overflow-x:auto}
+.head-btns .btn {
+  flex:none;
+  min-height:44px;
+  padding-inline-start:12px;
+  padding-inline-end:12px}
+.toolbar {
+  align-items:flex-start;
+  gap:12px}
+.seg-group {
+  flex-direction:column;
+  align-items:flex-start;
+  gap:5px;
+  max-width:100%}
+.toolbar .seg {
+  max-width:calc(100vw - 40px)}
+.add-actions {
+  width:100%;
+  margin-left:0}
+.add-actions .btn {
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  flex:1;
+  min-width:0;
+  overflow:hidden}
+.manager-head,.clear-row {
+  flex-direction:column;
+  align-items:flex-start}
+.manager-actions,.manager-actions .btn,.clear-row .btn {
+  width:100%}
+
+.mobile-view-switcher {
+  display:flex}
 }
-.auto-mode-hint small { color: var(--ink-faint); font-size: 11px; }
-.auto-mode-hint.auto small::before { content: '·'; margin: 0 6px; }
-.auto-mode-hint.unavailable { color: #9a6414; }
-
-.mobile-view-switcher { display: none; }
-.mobile-day-view { display: none; }
-.mobile-day-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid var(--border);
-}
-.mobile-day-head > div { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 6px; min-width: 0; text-align: center; }
-.mobile-day-head strong { font-size: 16px; }
-.mobile-day-head small { width: 100%; color: var(--danger); font-size: 11px; }
-.mobile-today-mark { padding: 2px 7px; color: var(--primary); font-size: 10px; font-weight: 800; border-radius: 999px; background: var(--primary-soft); }
-.day-nav { display: grid; place-items: center; width: 44px; height: 44px; color: var(--primary); font-size: 25px; border: 1px solid var(--border); border-radius: 10px; background: #fff; }
-.day-nav:disabled { color: var(--ink-faint); opacity: .45; }
-.mobile-course-list { display: flex; flex-direction: column; gap: 8px; padding-top: 12px; }
-.mobile-course-row { position: relative; display: grid; grid-template-columns: 82px minmax(0, 1fr) 24px; align-items: center; gap: 10px; min-height: 68px; padding: 10px 8px 10px 12px; color: var(--text); text-align: left; border: 1px solid var(--border); border-left: 4px solid var(--course-color); border-radius: 10px; background: var(--bg-tint); }
-.mobile-course-row:active { background: var(--primary-soft); }
-.mobile-course-time { color: var(--ink-soft); font-size: 11px; font-weight: 700; line-height: 1.4; }
-.mobile-course-main { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-.mobile-course-main b { overflow: hidden; font-size: 14px; line-height: 1.35; }
-.mobile-course-main small { overflow: hidden; color: var(--ink-soft); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-.mobile-course-arrow { color: var(--ink-faint); font-size: 24px; text-align: center; }
-.mobile-day-empty { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 24px 4px 6px; color: var(--ink-soft); font-size: 13px; }
-
-@media (max-width: 760px) {
-  .skin-switcher, .schedule-campus, .schedule-season { display: none; }
-  .schedule-settings { grid-template-columns: 1fr; gap: 11px; }
-  .head {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 12px;
-  }
-
-  .head-btns {
-    width: 100%;
-    flex-wrap: wrap;
-  }
-
-  .head-btns { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 2px; }
-
-  .head-btns .btn {
-    flex: 0 0 auto;
-    min-height: 44px;
-    padding-inline: 12px;
-  }
-
-  .toolbar {
-    align-items: flex-start;
-    gap: 12px;
-  }
-
-  .seg-group {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 5px;
-    max-width: 100%;
-  }
-
-  .toolbar .seg { max-width: calc(100vw - 40px); }
-
-  .add-actions {
-    width: 100%;
-    margin-left: 0;
-  }
-
-  .add-actions .btn {
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .timetable-wrap {
-    padding: 10px;
-  }
-
-  .tip {
-    line-height: 1.6;
-  }
-
-  .manager-head,
-  .clear-row {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-
-  .manager-actions,
-  .manager-actions .btn,
-  .clear-row .btn {
-    width: 100%;
-  }
-
-  .template-save {
-    flex-direction: column;
-  }
-  .mobile-view-switcher { display: flex; }
-  .mobile-day-view { display: block; padding: 12px; }
-}
-
-@media (max-width: 520px) {
+@media (max-width:520px) {
   .head h2 {
-    font-size: 20px;
-  }
+  font-size:20px}
+.row {
+  flex-direction:column}
+.colors {
+  flex-wrap:wrap}
 
-  .row {
-    flex-direction: column;
-  }
 
-  .colors {
-    flex-wrap: wrap;
-  }
 
-.warn-banner {
-    line-height: 1.55;
-  }
 
-  .it-row { grid-template-columns: 48px minmax(0, 1fr); }
-  .import-row { grid-template-columns: minmax(0, 1fr) 86px 12px 86px 24px; gap: 4px; }
-  .row-review-detail { align-items: flex-start; flex-direction: column; }
-  .detail-row-main { grid-template-columns: minmax(0, 1fr) 92px 12px 92px 24px; gap: 4px; }
-  .scheme-card { grid-template-columns: auto minmax(0, 1fr); }
-  .scheme-card > .btn-xs { grid-column: 1 / -1; justify-self: end; }
-  .overview-foot { flex-wrap: wrap; }
-  .mobile-view-switcher { width: 100%; }
-  .mobile-view-switcher .seg { flex: 1; }
-  .mobile-view-switcher .seg button { flex: 1; }
-  .mobile-course-row { grid-template-columns: 76px minmax(0, 1fr) 20px; gap: 8px; }
+
+.scheme-card>.btn-xs {
+  grid-column:1/-1;
+  justify-self:end}
+
+.mobile-view-switcher {
+  width:100%}
+.mobile-view-switcher .seg,.mobile-view-switcher .seg button {
+  flex:1}
 }
-
-/* ---------- 作息与时间设置 ---------- */
 .settings {
-  display: flex;
-  flex-direction: column;
-  gap: 18px;
-}
+  flex-direction:column;
+  gap:18px;
+  display:flex}
 .settings-hint {
-  padding: 10px 12px;
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.6;
-  border-radius: 8px;
-  background: var(--bg);
-}
+  color:var(--muted);
+  background:var(--bg);
+  border-radius:8px;
+  padding:10px 12px;
+  font-size:12px;
+  line-height:1.6}
 .setting-section {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
+  flex-direction:column;
+  gap:8px;
+  display:flex}
 .setting-head {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-.setting-head h4 {
-  font-size: 14px;
-}
-.setting-note {
-  color: var(--muted);
-  font-size: 11px;
-}
+  flex-wrap:wrap;
+  align-items:baseline;
+  gap:10px;
+  display:flex}
+
+
 .setting-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.setting-row input {
-  flex: 1;
-  min-width: 0;
-}
+  align-items:center;
+  gap:8px;
+  display:flex}
+
 .setting-row input.date {
-  flex: 0 0 90px;
-  text-align: center;
-}
-.setting-del {
-  flex: 0 0 30px;
-  height: 30px;
-  color: var(--muted);
-  font-size: 12px;
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  background: #fff;
-}
-.setting-del:hover:not(:disabled) {
-  color: var(--danger);
-  border-color: var(--danger);
-}
-.setting-del:disabled {
-  opacity: 0.35;
-  cursor: default;
-}
+  text-align:center;
+  flex:0 0 90px}
 .setting-add {
-  display: flex;
-  gap: 8px;
-  margin-top: 2px;
-}
-.setting-add input {
-  flex: 1;
-  min-width: 0;
-}
+  gap:8px;
+  margin-top:2px;
+  display:flex}
+
 .setting-add input.date {
-  flex: 0 0 90px;
-  text-align: center;
-}
+  text-align:center;
+  flex:0 0 90px}
 .period-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
-}
-/* ---------- 一键生成时间 ---------- */
+  grid-template-columns:1fr 1fr;
+  gap:8px;
+  display:grid}
 .gen-box {
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 12px 14px;
-  background: #fafbfd;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
+  border:1px solid var(--border);
+  background:var(--bg-tint);
+  border-radius:10px;
+  flex-direction:column;
+  gap:10px;
+  padding:12px 14px;
+  display:flex}
 .gen-title {
-  font-size: 13px;
-  font-weight: 700;
-  color: var(--primary);
-}
+  color:var(--primary);
+  font-size:13px;
+  font-weight:700}
 .gen-grid {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 16px;
-}
+  flex-wrap:wrap;
+  gap:8px 16px;
+  display:flex}
 .gen-item {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 12px;
-  color: var(--muted);
-}
-.gen-item input,
-.gen-item select {
-  padding: 5px 7px;
-  font-size: 12px;
-  border-radius: 6px;
-}
-.gen-item .num {
-  width: 62px;
-}
-.gen-item input[type='time'] {
-  width: 96px;
-}
-.gen-scope {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  flex-wrap: wrap;
-}
-.gen-scope label {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 12px;
-  color: var(--text);
-}
-.gen-scope .btn {
-  margin-left: auto;
-  padding: 7px 16px;
-}
-.gen-tip {
-  color: var(--muted);
-  font-size: 11px;
-  line-height: 1.6;
-}
+  color:var(--muted);
+  align-items:center;
+  gap:5px;
+  font-size:12px;
+  display:flex}
+.gen-item input,.gen-item select {
+  border-radius:6px;
+  padding:5px 7px;
+  font-size:12px}
+
+.gen-item input[type=time] {
+  width:96px}
+
+
+
+
 .cell-add-hint {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  flex-wrap: wrap;
-  margin-top: 12px;
-  padding: 10px 12px;
-  color: var(--muted);
-  font-size: 12px;
-  line-height: 1.6;
-  border-radius: 8px;
-  background: var(--bg);
-}
+  color:var(--muted);
+  background:var(--bg);
+  border-radius:8px;
+  flex-wrap:wrap;
+  justify-content:space-between;
+  align-items:center;
+  gap:10px;
+  margin-top:12px;
+  padding:10px 12px;
+  font-size:12px;
+  line-height:1.6;
+  display:flex}
 .cell-add-hint .btn {
-  flex: 0 0 auto;
-  padding: 7px 12px;
-  font-size: 12px;
-}
-
-/* ---------- 设置弹窗标签页 ---------- */
+  flex:none;
+  padding:7px 12px;
+  font-size:12px}
 .tab-bar {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-}
+  flex-wrap:wrap;
+  gap:6px;
+  display:flex}
 .tab-btn {
-  padding: 8px 14px;
-  font-size: 13px;
-  color: var(--muted);
-  border: 1px solid var(--border);
-  border-radius: 9px;
-  background: #fff;
-}
+  color:var(--muted);
+  border:1px solid var(--border);
+  background:var(--card);
+  border-radius:9px;
+  padding:8px 14px;
+  font-size:13px}
 .tab-btn.on {
-  color: #fff;
-  font-weight: 700;
-  border-color: var(--primary);
-  background: var(--primary);
-}
+  color:var(--on-primary,#fff);
+  border-color:var(--primary);
+  background:var(--primary);
+  font-weight:700}
 .cell-existing {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-  margin-top: 8px;
-}
+  flex-wrap:wrap;
+  align-items:center;
+  gap:6px;
+  margin-top:8px;
+  display:flex}
 .ce-label {
-  color: var(--muted);
-  font-size: 12px;
-}
+  color:var(--muted);
+  font-size:12px}
 .cell-chip {
-  padding: 4px 8px;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--primary);
-  border-radius: 6px;
-  background: var(--primary-soft);
-}
+  color:var(--primary);
+  background:var(--primary-soft);
+  border-radius:6px;
+  padding:4px 8px;
+  font-size:11px;
+  font-weight:600}
 .cell-chip.clash {
-  color: var(--danger);
-  background: #feecec;
-}
+  color:var(--danger);
+  background:color-mix(in srgb, var(--danger) 12%, var(--card))}
 .course-links {
-  margin-top: 14px;
-  padding: 12px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--bg);
-}
-.course-links-head,
-.course-link-columns {
-  display: flex;
-  gap: 12px;
-}
+  border:1px solid var(--border);
+  background:var(--bg);
+  border-radius:10px;
+  margin-top:14px;
+  padding:12px}
+.course-links-head,.course-link-columns {
+  gap:12px;
+  display:flex}
 .course-links-head {
-  align-items: flex-start;
-  justify-content: space-between;
-}
-.course-links-head b,
-.course-links-head small,
-.link-label,
-.link-list small {
-  display: block;
-}
-.course-links-head small,
-.link-empty,
-.link-list small {
-  color: var(--muted);
-  font-size: 12px;
-}
+  justify-content:space-between;
+  align-items:flex-start}
+.course-links-head b,.course-links-head small,.link-label,.link-list small {
+  display:block}
+.course-links-head small,.link-empty,.link-list small {
+  color:var(--muted);
+  font-size:12px}
 .link-progress {
-  padding: 4px 7px;
-  color: var(--primary);
-  font-size: 12px;
-  font-weight: 700;
-  border-radius: 999px;
-  background: var(--primary-soft);
-  white-space: nowrap;
-}
-.course-link-columns > div {
-  min-width: 0;
-  flex: 1;
-}
+  color:var(--primary);
+  background:var(--primary-soft);
+  white-space:nowrap;
+  border-radius:999px;
+  padding:4px 7px;
+  font-size:12px;
+  font-weight:700}
+.course-link-columns>div {
+  flex:1;
+  min-width:0}
 .course-link-columns {
-  margin-top: 10px;
+  margin-top:10px}
+.link-label {
+  font-size:12px;
+  font-weight:700}
+.link-empty {
+  margin:6px 0}
+.link-list {
+  margin:6px 0;
+  padding:0;
+  list-style:none}
+.link-list li {
+  padding:4px 0;
+  overflow:hidden}
+.link-list span {
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  font-size:12px;
+  display:block;
+  overflow:hidden}
+.link-list .done {
+  color:var(--muted);
+  text-decoration:line-through}
+.link-action {
+  color:var(--primary);
+  font-size:12px;
+  font-weight:700;
+  text-decoration:none}
+@media (max-width:520px) {
+  .course-link-columns {
+  flex-direction:column;
+  gap:10px}
 }
-.link-label { font-size: 12px; font-weight: 700; }
-.link-empty { margin: 6px 0; }
-.link-list { margin: 6px 0; padding: 0; list-style: none; }
-.link-list li { padding: 4px 0; overflow: hidden; }
-.link-list span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
-.link-list .done { color: var(--muted); text-decoration: line-through; }
-.link-action { color: var(--primary); font-size: 12px; font-weight: 700; text-decoration: none; }
-@media (max-width: 520px) {
-  .course-link-columns { flex-direction: column; gap: 10px; }
-}
-
-/* ---------- 页面内轻量 toast ---------- */
-.page-toast {
-  position: fixed;
-  left: 50%;
-  bottom: 26px;
-  transform: translateX(-50%);
-  z-index: 1001;
-  padding: 10px 18px;
-  color: #fff;
-  font-size: 14px;
-  border-radius: 999px;
-  background: rgba(33, 43, 54, 0.92);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
-  pointer-events: none;
-}
-.toast-enter-active,
-.toast-leave-active {
-  transition: opacity 0.2s, transform 0.2s;
-}
-.toast-enter-from,
-.toast-leave-to {
-  opacity: 0;
-  transform: translateX(-50%) translateY(8px);
-}
-
-/* 课程表备注横条 */
 .schedule-note {
-  margin-top: 8px;
-}
+  margin-top:8px}
 .schedule-note-input {
-  width: 100%;
-  padding: 10px 14px;
-  font-size: 14px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: #fff;
-  color: var(--text);
-  outline: none;
-  transition: border-color 0.2s, box-shadow 0.2s;
-}
+  border:1px solid var(--border);
+  background:var(--card);
+  width:100%;
+  min-height:38px;
+  max-height:180px;
+  color:var(--text);
+  resize:vertical;
+  -webkit-overflow-scrolling:touch;
+  touch-action:pan-y;
+  transition:border-color var(--dur-base) var(--ease-standard), box-shadow var(--dur-base) var(--ease-standard);
+  border-radius:10px;
+  outline:none;
+  padding:10px 14px;
+  font-size:14px;
+  line-height:1.55;
+  overflow-y:auto}
 .schedule-note-input:focus {
-  border-color: var(--primary);
-  box-shadow: 0 0 0 3px var(--primary-soft);
-}
+  border-color:var(--primary);
+  box-shadow:0 0 0 3px var(--primary-soft)}
 .schedule-note-input::placeholder {
-  color: var(--muted);
-}
+  color:var(--muted)}
+
 </style>

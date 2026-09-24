@@ -2,10 +2,11 @@
 import { computed, ref, watch } from 'vue'
 import Modal from './Modal.vue'
 import EmptyState from './EmptyState.vue'
-import { todayStr, useStoredRef } from '../composables/store'
+import { useStoredRef } from '../composables/store'
 import { dayStory, monthReport, yearReport, daySnapshot } from '../composables/retrospective.js'
 import { moodLog } from '../composables/atmosphereStore.js'
 import { useShareText } from '../composables/useShareText.js'
+import { appToday } from '../composables/timeContext.js'
 
 const props = defineProps({ open: Boolean })
 const emit = defineEmits(['close'])
@@ -14,7 +15,7 @@ const tasks = useStoredRef('sl_tasks', [])
 const courses = useStoredRef('sl_courses', [])
 const exams = useStoredRef('sl_exams', [])
 const bills = useStoredRef('sl_bills', [])
-const expenses = useStoredRef('sl_expenses', [])
+const expenses = useStoredRef('sl_expenses', [], { deep: false })
 const events = useStoredRef('sl_events', [])
 const notes = useStoredRef('sl_quick_notes', [])
 
@@ -24,9 +25,9 @@ const yearNotice = useStoredRef('sl_retro_year_notice', '')
 const { share, copy } = useShareText()
 
 const tab = ref('day')
-const day = ref(todayStr())
-const month = ref(todayStr().slice(0, 7))
-const year = ref(String(new Date().getFullYear()))
+const day = ref(appToday.value)
+const month = ref(appToday.value.slice(0, 7))
+const year = ref(appToday.value.slice(0, 4))
 const shareMessage = ref('')
 let shareMessageTimer = 0
 
@@ -48,7 +49,7 @@ const dataset = computed(() => ({
 }))
 
 const years = computed(() => {
-  const set = new Set([String(new Date().getFullYear())])
+  const set = new Set([appToday.value.slice(0, 4)])
   for (const list of [tasks.value, exams.value, bills.value, expenses.value, events.value, notes.value]) {
     for (const item of list) {
       const pre = String(item?.date ?? item?.dueDate ?? item?.nextDate ?? '').slice(0, 4)
@@ -87,10 +88,10 @@ function selectTab(next) {
 }
 
 function maybeShowYearHint() {
-  const now = new Date()
-  if (now.getMonth() !== 11) return
-  if (yearNotice.value === String(now.getFullYear())) return
-  yearNotice.value = String(now.getFullYear())
+  const [yearKey, monthKey] = appToday.value.split('-').map(Number)
+  if (monthKey !== 12) return
+  if (yearNotice.value === String(yearKey)) return
+  yearNotice.value = String(yearKey)
   shareMessage.value = '✨ 这一年就要结束了，翻翻这一年的足迹吧。'
   scheduleClearMessage()
 }
@@ -134,9 +135,9 @@ async function onCopy() {
 watch(() => props.open, (open) => {
   if (open) {
     tab.value = 'day'
-    day.value = todayStr()
-    month.value = todayStr().slice(0, 7)
-    year.value = String(new Date().getFullYear())
+    day.value = appToday.value
+    month.value = appToday.value.slice(0, 7)
+    year.value = appToday.value.slice(0, 4)
     shareMessage.value = ''
   }
 })
@@ -146,8 +147,8 @@ watch(() => props.open, (open) => {
   <Modal :open="open" title="📖 回放" wide @close="emit('close')">
     <div class="memory">
       <div class="memory-bar">
-        <div class="segmented" role="tablist" aria-label="回放时间范围">
-          <button v-for="item in TABS" :key="item.key" :class="{ on: tab === item.key }" @click="selectTab(item.key)">{{ item.label }}</button>
+        <div class="segmented" role="group" aria-label="回放时间范围">
+          <button v-for="item in TABS" :key="item.key" :aria-pressed="tab === item.key" :class="{ on: tab === item.key }" @click="selectTab(item.key)">{{ item.label }}</button>
         </div>
 
         <div class="memory-picker">
@@ -164,7 +165,7 @@ watch(() => props.open, (open) => {
 
       <p v-if="shareMessage" class="memory-message" role="status">{{ shareMessage }}</p>
 
-      <EmptyState
+      <EmptyState :level="2"
         v-if="!hasContent"
         class="card memory-empty"
         icon="🍃"

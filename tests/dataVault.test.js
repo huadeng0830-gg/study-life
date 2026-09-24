@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { shouldMirrorValue } from '../src/composables/dataVault.js'
+import { shouldMirrorValue, shouldRedirectPreviewOrigin } from '../src/composables/dataVault.js'
 
 describe('本地安全副本写入策略', () => {
   it('启动阶段不让可疑空集合覆盖最后一份非空副本', () => {
@@ -13,5 +13,11 @@ describe('本地安全副本写入策略', () => {
 
   it('非空新值始终可以更新安全副本', () => {
     expect(shouldMirrorValue('[{"id":"new"}]', '[{"id":"old"}]')).toBe(true)
+  })
+
+  it('只有显式验收标记才允许 Preview 保持独立来源', () => {
+    expect(shouldRedirectPreviewOrigin('auto-sync-release-test.study-life.pages.dev')).toBe(true)
+    expect(shouldRedirectPreviewOrigin('auto-sync-release-test.study-life.pages.dev', '?__study_life_preview=1')).toBe(false)
+    expect(shouldRedirectPreviewOrigin('study-life.pages.dev', '?__study_life_preview=1')).toBe(false)
   })
 })

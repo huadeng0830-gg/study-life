@@ -102,12 +102,36 @@ export interface Transaction {
   name: string
   amount: number
   date: string
+  time?: string
+  cat?: string
+  note?: string
+  account?: string
   direction?: 'expense' | 'income'
   billId?: string
   billingPeriodKey?: string
+  source?: string
+  sourceType?: string
+  sourceId?: string
+  relationId?: string
   createdAt?: string
   updatedAt?: string
   createdFrom?: string
+}
+
+export interface Bill {
+  id: string
+  name: string
+  amount: number
+  cycle?: 'weekly' | 'monthly' | 'quarterly' | 'yearly' | 'once'
+  nextDate: string
+  remindDays?: number
+  autoRenew?: boolean
+  active?: boolean
+  category?: string
+  account?: string
+  note?: string
+  createdAt?: string
+  updatedAt?: string
 }
 
 export interface Milestone {

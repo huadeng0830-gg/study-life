@@ -16,7 +16,7 @@ const visibleNotes = computed(() => expanded.value ? filteredNotes.value : filte
     <div v-if="tags.length" class="inbox-tags"><button type="button" :class="{ on: !selectedTag }" @click="selectedTag = ''">全部</button><button v-for="tag in tags" :key="tag" type="button" :class="{ on: selectedTag === tag }" @click="selectedTag = tag">#{{ tag }}</button></div>
     <div v-for="note in visibleNotes" :key="note.id" class="inbox-row"><div><b>{{ note.title }}</b><span>{{ note.content }}</span><small v-if="note.tags?.length">{{ note.tags.map(tag => `#${tag}`).join(' ') }}</small></div><div class="inbox-actions"><button type="button" @click="$emit('convert', note, 'todo')">转待办</button><button type="button" @click="$emit('convert', note, 'event')">转日程</button><button type="button" class="quiet" @click="$emit('archive', note)">归档</button></div></div>
     <p v-if="!visibleNotes.length" class="inbox-empty">这个标签下暂时没有记录。</p>
-    <button v-if="filteredNotes.length > 3" type="button" class="inbox-toggle" @click="expanded = !expanded">{{ expanded ? '收起已整理记录' : `查看其余 ${filteredNotes.length - 3} 条` }}</button>
+    <button v-if="filteredNotes.length > 3" type="button" class="inbox-toggle" :aria-expanded="expanded" @click="expanded = !expanded">{{ expanded ? '收起已整理记录' : `查看其余 ${filteredNotes.length - 3} 条` }}</button>
   </section>
 </template>
 

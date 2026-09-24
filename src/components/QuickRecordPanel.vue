@@ -5,8 +5,9 @@ import { isSupported, transcribe, voiceErrorMessage, VOICE_STATES } from '../com
 import { useQuickRecordAdapters } from '../composables/quickRecord/adapters.js'
 import { parseQuickRecord } from '../composables/quickRecord/parser.js'
 import { QUICK_ACTIONS, recordTypeMeta } from '../composables/quickRecord/types.js'
-import { ledgerCategories } from '../composables/ledger.js'
+import { amountToCents, catInfo, categoriesForScope, classifyTransaction, rememberCategoryOverride } from '../composables/ledger.js'
 import { settings as quickRecordSettings } from '../composables/settingsPolicy.js'
+import { useDomainCommands } from '../composables/domain/commands.js'
 
 const props = defineProps({
   open: Boolean,
@@ -16,6 +17,7 @@ const props = defineProps({
 const emit = defineEmits(['close', 'saved'])
 
 const { courses, save } = useQuickRecordAdapters()
+const { tasks, transactions, events, notes, milestones } = useDomainCommands()
 
 // 两种模式：smart = 智能结构化（默认）；note = 自由笔记（不做意图分类）。
 const mode = ref('smart')
@@ -36,6 +38,8 @@ const voiceSeconds = ref(0)
 const listening = ref(false)
 const settings = quickRecordSettings
 const voiceSupported = isSupported()
+const voiceHintShown = ref(false)
+const previewTypes = ['expense', 'income', 'todo', 'event', 'countdown', 'note']
 let recognizer = null
 let feedbackTimer = 0
 let voiceTimer = 0
@@ -44,9 +48,36 @@ let smartBeforeVoice = ''
 let voiceRunId = 0
 
 const actions = computed(() => QUICK_ACTIONS.map((type) => ({ type, ...recordTypeMeta(type) })))
-const activeLedgerCategories = computed(() => ledgerCategories.value.filter((item) => !item.hidden))
 const hasDrafts = computed(() => mode.value === 'smart' && drafts.value.length > 0)
-const totalExpense = computed(() => drafts.value.filter((item) => item.type === 'expense').reduce((sum, item) => sum + Number(item.amount || 0), 0))
+const categoryEditorId = ref('')
+const recentRecords = computed(() => {
+  const items = [
+    ...transactions.value.filter((item) => item && !item.archivedAt && !item.deletedAt).map((item) => ({
+      id: item.id, type: item.direction === 'income' ? 'income' : 'expense', title: item.name || '日常支出', raw: item.name || '',
+      amount: item.amount, detail: `${item.direction === 'income' ? '+' : '-'}¥${Number(item.amount || 0).toFixed(2)}`, at: item.updatedAt || item.createdAt,
+    })),
+    ...tasks.value.filter((item) => item && !item.archivedAt && !item.deletedAt).map((item) => ({
+      id: item.id, type: item.kind === 'homework' ? 'homework' : 'todo', title: item.title || '待办', raw: item.sourceText || item.title || '',
+      detail: item.dueDate ? (item.dueTime || item.dueDate) : '待安排', at: item.updatedAt || item.createdAt,
+    })),
+    ...events.value.filter((item) => item && !item.archivedAt && !item.deletedAt).map((item) => ({
+      id: item.id, type: 'event', title: item.title || '日程', raw: item.sourceText || item.title || '',
+      detail: item.date ? (item.time || item.date) : '待安排', at: item.updatedAt || item.createdAt,
+    })),
+    ...milestones.value.filter((item) => item && !item.archivedAt && !item.deletedAt).map((item) => ({
+      id: item.id, type: 'countdown', title: item.name || '重要日期', raw: item.sourceText || item.name || '',
+      detail: item.date || '待安排', at: item.updatedAt || item.createdAt,
+    })),
+    ...notes.value.filter((item) => item && !item.archivedAt && !item.deletedAt).map((item) => ({
+      id: item.id, type: 'note', title: item.title || item.content || '快速笔记', raw: item.sourceText || item.content || '',
+      detail: '刚刚', at: item.updatedAt || item.createdAt,
+    })),
+  ]
+  return items.sort((a, b) => String(b.at || '').localeCompare(String(a.at || ''))).slice(0, 5)
+})
+const totalExpense = computed(() => drafts.value
+  .filter((item) => item.type === 'expense')
+  .reduce((cents, item) => cents + (amountToCents(item.amount) ?? 0), 0) / 100)
 const voiceStatusText = computed(() => {
   if (voiceState.value === VOICE_STATES.listening) return `🔴 正在聆听…… ${voiceSeconds.value}s`
   if (voiceState.value === VOICE_STATES.transcribing) return '正在转写……'
@@ -55,7 +86,15 @@ const voiceStatusText = computed(() => {
   return ''
 })
 
-function focusInput() { nextTick(() => inputEl.value?.focus()) }
+function isSmallViewport() {
+  return typeof window !== 'undefined' && (
+    window.matchMedia?.('(max-width: 520px)')?.matches || window.innerWidth <= 520
+  )
+}
+function focusInput(force = false) {
+  if (!force && isSmallViewport()) return
+  nextTick(() => inputEl.value?.focus())
+}
 function focusNote() { nextTick(() => noteEl.value?.focus()) }
 
 function autosize(el, maxHeight = 220) {
@@ -71,6 +110,10 @@ function onSmartInput() {
 
 function onSmartKeydown(event) {
   if (event.isComposing) return
+  if (event.shiftKey) return
+  // 手机上 Enter 只负责换行，避免拇指误触直接保存；桌面仍保留快速回车保存，
+  // Ctrl/Cmd + Enter 在两端都明确表示保存。
+  if (isSmallViewport() && !event.ctrlKey && !event.metaKey) return
   event.preventDefault()
   saveAll()
 }
@@ -79,8 +122,10 @@ function onNoteInput() {
   autosize(noteEl.value)
 }
 
+
 function parse() {
   error.value = ''
+  categoryEditorId.value = ''
   drafts.value = parseQuickRecord(input.value, {
     courses: courses.value,
     forcedType: forcedType.value,
@@ -92,8 +137,10 @@ function chooseAction(type) {
   stopActiveVoice()
   if (type === 'note') {
     mode.value = 'note'
+    if (input.value.trim()) noteBody.value = input.value
     forcedType.value = ''
     drafts.value = []
+    categoryEditorId.value = ''
     error.value = ''
     focusNote()
     return
@@ -101,7 +148,7 @@ function chooseAction(type) {
   mode.value = 'smart'
   forcedType.value = type
   parse()
-  focusInput()
+  focusInput(true)
 }
 
 function chooseAuto() {
@@ -109,7 +156,39 @@ function chooseAuto() {
   mode.value = 'smart'
   forcedType.value = ''
   parse()
-  focusInput()
+  focusInput(true)
+}
+
+function recentIcon(type) { return recordTypeMeta(type).icon }
+function recentTitle(item) { return item.title || recordTypeMeta(item.type).label }
+function reuseRecent(item) {
+  mode.value = 'smart'
+  forcedType.value = ['expense', 'income'].includes(item.type) ? item.type : ''
+  input.value = ['expense', 'income'].includes(item.type) && item.amount
+    ? `${item.title} ${item.amount}元`
+    : item.raw || item.title || ''
+  parse()
+  focusInput(true)
+}
+
+function changeDraftType(draft, type) {
+  if (!draft || !previewTypes.includes(type) || draft.type === type) return
+  if (type === 'note') {
+    const [noteDraft] = parseQuickRecord(draft.raw, { courses: courses.value, forcedType: 'note', context: props.context })
+    if (noteDraft) drafts.value.splice(drafts.value.indexOf(draft), 1, noteDraft)
+  } else {
+    const [nextDraft] = parseQuickRecord(draft.raw, { courses: courses.value, forcedType: type, context: props.context })
+    if (nextDraft) drafts.value.splice(drafts.value.indexOf(draft), 1, nextDraft)
+  }
+  expandedId.value = ''
+  categoryEditorId.value = ''
+}
+
+function chooseCategory(draft, category) {
+  if (!draft || !category) return
+  draft.category = category.key
+  confirmCategory(draft)
+  categoryEditorId.value = ''
 }
 
 function chooseQuestion(draft, field, value) {
@@ -121,20 +200,51 @@ function updateRecent(types) {
   settings.value = { ...settings.value, recentTypes: [...new Set([...types, ...(settings.value.recentTypes || [])])].slice(0, 4) }
 }
 
-function categoryLabel(key) { return ledgerCategories.value.find((item) => item.key === key)?.name || '' }
+function categoryLabel(key) { return catInfo(key).name }
+function categoryOptions(draft) { return categoriesForScope(draft?.type === 'income' ? 'income' : 'expense') }
+function refreshCategorySuggestion(draft) {
+  if (!draft || !['expense', 'income', 'bill'].includes(draft.type)) return
+  const direction = draft.type === 'income' ? 'income' : 'expense'
+  const classification = classifyTransaction(draft.title || draft.raw, { direction })
+  Object.assign(draft, {
+    category: classification.categoryId,
+    categoryConfidence: classification.confidence,
+    categoryUncertain: classification.uncertain,
+    categorySuggested: classification.categoryId,
+    categoryMatchedBy: classification.matchedBy,
+    categoryMatchedTerms: classification.matchedTerms,
+    categoryCandidates: classification.candidates,
+    categoryAmbiguous: classification.ambiguous,
+    categoryConfirmed: false,
+    categoryEdited: false,
+  })
+}
+function onDraftTypeChange(draft) {
+  if (!['expense', 'income', 'bill'].includes(draft?.type)) return
+  const valid = categoryOptions(draft).some((category) => category.key === draft.category)
+  if (!valid || draft.type === 'income') refreshCategorySuggestion(draft)
+}
+function confirmCategory(draft) {
+  if (!draft || !['expense', 'income', 'bill'].includes(draft.type)) return
+  draft.categoryConfirmed = true
+  draft.categoryUncertain = false
+  draft.categoryEdited = true
+  rememberCategoryOverride(draft.title || draft.raw, draft.category, draft.type === 'income' ? 'income' : 'expense')
+}
 
 function resetForNextSmartEntry() {
   input.value = ''
   drafts.value = []
   forcedType.value = ''
   expandedId.value = ''
+  categoryEditorId.value = ''
   clipboardHint.value = ''
   error.value = ''
   feedback.value = ''
   noteBeforeVoice = ''
   smartBeforeVoice = ''
   stopActiveVoice()
-  focusInput()
+  focusInput(true)
 }
 
 function savedMessage(results) {
@@ -155,13 +265,29 @@ function finishSave(results, keepOpen) {
     showFeedback(`✓ ${message}`)
     return
   }
-  emit('saved', { message, undo })
+  emit('saved', {
+    message,
+    undo,
+    entityType: results.length === 1 ? results[0].entityType : '',
+    entityId: results.length === 1 ? results[0].entityId : '',
+    entities: results.map((result) => ({ type: result.entityType, id: result.entityId })).filter((item) => item.type && item.id),
+  })
   emit('close')
 }
 
 async function saveAll(keepOpen = false) {
   if (saving.value) return
   if (!drafts.value.length) return
+  const unconfirmedCategory = drafts.value.find((draft) => (
+    ['expense', 'income', 'bill'].includes(draft.type)
+    && draft.categoryUncertain
+    && !draft.categoryConfirmed
+  ))
+  if (unconfirmedCategory) {
+    expandedId.value = unconfirmedCategory.id
+    error.value = `请确认「${categoryLabel(unconfirmedCategory.category)}」分类后再保存`
+    return
+  }
   saving.value = true
   error.value = ''
   const pending = drafts.value.map((draft) => ({
@@ -204,7 +330,6 @@ async function saveNote(keepOpen = false) {
   saving.value = true
   try {
     const result = await save({
-      id: `qr-note-${Date.now()}`,
       type: 'note',
       raw: content,
       title: noteTitle.value.trim(),
@@ -232,7 +357,7 @@ async function saveNote(keepOpen = false) {
       showFeedback('✓ 已保存快速笔记')
       return
     }
-    emit('saved', { message: result.message, undo: result.undo })
+    emit('saved', { message: result.message, undo: result.undo, entityType: result.entityType, entityId: result.entityId })
     emit('close')
   } catch (cause) {
     error.value = cause?.message || '保存失败，请稍后重试'
@@ -253,7 +378,7 @@ async function saveAsNote(draft) {
   if (!draft) return
   saving.value = true
   try {
-    const content = String(draft.raw || draft.title || draft.note || '').trim()
+    const content = String(draft.note || draft.raw || draft.title || '').trim()
     if (!content) return
     const result = await save({
       ...draft,
@@ -269,7 +394,7 @@ async function saveAsNote(draft) {
       showFeedback(`✓ ${result.message}`)
       return
     }
-    emit('saved', { message: result.message, undo: result.undo })
+    emit('saved', { message: result.message, undo: result.undo, entityType: result.entityType, entityId: result.entityId })
     emit('close')
   } catch (cause) {
     error.value = cause?.message || '保存为笔记失败'
@@ -319,7 +444,13 @@ function onVoiceState(state) {
 }
 
 function toggleVoice() {
-  if (!voiceSupported) { error.value = '当前浏览器不支持语音识别，请改用键盘输入'; return }
+  if (!voiceSupported) {
+    if (!voiceHintShown.value) {
+      voiceHintShown.value = true
+      error.value = '当前浏览器不支持语音识别，请手动输入'
+    }
+    return
+  }
   if (listening.value) { recognizer?.stop(); return }
 
   const runId = ++voiceRunId
@@ -415,6 +546,7 @@ watch(() => props.open, (open) => {
   voiceState.value = VOICE_STATES.idle
   voiceSeconds.value = 0
   listening.value = false
+  voiceHintShown.value = false
   stopVoiceTimer()
   focusInput()
   void checkClipboard()
@@ -427,7 +559,7 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <Modal :open="open" title="⚡ 快速记录" medium @close="requestClose">
+  <Modal :open="open" title="⚡ 快速记录" medium sheet :sheet-detents="[0.62, 0.92]" @close="requestClose">
     <section class="quick-record">
       <!-- 智能记录模式：自然语言 → 结构化预览 → 确认保存 -->
       <template v-if="mode === 'smart'">
@@ -439,11 +571,15 @@ onBeforeUnmount(() => {
             rows="2"
             autocomplete="off"
             inputmode="text"
-            placeholder="记点什么……例如：午饭18元 / 周五交高数作业 / 明天下午三点组会"
+            aria-label="快速记录内容"
+            placeholder="今天想记点什么？"
             @input="onSmartInput"
             @keydown.enter.exact="onSmartKeydown"
+            @keydown.ctrl.enter="onSmartKeydown"
+            @keydown.meta.enter="onSmartKeydown"
           />
           <button
+            v-if="voiceSupported"
             class="mic"
             :class="{ on: listening }"
             type="button"
@@ -452,11 +588,14 @@ onBeforeUnmount(() => {
           >{{ listening ? '⏹' : '🎤' }}</button>
         </div>
 
-        <p class="example">自动识别，或者先选择类型再输入，识别更准确</p>
+        <p class="example">例如：买牛肉面花了15元</p>
 
-        <div class="action-row" aria-label="快速类型">
-          <button type="button" class="auto-chip" :class="{ on: mode === 'smart' && !forcedType }" @click="chooseAuto">✨ 自动识别</button>
-          <button v-for="action in actions" :key="action.type" type="button" :class="{ on: mode === 'smart' && forcedType === action.type }" @click="chooseAction(action.type)">{{ action.icon }} {{ action.label }}</button>
+        <div class="action-row" aria-label="其它记录方式">
+          <button type="button" class="note-entry" @click="chooseAction('note')">📝 快速笔记</button>
+          <button v-if="input" type="button" class="action-more" :class="{ on: forcedType }" @click="chooseAuto">自动识别</button>
+          <template v-if="input">
+            <button v-for="action in actions.filter((item) => item.type !== 'note')" :key="action.type" type="button" :class="{ on: forcedType === action.type }" @click="chooseAction(action.type)">{{ action.icon }} {{ action.label }}</button>
+          </template>
         </div>
 
         <p v-if="voiceStatusText" class="voice-status" role="status">{{ voiceStatusText }}</p>
@@ -465,21 +604,34 @@ onBeforeUnmount(() => {
           <span>检测到剪贴板内容：“{{ clipboardHint }}”</span><button type="button" @click="useClipboard">智能识别</button>
         </div>
 
+        <section v-if="!input && recentRecords.length" class="recent-block" aria-label="最近记录">
+          <div class="recent-head"><span>最近</span><small>刚刚记过的内容</small></div>
+          <button v-for="item in recentRecords" :key="`${item.type}-${item.id}`" type="button" class="recent-row" @click="reuseRecent(item)">
+            <span class="recent-icon" aria-hidden="true">{{ recentIcon(item.type) }}</span>
+            <span class="recent-name">{{ recentTitle(item) }}</span>
+            <small>{{ item.detail }}</small>
+          </button>
+        </section>
+
         <section v-if="hasDrafts" class="results" aria-live="polite">
           <p v-if="drafts.length > 1" class="result-count">识别到 {{ drafts.length }} 项</p>
 
-          <article v-for="draft in drafts" :key="draft.id" class="record-card" :class="{ uncertain: draft.uncertain || draft.type === 'unknown' }">
+          <article v-for="draft in drafts" :key="draft.id" class="record-card" :class="{ uncertain: draft.uncertain || draft.type === 'unknown' || draft.categoryUncertain }">
             <div class="record-head">
               <b>{{ recordTypeMeta(draft.type).icon }} {{ recordTypeMeta(draft.type).label }}</b>
               <div class="record-head-actions">
-                <span v-if="draft.confidence > 0" class="confidence">{{ Math.round(draft.confidence * 100) }}%</span>
-                <button type="button" @click="expandedId = expandedId === draft.id ? '' : draft.id">{{ expandedId === draft.id ? '收起' : '修改' }}</button>
+                <button type="button" :aria-expanded="expandedId === draft.id" @click="expandedId = expandedId === draft.id ? '' : draft.id">{{ expandedId === draft.id ? '收起' : '修改' }}</button>
               </div>
+            </div>
+
+            <div class="type-switch" role="group" aria-label="纠正记录类型">
+              <span v-if="draft.uncertain" class="human-confidence">看起来像{{ recordTypeMeta(draft.type).label }}，请确认</span>
+              <button v-for="type in previewTypes" :key="type" type="button" :class="{ on: draft.type === type }" @click="changeDraftType(draft, type)">{{ recordTypeMeta(type).label }}</button>
             </div>
 
             <!-- 不确定类型：不让输入丢失 -->
             <template v-if="draft.type === 'unknown'">
-              <p class="unknown-tip">⚠ 暂时无法确定记录类型，请选择保存方式。</p>
+              <p class="unknown-tip">这段内容还不像待办或账目，可以直接保存为笔记。</p>
               <textarea v-model="draft.note" class="note-body-edit" rows="3" aria-label="原文" />
               <div class="fallback-actions">
                 <button type="button" class="fallback-note" @click="saveAsNote(draft)">📝 保存为快速笔记</button>
@@ -496,9 +648,14 @@ onBeforeUnmount(() => {
               <input v-else v-model="draft.title" class="title-edit" aria-label="记录标题" placeholder="输入标题" />
 
               <div class="chips">
-                <label v-if="['expense', 'income', 'bill'].includes(draft.type)">¥ <input v-model.number="draft.amount" type="number" min="0" step="0.01" inputmode="decimal" /></label>
+                <label v-if="['expense', 'income', 'bill'].includes(draft.type)" class="amount-chip">¥ <input v-model.number="draft.amount" type="number" min="0" step="0.01" inputmode="decimal" aria-label="金额" /></label>
                 <label v-if="draft.course">{{ draft.course }}</label>
-                <label v-if="['expense', 'income'].includes(draft.type) && categoryLabel(draft.category)">{{ categoryLabel(draft.category) }}</label>
+                <span v-if="['expense', 'income', 'bill'].includes(draft.type) && categoryLabel(draft.category)" class="category-chip-wrap">
+                  <button type="button" class="category-chip" :aria-expanded="categoryEditorId === draft.id" @click="categoryEditorId = categoryEditorId === draft.id ? '' : draft.id">{{ catInfo(draft.category).icon }} {{ categoryLabel(draft.category) }}</button>
+                  <span v-if="categoryEditorId === draft.id" class="category-picker" role="listbox" aria-label="选择分类">
+                    <button v-for="category in categoryOptions(draft).slice(0, 8)" :key="category.key" type="button" role="option" :aria-selected="draft.category === category.key" @click="chooseCategory(draft, category)">{{ category.icon }} {{ category.name }}</button>
+                  </span>
+                </span>
                 <label v-if="draft.dateRange && !draft.date">时间范围：{{ draft.dateRange }}</label>
                 <label v-if="draft.date"><input v-model="draft.date" type="date" aria-label="日期" /></label>
                 <label v-if="draft.time"><input v-model="draft.time" type="time" aria-label="时间" /></label>
@@ -515,12 +672,17 @@ onBeforeUnmount(() => {
               </div>
 
               <div v-if="draft.uncertain && draft.type !== 'unknown'" class="uncertain-tip">
-                <span>置信度较低，可能猜错意图</span>
+                <span>看起来像{{ recordTypeMeta(draft.type).label }}，可以确认后保存</span>
                 <button type="button" @click="saveAsNote(draft)">保存为快速笔记</button>
               </div>
 
+              <div v-if="draft.categoryUncertain && ['expense', 'income', 'bill'].includes(draft.type)" class="category-tip">
+                <span>建议分类：{{ categoryLabel(draft.category) }}<template v-if="draft.categoryAmbiguous">（描述包含多个消费内容）</template></span>
+                <button type="button" @click="expandedId = draft.id">选择其它分类</button>
+              </div>
+
               <div v-if="expandedId === draft.id" class="details">
-                <label>类型<select v-model="draft.type">
+                <label>类型<select v-model="draft.type" @change="onDraftTypeChange(draft)">
                   <option value="todo">待办</option>
                   <option value="homework">作业</option>
                   <option value="event">日程</option>
@@ -531,7 +693,7 @@ onBeforeUnmount(() => {
                   <option value="note">快速笔记</option>
                 </select></label>
                 <label v-if="!['note', 'expense', 'income', 'bill'].includes(draft.type)">课程<input v-model="draft.course" list="quick-course-options" /></label>
-                <label v-if="['expense', 'income'].includes(draft.type)">分类<select v-model="draft.category"><option v-for="category in activeLedgerCategories" :key="category.key" :value="category.key">{{ category.icon }} {{ category.name }}</option></select></label>
+                <label v-if="['expense', 'income', 'bill'].includes(draft.type)">分类<select v-model="draft.category" @change="confirmCategory(draft)"><option v-for="category in categoryOptions(draft)" :key="category.key" :value="category.key">{{ category.icon }} {{ category.name }}</option></select></label>
                 <label v-if="['expense', 'income', 'bill'].includes(draft.type)">账户<input v-model.trim="draft.account" placeholder="例如：微信 / 现金" /></label>
                 <label>备注<textarea v-model="draft.note" rows="2" /></label>
                 <label v-if="draft.type === 'bill'">重复<select v-model="draft.cycle"><option value="weekly">每周</option><option value="monthly">每月</option><option value="quarterly">每季度</option><option value="yearly">每年</option></select></label>
@@ -546,8 +708,8 @@ onBeforeUnmount(() => {
         <div class="footer">
           <p v-if="feedback" class="success" role="status">{{ feedback }}</p>
           <div v-if="hasDrafts" class="save-actions">
-            <button type="button" class="btn btn-primary" :disabled="saving" @click="saveAll(false)">{{ drafts.length > 1 ? '全部保存' : '保存' }}</button>
-            <button type="button" class="btn btn-ghost" :disabled="saving" @click="saveAll(true)">保存并继续</button>
+            <button type="button" class="btn btn-primary" :disabled="saving" :aria-busy="saving || undefined" @click="saveAll(false)">{{ drafts.length > 1 ? '全部保存' : '保存' }}</button>
+            <button type="button" class="btn btn-ghost" :disabled="saving" :aria-busy="saving || undefined" @click="saveAll(true)">保存并继续</button>
           </div>
         </div>
       </template>
@@ -564,11 +726,13 @@ onBeforeUnmount(() => {
             v-model="noteBody"
             class="note-body"
             rows="6"
+            aria-label="快速笔记内容"
             placeholder="随手写点什么……"
             @input="onNoteInput"
           />
           <div class="note-tools">
             <button
+              v-if="voiceSupported"
               class="mic note-mic"
               :class="{ on: listening }"
               type="button"
@@ -576,14 +740,15 @@ onBeforeUnmount(() => {
               @click="toggleVoice"
             >{{ listening ? '⏹' : '🎤' }} 语音输入</button>
             <span v-if="voiceStatusText" class="voice-status">{{ voiceStatusText }}</span>
+            <span v-else class="voice-hint">当前浏览器不支持语音识别</span>
           </div>
           <input v-model="noteTitle" class="note-title" aria-label="笔记标题（可选）" placeholder="标题（可选，默认取正文第一行）" />
           <p v-if="error" class="error" role="alert">{{ error }}</p>
           <div class="footer note-footer">
             <p v-if="feedback" class="success" role="status">{{ feedback }}</p>
             <div class="save-actions">
-            <button type="button" class="btn btn-primary" :disabled="saving" @click="saveNote(false)">保存</button>
-            <button type="button" class="btn btn-ghost" :disabled="saving" @click="saveNote(true)">保存并继续</button>
+            <button type="button" class="btn btn-primary" :disabled="saving" :aria-busy="saving || undefined" @click="saveNote(false)">保存</button>
+            <button type="button" class="btn btn-ghost" :disabled="saving" :aria-busy="saving || undefined" @click="saveNote(true)">保存并继续</button>
             </div>
           </div>
         </div>
@@ -598,49 +763,71 @@ onBeforeUnmount(() => {
 .quick-record{display:flex;flex-direction:column;gap:11px}
 .input-wrap{display:flex;align-items:flex-end;gap:7px;padding:6px 5px 6px 12px;border:1px solid var(--border-strong);border-radius:12px;background:var(--card)}
 .input-wrap:focus-within{border-color:var(--primary);box-shadow:0 0 0 3px var(--primary-soft)}
-.smart-input{flex:1;min-width:0;max-height:220px;padding:9px 0;border:0;outline:0;background:transparent;resize:none;line-height:1.5;font:inherit;color:var(--text)}
-.mic{display:inline-flex;align-items:center;justify-content:center;gap:5px;min-width:42px;height:42px;padding:0 12px;border:0;border-radius:10px;background:var(--primary-soft);font-size:17px;cursor:pointer}
-.mic.on{color:#fff;background:var(--danger)}
+.smart-input{flex:1;min-width:0;min-height:58px;max-height:220px;padding:9px 0;border:0;outline:0;background:transparent;resize:none;line-height:1.5;font:inherit;color:var(--text)}
+.mic{display:inline-flex;align-items:center;justify-content:center;gap:5px;min-width:44px;height:44px;padding:0 12px;border:0;border-radius:10px;background:var(--primary-soft);font-size:17px;cursor:pointer;touch-action:manipulation}
+.mic.on{color:var(--on-danger,#fff);background:var(--danger)}
 .note-mic{font-size:14px;width:auto}
 .example{margin-top:-5px;color:var(--ink-faint);font-size:11.5px}
 .action-row{display:flex;gap:7px;overflow-x:auto;padding-bottom:2px}
-.action-row button{flex:0 0 auto;padding:7px 10px;color:var(--ink-soft);border:1px solid var(--border);border-radius:999px;background:var(--card);font-size:12px;font-weight:700}
+.action-row button{flex:0 0 auto;min-height:34px;padding:7px 10px;color:var(--ink-soft);border:1px solid var(--border);border-radius:999px;background:var(--card);font-size:12px;font-weight:700;touch-action:manipulation}
 .action-row button.on{color:var(--primary);border-color:var(--primary);background:var(--primary-soft)}
+.action-row .note-entry{color:var(--primary);border-color:transparent;background:var(--primary-soft)}
+.action-row .action-more{margin-left:auto}
 .voice-status{margin:0;color:var(--primary);font-size:12px;font-weight:700}
+.voice-hint{margin:0;color:var(--ink-faint);font-size:12px}
 .clipboard-hint{display:flex;gap:8px;align-items:center;padding:9px 10px;color:var(--ink-soft);font-size:12px;border-radius:9px;background:var(--bg)}
 .clipboard-hint span{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .clipboard-hint button{padding:5px 7px;color:var(--primary);font-weight:800;border:0;border-radius:6px;background:var(--primary-soft)}
+.recent-block{display:flex;flex-direction:column;gap:0;padding-top:2px}
+.recent-head{display:flex;align-items:baseline;gap:8px;padding:0 2px 5px;color:var(--text);font-size:12px;font-weight:800}
+.recent-head small{color:var(--ink-faint);font-size:10.5px;font-weight:500}
+.recent-row{display:flex;align-items:center;gap:8px;min-height:38px;padding:6px 2px;color:var(--text);text-align:left;border:0;border-top:1px solid var(--border);background:transparent;cursor:pointer}
+.recent-row:hover{color:var(--primary)}
+.recent-icon{width:22px;text-align:center;font-size:15px}
+.recent-name{flex:1;min-width:0;overflow:hidden;font-size:12.5px;font-weight:700;text-overflow:ellipsis;white-space:nowrap}
+.recent-row small{max-width:40%;overflow:hidden;color:var(--ink-soft);font-size:11px;text-overflow:ellipsis;white-space:nowrap}
 .results{display:flex;flex-direction:column;gap:8px}
 .result-count,.total{margin:0;color:var(--ink-soft);font-size:12px}
 .record-card{padding:11px;border:1px solid var(--border);border-radius:11px;background:var(--bg-tint)}
-.record-card.uncertain{border-color:#e8c98e;background:#fffaf0}
+.record-card.uncertain{border-color:#e8c98e;background:color-mix(in srgb, var(--card) 88%, #fff1c9)}
 .record-head{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px}
 .record-head b{color:var(--primary)}
 .record-head-actions{display:inline-flex;align-items:center;gap:6px}
-.confidence{color:var(--ink-faint);font-size:10.5px}
 .record-head button{padding:2px 4px;color:var(--ink-faint);font-size:11px;border:0;background:transparent}
+.type-switch{display:flex;align-items:center;gap:5px;overflow-x:auto;margin:8px 0 2px;padding-bottom:2px}
+.type-switch button{flex:0 0 auto;min-height:30px;padding:5px 8px;color:var(--ink-soft);font-size:11px;border:1px solid var(--border);border-radius:999px;background:var(--card);touch-action:manipulation}
+.type-switch button.on{color:var(--primary);font-weight:800;border-color:var(--primary);background:var(--primary-soft)}
+.human-confidence{flex:0 0 auto;color:var(--ink-soft);font-size:11px}
 .title-edit,.note-title-edit{width:100%;margin:7px 0 8px;padding:0;color:var(--text);font-size:15px;font-weight:750;border:0;border-bottom:1px solid transparent;background:transparent}
 .title-edit:focus,.note-title-edit:focus{outline:0;border-bottom-color:var(--primary)}
 .note-title-edit{font-size:12px;font-weight:650}
-.note-body-edit{width:100%;min-height:104px;margin:8px 0 4px;padding:9px 10px;line-height:1.55;border:1px solid var(--border);border-radius:9px;resize:vertical;background:#fff}
+.note-body-edit{width:100%;min-height:104px;margin:8px 0 4px;padding:9px 10px;line-height:1.55;border:1px solid var(--border);border-radius:9px;resize:vertical;background:var(--card);color:var(--text)}
 .note-body-edit:focus{outline:0;border-color:var(--primary);box-shadow:0 0 0 2px var(--primary-soft)}
-.unknown-tip,.uncertain-tip{margin:6px 0;padding:7px 8px;color:#9a651d;font-size:11.5px;border-radius:7px;background:#fff;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-.unknown-tip button,.uncertain-tip button,.fallback-actions button{padding:4px 7px;color:#9a651d;border:1px solid #e8c98e;border-radius:6px;background:#fff;font-size:11px}
+ .unknown-tip,.uncertain-tip,.category-tip{margin:6px 0;padding:7px 8px;color:var(--warning);font-size:11.5px;border-radius:7px;background:var(--card);display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+ .category-tip span{flex:1;min-width:0}
+ .category-tip button{padding:4px 7px;color:var(--text);border:1px solid #e8c98e;border-radius:6px;background:var(--bg-tint);font-size:11px}
+.unknown-tip button,.uncertain-tip button,.fallback-actions button{padding:4px 7px;color:var(--text);border:1px solid #e8c98e;border-radius:6px;background:var(--bg-tint);font-size:11px}
 .fallback-actions{display:flex;gap:7px;flex-wrap:wrap;margin-top:8px}
 .fallback-actions .fallback-note{color:#087a58;border-color:#b6e2d2;background:#eefaf5}
 .chips{display:flex;gap:5px;flex-wrap:wrap}
-.chips label{display:flex;align-items:center;gap:2px;min-height:24px;padding:3px 7px;color:var(--ink-soft);font-size:11px;border-radius:6px;background:#fff}
+.chips label{display:flex;align-items:center;gap:2px;min-height:28px;padding:3px 7px;color:var(--ink-soft);font-size:11px;border-radius:6px;background:var(--card)}
 .chips input{width:92px;padding:0;border:0;background:transparent;font:inherit}
 .chips input[type="date"]{width:107px}
 .chips input[type="time"]{width:62px}
-.question{display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin-top:8px;color:#9a651d;font-size:11.5px}
-.question button{padding:4px 7px;color:#9a651d;border:1px solid #e8c98e;border-radius:6px;background:#fff}
+.category-chip-wrap{position:relative;display:inline-flex}
+.category-chip{min-height:28px;padding:3px 8px;color:var(--ink-soft);font-size:11px;border:0;border-radius:6px;background:var(--card);cursor:pointer}
+.category-chip:hover{color:var(--primary)}
+.category-picker{position:absolute;top:calc(100% + 5px);left:0;z-index:3;display:flex;flex-wrap:wrap;gap:5px;width:min(300px, calc(100vw - 64px));padding:8px;border:1px solid var(--border);border-radius:9px;background:var(--card);box-shadow:var(--shadow-md)}
+.category-picker button{min-height:32px;padding:5px 7px;color:var(--ink-soft);font-size:11px;border:1px solid var(--border);border-radius:6px;background:var(--bg);cursor:pointer}
+.category-picker button:hover,.category-picker button[aria-selected="true"]{color:var(--primary);border-color:var(--primary);background:var(--primary-soft)}
+.question{display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin-top:8px;color:var(--warning);font-size:11.5px}
+.question button{padding:4px 7px;color:var(--text);border:1px solid #e8c98e;border-radius:6px;background:var(--bg-tint)}
 .details{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px;padding-top:10px;border-top:1px solid var(--border)}
 .details label{display:flex;flex-direction:column;gap:4px;color:var(--ink-soft);font-size:11px}
 .details textarea,.details input,.details select{width:100%;padding:6px 7px;font-size:12px}
 .details label:last-child{grid-column:1/-1}
-.footer{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:38px}
-.success{margin:0;color:#087a58;font-size:12px}
+.footer{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:42px}
+.success{margin:0;color:var(--success);font-size:12px}
 .error{margin:0;color:var(--danger);font-size:12px}
 .save-actions{display:flex;gap:8px;margin-left:auto}
 .save-actions .btn{min-width:88px}
@@ -648,16 +835,19 @@ onBeforeUnmount(() => {
 .note-head{display:flex;align-items:center;justify-content:space-between;gap:8px}
 .note-head b{font-size:14px}
 .note-head small{color:var(--ink-faint);font-size:11px}
-.note-body{width:100%;min-height:160px;max-height:45vh;padding:12px;line-height:1.6;border:1px solid var(--border-strong);border-radius:12px;resize:none;background:var(--card);font:inherit;color:var(--text)}
+.note-body{width:100%;min-height:160px;max-height:45vh;max-height:45dvh;padding:12px;line-height:1.6;border:1px solid var(--border-strong);border-radius:12px;resize:none;background:var(--card);font:inherit;color:var(--text)}
 .note-body:focus{outline:0;border-color:var(--primary);box-shadow:0 0 0 3px var(--primary-soft)}
 .note-tools{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
 .note-title{width:100%;padding:10px 12px;font-size:13px;border:1px solid var(--border);border-radius:9px;background:var(--card)}
 .note-title:focus{outline:0;border-color:var(--primary)}
 .note-footer{padding-top:4px}
 @media(max-width:520px){
-.note-body{min-height:150px;max-height:40vh}
+.note-body{min-height:150px;max-height:40vh;max-height:40dvh}
 .details{grid-template-columns:1fr}
 .details label:last-child{grid-column:auto}
 .footer{position:sticky;bottom:0;background:var(--card);padding:8px 0 4px}
+.save-actions{width:100%}
+.save-actions .btn-primary{flex:1}
+.save-actions .btn-ghost{min-width:92px}
 }
 </style>

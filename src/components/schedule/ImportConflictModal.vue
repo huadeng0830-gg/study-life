@@ -67,7 +67,7 @@ function formatPeriods(detail) {
             当前课程：{{ match.existing.name }} · {{ days[match.existing.day] }} · {{ coursePeriodText(match.existing) }} · {{ weekLabel(match.existing) }}
             <small>实际冲突：第{{ formatWeeks(match.detail.weeks) }}周 · {{ formatPeriods(match.detail) }}</small>
           </div>
-          <select :value="draft.decisions[item.index] || ''" @change="emit('decision', item.index, $event.target.value)">
+          <select :value="draft.decisions[item.index] || ''" :aria-label="`${item.course.name} 的处理方式`" @change="emit('decision', item.index, $event.target.value)">
             <option value="" disabled>请选择处理方式</option>
             <option value="replace">替换原课程</option>
             <option value="keep">两门都保留</option>
@@ -75,14 +75,14 @@ function formatPeriods(detail) {
           </select>
         </article>
       </div>
-      <p v-if="error" class="error">{{ error }}</p>
+      <p v-if="error" class="error" role="alert">{{ error }}</p>
       <div class="import-conflict-footer">
         <button class="btn btn-ghost" @click="emit('close')">取消</button>
-        <button class="btn btn-primary" :disabled="busy" @click="emit('commit')">确认导入</button>
+        <button class="btn btn-primary" :disabled="busy" :aria-busy="busy || undefined" @click="emit('commit')">确认导入</button>
       </div>
       <div class="replace-all-schedule">
         <b>高级操作</b><span>替换当前整张课表会移除原有全部课程，与“替换冲突项”不同。</span>
-        <button class="btn btn-danger" :disabled="busy" @click="emit('replace-all')">替换当前整张课表</button>
+        <button class="btn btn-danger" :disabled="busy" :aria-busy="busy || undefined" @click="emit('replace-all')">替换当前整张课表</button>
       </div>
     </div>
   </Modal>
@@ -96,28 +96,33 @@ function formatPeriods(detail) {
 .conflict-item-list {
   display: flex;
   max-height: 42vh;
+  max-height: 42dvh;
   flex-direction: column;
   gap: 9px;
   overflow: auto;
 }
+/* 冲突条目整块：容器底色/边框与条目标题的琥珀字是一对写死的「浅底 + 深字」，
+   只把字换成令牌，深色主题下容器依旧是 #fffaf0 白底配亮琥珀（约 1.7:1），
+   所以底与边框一起从 --card 混出来。改前 4.80:1（两套主题一样），改后浅 5.16、深 6.72:1。 */
 .conflict-item {
   padding: 12px;
-  border: 1px solid #efd59d;
+  border: 1px solid color-mix(in srgb, var(--warning) 35%, var(--card));
   border-radius: 10px;
-  background: #fffaf0;
+  background: color-mix(in srgb, var(--warning) 10%, var(--card));
 }
-.conflict-item>b { color: #9a6414; font-size: 12px; }
+.conflict-item>b { color: var(--warning); font-size: 12px; }
 .conflict-item p { margin: 7px 0; font-size: 12px; line-height: 1.5; }
 .conflict-item select { width: 100%; margin-top: 8px; }
 .conflict-match {
   padding: 7px 9px;
   border-radius: 7px;
-  background: rgba(255,255,255,.72);
+  /* 同 .conn-meta-item code：半透明白在深色主题下是一层浅色遮罩，改用 --card 混色。 */
+  background: color-mix(in srgb, var(--card) 72%, transparent);
   color: var(--ink-soft);
   font-size: 11.5px;
   line-height: 1.5;
 }
-.conflict-match small { display: block; color: #9a6414; font-weight: 700; }
+.conflict-match small { display: block; color: var(--warning); font-weight: 700; }
 .replace-all-schedule {
   display: flex;
   align-items: center;

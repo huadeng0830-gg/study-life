@@ -8,7 +8,6 @@ export const WALLPAPER_TARGETS = {
   exams: { label: '重要日期', path: '/exams' },
   lists: { label: '清单', path: '/lists' },
   bills: { label: '账本', path: '/bills' },
-  food: { label: '吃什么', path: '/food' },
 }
 
 export const HOME_MODULES = [
@@ -44,7 +43,6 @@ function defaultAppearanceValue() {
     showQuote: true,
     homeModules: HOME_MODULES.map((item) => ({ id: item.id, visible: true })),
     scheduleSkin: 'classic',
-    foodPickerMode: 'cards',
     swipeActions: {
       tasks: { left: 'complete', right: 'edit' },
       lists: { left: 'complete', right: 'edit' },
@@ -73,7 +71,15 @@ function normalize() {
 
   const current = appearance.value ?? {}
   const existing = Array.isArray(current.homeModules) ? current.homeModules : []
-  const homeModules = HOME_MODULES.map((item) => existing.find((entry) => entry.id === item.id) ?? { id: item.id, visible: true })
+  // 保留用户拖拽后的顺序：先按已存顺序保留合法模块，再补齐新增模块（追加到末尾），并丢弃过时 id。
+  // 这样未来新增首页模块时，老用户的旧顺序数组不会丢掉新模块入口。
+  const knownIds = new Set(HOME_MODULES.map((item) => item.id))
+  const ordered = existing.filter((entry) => entry && knownIds.has(entry.id))
+  const seen = new Set(ordered.map((entry) => entry.id))
+  for (const item of HOME_MODULES) {
+    if (!seen.has(item.id)) ordered.push({ id: item.id, visible: true })
+  }
+  const homeModules = ordered
   const swipeActions = {
     tasks: {
       left: current.swipeActions?.tasks?.left ?? 'complete',
@@ -90,12 +96,12 @@ function normalize() {
     signature: '',
     showQuote: true,
     scheduleSkin: 'classic',
-    foodPickerMode: 'cards',
     ...current,
     quotes: Array.isArray(current.quotes) && current.quotes.length ? current.quotes : ['今天也要漂亮通关。'],
     homeModules,
     swipeActions,
   }
+  delete normalizedAppearance.foodPickerMode
   if (JSON.stringify(normalizedAppearance) !== JSON.stringify(current)) appearance.value = normalizedAppearance
 }
 

@@ -52,4 +52,14 @@ describe('mood.js', () => {
     expect(moodOf('2026-08-01', { '2026-08-01': '😊' }).mood).toBe('😊')
     expect(moodOf('2026-08-02', {})).toBeNull()
   })
+
+  it('moodOf 查询单日时不枚举整份日志', () => {
+    const log = new Proxy({ '2026-08-01': '😊' }, {
+      ownKeys() {
+        throw new Error('不应扫描整份心情日志')
+      },
+    })
+
+    expect(moodOf('2026-08-01', log)).toEqual({ mood: '😊', note: '' })
+  })
 })

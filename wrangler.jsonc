@@ -2,6 +2,10 @@
   "name": "study-life",
   "pages_build_output_dir": "./dist",
   "compatibility_date": "2026-08-28",
+  "vars": {
+    "SYNC_REMOTE_MODE": "do",
+    "SYNC_LEGACY_MIGRATION": "enabled"
+  },
   "kv_namespaces": [{
     "binding": "STUDY_LIFE_SYNC",
     "id": "81bcb55b6505465391dbb1c8860a886c"

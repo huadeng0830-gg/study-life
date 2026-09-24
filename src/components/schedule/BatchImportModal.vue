@@ -167,6 +167,7 @@ function daysLabel(day) {
 
       <div class="batch-input-row">
         <textarea
+          aria-label="批量录入课程文本"
           :value="text"
           rows="7"
           placeholder="高等数学 周一 1-2节 1-16周 A201 张老师&#10;大学英语,星期三,3-4,1-16,单周,B305,李老师"
@@ -256,7 +257,7 @@ function daysLabel(day) {
           <table class="batch-table">
             <thead>
               <tr>
-                <th>行</th><th>课程</th><th>星期</th><th>节次</th><th>周次</th><th>类型</th><th>地点</th><th>教师</th>
+                <th scope="col">行</th><th scope="col">课程</th><th scope="col">星期</th><th scope="col">节次</th><th scope="col">周次</th><th scope="col">类型</th><th scope="col">地点</th><th scope="col">教师</th>
               </tr>
             </thead>
             <tbody>
@@ -316,7 +317,7 @@ function daysLabel(day) {
         </div>
       </div>
 
-      <p v-if="showRowError" class="error">{{ error }}</p>
+      <p v-if="showRowError" class="error" role="alert">{{ error }}</p>
       <div v-if="message" class="batch-success">
         <b>✓ {{ message }}</b>
         <span>课程已经保存在本机，可以继续录入或返回课表检查。</span>
@@ -380,7 +381,7 @@ function daysLabel(day) {
   padding: 9px 14px;
   border-radius: 8px;
   background: var(--primary);
-  color: #fff;
+  color: var(--on-primary, #fff);
   font-size: 12px;
   font-weight: 700;
   cursor: pointer;
@@ -396,15 +397,17 @@ function daysLabel(day) {
   font-size: 11px;
   margin: 0;
 }
+/* OCR 结果提示：绿字 + 写死的浅绿底/边成对出现，三者一起改成令牌混色，
+   否则深色主题下 #effbf7 是一块白面板，亮绿字压上去读不出来。 */
 .ocr-result-hint {
   margin: 2px 0 0;
   padding: 8px 10px;
-  color: #08785a;
+  color: var(--success);
   font-size: 11px;
   line-height: 1.55;
-  border: 1px solid #b8e5d7;
+  border: 1px solid color-mix(in srgb, var(--success) 35%, var(--card));
   border-radius: 8px;
-  background: #effbf7;
+  background: color-mix(in srgb, var(--success) 10%, var(--card));
 }
 .batch-preview-wrap {
   overflow: hidden;
@@ -418,12 +421,14 @@ function daysLabel(day) {
   padding: 10px 12px;
   font-size: 12px;
   border-bottom: 1px solid var(--border);
-  background: #fafbfd;
+  background: var(--bg-tint);
 }
 .batch-summary b { font-size: 12px; }
-.ok-text { color: #07805d; }
+.ok-text { color: var(--success); }
 .error-text { color: var(--danger); }
-.warning-text { color: #b88921; }
+/* #b88921 与同栏的 .ok-text 是同一对「可导入 / 需确认」语义色，写死的琥珀在浅色
+   只有 3.03:1（已低于 AA）、深色 5.50:1；换成 --warning 后浅 5.66、深 8.99:1。 */
+.warning-text { color: var(--warning); }
 .batch-table-scroll {
   max-height: 260px;
   overflow: auto;
@@ -446,48 +451,55 @@ function daysLabel(day) {
   top: 0;
   z-index: 1;
   color: var(--muted);
-  background: #fff;
+  background: var(--card);
 }
 .batch-table tr.invalid td {
   color: var(--danger);
-  background: #fff7f7;
+  background: color-mix(in srgb, var(--danger) 10%, var(--card));
 }
+/* needsReview 的主行与它下面的 .batch-review-row 是同一个视觉单元（同一份 #fffbef），
+   所以两处底色必须一起迁移：只改一处会让同一行在深色主题下一深一白。 */
 .batch-table tr.needsReview td {
-  background: #fffbef;
+  background: color-mix(in srgb, var(--warning) 10%, var(--card));
 }
 .batch-error-row td {
   padding-top: 2px;
   color: var(--danger);
-  background: #fff7f7;
+  background: color-mix(in srgb, var(--danger) 10%, var(--card));
 }
 .batch-review-row td {
   padding-top: 2px;
-  color: #9a6414;
-  background: #fffbef;
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 10%, var(--card));
 }
 .batch-mobile-preview { display: none; }
+/* 卡内的说明 span 用的是 var(--muted)，10% 混合底会让它在浅色只有 4.31:1，
+   所以这里取 6%（实测 --muted 4.58 / 深 4.72，正文 var(--text) 14.97 / 12.01）。 */
 .batch-success {
   display: flex;
   flex-direction: column;
   gap: 8px;
   padding: 14px;
-  color: #08785a;
-  border: 1px solid #a7e3d2;
+  color: var(--success);
+  border: 1px solid color-mix(in srgb, var(--success) 35%, var(--card));
   border-radius: 12px;
-  background: #effbf7;
+  background: color-mix(in srgb, var(--success) 6%, var(--card));
 }
 .batch-success span { color: var(--muted); font-size: 12px; line-height: 1.55; }
 .batch-success>div { display: flex; justify-content: flex-end; gap: 8px; }
 .error-message { display: flex; align-items: center; gap: 6px; padding: 6px 8px; }
-.review-message { display: flex; align-items: center; gap: 6px; padding: 6px 8px; color: #9a6414; }
+.review-message { display: flex; align-items: center; gap: 6px; padding: 6px 8px; color: var(--warning); }
+/* 「需要确认」清单是一个整体：容器底色/边框、容器自己的正文色、标题的深棕、
+   条目边框和按钮全部属于同一套写死的琥珀色阶。只把里面的 em 换成令牌的话，
+   深色主题下容器仍是 #fffbef 白底，亮琥珀字压上去约 1.7:1 —— 所以整块一起迁移。 */
 .review-checklist {
   padding: 12px;
-  color: #7a5317;
-  border: 1px solid #edca7b;
+  color: var(--warning);
+  border: 1px solid color-mix(in srgb, var(--warning) 35%, var(--card));
   border-radius: 10px;
-  background: #fffbef;
+  background: color-mix(in srgb, var(--warning) 10%, var(--card));
 }
-.review-checklist header b { display: block; color: #62400e; font-size: 13px; }
+.review-checklist header b { display: block; color: var(--warning); font-size: 13px; }
 .review-checklist header span { display: block; margin-top: 3px; font-size: 11px; line-height: 1.5; }
 .review-checklist ol {
   display: grid;
@@ -499,22 +511,22 @@ function daysLabel(day) {
   overflow: auto;
   list-style: none;
 }
-.review-checklist li { min-width: 0; padding: 9px 10px; border: 1px solid #f0d99e; border-radius: 8px; background: #fff; }
+.review-checklist li { min-width: 0; padding: 9px 10px; border: 1px solid color-mix(in srgb, var(--warning) 35%, var(--card)); border-radius: 8px; background: var(--card); }
 .review-course-title { display: flex; align-items: center; gap: 8px; }
 .review-course-title strong { overflow: hidden; color: var(--text); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .review-course-title span { flex: none; margin-left: auto; color: var(--muted); font-size: 10px; }
 .review-course-title button,
-.review-edit-actions button { flex: none; padding: 4px 7px; color: #835711; font-size: 10px; font-weight: 700; border: 1px solid #e3c171; border-radius: 6px; background: #fff8e4; cursor: pointer; }
+.review-edit-actions button { flex: none; padding: 4px 7px; color: var(--warning); font-size: 10px; font-weight: 700; border: 1px solid color-mix(in srgb, var(--warning) 35%, var(--card)); border-radius: 6px; background: color-mix(in srgb, var(--warning) 10%, var(--card)); cursor: pointer; }
 .review-checklist p { margin: 5px 0; color: var(--muted); font-size: 10px; line-height: 1.5; }
-.review-checklist em { color: #9a6414; font-size: 10px; font-style: normal; font-weight: 700; line-height: 1.5; }
+.review-checklist em { color: var(--warning); font-size: 10px; font-style: normal; font-weight: 700; line-height: 1.5; }
 .review-edit-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; margin-top: 9px; }
 .review-edit-grid label { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
 .review-edit-grid label.wide { grid-column: span 2; }
 .review-edit-grid label span { color: var(--muted); font-size: 9px; }
 .review-edit-grid input,
-.review-edit-grid select { width: 100%; min-width: 0; box-sizing: border-box; padding: 6px 7px; font-size: 11px; border: 1px solid var(--border); border-radius: 6px; background: #fff; }
+.review-edit-grid select { width: 100%; min-width: 0; box-sizing: border-box; padding: 6px 7px; font-size: 11px; border: 1px solid var(--border); border-radius: 6px; background: var(--card); }
 .review-edit-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 8px; }
-.review-edit-actions button.save { color: #fff; border-color: var(--primary); background: var(--primary); }
+.review-edit-actions button.save { color: var(--on-primary, #fff); border-color: var(--primary); background: var(--primary); }
 .review-edit-actions button:disabled { cursor: not-allowed; opacity: .5; }
 
 @media (max-width: 760px) {
@@ -533,10 +545,13 @@ function daysLabel(day) {
     padding: 10px;
     border: 1px solid var(--border);
     border-radius: 10px;
-    background: #fff;
+    background: var(--card);
   }
   .batch-mobile-card.invalid { border-color: #f3b7b7; background: #fff7f7; }
-  .batch-mobile-card.needsReview:not(.invalid) { border-color: #f1d38b; background: #fffbef; }
+  /* 主预览行（tr.needsReview）已经改成令牌混色，移动端卡片是同一份「需确认」语义，
+     不一起改的话窄屏下仍是白卡配浅字。卡内的 dt/span 是 var(--muted)，所以取 6%。
+     invalid（红）不在本次范围。 */
+  .batch-mobile-card.needsReview:not(.invalid) { border-color: color-mix(in srgb, var(--warning) 35%, var(--card)); background: color-mix(in srgb, var(--warning) 6%, var(--card)); }
   .batch-mobile-head {
     display: grid;
     grid-template-columns: auto 1fr auto;
@@ -556,9 +571,11 @@ function daysLabel(day) {
     font-size: 9px;
     font-style: normal;
     border-radius: 5px;
-    background: #feecec;
+    background: color-mix(in srgb, var(--danger) 12%, var(--card));
   }
-  .batch-mobile-head em.ok { color: #08785a; background: #e8f8f2; }
+  /* 与上面「需修改」的 em 完全对称：同样是「语义字 + 同色浅底」，上面已经用
+     令牌 + 混色，这里却还写死，深色主题下就是一浅一深的两个药丸。 */
+  .batch-mobile-head em.ok { color: var(--success); background: color-mix(in srgb, var(--success) 10%, var(--card)); }
   .batch-mobile-card dl {
     display: grid;
     grid-template-columns: 1fr 1fr;

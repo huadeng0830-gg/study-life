@@ -3,12 +3,14 @@
 import { coursesForDate } from './store/schedule.js'
 import { fmtDate } from './store/utils.js'
 import { monthMoodSummary } from './mood.js'
+import { summarizeLedgerTransactions } from './ledger.js'
+import { mySpendCents } from './ledgerSplit.js'
+import { createdDateKey } from './settingsPolicy.js'
 
 const number = (value) => {
   const n = Number(value)
   return Number.isFinite(n) ? n : 0
 }
-const round2 = (value) => Math.round(value * 100) / 100
 
 function collect(data) {
   return {
@@ -29,11 +31,6 @@ function examOnDate(item, dateStr) {
   return item.date === dateStr
 }
 
-function spend(list) {
-  return round2(list.filter((item) => item.direction !== 'income').reduce((sum, item) => sum + number(item.amount), 0))
-}
-function income(list) { return round2(list.filter((item) => item.direction === 'income').reduce((sum, item) => sum + number(item.amount), 0)) }
-
 function courseLine(course) {
   return course?.room ? `${course.name} · ${course.room}` : course?.name || ''
 }
@@ -49,9 +46,12 @@ export function daySnapshot(dateStr, data) {
   const doneTasks = tasks.filter((task) => task.done)
   const exams = d.exams.filter((item) => examOnDate(item, dateStr))
   const bills = d.bills.filter((bill) => bill.nextDate === dateStr)
-  const expenses = d.expenses.filter((expense) => expense.date === dateStr)
+  // 回顾叙事里的「支出」回答的是「**我**花了多少」：与账本页同一口径（分摊取我的份额）。
+  // 未分摊的记录逐分不变，所以没有分摊的账本读起来与以前完全一样。
+  const ledger = summarizeLedgerTransactions(d.expenses, { dateFilter: (date) => date === dateStr, amountOf: mySpendCents })
+  const expenses = ledger.items
   const events = d.events.filter((item) => item.date === dateStr)
-  const notes = d.notes.filter((item) => String(item.createdAt ?? '').slice(0, 10) === dateStr)
+  const notes = d.notes.filter((item) => createdDateKey(item.createdAt) === dateStr)
   const total = tasks.length
   return {
     courses,
@@ -68,9 +68,9 @@ export function daySnapshot(dateStr, data) {
       taskRate: total ? Math.round((doneTasks.length / total) * 100) : 0,
       exams: exams.length,
       bills: bills.length,
-      expensesCount: expenses.length,
-      expensesTotal: spend(expenses),
-      incomeTotal: income(expenses),
+      expensesCount: ledger.count,
+      expensesTotal: ledger.expenseTotal,
+      incomeTotal: ledger.incomeTotal,
       events: events.length,
       notes: notes.length,
       focusMinutes: tasks.reduce((sum, task) => sum + number(task.estimateMinutes), 0),
@@ -123,13 +123,14 @@ export function monthReport(month, data) {
   const prefix = String(month ?? '').slice(0, 7)
   const tasks = d.tasks.filter((task) => String(task.dueDate ?? '').startsWith(prefix))
   const doneTasks = tasks.filter((task) => task.done)
-  const expenses = d.expenses.filter((expense) => String(expense.date ?? '').startsWith(prefix))
+  const ledger = summarizeLedgerTransactions(d.expenses, { dateFilter: (date) => date.startsWith(prefix), amountOf: mySpendCents })
+  const expenses = ledger.items
   const exams = d.exams.filter((item) => (
     item.repeat === 'yearly' ? String(item.date ?? '').slice(5) === prefix.slice(5) : String(item.date ?? '').startsWith(prefix)
   ))
   const bills = d.bills.filter((bill) => String(bill.nextDate ?? '').startsWith(prefix))
   const events = d.events.filter((item) => String(item.date ?? '').startsWith(prefix))
-  const notes = d.notes.filter((item) => String(item.createdAt ?? '').startsWith(prefix))
+  const notes = d.notes.filter((item) => createdDateKey(item.createdAt).startsWith(prefix))
   const mood = monthMoodSummary(prefix, d.moodLog)
   const total = tasks.length
 
@@ -137,9 +138,9 @@ export function monthReport(month, data) {
     tasks: total,
     tasksDone: doneTasks.length,
     taskRate: total ? Math.round((doneTasks.length / total) * 100) : 0,
-    expensesCount: expenses.length,
-    expensesTotal: spend(expenses),
-    incomeTotal: income(expenses),
+    expensesCount: ledger.count,
+    expensesTotal: ledger.expenseTotal,
+    incomeTotal: ledger.incomeTotal,
     exams: exams.length,
     bills: bills.length,
     focusMinutes: tasks.reduce((sum, task) => sum + number(task.estimateMinutes), 0),
@@ -180,22 +181,23 @@ export function yearReport(year, data) {
   const prefix = String(year ?? '').slice(0, 4)
   const tasks = d.tasks.filter((task) => String(task.dueDate ?? '').startsWith(prefix))
   const doneTasks = tasks.filter((task) => task.done)
-  const expenses = d.expenses.filter((expense) => String(expense.date ?? '').startsWith(prefix))
+  const ledger = summarizeLedgerTransactions(d.expenses, { dateFilter: (date) => date.startsWith(prefix), amountOf: mySpendCents })
+  const expenses = ledger.items
   const exams = d.exams.filter((item) => (
     item.repeat === 'yearly' ? Boolean(item.date) : String(item.date ?? '').startsWith(prefix)
   ))
   const bills = d.bills.filter((bill) => String(bill.nextDate ?? '').startsWith(prefix))
   const events = d.events.filter((item) => String(item.date ?? '').startsWith(prefix))
-  const notes = d.notes.filter((item) => String(item.createdAt ?? '').startsWith(prefix))
+  const notes = d.notes.filter((item) => createdDateKey(item.createdAt).startsWith(prefix))
   const total = tasks.length
 
   const stats = {
     tasks: total,
     tasksDone: doneTasks.length,
     taskRate: total ? Math.round((doneTasks.length / total) * 100) : 0,
-    expensesCount: expenses.length,
-    expensesTotal: spend(expenses),
-    incomeTotal: income(expenses),
+    expensesCount: ledger.count,
+    expensesTotal: ledger.expenseTotal,
+    incomeTotal: ledger.incomeTotal,
     exams: exams.length,
     bills: bills.length,
     focusMinutes: tasks.reduce((sum, task) => sum + number(task.estimateMinutes), 0),
@@ -203,7 +205,7 @@ export function yearReport(year, data) {
       ...tasks.map((task) => task.dueDate),
       ...expenses.map((expense) => expense.date),
       ...events.map((item) => item.date),
-      ...notes.map((item) => String(item.createdAt ?? '').slice(0, 10)),
+      ...notes.map((item) => createdDateKey(item.createdAt)),
     ].filter(Boolean)).size,
   }
 

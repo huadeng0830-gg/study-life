@@ -1,9 +1,13 @@
 // @vitest-environment happy-dom
 import { beforeEach, describe, expect, it } from 'vitest'
-import { buildSyncManifest, hashSyncValue, readSyncMetadata, recordTombstone, validateStableEntityIds } from '../src/composables/syncMetadata.js'
+import { buildSyncManifest, hashSyncValue, readSyncMetadata, recordTombstone, removeSupersededTombstones, saveSyncMetadata, syncMetadataStorageKey, validateStableEntityIds } from '../src/composables/syncMetadata.js'
+import { clearSyncSpaceSettings, randomSecret, saveSyncSpaceSettings } from '../src/composables/syncSpace.js'
 
 describe('P2-B 同步 manifest 与 tombstone', () => {
-  beforeEach(() => localStorage.clear())
+  beforeEach(() => {
+    localStorage.clear()
+    clearSyncSpaceSettings()
+  })
 
   it('核心实体使用稳定 id，特殊集合使用确定性复合 id', () => {
     const values = {
@@ -30,5 +34,33 @@ describe('P2-B 同步 manifest 与 tombstone', () => {
     expect(first.baseHash).toBe(hashSyncValue(entity))
     expect(readSyncMetadata().tombstones).toEqual([second])
     expect(second.revision).toBe(2)
+  })
+
+  it('客户端未来时间不能自动清理墓碑，墓碑只能由显式恢复因果解除', () => {
+    const tombstone = {
+      tombstoneId: 'delete-task-1',
+      entityType: 'Task',
+      entityId: 'task-1',
+      deletedAt: '2026-09-02T00:00:00.000Z',
+    }
+    const futureEntity = { id: 'task-1', title: '陈旧设备版本', updatedAt: '2035-01-01T00:00:00.000Z' }
+
+    expect(removeSupersededTombstones({ sl_tasks: [futureEntity] }, [tombstone])).toEqual([tombstone])
+  })
+
+  it('不同同步空间使用不同的本地基线命名空间', () => {
+    const settings = { deviceCredential: randomSecret(), payloadKey: randomSecret() }
+    saveSyncSpaceSettings({ ...settings, spaceId: 'AB7K-P9M2-X4DQ' })
+    saveSyncMetadata({ hasBaseline: true, baseRemoteRevision: 7, baseline: { entities: {}, singletons: {} }, tombstones: [] })
+    const spaceAKey = syncMetadataStorageKey()
+
+    saveSyncSpaceSettings({ ...settings, spaceId: 'CD8M-Q2R4-Y6TG' })
+    expect(readSyncMetadata().hasBaseline).toBe(false)
+    saveSyncMetadata({ hasBaseline: true, baseRemoteRevision: 2, baseline: { entities: {}, singletons: {} }, tombstones: [] })
+
+    saveSyncSpaceSettings({ ...settings, spaceId: 'AB7K-P9M2-X4DQ' })
+    expect(readSyncMetadata().baseRemoteRevision).toBe(7)
+    expect(localStorage.getItem(spaceAKey)).not.toBeNull()
+    expect(localStorage.getItem(syncMetadataStorageKey())).not.toBeNull()
   })
 })

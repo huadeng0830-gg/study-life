@@ -1,4 +1,5 @@
 import { policyDateKey, policyDateTime } from '../settingsPolicy.js'
+import { clock } from '../store/core.js'
 
 export const TASK_STATUS = Object.freeze({ pending: 'pending', inProgress: 'in_progress', completed: 'completed', cancelled: 'cancelled', archived: 'archived' })
 export const TASK_PLAN_STATE = Object.freeze({ unplanned: 'unplanned', scheduled: 'scheduled', completed: 'completed' })
@@ -12,7 +13,7 @@ export function isActiveEntity(entity) {
   return !isArchived(entity) && entity?.active !== false
 }
 
-export function taskStatus(task, now = new Date()) {
+export function taskStatus(task, now = clock.value) {
   if (!task || typeof task !== 'object') return TASK_STATUS.pending
   if (isArchived(task)) return TASK_STATUS.archived
   if (task.status === TASK_STATUS.cancelled) return task.status
@@ -22,13 +23,13 @@ export function taskStatus(task, now = new Date()) {
   return TASK_STATUS.pending
 }
 
-export function isTaskActionable(task, now = new Date()) {
+export function isTaskActionable(task, now = clock.value) {
   const status = taskStatus(task, now)
   return status !== TASK_STATUS.completed && status !== TASK_STATUS.cancelled && status !== TASK_STATUS.archived
 }
 
 // 用户可见的三态：逾期仍属于“已安排”，只是 taskStatus 的派生紧急状态。
-export function taskPlanningState(task, now = new Date()) {
+export function taskPlanningState(task, now = clock.value) {
   const status = taskStatus(task, now)
   if (status === TASK_STATUS.cancelled || status === TASK_STATUS.archived) return status
   if (status === TASK_STATUS.completed) return TASK_PLAN_STATE.completed
@@ -36,7 +37,7 @@ export function taskPlanningState(task, now = new Date()) {
   return TASK_PLAN_STATE.unplanned
 }
 
-export function billStatus(bill, now = new Date()) {
+export function billStatus(bill, now = clock.value) {
   if (!bill || isArchived(bill) || bill.active === false) return 'paused'
   if (!bill.nextDate) return 'upcoming'
   const today = policyDateKey(now)
@@ -47,7 +48,7 @@ export function billStatus(bill, now = new Date()) {
 }
 
 // 首页“接下来”只展示当前到期或已进入提醒窗口的固定账单。
-export function isBillDueSoon(bill, now = new Date()) {
+export function isBillDueSoon(bill, now = clock.value) {
   if (!bill || !isActiveEntity(bill) || !bill.nextDate) return false
   const status = billStatus(bill, now)
   if (status === 'due' || status === 'overdue') return true

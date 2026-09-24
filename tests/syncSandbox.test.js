@@ -48,6 +48,82 @@ describe('P2-B.5 isolated sync sandbox', () => {
     ]))
   })
 
+  it('完成 A→B→A 往返后保留删除因果与后续修改，并隔离另一个空间', () => {
+    const spaceA = createSyncSandbox({
+      namespace: 'sync-test-roundtrip-a',
+      initialValues: { sl_tasks: [task('t1', '待删除'), task('t2', '待修改')] },
+    })
+    const spaceB = createSyncSandbox({
+      namespace: 'sync-test-roundtrip-b',
+      initialValues: { sl_tasks: [task('t1', '另一空间任务')] },
+    })
+    spaceA.seed()
+    spaceB.seed()
+    const deviceA = spaceA.device('Device A')
+    const deviceB = spaceA.device('Device B')
+
+    spaceA.deleteEntity(deviceA, 'sl_tasks', 'Task', 't1')
+    expect(spaceA.tryPush(deviceA)).toMatchObject({ ok: true, revision: 2 })
+    expect(spaceA.pull(deviceB)).toMatchObject({ ok: true, summary: { deleted: 1 } })
+    spaceA.edit(deviceB, 'sl_tasks', 't2', { title: 'B 修改后', updatedAt: '2026-09-03T00:00:00.000Z' })
+    expect(spaceA.tryPush(deviceB)).toMatchObject({ ok: true, revision: 3 })
+
+    expect(spaceA.pull(deviceA)).toMatchObject({ ok: true })
+    expect(deviceA.local.sl_tasks).toEqual([expect.objectContaining({ id: 't2', title: 'B 修改后' })])
+    expect(deviceA.tombstones).toEqual(expect.arrayContaining([expect.objectContaining({ entityType: 'Task', entityId: 't1' })]))
+    expect(spaceB.remote.revision).toBe(1)
+    expect(spaceB.remoteSnapshot().envelope.values.sl_tasks[0]).toMatchObject({ id: 't1', title: '另一空间任务' })
+  })
+
+  it('综合 Phone/PC 流程：初始合并、双改、删除冲突恢复、撤销与重新配对均不丢数据', () => {
+    const phoneTask = task('phone-task', 'Phone P')
+    const pcTask = task('pc-task', 'PC R')
+    const sandbox = createSyncSandbox({ initialValues: { sl_tasks: [pcTask] } })
+    sandbox.seed()
+    const phone = sandbox.device('Phone', { sl_tasks: [phoneTask] })
+    const pc = sandbox.device('PC', { sl_tasks: [pcTask] })
+
+    // Pair/Recovery 后没有可信 Base：首次 pull 必须做 Initial Merge。
+    phone.baseManifest = null
+    expect(sandbox.pull(phone).ok).toBe(true)
+    expect(phone.local.sl_tasks.map((item) => item.id)).toEqual(expect.arrayContaining(['phone-task', 'pc-task']))
+
+    sandbox.edit(phone, 'sl_tasks', 'phone-task', { title: 'Phone 修改 P' })
+    expect(sandbox.tryPush(phone).ok).toBe(true)
+    expect(sandbox.pull(pc).ok).toBe(true)
+    sandbox.edit(pc, 'sl_tasks', 'pc-task', { title: 'PC 修改 R' })
+    expect(sandbox.tryPush(pc).ok).toBe(true)
+    expect(sandbox.pull(phone).ok).toBe(true)
+    expect(phone.local.sl_tasks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'phone-task', title: 'Phone 修改 P' }),
+      expect.objectContaining({ id: 'pc-task', title: 'PC 修改 R' }),
+    ]))
+
+    sandbox.deleteEntity(phone, 'sl_tasks', 'Task', 'phone-task')
+    expect(sandbox.tryPush(phone).ok).toBe(true)
+    sandbox.edit(pc, 'sl_tasks', 'phone-task', { title: 'PC 离线修改 P' })
+    expect(sandbox.tryPush(pc).ok).toBe(false)
+    const conflict = sandbox.pull(pc)
+    expect(conflict.conflicts[0].status).toBe('delete-update-conflict')
+    expect(sandbox.resolve(pc, conflict, { 'sl_tasks:phone-task': 'local' }).ok).toBe(true)
+    expect(sandbox.tryPush(pc).ok).toBe(true)
+    expect(sandbox.pull(phone).ok).toBe(true)
+    expect(phone.local.sl_tasks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'phone-task', title: 'PC 离线修改 P' }),
+      expect.objectContaining({ id: 'pc-task', title: 'PC 修改 R' }),
+    ]))
+    expect(phone.tombstones).toHaveLength(0)
+
+    sandbox.revoke(phone)
+    expect(sandbox.tryPush(phone)).toMatchObject({ ok: false, status: 401 })
+    sandbox.rebind(phone)
+    expect(sandbox.pull(phone).ok).toBe(true)
+    expect(phone.local.sl_tasks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: 'phone-task', title: 'PC 离线修改 P' }),
+      expect.objectContaining({ id: 'pc-task', title: 'PC 修改 R' }),
+    ]))
+  })
+
   it('requires a decision for delete-vs-update and supports both deletion and explicit restoration', () => {
     for (const [decision, expectedCount] of [['remote', 0], ['local', 1]]) {
       const sandbox = createSyncSandbox({ initialValues: baseValues() })

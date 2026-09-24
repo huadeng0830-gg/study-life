@@ -1,7 +1,9 @@
-import { coursesForDate } from '../store/schedule.js'
+import { coursesForDates } from '../store/schedule.js'
 import { weatherOfMood, normalizeMoodLog } from '../mood.js'
 import { policyDateKey, policyDateTime } from '../settingsPolicy.js'
 import { isActiveEntity } from './state.js'
+import { clock } from '../store/core.js'
+import { mySpendCents } from '../ledgerSplit.js'
 
 function dateFromKey(key) {
   const [year, month, day] = String(key || '').split('-').map(Number)
@@ -22,6 +24,10 @@ function inRange(key, range) {
   return Boolean(key) && key >= range.startDate && key < range.endDate
 }
 
+function resolveRange(now, options = {}) {
+  return options.range ?? weekRange(now, options)
+}
+
 function numeric(value) {
   const amount = Number(value)
   return Number.isFinite(amount) ? amount : 0
@@ -31,7 +37,7 @@ function round2(value) {
   return Math.round(value * 100) / 100
 }
 
-export function weekRange(now = new Date(), { weekOffset = 0, timezone } = {}) {
+export function weekRange(now = clock.value, { weekOffset = 0, timezone } = {}) {
   const today = policyDateKey(now, timezone)
   const date = dateFromKey(today)
   const day = date.getUTCDay()
@@ -51,67 +57,94 @@ function timestampInRange(value, range) {
   return Number.isFinite(timestamp) && timestamp >= range.startAt && timestamp < range.endAt
 }
 
-export function selectWeeklyTaskSummary({ tasks = [] } = {}, now = new Date(), options = {}) {
-  const range = weekRange(now, options)
-  const created = tasks.filter((task) => timestampInRange(task.createdAt, range))
-  const completed = tasks.filter((task) => timestampInRange(task.completedAt, range))
-  const active = tasks.filter(isActiveEntity)
-  return {
-    created: created.length,
-    completed: completed.length,
-    homeworkCompleted: completed.filter((task) => task.kind === 'homework').length,
-    reviewCompleted: completed.filter((task) => task.kind === 'review').length,
-    pending: active.filter((task) => task.status !== 'completed' && !task.done).length,
-    focusMinutes: completed.reduce((sum, task) => sum + numeric(task.estimateMinutes), 0),
+export function selectWeeklyTaskSummary({ tasks = [] } = {}, now = clock.value, options = {}) {
+  const range = resolveRange(now, options)
+  const summary = { created: 0, completed: 0, homeworkCompleted: 0, reviewCompleted: 0, pending: 0, focusMinutes: 0 }
+  for (const task of Array.isArray(tasks) ? tasks : []) {
+    if (timestampInRange(task.createdAt, range)) summary.created += 1
+    if (timestampInRange(task.completedAt, range)) {
+      summary.completed += 1
+      if (task.kind === 'homework') summary.homeworkCompleted += 1
+      if (task.kind === 'review') summary.reviewCompleted += 1
+      summary.focusMinutes += numeric(task.estimateMinutes)
+    }
+    if (isActiveEntity(task) && task.status !== 'completed' && !task.done) summary.pending += 1
   }
+  return summary
 }
 
-export function selectWeeklyFinanceSummary({ transactions = [], expenses = [] } = {}, now = new Date(), options = {}) {
-  const range = weekRange(now, options)
+export function selectWeeklyFinanceSummary({ transactions = [], expenses = [] } = {}, now = clock.value, options = {}) {
+  const range = resolveRange(now, options)
   const source = transactions.length ? transactions : expenses
-  const items = source.filter((item) => inRange(item.date, range))
-  const income = items.filter((item) => item.direction === 'income')
-  const expense = items.filter((item) => item.direction !== 'income')
+  let count = 0
+  let incomeTotal = 0
+  let expenseTotal = 0
   const categoryMap = new Map()
-  for (const item of expense) {
+  for (const item of Array.isArray(source) ? source : []) {
+    if (!inRange(item.date, range)) continue
+    // 与账本页同一口径：支出按「我实际承担」的份额算（未分摊的记录 = 记录金额）。
+    // 金额非法时仍走 numeric 的旧兜底（0），不因为这个口径改动而改变容错行为。
+    const spendCents = mySpendCents(item)
+    const amount = spendCents === null ? numeric(item.amount) : spendCents / 100
+    if (item.direction === 'income') {
+      incomeTotal += amount
+      count += 1
+      continue
+    }
+    // 退款是冲抵项：冲抵支出、不计笔数、不进分类分布。
+    if (item.direction === 'refund') {
+      expenseTotal -= amount
+      continue
+    }
+    expenseTotal += amount
+    count += 1
     const key = item.cat || item.category || '未分类'
-    categoryMap.set(key, (categoryMap.get(key) || 0) + numeric(item.amount))
+    categoryMap.set(key, (categoryMap.get(key) || 0) + amount)
   }
   return {
-    count: items.length,
-    income: round2(income.reduce((sum, item) => sum + numeric(item.amount), 0)),
-    expense: round2(expense.reduce((sum, item) => sum + numeric(item.amount), 0)),
+    count,
+    income: round2(incomeTotal),
+    expense: round2(expenseTotal),
     categories: [...categoryMap.entries()].map(([key, amount]) => ({ key, amount: round2(amount) })).sort((a, b) => b.amount - a.amount),
   }
 }
 
-export function selectWeeklyCourseSummary({ courses = [] } = {}, now = new Date(), options = {}) {
-  const range = weekRange(now, options)
+export function selectWeeklyCourseSummary({ courses = [] } = {}, now = clock.value, options = {}) {
+  const range = resolveRange(now, options)
   let sessions = 0
   const names = new Set()
-  for (let offset = 0; offset < 7; offset++) {
-    const date = shiftDate(range.startDate, offset)
-    const daily = coursesForDate(courses, date)
+  const dates = Array.from({ length: 7 }, (_, offset) => shiftDate(range.startDate, offset))
+  const dailyCourses = coursesForDates(courses, dates)
+  for (const daily of dailyCourses) {
     sessions += daily.length
     daily.forEach((course) => names.add(course.id))
   }
   return { sessions, courses: names.size }
 }
 
-export function selectWeeklyBillSummary({ bills = [], transactions = [], expenses = [] } = {}, now = new Date(), options = {}) {
-  const range = weekRange(now, options)
+export function selectWeeklyBillSummary({ bills = [], transactions = [], expenses = [] } = {}, now = clock.value, options = {}) {
+  const range = resolveRange(now, options)
   const source = transactions.length ? transactions : expenses
-  const paid = source.filter((item) => item.source === 'bill' && inRange(item.date, range))
-  const due = bills.filter((bill) => isActiveEntity(bill) && inRange(bill.nextDate, range))
+  let paidAmount = 0
+  const paidIds = new Set()
+  for (const item of Array.isArray(source) ? source : []) {
+    if (item.source !== 'bill' || !inRange(item.date, range)) continue
+    paidIds.add(item.billId || item.id)
+    paidAmount += numeric(item.amount)
+  }
+  let due = 0
+  for (const bill of Array.isArray(bills) ? bills : []) {
+    if (isActiveEntity(bill) && inRange(bill.nextDate, range)) due += 1
+  }
   return {
-    due: due.length,
-    paid: new Set(paid.map((item) => item.billId || item.id)).size,
-    paidAmount: round2(paid.reduce((sum, item) => sum + numeric(item.amount), 0)),
+    due,
+    paid: paidIds.size,
+    paidAmount: round2(paidAmount),
   }
 }
 
-export function selectWeeklyMoodSummary({ moodLog = {} } = {}, now = new Date(), options = {}) {
-  const range = weekRange(now, options)
+export function selectWeeklyMoodSummary({ moodLog = {} } = {}, now = clock.value, options = {}) {
+  const range = resolveRange(now, options)
   const normalized = normalizeMoodLog(moodLog)
   const counts = { sunny: 0, cloudy: 0, rain: 0 }
   for (const [date, entry] of Object.entries(normalized)) {
@@ -121,16 +154,20 @@ export function selectWeeklyMoodSummary({ moodLog = {} } = {}, now = new Date(),
   return { ...counts, days: counts.sunny + counts.cloudy + counts.rain, dominant: dominant?.[1] ? dominant[0] : '' }
 }
 
-export function selectWeeklyNoteSummary({ notes = [] } = {}, now = new Date(), options = {}) {
-  const range = weekRange(now, options)
-  return { created: notes.filter((note) => timestampInRange(note.createdAt, range)).length }
+export function selectWeeklyNoteSummary({ notes = [] } = {}, now = clock.value, options = {}) {
+  const range = resolveRange(now, options)
+  let created = 0
+  for (const note of Array.isArray(notes) ? notes : []) {
+    if (timestampInRange(note.createdAt, range)) created += 1
+  }
+  return { created }
 }
 
 function highlight(type, item, date, time = '') {
   return { key: `${type}:${item.id}`, sourceType: type, sourceId: item.id, title: item.title || item.name, date, time, entity: item }
 }
 
-export function selectNextWeekHighlights({ tasks = [], events = [], milestones = [], bills = [] } = {}, now = new Date(), { limit = 8, ...options } = {}) {
+export function selectNextWeekHighlights({ tasks = [], events = [], milestones = [], bills = [] } = {}, now = clock.value, { limit = 8, ...options } = {}) {
   const range = weekRange(now, { ...options, weekOffset: 1 })
   const items = []
   tasks.filter(isActiveEntity).forEach((task) => { if (inRange(task.dueDate, range)) items.push(highlight('task', task, task.dueDate, task.dueTime)) })
@@ -141,15 +178,17 @@ export function selectNextWeekHighlights({ tasks = [], events = [], milestones =
   return unique.sort((a, b) => `${a.date}T${a.time || '23:59'}`.localeCompare(`${b.date}T${b.time || '23:59'}`)).slice(0, limit)
 }
 
-export function selectWeeklyReview(data = {}, now = new Date(), options = {}) {
+export function selectWeeklyReview(data = {}, now = clock.value, options = {}) {
+  const range = weekRange(now, options)
+  const sharedOptions = { ...options, range }
   return {
-    week: weekRange(now, options),
-    tasks: selectWeeklyTaskSummary(data, now, options),
-    courses: selectWeeklyCourseSummary(data, now, options),
-    finance: selectWeeklyFinanceSummary(data, now, options),
-    bills: selectWeeklyBillSummary(data, now, options),
-    mood: selectWeeklyMoodSummary(data, now, options),
-    notes: selectWeeklyNoteSummary(data, now, options),
-    nextWeek: selectNextWeekHighlights(data, now, options),
+    week: range,
+    tasks: selectWeeklyTaskSummary(data, now, sharedOptions),
+    courses: selectWeeklyCourseSummary(data, now, sharedOptions),
+    finance: selectWeeklyFinanceSummary(data, now, sharedOptions),
+    bills: selectWeeklyBillSummary(data, now, sharedOptions),
+    mood: selectWeeklyMoodSummary(data, now, sharedOptions),
+    notes: selectWeeklyNoteSummary(data, now, sharedOptions),
+    nextWeek: selectNextWeekHighlights(data, now, sharedOptions),
   }
 }

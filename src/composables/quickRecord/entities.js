@@ -43,9 +43,11 @@ export function extractAmounts(text) {
   function addFromMatch(match, amount, raw) {
     if (!match && match !== 0) return
     const start = typeof match.index === 'number' ? match.index : 0
-    const end = start + String(raw ?? match[0]).length
+    const matchedText = String(raw ?? match[0])
+    const end = start + matchedText.length
+    if (/[\d.-]/.test(source[start - 1] || '') || /[\d.]/.test(source[end] || '')) return
     if (!(end > start) || !(amount > 0)) return
-    candidates.push({ start, end, amount, raw: String(raw ?? match[0]) })
+    candidates.push({ start, end, amount, raw: matchedText })
   }
 
   // 1) ¥/￥ 开头：¥12、￥12.5
@@ -93,7 +95,9 @@ export function extractAmounts(text) {
   // 7) 其他位置的裸阿拉伯数字，例如“生活费到账500微信”，但跳过日期/时间上下文中的数字。
   for (const match of source.matchAll(/(?:¥|￥)?\s*(\d+(?:\.\d{1,2})?)\s*(?:元|块|rmb)?/gi)) {
     const next = source.slice(match.index + match[0].length, match.index + match[0].length + 1)
-    if (/^[年月日号点时天]/.test(next)) continue
+    const previous = source[match.index - 1] || ''
+    // 数字后接时长/序号/数量单位时不是金额：5分钟、2小时、3次、4号楼等。
+    if (/^[年月日号点时天分秒个次人岁级楼页项]/.test(next) || /第\s*$/.test(previous)) continue
     const amount = Number(match[1])
     addFromMatch(match, amount, match[0])
   }
@@ -119,7 +123,9 @@ export function hasAmbiguousAmount(text) {
   const source = String(text ?? '').trim()
   if (!source) return false
   if (extractAmounts(source).length) return false
-  return /[0-9]+$/.test(source) || /[零〇一二两三四五六七八九十百]+$/.test(source)
+  return /(?:¥|￥)?\s*\d+\.\d{3,}(?:\s*(?:元|块钱|块|rmb))?/i.test(source)
+    || /[0-9]+$/.test(source)
+    || /[零〇一二两三四五六七八九十百]+$/.test(source)
 }
 
 // 日期/时间/课程/优先级等，复用 noticeParser 已比较成熟的时间解析能力。
@@ -175,6 +181,7 @@ export function buildExpenseTitle(source, amounts = [], account = '') {
   if (account) text = text.split(account).join(' ')
   text = text
     .replace(/^[\s，,。；;：:]+|[\s，,。；;：:]+$/g, '')
+    .replace(/^每(?:个?月|周|星期|年|季度)\s*(?:\d{1,2}\s*[号日]?)?\s*/g, '')
     // 时间/出行前缀
     .replace(/^(今天|今日|昨天|昨晚|前天|大前天|刚才|刚刚|早上|上午|中午|下午|晚上|夜里|凌晨|坐|乘坐|乘|搭乘)+/g, '')
     // 尾部消费动作词（含单字“花”，例：吃饭花18元 → 吃饭）
@@ -195,5 +202,5 @@ export function buildExpenseTitle(source, amounts = [], account = '') {
   text = text
     .replace(/^[的了]+|[的了]+$/g, '')
     .replace(/^[\s，,。；;：:]+|[\s，,。；;：:]+$/g, '')
-  return text.slice(0, 40) || '未命名账目'
+  return text.slice(0, 40) || '日常支出'
 }

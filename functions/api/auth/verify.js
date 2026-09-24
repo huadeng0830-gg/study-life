@@ -1,12 +1,11 @@
-import { coordinatorJson } from '../sync/coordinator.js'
+import { coordinatorJson, readLegacyRecord } from '../sync/coordinator.js'
 
 // POST /api/auth/verify { code }
 // 仅校验访问码并返回轻量版本 metadata，绝不返回业务数据。
 export async function onRequestPost(context) {
   const { codeHash, kv } = context.data
 
-  const key = `sync:${codeHash}:data`
-  const stored = await kv.get(key, 'json')
+  const stored = await readLegacyRecord({ env: context.env, data: { kv, codeHash } })
   const coordinated = await coordinatorJson(context, { operation: 'metadata', legacyRecord: stored })
   if (coordinated) return json(coordinated.body, coordinated.status)
 

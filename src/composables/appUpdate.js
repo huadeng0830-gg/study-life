@@ -8,7 +8,9 @@ let updateInFlight = null
 let lastSilentCheckAt = 0
 let reloadScheduled = false
 const SILENT_CHECK_INTERVAL = 10 * 60 * 1000
-const UPDATE_FOUND_GRACE = 3000
+// Safari 的 update() 会先返回、随后才触发 updatefound；这里只留一个足够短的重判窗口，
+// 避免“已是最新版本”白白等 3 秒。800ms 已能覆盖 Safari 的异步 updatefound。
+const UPDATE_FOUND_GRACE = 800
 const UPDATE_INSTALL_TIMEOUT = 30 * 1000
 export const updateMessage = ref('')
 export const updateChecking = ref(false)
@@ -287,5 +289,7 @@ window.addEventListener('online', silentCheck)
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'visible') silentCheck()
 })
-window.setTimeout(silentCheck, 30 * 1000)
+// 应用打开后尽快做一次静默更新检查（2 秒），不等 30 秒；命中即触发 SW 更新+刷新，
+// 避免手机 PWA 打开后长时间停留在旧版本、懒加载分包 hash 错位导致入口打不开。
+window.setTimeout(silentCheck, 2000)
 window.setInterval(silentCheck, 30 * 60 * 1000)

@@ -5,7 +5,7 @@ import { DEFAULT_FESTIVE_CONFIG, normalizeFestiveConfig } from './festive.js'
 import { normalizeMoodLog } from './mood.js'
 
 export const festiveConfig = useStoredRef('sl_festive_config', DEFAULT_FESTIVE_CONFIG)
-export const moodLog = useStoredRef('sl_mood_log', {})
+export const moodLog = useStoredRef('sl_mood_log', {}, { deep: false })
 
 // 第一时间修复历史坏数据，避免坏数据进入响应式状态被各页面读到。
 const repairedFestive = normalizeFestiveConfig(festiveConfig.value)

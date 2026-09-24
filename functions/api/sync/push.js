@@ -1,4 +1,5 @@
 import { coordinatorJson, readLegacyRecord } from './coordinator.js'
+import { json as responseJson, MAX_ENCRYPTED_PAYLOAD_LENGTH } from './spaceUtils.js'
 
 // POST /api/sync/push { code, data, expectedRevision, deviceId, deviceName }
 // 仅在 expectedRevision 与当前版本一致时写入，防止页面打开后静默覆盖新版本。
@@ -16,6 +17,9 @@ export async function onRequestPost(context) {
   if (!body.data) {
     return json({ error: '缺少 data 字段' }, 400)
   }
+  if (typeof body.data !== 'string' || body.data.length > MAX_ENCRYPTED_PAYLOAD_LENGTH) {
+    return responseJson({ error: '同步密文过大' }, 413)
+  }
 
   if (!validRevision(body.expectedRevision)) {
     return json({ error: 'expectedRevision 格式无效' }, 400)
@@ -32,6 +36,9 @@ export async function onRequestPost(context) {
     expectedRevision: body.expectedRevision,
     deviceId: body.deviceId.trim().slice(0, 80),
     deviceName: body.deviceName.trim().slice(0, 30),
+    authEpoch: Number(context.data.authEpoch || context.data.spaceDevice?.authEpoch || 1),
+    clientDataSchemaVersion: Number.isInteger(body.clientDataSchemaVersion) ? body.clientDataSchemaVersion : 1,
+    devices: context.data.spaceMeta?.devices || [],
   })
   if (coordinated) return json(coordinated.body, coordinated.status)
 
@@ -47,6 +54,11 @@ export async function onRequestPost(context) {
   }
   const updatedAt = new Date().toISOString()
   const revision = (actualRevision ?? 0) + 1
+  const writerSchema = Number.isInteger(body.clientDataSchemaVersion) ? body.clientDataSchemaVersion : 1
+  const minimumWriterSchema = Math.max(1, Number(previous?.minWriterSchemaVersion) || 1)
+  if (writerSchema < minimumWriterSchema) {
+    return json({ error: '此同步空间已经使用新版数据结构，请更新此设备后继续同步。', code: 'DATA_SCHEMA_UPGRADE_REQUIRED', minWriterSchemaVersion: minimumWriterSchema, clientDataSchemaVersion: writerSchema }, 426)
+  }
 
   // 只有 KV 写入成功后才更新来源、时间与 revision。
   await kv.put(key, JSON.stringify({
@@ -55,9 +67,11 @@ export async function onRequestPost(context) {
     updatedAt,
     updatedByDeviceId: body.deviceId.trim().slice(0, 80),
     updatedByDeviceName: body.deviceName.trim().slice(0, 30),
+    minWriterSchemaVersion: Math.max(minimumWriterSchema, writerSchema),
+    lastWriterSchemaVersion: writerSchema,
   }))
 
-  return json({ ok: true, revision, updatedAt, updatedByDeviceId: body.deviceId.trim().slice(0, 80), updatedByDeviceName: body.deviceName.trim().slice(0, 30) })
+  return json({ ok: true, revision, updatedAt, updatedByDeviceId: body.deviceId.trim().slice(0, 80), updatedByDeviceName: body.deviceName.trim().slice(0, 30), minWriterSchemaVersion: Math.max(minimumWriterSchema, writerSchema), lastWriterSchemaVersion: writerSchema })
 }
 
 function validRevision(value) {
@@ -71,6 +85,8 @@ function metadataOf(stored) {
     updatedAt: stored?.updatedAt || null,
     updatedByDeviceId: typeof stored?.updatedByDeviceId === 'string' ? stored.updatedByDeviceId : null,
     updatedByDeviceName: typeof stored?.updatedByDeviceName === 'string' ? stored.updatedByDeviceName : null,
+    minWriterSchemaVersion: Math.max(1, Number(stored?.minWriterSchemaVersion) || 1),
+    lastWriterSchemaVersion: Math.max(1, Number(stored?.lastWriterSchemaVersion) || 1),
   }
 }
 

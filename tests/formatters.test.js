@@ -11,12 +11,12 @@ describe('formatters', () => {
     expect(dateText(new Date(2026, 7, 29))).toBe('2026-08-29')
   })
 
-  it('moneyRow 整数不带小数、非整数保留两位', () => {
-    expect(moneyRow(12)).toBe('¥12')
-    expect(moneyRow('12')).toBe('¥12')
+  it('moneyRow 统一保留两位小数', () => {
+    expect(moneyRow(12)).toBe('¥12.00')
+    expect(moneyRow('12')).toBe('¥12.00')
     expect(moneyRow(12.5)).toBe('¥12.50')
-    expect(moneyRow(0)).toBe('¥0')
-    expect(moneyRow('abc')).toBe('¥0')
+    expect(moneyRow(0)).toBe('¥0.00')
+    expect(moneyRow('abc')).toBe('¥0.00')
   })
 
   it('moneyHero 统一两位小数', () => {

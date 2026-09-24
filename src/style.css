@@ -3,57 +3,141 @@
   --card: #ffffff;
   --text: #172033;
   --muted: #667085;
-  --primary: #456fe8;
-  --primary-hover: #365fd2;
+  /* 主色经过 AA 校准：白字在 --primary 上 ≥ 4.66:1，
+     --primary 在 --primary-soft 上 ≥ 4.7:1（改动前分别是 4.48 与 4.0）。
+     可用 `node scripts/audit-contrast.mjs` 复核。 */
+  --primary: #3d63d8;
+  --primary-hover: #3151b8;
   --primary-soft: #edf2ff;
-  --danger: #ef4444;
+  --danger: #c62828;
+  /* 成功/警告语义色。此前全仓只有 --danger 有令牌，成功与警告一律写死
+     （#07805d / #0d9463 / #9a6414 等 33 处），于是深色主题下这些文字仍是深色，
+     落在深色卡片上几乎读不出来；而 ExamsView 的 .review-message 甚至写了
+     var(--success) —— 那个令牌从来不存在，整条声明失效、回退成继承色，
+     「已安排复习」的绿色提示一直是假的。
+     取值经过对比度校准（底色按 Toast 的 color-mix 比例算）：
+     浅色 #067654 在 10% 混合底上 4.88:1、直接在 --card 上 5.6:1。 */
+  --success: #067654;
+  --warning: #8a5a12;
+  /* 主色/危险色实底上的文字色。浅色主题用白字；深色主题的
+     --primary 本身是亮色，白字只有 3.17:1，必须在深色分支改成深字。 */
+  --on-primary: #ffffff;
+  --on-danger: #ffffff;
   --border: #e3e8f2;
-  --brand-grad-a: #456fe8;
+  --brand-grad-a: #3d63d8;
   --brand-grad-b: #7855dc;
   --shadow-sm: 0 1px 2px rgba(22, 34, 64, 0.04);
   --shadow-md: 0 8px 24px rgba(35, 52, 93, 0.08);
 
-  /* ---------- v2 Design Tokens（本轮追加，课程表不引用，零影响） ---------- */
+  /* ---------- v2 Design Tokens ----------
+     这里原来写的是「本轮追加，课程表不引用，零影响」——那是刚铺令牌时的状态。
+     现在这一块里的每个令牌都有真实消费者（--card-radius / --radius-s /
+     --border-strong / --bg-tint / --focus-ring 在组件与公共规范里，--fs-body
+     在本文件的基础声明里），不再有「只定义不消费」的令牌：
+     tests/styleHooks.test.js 会守住这条。 */
   --border-strong: #d3dbea;
   --ink-soft: #55607a;
-  --ink-faint: #7d879e;
+  --ink-faint: #626d84;
   --bg-tint: #f9fafd;
   --card-radius: 14px;
   --radius-s: 9px;
-  --radius-m: 12px;
-  --focus-ring: rgba(69, 111, 232, 0.16);
+  /* 这里原本还有一个 --radius-m: 12px。全仓 22 处 border-radius: 12px 全是硬编码，
+     没有一处引用过它，属于「定义了却没人消费」，已删除：样式表里没有任何一处
+     用 12px，留着只会让设计系统看起来比实际完整。等组件批量迁移时，把令牌和
+     消费者一起加回来（tests/styleHooks.test.js 会挡住只定义不消费的令牌）。
+     同样理由删掉的还有 --fs-module-title / --fs-card-title / --fs-num-hero /
+     --fs-num-big：见下面的字体层级。 */
+  --focus-ring: rgba(61, 99, 216, 0.28);
 
-  /* 字体层级 */
+  /* 字体层级。三个令牌都各自有真实消费者：--fs-page-title 给 .page-title，
+     --fs-body 给全站基础正文（表单控件与 .btn），--fs-aux 给 .page-desc。
+     刻意不再保留「看起来该有」的空档：17px / 15px 的实际使用点是图标、按钮、
+     列表项，和「模块标题 / 卡片标题」对不上；28px 与那串 clamp 在全仓一次都没
+     出现过。需要时再和消费者一起加。 */
   --fs-page-title: 23px;
-  --fs-module-title: 17px;
-  --fs-card-title: 15px;
-  --fs-num-hero: clamp(30px, 2.6vw, 38px);
-  --fs-num-big: 28px;
   --fs-body: 14px;
   --fs-aux: 12.5px;
+
+  /* ---------- v3 动效 token：统一时长与缓动曲线 ----------
+     此前各组件硬编码 0.13s~0.3s 与各不相同的缓动，手感不一致。
+     这里收敛成一套；JS 侧同名常量见 src/composables/motion.js。
+     注意：data-performance='reduced' 时下面的全局规则会把
+     transition/animation 压到 0.01ms，CSS 动效自动降级。 */
+  --dur-instant: 90ms;
+  --dur-fast: 150ms;
+  --dur-base: 220ms;
+  --dur-slow: 320ms;
+  --dur-reveal: 420ms;
+  --ease-standard: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  /* ---------- v4 焦点可见性 ----------
+     原来的 --focus-ring 是 16% 透明度的品牌色，只适合做“输入框激活阴影”，
+     当作键盘焦点环时在浅色卡片上几乎看不见。
+     这里另立一对实色 token：
+       --focus-solid 画 outline（实色，任何背景都能分辨）；
+       --focus-halo  画 outline 外的一圈对比光环，抵消壁纸明暗差异。
+     两圈是**互补**的，不是重复：outline 在浅底上很稳（默认主题对 --card 是 5.87:1），
+     但压到主色按钮上只剩 1.11:1——那时靠 halo 顶上（对 --primary 是 4.75:1）。
+     所以可感知性由"至少一圈达标"保证（WCAG 1.4.11 要求 3:1）。
+     实测口径见 scripts/audit-contrast.mjs 的 focusIndicatorOffenders：
+     6 个主题 × 7 类相邻背景共 42 组，全部达标，最弱一处 4.75:1。
+     注：这里原先写着"由 appearance.js 按壁纸亮度在浅/深之间切换"，那句话是**错的**——
+     appearance.js 里没有这段代码，--focus-halo 是纯 CSS 令牌（第四十五轮核实）。
+     壁纸与主题不匹配时 halo 可能看不出来，但那种情况下 outline 仍然达标、
+     指示器整体依旧可感知，故不为此引入运行时切换。 */
+  --focus-solid: #2b5bd7;
+  --focus-halo: rgba(255, 255, 255, 0.92);
+  --focus-width: 2px;
+  --focus-offset: 2px;
+
+  /* ---------- v4 触摸目标 ----------
+     44px 是 iOS HIG 与 WCAG 2.2 (2.5.8) 的最小可点击尺寸。
+     只在粗指针设备上放大，桌面保持紧凑密度。 */
+  --tap-min: 44px;
 }
+
+/* 深色主题：焦点实色提亮，光环压暗，保证在深色卡片上仍然清晰。 */
+:root[data-theme='dark'] {
+  --focus-solid: #8fb0ff;
+  --focus-halo: rgba(8, 12, 22, 0.92);
+  /* 深色的 --success/--warning 必须提亮：浅色的 #067654 在 #1b2233 上只有 1.9:1。
+     取值同样按 Toast 的 10% 混合底校准（各 6.72:1）。
+     注意深色只由「跟随系统 + 系统偏好深色」这一个分支产生（theme.js 里
+     dataset.theme 只在那里被设成 'dark'），具名主题与自定义主题都是浅色，
+     所以不需要在 theme.js 的调色板里再复制一份。 */
+  --success: #4ecfa4;
+  --warning: #e0b45c;
+}
+:root[data-theme='purple'] { --focus-solid: #6d28d9; }
+:root[data-theme='green'] { --focus-solid: #0a7a56; }
+:root[data-theme='pink'] { --focus-solid: #be185d; }
 
 /* ---------- 主题色切换 ---------- */
 :root[data-theme='purple'] {
-  --primary: #8b5cf6;
-  --primary-hover: #7c4ae0;
+  --primary: #7a37e8;
+  --primary-hover: #6a2dd0;
   --primary-soft: #f3eeff;
   --brand-grad-a: #7c3aed;
   --brand-grad-b: #a855f7;
 }
 :root[data-theme='green'] {
-  --primary: #0ea271;
-  --primary-hover: #0b8a60;
+  --primary: #0a7a54;
+  --primary-hover: #086a49;
   --primary-soft: #e6f7f0;
   --brand-grad-a: #0b9e69;
   --brand-grad-b: #34d399;
 }
 :root[data-theme='pink'] {
-  --primary: #ec4899;
-  --primary-hover: #d93887;
+  --primary: #c02070;
+  --primary-hover: #a81b62;
   --primary-soft: #fdeaf3;
   --brand-grad-a: #db2777;
   --brand-grad-b: #f472b6;
+}
+:root[data-theme='custom'] {
+  /* 自定义主题颜色由 theme.js 运行时写入 CSS 变量，这里只作占位 */
 }
 
 * {
@@ -72,6 +156,15 @@ body {
   font-size: 15px;
 }
 
+/* 横屏 / 移动浏览器地址栏收放时，100vh 会大于真正的可见高度，
+   底部内容会被推出屏幕。有 dvh 就跟着动态视口走。 */
+@supports (min-height: 100dvh) {
+  html,
+  body {
+    min-height: 100dvh;
+  }
+}
+
 button {
   font-family: inherit;
   cursor: pointer;
@@ -85,12 +178,14 @@ input,
 select,
 textarea {
   font-family: inherit;
-  font-size: 14px;
+  /* 正文尺寸走令牌：全站还有几十处 14px 硬编码待迁移，但这里和下面的 .btn
+     是两个「基础定义点」，先接上才能让 --fs-body 有真实消费者。 */
+  font-size: var(--fs-body);
   padding: 8px 10px;
   border: 1px solid var(--border);
   border-radius: 8px;
   outline: none;
-  background: #fff;
+  background: var(--card);
   color: var(--text);
 }
 
@@ -107,41 +202,153 @@ input:focus,
 select:focus,
 textarea:focus {
   border-color: var(--primary);
-  box-shadow: 0 0 0 3px rgba(69, 111, 232, 0.12);
+  box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
+/* ---------- 表单无效态 ----------
+   用 :user-invalid（浏览器只在用户真正交互过之后才匹配），
+   而不是裸 :invalid —— 否则刚打开表单时所有必填空字段会一起变红。
+   程序化校验统一走 aria-invalid='true'（见 views 里的 setXxxError）。
+   这里原本还并列了一组手写 .is-invalid 类名钩子，但全仓没有任何一处使用，
+   属于「样式写好了没人接线」，已删除：留两套等价机制只会让下一个改的人
+   改错其中一套。 */
+input:user-invalid,
+textarea:user-invalid,
+select:user-invalid,
+[aria-invalid='true'] {
+  border-color: var(--danger);
+}
+
+input:user-invalid:focus,
+textarea:user-invalid:focus,
+select:user-invalid:focus,
+[aria-invalid='true']:focus {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 22%, transparent);
+}
+
+/* 键盘焦点：全站统一一套可见焦点环。
+   用实色 outline + 对比光环，替代原来几乎透明的 --focus-ring，
+   并覆盖 button / a / input / select / textarea / summary / [tabindex]。 */
 button:focus-visible,
 a:focus-visible,
 input:focus-visible,
 select:focus-visible,
-textarea:focus-visible {
-  outline: 3px solid rgba(69, 111, 232, 0.28);
-  outline-offset: 2px;
+textarea:focus-visible,
+summary:focus-visible,
+[tabindex]:focus-visible {
+  outline: var(--focus-width) solid var(--focus-solid);
+  outline-offset: var(--focus-offset);
+  box-shadow: 0 0 0 calc(var(--focus-width) + var(--focus-offset) + 1px) var(--focus-halo);
+}
+
+/* 焦点与跳转目标不得被 sticky 面遮挡（WCAG 2.4.11 Focus Not Obscured）。
+   「被聚焦的元素滚入视野」和「scrollIntoView」都会把元素滚到**紧贴滚动容器边缘**，
+   而这个应用里贴着边缘的地方正好有 sticky 面：弹窗里的自动保存提示
+   （TimeSettingsModal，padding 7+7 加一行字，约 32px，z-index:3）与表格 sticky 表头
+   （BatchImportModal / CourseManagerModal）；底部则有「快速记录」的 sticky 保存栏
+   （QuickRecordPanel，44px 按钮 + 上下 padding ≈ 56px）。贴边的元素会正好落在它们底下。
+   留出余量后浏览器会停在 48px / 56px 之外，而不是 0。
+   为什么用 scroll-margin 而不是改 JS 的对齐方式：
+     · Modal.vue 的 keepFocusedControlVisible 已经用 12px 余量判断"要不要滚"，
+       但 scrollIntoView({block:'nearest'}) 没有"滚多少余量"这个参数——余量只能来自 CSS；
+     · DataManager 的 .data-section 早就是按这个思路单独修的（scroll-margin-top:58px），
+       这里把它提升为全站约定；下面用 :where() 让这条规则**特异性为 0**，
+       所以任何局部写法（包括 .data-section 的 58px）都能覆盖它。
+   不限定 :focus：scroll-margin 只在"滚入视野"时起作用，而要被保护的目标
+   往往不是可聚焦元素（.data-section 就是个 div），所以按元素类型列出来。 */
+:where(a[href], button, input, select, textarea, summary, [tabindex], :target) {
+  scroll-margin-top: 48px;
+  scroll-margin-bottom: 56px;
+}
+
+/* 鼠标点击不该留下焦点环（键盘用户仍然看得到）。 */
+button:focus:not(:focus-visible),
+a:focus:not(:focus-visible),
+summary:focus:not(:focus-visible) {
+  outline: none;
 }
 
 .btn {
   border: none;
   border-radius: 8px;
   padding: 9px 18px;
-  font-size: 14px;
+  font-size: var(--fs-body);
   font-weight: 600;
-  transition: background 0.15s, color 0.15s, transform 0.15s,
-    box-shadow 0.15s;
+  transition: background var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard), transform var(--dur-fast) var(--ease-standard),
+    box-shadow var(--dur-fast) var(--ease-standard), opacity var(--dur-fast) var(--ease-standard);
 }
 
 .btn:hover {
   transform: translateY(-1px);
 }
 
-.btn:disabled {
+.btn:active {
+  transform: translateY(0);
+  transition-duration: var(--dur-instant);
+}
+
+/* 禁用态：保留过渡，让“按钮变灰”本身也有一个 150ms 的交代，
+   而不是瞬间跳变；同时彻底退出 hover 抬升。 */
+.btn:disabled,
+.btn[aria-disabled='true'] {
   opacity: 0.48;
   transform: none;
+  box-shadow: none;
+  filter: saturate(0.7);
+}
+
+.btn[aria-busy='true'] {
+  cursor: progress;
+  opacity: 0.78;
+  transform: none;
+  box-shadow: none;
+  /* 双击保护的第一道闸：鼠标层面直接吞掉重复点击。
+     键盘层面由按钮自身的 :disabled 负责 —— 所有异步按钮在提交期间都会
+     置 disabled，因此 Enter/Space 重复触发不会发生。 */
+  pointer-events: none;
+}
+
+/* 加载中的 spinner：贴在文字后面，不改变按钮宽度以外的布局。
+   只认 aria-busy —— 全仓的异步按钮都用 :aria-busy="busy || undefined" 接线了，
+   原来并列的 .btn.is-loading 钩子一处都没用，已删除（理由同表单无效态）。 */
+.btn[aria-busy='true']::after {
+  content: '';
+  display: inline-block;
+  width: 1em;
+  height: 1em;
+  margin-left: 8px;
+  vertical-align: -0.16em;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: btn-spin 720ms linear infinite;
+}
+
+@keyframes btn-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* 图标按钮（关闭 / 删除这类只有一个符号的控件）在本仓库一律由组件自带样式，
+   触屏上的 44px 最小尺寸统一用下面的 `button.tap-target` 声明，不另设工具类。
+   这里原来有一套从未被任何组件使用的 .icon-btn，已删除。 */
+
+/* 粗指针设备（手机 / 平板）上的主要按钮、独立链接，以及显式标记 tap-target 的
+   图标按钮（弹窗关闭、通知关闭、模板删除、设置行删除等）至少 44px 高。
+   刻意排除 .chip / .segmented / .link-btn / .toast-btn 这类密集内联控件：
+   它们靠间距而非尺寸达成可分性，强行放大反而会挤爆筛选行。 */
+@media (pointer: coarse) {
+  .btn:not(.chip):not(.link-btn),
+  button.tap-target,
+  [role='button'].tap-target,
+  .setting-del {
+    min-height: var(--tap-min);
+  }
 }
 
 .btn-primary {
   background: var(--primary);
-  color: #fff;
-  box-shadow: 0 3px 10px rgba(69, 111, 232, 0.2);
+  color: var(--on-primary, #fff);
+  box-shadow: 0 3px 10px color-mix(in srgb, var(--primary) 24%, transparent);
 }
 
 .btn-primary:hover {
@@ -154,12 +361,19 @@ textarea:focus-visible {
 }
 
 .btn-ghost:hover {
-  background: #e1e9ff;
+  background: color-mix(in srgb, var(--primary) 14%, var(--primary-soft));
 }
 
+/* 危险按钮：底色从 --danger 与 --card 混出来，而不是写死的浅红。
+   写死 #fee2e2 在暗色主题下会变成"浅粉底 + 浅红字"，几乎读不出来；
+   用 color-mix 后浅色主题观感不变，暗色主题自动得到深红底 + 亮红字。 */
 .btn-danger {
-  background: #fee2e2;
+  background: color-mix(in srgb, var(--danger) 14%, var(--card));
   color: var(--danger);
+}
+
+.btn-danger:hover {
+  background: color-mix(in srgb, var(--danger) 24%, var(--card));
 }
 
 .card {
@@ -175,9 +389,8 @@ textarea:focus-visible {
   *::before,
   *::after {
     scroll-behavior: auto !important;
-    transition-duration: 0.01ms !important;
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
+    transition: none !important;
+    animation: none !important;
   }
 }
 
@@ -185,9 +398,116 @@ textarea:focus-visible {
 :root[data-performance='reduced'] *::before,
 :root[data-performance='reduced'] *::after {
   scroll-behavior: auto !important;
-  transition-duration: 0.01ms !important;
-  animation-duration: 0.01ms !important;
-  animation-iteration-count: 1 !important;
+  transition: none !important;
+  animation: none !important;
+}
+
+/* ---------- 高对比度模式 ----------
+   两个触发源，任一命中即可：
+     1) 系统级 prefers-contrast: more（用户操作系统里的辅助功能设置）；
+     2) 应用内 data-contrast='high'（外观设置里的开关）。
+   做法是把中性色（边框、次要文字）的对比推上去，
+   而不是改品牌色 —— 品牌色一旦改动就不再是用户选的主题了。
+   深色下反向处理：边框提亮、次要文字提亮。 */
+@media (prefers-contrast: more) {
+  :root:not([data-contrast='normal']) {
+    --border: #8b97ae;
+    --border-strong: #55617c;
+    --ink-soft: #333d54;
+    --ink-faint: #3f4a62;
+    --muted: #3d4759;
+    --bg-tint: #eef1f7;
+    --focus-ring: rgba(43, 91, 215, 0.34);
+  }
+  :root[data-theme='dark']:not([data-contrast='normal']) {
+    --border: #64749a;
+    --border-strong: #93a5c8;
+    --ink-soft: #e4eaf5;
+    --ink-faint: #ccd6e8;
+    --muted: #bcc7db;
+    /* 高对比要的是**更大**的层次差。原先这里写 #1b2333，与 --card(#1b2233)
+       只差一个绿通道值——肉眼完全同色，卡片与内嵌区的分界消失。
+       改成比卡片明显更深的一档，并比普通深色（第四十二轮起是 #161d2c）再深一点。 */
+    --bg-tint: #0d1320;
+    --focus-ring: rgba(143, 176, 255, 0.4);
+  }
+}
+
+:root[data-contrast='high'] {
+  --border: #8b97ae;
+  --border-strong: #55617c;
+  --ink-soft: #333d54;
+  --ink-faint: #3f4a62;
+  --muted: #3d4759;
+  --bg-tint: #eef1f7;
+  --focus-ring: rgba(43, 91, 215, 0.34);
+}
+
+:root[data-contrast='high'][data-theme='dark'] {
+  --border: #64749a;
+  --border-strong: #93a5c8;
+  --ink-soft: #e4eaf5;
+  --ink-faint: #ccd6e8;
+  --muted: #bcc7db;
+  /* 与上面 @media (prefers-contrast: more) 里那一份必须逐字一致，
+     且与 theme.js 的 CONTRAST_DELTAS.dark.bgTint 一致
+     （tests/highContrastPalette.test.js 会比对，防止漂移）。 */
+  --bg-tint: #0d1320;
+  --focus-ring: rgba(143, 176, 255, 0.4);
+}
+
+/* Windows 强制颜色模式（高对比度主题）下，浏览器会接管所有颜色，
+   这里只保证控件边界仍在，避免按钮和输入框"融进"背景。 */
+@media (forced-colors: active) {
+  .btn,
+  .card,
+  input,
+  select,
+  textarea,
+  button.tap-target {
+    border: 1px solid ButtonBorder;
+  }
+
+  .btn:focus-visible,
+  button.tap-target:focus-visible {
+    outline: 2px solid Highlight;
+    outline-offset: 2px;
+  }
+
+  /* 确保焦点环不被边框裁切，并保留自定义焦点样式 */
+  :where(a[href], button, input, select, textarea, summary, [tabindex]):focus-visible {
+    forced-color-adjust: none;
+    outline-offset: 2px;
+  }
+}
+
+/* ---------- 主题切换：圆形扩散（View Transitions API） ----------
+   默认的旧/新快照会做整屏交叉淡入，等于整页一起叠化。
+   这里把两者的默认动画都关掉，只保留：
+     旧页面保持原位（静止不动，不缩放、不变形）
+     新页面被一个从触点向外长大的圆裁切出来
+   圆的半径由 JS 按「触点到最远角落的距离」计算，见 motion.js。
+   data-theme-reveal 只在一次切换期间存在，用来给新快照一个
+   初始 0 半径的裁切，避免动画开始前闪一帧完整页面；
+   结束后 JS 会立刻移除它，所以不会出现页面被永久裁没的情况。 */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+/* 揭示时长在 CSS 侧也声明一次。::view-transition-group 的 animation-duration
+   决定 UA 生成的那段尺寸/位移补间有多长（MDN 给 ::view-transition-group 的
+   示例就是这个用法），而 motion.js 里的 WAAPI 用 MOTION.reveal 驱动新快照的
+   圆形裁切 —— 两边必须是同一个刻度。引用同一个令牌，就不必在样式表和 JS 里
+   各写一遍 420，也就不会再悄悄漂移。
+   主题切换只换颜色，前后快照的尺寸完全一致，组动画的起点终点相同，所以把
+   UA 默认的 0.25s 改成 420ms 不改变画面；transition.finished 的结算时刻也
+   不变 —— WAAPI 那一侧本来就是 420ms，总时长取两者的最大值。 */
+::view-transition-group(root) {
+  animation-duration: var(--dur-reveal);
+}
+:root[data-theme-reveal]::view-transition-new(root) {
+  clip-path: circle(0px at var(--reveal-origin, 50% 50%));
 }
 
 /* ---------- v2 公共规范：页头 / 分段控件 / 筛选片（本轮追加） ---------- */
@@ -231,7 +551,7 @@ textarea:focus-visible {
   padding: 3px;
   border: 1px solid var(--border);
   border-radius: var(--radius-s);
-  background: #eef1f7;
+  background: var(--bg-tint);
 }
 .segmented > button {
   padding: 6px 13px;
@@ -241,18 +561,18 @@ textarea:focus-visible {
   border: none;
   border-radius: calc(var(--radius-s) - 2px);
   background: transparent;
-  transition: background 0.14s, color 0.14s, box-shadow 0.14s;
+  transition: background var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard), box-shadow var(--dur-fast) var(--ease-standard);
 }
 .segmented > button:hover {
   color: var(--text);
-  background: rgba(255, 255, 255, 0.85);
+  background: var(--card);
 }
 .segmented > button:active {
   transform: translateY(0.5px);
 }
 .segmented > button.on {
   color: var(--primary);
-  background: #fff;
+  background: var(--card);
   box-shadow: 0 1px 3px rgba(22, 34, 64, 0.12), 0 0 0 1px rgba(69, 111, 232, 0.16);
 }
 .segmented > button b {
@@ -273,8 +593,8 @@ textarea:focus-visible {
   font-weight: 600;
   border: 1px solid var(--border-strong);
   border-radius: 999px;
-  background: #fff;
-  transition: border-color 0.14s, background 0.14s, color 0.14s, box-shadow 0.14s;
+  background: var(--card);
+  transition: border-color var(--dur-fast) var(--ease-standard), background var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard), box-shadow var(--dur-fast) var(--ease-standard);
 }
 .chip:hover {
   border-color: var(--primary);
@@ -297,7 +617,7 @@ textarea:focus-visible {
   border: none;
   border-radius: 7px;
   background: transparent;
-  transition: background 0.14s, color 0.14s;
+  transition: background var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard);
 }
 .link-btn:hover {
   color: var(--primary);
@@ -305,21 +625,43 @@ textarea:focus-visible {
 }
 .link-btn.danger:hover {
   color: var(--danger);
-  background: #feecec;
+  background: color-mix(in srgb, var(--danger) 12%, var(--card));
 }
 
+.startup-error {
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+  min-height: 100dvh;
+  padding: 32px 20px;
+  color: var(--ink, #1f2937);
+  text-align: center;
+  background: var(--bg, #f6f7fb);
+}
+.startup-error p { max-width: 620px; color: var(--ink-soft, #65708a); line-height: 1.7; }
+.startup-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 8px; }
+.route-fallback { display: grid; place-items: center; min-height: 180px; padding: 24px; color: var(--ink-soft); text-align: center; }
+.route-fallback.error { color: var(--danger, #b42318); }
+
 /* ---------- 移动端性能：屏幕外区块延迟渲染 ----------
-   content-visibility: auto 让视口外的面板与卡片跳过首屏绘制，
+   content-visibility: auto 让视口外的卡片跳过首屏绘制，
    滚动接近时才真正渲染；contain-intrinsic-size 保证滚动条高度不跳动。
-   不支持的浏览器（旧 Safari）直接忽略，纯渐进增强。 */
+   不支持的浏览器（旧 Safari）直接忽略，纯渐进增强。
+   目前只有考试卡片用了 .cvi-card。这里原本还有一个给更高面板用的
+   .cvi-auto（220px），一处都没用上，已删除：把 content-visibility 加在
+   含交互行的列表上会影响 scrollIntoView / 锚定，收益未经实测就不铺开。 */
 @supports (content-visibility: auto) {
-  .cvi-auto {
-    content-visibility: auto;
-    contain-intrinsic-size: auto 220px;
-  }
   .cvi-card {
     content-visibility: auto;
     contain-intrinsic-size: auto 150px;
+  }
+  .cvi-section {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 200px;
+  }
+  .cvi-list-item {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 80px;
   }
 }
 
@@ -370,4 +712,142 @@ textarea:focus-visible {
 @keyframes atmo-lantern {
   from { transform: translateY(0) rotate(-2deg); }
   to { transform: translateY(6vh) rotate(2deg); }
+}
+/* 个人周年（纪念日 / 使用周年）的专属动画（第五十四轮）。
+   氛围侧给周年的装饰与情人节、儿童节共用（彩带），所以这里**不改装饰名称**，
+   而是让外壳额外打一个 data-festive 属性用来分叉：金色星芒**向上**升起、
+   边升边旋转，方向与彩带的下落相反，一眼能区分。粒子颜色与时长仍由 JS 内联提供。
+   时长没有新令牌 —— 粒子用内联时长，光环用既有的 --dur-reveal。 */
+/* 注意选择器要**逐个列出** App.vue 里 ANNIVERSARY_KEYS 的每个 key：
+   属性选择器是精确匹配，写成 [data-festive='anniversary'] 是**匹配不到**
+   'anniversary-start'（使用周年）的 —— 那样使用周年会静默退回彩带，
+   看起来"功能做了"，实际只有一半生效。守卫会把两边的清单对起来验。 */
+.atmo-layer[data-festive='anniversary'] i,
+.atmo-layer[data-festive='anniversary-start'] i {
+  clip-path: polygon(50% 0%, 61% 39%, 100% 50%, 61% 61%, 50% 100%, 39% 61%, 0% 50%, 39% 39%);
+  animation-name: atmo-anniversary;
+  animation-timing-function: ease-out;
+  animation-iteration-count: infinite;
+}
+@keyframes atmo-anniversary {
+  from { transform: translate3d(0, 4vh, 0) rotate(0deg) scale(0.7); opacity: 0; }
+  30% { opacity: 1; }
+  to { transform: translate3d(18px, -112vh, 0) rotate(220deg) scale(1.05); opacity: 0; }
+}
+/* 庆典光环：只在周年当天出现、只播一次，用来把"这一天不一样"讲清楚。
+   它与常驻粒子是两件事，所以是独立元素而不是粒子的变形。 */
+.atmo-halo {
+  position: absolute;
+  left: 50%;
+  top: 38%;
+  width: 320px;
+  height: 320px;
+  margin: -160px 0 0 -160px;
+  border-radius: 50%;
+  border: 2px solid var(--atmosphere-accent, #8b5cf6);
+  opacity: 0;
+  animation: atmo-halo var(--dur-reveal) var(--ease-out) 1;
+}
+@keyframes atmo-halo {
+  from { transform: scale(0.35); opacity: 0.85; }
+  to { transform: scale(1.35); opacity: 0; }
+}
+.focus-target-highlight {
+  outline: 2px solid var(--primary);
+  outline-offset: 3px;
+  animation: focus-target-pulse 2.4s ease;
+}
+
+@keyframes focus-target-pulse {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--primary) 35%, transparent); }
+  45% { box-shadow: 0 0 0 7px color-mix(in srgb, var(--primary) 16%, transparent); }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+
+/* ---------- 打印：只留正文（第三十三轮） ----------
+   课程表、账单、待办是会被真的打印出来的东西。此前全仓没有任何打印样式，
+   按 Ctrl+P 会把深色侧栏、悬浮的任务中心、装饰粒子与提示层一起印上，
+   整块深色底还要吃掉一盒墨；更麻烦的是 .timetable-wrap 的 overflow-x: auto
+   在纸上会把表格右侧的列**整块裁掉**，只印得出当前能看见的那几列。
+   所以：外壳隐藏、滚动容器展开、主题强制走黑白。 */
+@media print {
+  /* 1. 外壳与浮层。浮层（.overlay）是 position: fixed，印出来会叠在正文上，
+        所以连它一起隐藏：纸上要看的是页面本身，不是某个弹窗。 */
+  .atmo-layer,
+  .sidebar,
+  .task-center,
+  .overlay,
+  .toast,
+  .skip-to-content,
+  .global-safe-mode-alert,
+  .global-persistence-alert,
+  .global-sync-alert {
+    display: none !important;
+  }
+
+  /* 2. 主题令牌归零。自定义主题在纸上既费墨又可能看不清；
+        变量名照抄 :root 里的真实名字（写错就是静默失效）。 */
+  :root {
+    --bg: #ffffff !important;
+    --card: #ffffff !important;
+    --bg-tint: #ffffff !important;
+    --text: #000000 !important;
+    --muted: #333333 !important;
+    --border: #bbbbbb !important;
+    --border-strong: #888888 !important;
+  }
+
+  body,
+  .layout,
+  .content {
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+
+  /* 3. 页面宽度类在纸上没有意义，铺满整页；外壳留白交给 @page。
+     这里原本还列了 .content-wide，但第三十七轮核实它是死类（模板里从没用过，
+     构建产物里也没有），已连同 App.vue 里的定义一起删掉。 */
+  .content,
+  .content-narrow {
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  /* 4. 滚动容器必须展开——否则只印得出当前一屏。课程表最明显。 */
+  .timetable-wrap,
+  .list-sidebar,
+  .manager-table-scroll {
+    overflow: visible !important;
+    max-height: none !important;
+  }
+
+  .timetable-wrap {
+    padding: 0 !important;
+  }
+
+  /* 5. 阴影在纸上只是灰糊；卡片、行、表格行别被切成两半。 */
+  *,
+  *::before,
+  *::after {
+    box-shadow: none !important;
+  }
+
+  .card,
+  section,
+  article,
+  li,
+  tr {
+    break-inside: avoid;
+  }
+
+  h1,
+  h2,
+  h3 {
+    break-after: avoid;
+  }
+}
+
+@page {
+  margin: 12mm;
 }

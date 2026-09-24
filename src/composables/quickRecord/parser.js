@@ -1,4 +1,4 @@
-import { detectCategory } from '../ledger.js'
+import { classifyTransaction } from '../ledger.js'
 import {
   buildExpenseTitle,
   chineseNumber,
@@ -14,25 +14,36 @@ import { defaultAccount, policyDateKey, policyTimeKey } from '../settingsPolicy.
 // 同一段文本无论“金额在前/在后”都会先被识别成实体，再组合成结构化草稿。
 
 const HOMEWORK_WORDS = /作业|实验报告|论文|习题|复习|预习|测验|英语作文|报告/
-const EVENT_WORDS = /开会|会议|组会|答辩|面试|约|活动|讲座|值班|课题组|上课|课程/
+const EVENT_WORDS = /开会|会议|组会|班会|答辩|面试|约|活动|讲座|值班|课题组|上课|课程/
 const COUNTDOWN_WORDS = /倒计时|还有\d+天|距离.*?(考试|生日|放假|纪念日)|六级|四级|考研/
 const NOTE_WORDS = /^(记一下|笔记|note[：:]?)/i
+const REFLECTION_WORDS = /实验(?:挺|很)?顺利|老师讲的.*听懂|实验结果|实验记录/
 const INCOME_WORDS = /生活费|工资|奖学金|报销|退款|到账|收入|收款|红包|转入|兼职/
 const BILL_WORDS = /每月|每周|每年|每季度|周期|自动续费|月租|订阅|会员/
 
 let uidSeq = 0
-function uid() { return `qr${Date.now().toString(36)}${uidSeq++}${Math.random().toString(36).slice(2, 7)}` }
+function uid() {
+  const uuid = globalThis.crypto?.randomUUID?.()
+  return uuid ? `qr-${uuid}` : `qr-${Math.random().toString(36).slice(2)}-${uidSeq++}`
+}
 function pad(value) { return String(value).padStart(2, '0') }
 function today(now) { return policyDateKey(now) }
 function currentTime(now) { return policyTimeKey(now) }
 
+function policyReferenceDate(now) {
+  return new Date(`${policyDateKey(now)}T${policyTimeKey(now)}:00`)
+}
+
+function addPolicyDays(dateKey, count) {
+  const [year, month, day] = String(dateKey).split('-').map(Number)
+  const date = new Date(Date.UTC(year, month - 1, day + count))
+  return date.toISOString().slice(0, 10)
+}
+
 function countdownDate(source, now) {
   const match = String(source ?? '').match(/(?:还有|剩余)\s*(\d{1,3})\s*天/)
   if (!match) return ''
-  const target = new Date(now)
-  target.setHours(0, 0, 0, 0)
-  target.setDate(target.getDate() + Number(match[1]))
-  return `${target.getFullYear()}-${pad(target.getMonth() + 1)}-${pad(target.getDate())}`
+  return addPolicyDays(policyDateKey(now), Number(match[1]))
 }
 
 function timeOf(source, schedule) {
@@ -110,6 +121,7 @@ function inferIntent(source, schedule, amountCount, forcedType, preferredType = 
   if (EVENT_WORDS.test(source) && (hasDate || hasTime)) return { type: 'event', confidence: 0.84, uncertain: false }
   if (HOMEWORK_WORDS.test(source)) return { type: 'homework', confidence: 0.72, uncertain: false }
   if (NOTE_WORDS.test(source)) return { type: 'note', confidence: 0.9, uncertain: false }
+  if (REFLECTION_WORDS.test(source)) return { type: 'note', confidence: 0.78, uncertain: false }
   if (hasDate || hasTime || /提醒我|记得|截止|开始|完成|提交|交/.test(source)) return { type: preferredType === 'event' ? 'event' : 'todo', confidence: 0.66, uncertain: false }
   if (hasAmbiguousAmount(source)) return { type: 'unknown', confidence: 0.3, uncertain: true }
   if (preferredType) return { type: preferredType, confidence: 0.5, uncertain: true }
@@ -140,7 +152,7 @@ function parseStatement(statement, { courses = [], now = new Date(), forcedType 
   }
   const knownAmount = typeof context.knownAmount === 'number' ? context.knownAmount : null
   const amounts = extractAmounts(source)
-  const schedule = extractSchedule(source, courses, now)
+  const schedule = extractSchedule(source, courses, policyReferenceDate(now))
   const relativeCountdownDate = countdownDate(source, now)
   const account = extractAccount(source)
   const cycle = extractCycle(source)
@@ -150,6 +162,9 @@ function parseStatement(statement, { courses = [], now = new Date(), forcedType 
     ? inferIntent(source, { ...schedule, date: schedule.date || relativeCountdownDate }, amountCount, forcedType, context.preferredType)
     : { type: forcedType || 'expense', confidence: 0.9, uncertain: false }
   const type = intent.type
+  const classification = ['expense', 'income', 'bill'].includes(type)
+    ? classifyTransaction(source, { direction: type === 'income' ? 'income' : 'expense' })
+    : null
 
   const base = {
     id: uid(),
@@ -167,7 +182,14 @@ function parseStatement(statement, { courses = [], now = new Date(), forcedType 
     priority: schedule.priority || 'normal',
     note: schedule.note || '',
     amount,
-    category: detectCategory(source),
+    category: classification?.categoryId || '',
+    categoryConfidence: classification?.confidence ?? 0,
+    categoryUncertain: Boolean(classification?.uncertain),
+    categorySuggested: classification?.categoryId || '',
+    categoryMatchedBy: classification?.matchedBy || '',
+    categoryMatchedTerms: classification?.matchedTerms || [],
+    categoryCandidates: classification?.candidates || [],
+    categoryAmbiguous: Boolean(classification?.ambiguous),
     account: ['expense', 'income', 'bill'].includes(type) ? (account || defaultAccount()) : account,
     cycle: cycle?.cycle || 'monthly',
     questions: questionsFor(type, source, schedule, amount),
@@ -176,12 +198,13 @@ function parseStatement(statement, { courses = [], now = new Date(), forcedType 
   }
 
   if (type === 'expense' || type === 'income' || type === 'bill') {
-    base.title = buildExpenseTitle(source, amounts, account) || (type === 'income' ? '收入' : '未命名账目')
+    base.title = buildExpenseTitle(source, amounts, account) || (type === 'income' ? '收入' : '日常支出')
     base.date = schedule.date || today(now)
     base.time = schedule.time || currentTime(now)
     if (type === 'bill') {
-      const day = cycle?.day || now.getDate()
-      base.date = schedule.date || `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(day)}`
+      const [year, month] = policyDateKey(now).split('-').map(Number)
+      const day = cycle?.day || Number(policyDateKey(now).slice(8, 10))
+      base.date = schedule.date || `${year}-${pad(month)}-${pad(day)}`
     }
   } else if (type === 'countdown') {
     base.title = cleanTaskTitle(source, schedule.title)

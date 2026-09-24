@@ -1,20 +1,131 @@
-import { effectScope, ref, watch } from 'vue'
+import { effectScope, ref, triggerRef, watch, shallowRef, isRef } from 'vue'
 import { markLocalChanged } from '../cloudSync.js'
-import { mirrorLocalValue, mirrorLocalValues } from '../dataVault.js'
+import { isSyncKey } from '../cloudSyncData.js'
+import { mirrorLocalValue, mirrorLocalValues, setMirrorErrorHandler, setMirrorTimingHandler } from '../dataVault.js'
 import { recordSilentError } from '../globalError.js'
 
 const storedRefs = new Map()
+// 这些高增长集合由领域命令显式提交，避免每次嵌套修改递归遍历整棵状态树。
+//
+// 【加入本集合的前提，两条缺一不可】
+// 1. 该键的**每一条**修改路径都要显式调用 touchStoredRef（否则改动不会被持久化）；
+// 2. 视图只依赖 touchStoredRef 那一次通知 —— 集合内的键是 shallowRef，
+//    push/splice/就地改字段都不会自己通知（见 touchStoredRef 处的说明）。
+// 漏掉第 1 条 = 改了不存盘；漏掉第 2 条 = 存盘了但界面停在旧值（「删了不消失」）。
+const EXPLICIT_COMMIT_KEY_LIST = Object.freeze([
+  'sl_expenses', 'sl_tasks', 'sl_events', 'sl_exams', 'sl_bills', 'sl_focus_sessions',
+  'sl_checklists', 'sl_courses', 'sl_course_templates', 'sl_ledger_fx', 'sl_ledger_budget',
+  'sl_ledger_templates', 'sl_schedule_exceptions', 'sl_mood_log',
+])
+export { EXPLICIT_COMMIT_KEY_LIST }
+const EXPLICIT_COMMIT_KEYS = new Set(EXPLICIT_COMMIT_KEY_LIST)
+const OBSERVABILITY_ENABLED = import.meta.env?.DEV === true
+export const STORAGE_PERF_THRESHOLDS = Object.freeze({
+  serializeMs: 32,
+  localStorageMs: 32,
+  mirrorMs: 32,
+  payloadBytes: 1024 * 1024,
+  writesPerMinute: 60,
+})
+const storagePerformance = new Map()
+const storageWriteTimes = new Map()
+
+function performanceNow() {
+  return typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now()
+}
+
+function payloadBytes(raw) {
+  if (typeof TextEncoder !== 'undefined') return new TextEncoder().encode(raw).byteLength
+  return String(raw).length * 2
+}
+
+function observeStorage(key, values = {}, { countWrite = true } = {}) {
+  if (!OBSERVABILITY_ENABLED) return
+  const now = Date.now()
+  const recent = (storageWriteTimes.get(key) || []).filter((stamp) => now - stamp < 60 * 1000)
+  if (countWrite) recent.push(now)
+  storageWriteTimes.set(key, recent)
+  const previous = storagePerformance.get(key) || { key, payloadBytes: 0, serializeMs: 0, localStorageMs: 0, mirrorMs: 0, writesPerMinute: 0 }
+  const next = { ...previous, ...values, key, writesPerMinute: recent.length }
+  storagePerformance.set(key, next)
+  const warnings = []
+  if (next.serializeMs > STORAGE_PERF_THRESHOLDS.serializeMs) warnings.push(`serialize ${next.serializeMs}ms`)
+  if (next.localStorageMs > STORAGE_PERF_THRESHOLDS.localStorageMs) warnings.push(`localStorage ${next.localStorageMs}ms`)
+  if (next.mirrorMs > STORAGE_PERF_THRESHOLDS.mirrorMs) warnings.push(`mirror ${next.mirrorMs}ms`)
+  if (next.payloadBytes > STORAGE_PERF_THRESHOLDS.payloadBytes) warnings.push(`payload ${next.payloadBytes}B`)
+  if (next.writesPerMinute > STORAGE_PERF_THRESHOLDS.writesPerMinute) warnings.push(`writes/min ${next.writesPerMinute}`)
+  if (warnings.length) console.warn(`[Study Life storage] ${key}: ${warnings.join(', ')}`)
+}
+
+export function getStoragePerformanceSnapshot() {
+  return [...storagePerformance.values()].map((item) => ({ ...item }))
+}
+
+setMirrorTimingHandler(({ keys = [], durationMs = 0 } = {}) => {
+  for (const key of keys) observeStorage(key, { mirrorMs: durationMs }, { countWrite: false })
+})
 
 export const clock = ref(new Date())
 
-const CLOCK_INTERVAL = 30000
+// 持久化失败不能只进入静默日志：用户仍可继续使用内存中的本次状态，
+// 但必须明确知道刷新/关闭页面前需要导出数据。
+export const persistenceState = ref({
+  status: 'idle',
+  key: '',
+  source: '',
+  message: '',
+  at: 0,
+})
+
+export function reportPersistenceFailure(error, key = '', source = 'local') {
+  const isMirror = source === 'mirror'
+  persistenceState.value = {
+    status: 'error',
+    key,
+    source,
+    message: isMirror
+      ? '本机主数据已写入，但安全副本未能更新；建议立即导出当前数据。'
+      : '本次修改未能保存到本机；刷新或关闭页面前请先导出当前数据。',
+    at: Date.now(),
+  }
+  recordSilentError(`storage-${source}`, error)
+}
+
+export function dismissPersistenceNotice() {
+  persistenceState.value = { status: 'idle', key: '', source: '', message: '', at: 0 }
+}
+
+setMirrorErrorHandler((error, keys = []) => {
+  reportPersistenceFailure(error, keys[0] || '', 'mirror')
+})
+
+function markPersistenceSuccess() {
+  if (persistenceState.value.status !== 'error') return
+  persistenceState.value = {
+    ...persistenceState.value,
+    status: 'recovered',
+    message: '本机保存已恢复。',
+    at: Date.now(),
+  }
+}
+
+const CLOCK_INTERVAL = 60 * 1000
 let clockTimer = null
+let midnightTimer = null
 
 function startClock() {
   clearInterval(clockTimer)
   clockTimer = setInterval(() => {
     clock.value = new Date()
   }, CLOCK_INTERVAL)
+  if (midnightTimer) clearTimeout(midnightTimer)
+  const now = new Date()
+  const nextMidnight = new Date(now)
+  nextMidnight.setHours(24, 0, 0, 10)
+  midnightTimer = setTimeout(() => {
+    clock.value = new Date()
+    startClock()
+  }, Math.max(1000, nextMidnight.getTime() - now.getTime()))
 }
 
 startClock()
@@ -29,24 +140,58 @@ if (typeof document !== 'undefined') {
       startClock()
     }
   })
+  window.addEventListener('focus', () => {
+    clock.value = new Date()
+    startClock()
+  })
 }
 
 const WRITE_DELAY = 300
+// 不同类型数据的差异化防抖：表单输入 500ms，大集合 300ms，设置类 1000ms
+const WRITE_DELAY_BY_TYPE = {
+  default: 300,
+  form: 500,        // 表单输入：给用户更多打字时间
+  collection: 300,  // 大集合：批量操作后快速持久化
+  settings: 1000,   // 设置类：低频变更，延迟更久避免抖动
+}
 const pendingWrites = new Map()
+const lastWrittenRaw = new Map()
 let writeTimer = null
 let idleWrite = null
 
+function getWriteDelay(key) {
+  if (key.startsWith('sl_') && (key.includes('expense') || key.includes('task') || key.includes('course') || key.includes('bill') || key.includes('event'))) {
+    return WRITE_DELAY_BY_TYPE.collection
+  }
+  if (key.includes('setting') || key.includes('theme') || key.includes('config') || key.includes('preference')) {
+    return WRITE_DELAY_BY_TYPE.settings
+  }
+  if (key.includes('note') || key.includes('draft') || key.includes('input')) {
+    return WRITE_DELAY_BY_TYPE.form
+  }
+  return WRITE_DELAY_BY_TYPE.default
+}
+
 function writeNow(key, makeRaw) {
+  let raw
   try {
-    const raw = makeRaw()
+    const serializeStartedAt = performanceNow()
+    raw = makeRaw()
+    const serializeMs = Math.round((performanceNow() - serializeStartedAt) * 100) / 100
+    if (raw === lastWrittenRaw.get(key)) return
+    const localStartedAt = performanceNow()
     localStorage.setItem(key, raw)
+    lastWrittenRaw.set(key, raw)
+    const localStorageMs = Math.round((performanceNow() - localStartedAt) * 100) / 100
+    observeStorage(key, { payloadBytes: payloadBytes(raw), serializeMs, localStorageMs })
+    markPersistenceSuccess()
     // 来自响应式业务状态的写入是用户已确认的最新事实；即便是空集合，
     // 也必须覆盖影子副本，避免之后把已删除的数据重新恢复出来。
-    mirrorLocalValue(key, raw, { allowEmpty: true }).catch((error) => recordSilentError('vault-mirror', error))
-    markLocalChanged(key, raw)
+    mirrorLocalValue(key, raw, { allowEmpty: true }).catch((error) => reportPersistenceFailure(error, key, 'mirror'))
+    if (isSyncKey(key)) markLocalChanged(key, raw)
   } catch (error) {
     // 配额溢出/隐私模式等失败不阻塞应用，但必须留下排查线索。
-    recordSilentError('storage-write', error)
+    reportPersistenceFailure(error, key, 'local')
   }
 }
 
@@ -65,12 +210,43 @@ function writePendingBatch() {
   cancelScheduledBatch()
   const batch = [...pendingWrites.entries()]
   pendingWrites.clear()
-  for (const [key, producer] of batch) writeNow(key, producer)
+  // Serialize all values first to avoid interleaved layout thrashing
+  const serialized = new Map()
+  for (const [key, producer] of batch) {
+    try {
+      serialized.set(key, producer())
+    } catch (e) {
+      // producer error will be caught in writeNow
+      serialized.set(key, producer)
+    }
+  }
+  for (const [key, rawOrProducer] of serialized) {
+    if (typeof rawOrProducer === 'function') {
+      writeNow(key, rawOrProducer)
+    } else {
+      // Already serialized
+      const raw = rawOrProducer
+      if (raw === lastWrittenRaw.get(key)) continue
+      try {
+        const localStartedAt = performanceNow()
+        localStorage.setItem(key, raw)
+        lastWrittenRaw.set(key, raw)
+        const localStorageMs = Math.round((performanceNow() - localStartedAt) * 100) / 100
+        observeStorage(key, { payloadBytes: payloadBytes(raw), serializeMs: 0, localStorageMs })
+        markPersistenceSuccess()
+        mirrorLocalValue(key, raw, { allowEmpty: true }).catch((error) => reportPersistenceFailure(error, key, 'mirror'))
+        if (isSyncKey(key)) markLocalChanged(key, raw)
+      } catch (error) {
+        reportPersistenceFailure(error, key, 'local')
+      }
+    }
+  }
 }
 
 function scheduleWrite(key, makeRaw) {
   pendingWrites.set(key, makeRaw)
   if (writeTimer) clearTimeout(writeTimer)
+  const delay = getWriteDelay(key)
   writeTimer = setTimeout(() => {
     writeTimer = null
     if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
@@ -78,7 +254,7 @@ function scheduleWrite(key, makeRaw) {
     } else {
       writePendingBatch()
     }
-  }, WRITE_DELAY)
+  }, delay)
 }
 
 function flushAllWrites() {
@@ -122,7 +298,7 @@ function installPersistenceWatcher(key) {
       () => {
         scheduleWrite(key, () => JSON.stringify(pending.state.value))
       },
-      { deep: true }
+      { deep: pending.deep }
     )
   })
   try {
@@ -133,8 +309,8 @@ function installPersistenceWatcher(key) {
   }
 }
 
-function schedulePersistenceWatcher(key, state, baselineRaw) {
-  const pending = { state, baselineRaw, timer: null, idle: null }
+function schedulePersistenceWatcher(key, state, baselineRaw, { deep = true } = {}) {
+  const pending = { state, baselineRaw, deep, timer: null, idle: null }
   pendingWatcherInstalls.set(key, pending)
   const install = () => installPersistenceWatcher(key)
   if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
@@ -184,10 +360,16 @@ export function normalizeStoredValue(saved, defaultValue) {
  * @template T
  * @param {string} key 以 `sl_` 开头的存储键
  * @param {T} defaultValue 默认值（同时决定数据修复的形状基准）
+ * @param {{ deep?: boolean, shallow?: boolean }} options 
+ *   - deep: 是否深层监听（默认对非显式提交键开启）
+ *   - shallow: 是否使用 shallowRef（大集合建议开启，需配合 touchStoredRef 显式提交）
  * @returns {import('vue').Ref<T>}
  */
-export function useStoredRef(key, defaultValue) {
+export function useStoredRef(key, defaultValue, options = {}) {
   if (storedRefs.has(key)) return storedRefs.get(key)
+  const isExplicitCommit = EXPLICIT_COMMIT_KEYS.has(key)
+  const deep = options.deep ?? !isExplicitCommit
+  const shallow = options.shallow ?? isExplicitCommit
 
   let saved = null
   let savedRaw = null
@@ -196,27 +378,49 @@ export function useStoredRef(key, defaultValue) {
     saved = savedRaw === null ? null : JSON.parse(savedRaw)
   } catch (error) {
     // 读取失败（损坏/隐私模式）回退到默认值，同时留下排查线索。
-    recordSilentError('storage-read', error)
+    reportPersistenceFailure(error, key, 'read')
     saved = null
     savedRaw = null
   }
   const normalized = saved === null
     ? { value: JSON.parse(JSON.stringify(defaultValue)), repaired: false }
     : normalizeStoredValue(saved, defaultValue)
-  const state = ref(normalized.value)
+  const state = shallow ? shallowRef(normalized.value) : ref(normalized.value)
   if (normalized.repaired) {
     try {
       const raw = JSON.stringify(normalized.value)
       localStorage.setItem(key, raw)
-      mirrorLocalValue(key, raw).catch((error) => recordSilentError('vault-mirror', error))
+      lastWrittenRaw.set(key, raw)
+      markPersistenceSuccess()
+      mirrorLocalValue(key, raw).catch((error) => reportPersistenceFailure(error, key, 'mirror'))
       savedRaw = raw
     } catch (error) {
-      recordSilentError('storage-repair', error)
+      reportPersistenceFailure(error, key, 'repair')
     }
   }
   storedRefs.set(key, state)
-  schedulePersistenceWatcher(key, state, savedRaw ?? JSON.stringify(normalized.value))
+  const baselineRaw = savedRaw ?? JSON.stringify(normalized.value)
+  lastWrittenRaw.set(key, baselineRaw)
+  schedulePersistenceWatcher(key, state, baselineRaw, { deep })
   return state
+}
+
+// 显式提交 seam：调用方已经掌握一次完整业务变更时，可避免大集合的递归监听。
+// 未使用该选项的旧 store 仍由 deep watcher 兜底，保持现有调用方兼容。
+//
+// 【必须同时 triggerRef】这里的 shallowRef 只把「引用整体被换掉」变成通知，
+// push/splice/就地改字段都不会通知任何依赖。而记账、勾待办、删账单都是就地改，
+// 于是持久化（本函数负责）对了、界面（依赖 computed）却停在旧值上——
+// 表现就是「删掉的记录不消失，刷新一次才没了」。发布一次通知是这条 seam 的
+// 另一半职责：调用方声明「这次业务变更已完成」，视图必须跟着重算。
+export function touchStoredRef(key) {
+  if (!storedRefs.has(key)) return false
+  const state = storedRefs.get(key)
+  // 先发布：深的 ref 本来就靠变更自动通知，这里多一次通知是无害的重复；
+  // shallow 的 ref 只有这一下能让 computed/模板失效。
+  triggerRef(state)
+  scheduleWrite(key, () => JSON.stringify(state.value))
+  return true
 }
 
 export function migrateTaskCourseLinks(taskList, courseList) {
@@ -239,6 +443,25 @@ export function migrateTaskCourseLinks(taskList, courseList) {
   return changed
 }
 
+/**
+ * 农历纪念日的内存镜像（lunarAnniversaries.js）不在存储层里：它只在首次读取时从
+ * localStorage 补水，之后只有设置面板会发布。云同步恢复、本地迁移导入、备份恢复
+ * 都经过 restoreStoredValues，写完这个键必须补一次发布 —— 否则首页会一直读旧镜像
+ * 直到刷新，用户看到的是「恢复成功了但首页没变」。
+ */
+async function publishLunarMirror(values) {
+  if (!values || typeof values !== 'object' || !Object.prototype.hasOwnProperty.call(values, 'sl_festive_lunar')) return false
+  try {
+    const { publishLunarAnniversaries } = await import('../lunarAnniversaries.js')
+    publishLunarAnniversaries(values.sl_festive_lunar)
+    return true
+  } catch (error) {
+    // 发布失败不影响已经写入本机的数据，但不能静默。
+    recordSilentError('lunar-mirror-publish', error)
+    return false
+  }
+}
+
 export async function restoreStoredValues(values, { markChanged = true } = {}) {
   const entries = Object.entries(values || {}).filter(([key]) => typeof key === 'string' && key.startsWith('sl_'))
   if (!entries.length) return
@@ -251,11 +474,13 @@ export async function restoreStoredValues(values, { markChanged = true } = {}) {
   )))
   try {
     for (const [key, raw] of Object.entries(rawValues)) localStorage.setItem(key, raw)
+    for (const [key, raw] of Object.entries(rawValues)) lastWrittenRaw.set(key, raw)
     for (const [key, value] of entries) {
       if (storedRefs.has(key)) storedRefs.get(key).value = value
     }
     await mirrorLocalValues(rawValues)
-    if (markChanged) markLocalChanged()
+    if (markChanged && entries.some(([key]) => isSyncKey(key))) markLocalChanged()
+    markPersistenceSuccess()
   } catch (error) {
     let rollbackError = null
     try {
@@ -271,17 +496,37 @@ export async function restoreStoredValues(values, { markChanged = true } = {}) {
       error.rollbackFailed = true
       error.rollbackError = rollbackError
     }
+    reportPersistenceFailure(error, 'restore', 'local')
     throw error
   }
+  await publishLunarMirror(values)
 }
 
 if (typeof window !== 'undefined') {
   window.addEventListener('storage', (event) => {
+    // storage 事件对 sessionStorage 也会触发；这里只关心业务数据的 localStorage。
+    // 不判断的话，任何写 sessionStorage 的代码都会让本标签页取消待写入并覆盖内存值。
+    if (event.storageArea && event.storageArea !== window.localStorage) return
     if (!event.key || !storedRefs.has(event.key) || event.newValue === null) return
+    // 另一个标签页写了同一个键：放弃本次待写入、采用对方的值。
+    // 这是有意的「后写者胜」策略，保证多标签页看到同一份数据；
+    // 真正的多设备合并由同步管线负责，不在这里做。
     cancelPendingWrite(event.key)
     try {
       storedRefs.get(event.key).value = JSON.parse(event.newValue)
+      lastWrittenRaw.set(event.key, event.newValue)
     } catch {
+    }
+    // 另一个标签页改了农历纪念日时，内存镜像也要跟着走；否则本标签页的首页
+    // 会一直读旧镜像（镜像只在首次读取时补水、之后只由设置面板发布）。
+    if (event.key === 'sl_festive_lunar') {
+      let nextValue = null
+      try {
+        nextValue = JSON.parse(event.newValue)
+      } catch {
+        return
+      }
+      void publishLunarMirror({ sl_festive_lunar: nextValue })
     }
   })
 }

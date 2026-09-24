@@ -8,13 +8,7 @@ function mapById(key, list = []) { return new Map(list.filter((item) => idOf(key
 function tombstoneMap(tombstones = []) { return new Map(tombstones.map((item) => [`${item.entityType}:${item.entityId}`, item])) }
 function baseEntry(baseManifest, key, id) { return baseManifest?.entities?.[key]?.[id] || null }
 function sameHash(value, entry) { return value !== undefined && entry?.hash === hashSyncValue(value) }
-function isNewerThanTombstone(value, tombstone) {
-  const valueTime = Date.parse(value?.updatedAt ?? '')
-  const tombstoneTime = Date.parse(tombstone?.deletedAt ?? tombstone?.updatedAt ?? '')
-  return Number.isFinite(valueTime) && Number.isFinite(tombstoneTime) && valueTime > tombstoneTime
-}
-
-function mergeOneEntity({ base, local, remote, localTombstone, remoteTombstone, localDeleted, remoteDeleted, legacy = false }) {
+function mergeOneEntity({ base, local, remote, localTombstone, remoteTombstone, restoreMarker, localDeleted, remoteDeleted, legacy = false }) {
   const localHash = local === undefined ? null : hashSyncValue(local)
   const remoteHash = remote === undefined ? null : hashSyncValue(remote)
   const baseHash = base?.hash || localTombstone?.baseHash || remoteTombstone?.baseHash || null
@@ -22,21 +16,23 @@ function mergeOneEntity({ base, local, remote, localTombstone, remoteTombstone, 
   if (localDeleted && remoteDeleted) return { result: undefined, status: MERGE_STATUS.deleted }
   if (localDeleted) {
     if (remote === undefined || sameHash(remote, base)) return { result: undefined, status: MERGE_STATUS.deleted }
-    // 另一端已明确恢复并产生了晚于墓碑的新版本；旧墓碑不能再次删除它。
-    // 没有新版时间戳时仍保持冲突，避免把无标记的旧记录当成恢复。
-    if (!remoteDeleted && isNewerThanTombstone(remote, localTombstone)) return { result: cloneSyncValue(remote), status: MERGE_STATUS.remoteOnly }
-    return { status: MERGE_STATUS.deleteUpdateConflict, conflict: true }
+    if (restoreMarker?.tombstoneId && restoreMarker.tombstoneId === localTombstone?.tombstoneId) {
+      return { result: cloneSyncValue(remote), status: MERGE_STATUS.remoteOnly }
+    }
+    // 删除与另一端的有效实体冲突时，不能用客户端 wall-clock 推断恢复。
+    // 只有后续明确的 restore marker 才能表达“用户主动恢复”。
+    return { status: MERGE_STATUS.deleteUpdateConflict, conflict: true, reason: 'delete-update-conflict' }
   }
   if (remoteDeleted) {
     if (local === undefined || sameHash(local, base)) return { result: undefined, status: MERGE_STATUS.deleted }
-    return { status: MERGE_STATUS.deleteUpdateConflict, conflict: true }
+    return { status: MERGE_STATUS.deleteUpdateConflict, conflict: true, reason: 'delete-update-conflict' }
   }
   if (legacy && remote !== undefined) return { result: cloneSyncValue(remote), status: MERGE_STATUS.remoteOnly }
   if (baseHash && localHash === baseHash) return { result: cloneSyncValue(remote), status: MERGE_STATUS.remoteOnly }
   if (baseHash && remoteHash === baseHash) return { result: cloneSyncValue(local), status: MERGE_STATUS.localOnly }
   if (local === undefined) return { result: cloneSyncValue(remote), status: MERGE_STATUS.remoteOnly }
   if (remote === undefined) return { result: cloneSyncValue(local), status: MERGE_STATUS.localOnly }
-  return { status: MERGE_STATUS.conflict, conflict: true }
+  return { status: MERGE_STATUS.conflict, conflict: true, reason: 'both-modified' }
 }
 
 function transactionEquivalent(left, right) {
@@ -44,7 +40,7 @@ function transactionEquivalent(left, right) {
     && Number(left.amount) === Number(right.amount) && left.direction === right.direction && left.name === right.name
 }
 
-function mergeEntityCollection(key, local = [], remote = [], baseManifest, localTombstones, remoteTombstones, legacy) {
+function mergeEntityCollection(key, local = [], remote = [], baseManifest, localTombstones, remoteTombstones, remoteRestoreMarkers, legacy) {
   const type = entityTypeForKey(key)
   if (legacy) {
     return { values: cloneSyncValue(remote), statuses: remote.map(() => MERGE_STATUS.remoteOnly), conflicts: [] }
@@ -53,6 +49,7 @@ function mergeEntityCollection(key, local = [], remote = [], baseManifest, local
   const remoteMap = mapById(key, remote)
   const localDeleted = tombstoneMap(localTombstones)
   const remoteDeleted = tombstoneMap(remoteTombstones)
+  const restoreMarkers = new Map(remoteRestoreMarkers.map((item) => [`${item.entityType}:${item.entityId}`, item]))
   const ids = new Set([...localMap.keys(), ...remoteMap.keys(), ...[...localDeleted.keys(), ...remoteDeleted.keys()].filter((value) => value.startsWith(`${type}:`)).map((value) => value.slice(type.length + 1))])
   const results = []
   const statuses = []
@@ -64,12 +61,13 @@ function mergeEntityCollection(key, local = [], remote = [], baseManifest, local
       remote: remoteMap.get(id),
       localTombstone: localDeleted.get(`${type}:${id}`),
       remoteTombstone: remoteDeleted.get(`${type}:${id}`),
+      restoreMarker: restoreMarkers.get(`${type}:${id}`),
       localDeleted: localDeleted.has(`${type}:${id}`),
       remoteDeleted: remoteDeleted.has(`${type}:${id}`),
       legacy,
     })
     statuses.push({ status: result.status, key, entityId: id, label: localMap.get(id)?.title || localMap.get(id)?.name || remoteMap.get(id)?.title || remoteMap.get(id)?.name || id })
-    if (result.conflict) conflicts.push({ key, entityType: type, entityId: id, status: result.status, local: cloneSyncValue(localMap.get(id)), remote: cloneSyncValue(remoteMap.get(id)), base: cloneSyncValue(baseEntry(baseManifest, key, id)) })
+    if (result.conflict) conflicts.push({ key, entityType: type, entityId: id, status: result.status, local: cloneSyncValue(localMap.get(id)), remote: cloneSyncValue(remoteMap.get(id)), base: cloneSyncValue(baseEntry(baseManifest, key, id)), reason: result.reason })
     else if (result.result !== undefined) results.push(result.result)
   }
   let autoMerged = false
@@ -113,6 +111,7 @@ export function mergeEntity(base, local, remote, options = {}) {
       remote,
       localTombstone: options.localTombstone,
       remoteTombstone: options.remoteTombstone,
+      restoreMarker: options.restoreMarker,
       localDeleted: Boolean(options.localDeleted),
       remoteDeleted: Boolean(options.remoteDeleted),
       legacy: options.legacy,
@@ -121,7 +120,7 @@ export function mergeEntity(base, local, remote, options = {}) {
   return mergeSingleton(options.key || '', local, remote, base || {}, options.legacy)
 }
 
-export function mergeSyncPayload({ baseManifest = null, localValues = {}, remoteValues = {}, localTombstones = [], remoteTombstones = [], keys = Object.keys(remoteValues), legacy = false } = {}) {
+export function mergeSyncPayload({ baseManifest = null, localValues = {}, remoteValues = {}, localTombstones = [], remoteTombstones = [], remoteRestoreMarkers = [], keys = Object.keys(remoteValues), legacy = false } = {}) {
   const merged = cloneSyncValue(localValues) || {}
   const conflicts = []
   const statuses = []
@@ -138,7 +137,7 @@ export function mergeSyncPayload({ baseManifest = null, localValues = {}, remote
       continue
     }
     if (isEntityCollectionKey(key)) {
-      const result = mergeEntityCollection(key, localValues[key], remoteValues[key], baseManifest, localTombstones, remoteTombstones, legacy)
+      const result = mergeEntityCollection(key, localValues[key], remoteValues[key], baseManifest, localTombstones, remoteTombstones, remoteRestoreMarkers, legacy)
       merged[key] = result.values
       statuses.push(...result.statuses)
       conflicts.push(...result.conflicts)
@@ -146,12 +145,12 @@ export function mergeSyncPayload({ baseManifest = null, localValues = {}, remote
       const result = mergeSingleton(key, localValues[key], remoteValues[key], baseManifest, legacy)
       if (!result.conflict) merged[key] = result.value
       statuses.push({ key, status: result.status })
-      if (result.conflict) conflicts.push({ key, status: MERGE_STATUS.conflict, local: cloneSyncValue(localValues[key]), remote: cloneSyncValue(remoteValues[key]) })
+      if (result.conflict) conflicts.push({ key, status: MERGE_STATUS.conflict, local: cloneSyncValue(localValues[key]), remote: cloneSyncValue(remoteValues[key]), reason: 'both-modified' })
     } else {
       const result = mergeSingleton(key, localValues[key], remoteValues[key], baseManifest, legacy)
       if (!result.conflict) merged[key] = result.value
       statuses.push({ key, status: result.status })
-      if (result.conflict) conflicts.push({ key, status: MERGE_STATUS.conflict, local: cloneSyncValue(localValues[key]), remote: cloneSyncValue(remoteValues[key]) })
+      if (result.conflict) conflicts.push({ key, status: MERGE_STATUS.conflict, local: cloneSyncValue(localValues[key]), remote: cloneSyncValue(remoteValues[key]), reason: 'both-modified' })
     }
   }
   const repaired = validateAndRepairRelations(merged)

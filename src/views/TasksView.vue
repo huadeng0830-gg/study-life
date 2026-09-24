@@ -1,38 +1,59 @@
 <script setup>
-import { computed, onBeforeUnmount, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import EmptyState from '../components/EmptyState.vue'
 import Modal from '../components/Modal.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import NoticePaste from '../components/NoticePaste.vue'
 import SwipeActionItem from '../components/SwipeActionItem.vue'
 import VirtualList from '../components/VirtualList.vue'
+import Toast from '../components/Toast.vue'
 import { appearance } from '../composables/appearance.js'
-import { fmtDate, todayStr } from '../composables/store'
 import { findUniqueCourseByName } from '../composables/courseLinks.js'
 import { classifyTasks } from '../composables/smartClassify.js'
 import { useDomainCommands } from '../composables/domain/commands.js'
-import { TASK_PLAN_STATE, isArchived, taskPlanningState, taskStatus } from '../composables/domain/state.js'
+import { selectTaskView } from '../composables/domain/selectors.js'
+import { TASK_PLAN_STATE, isArchived, taskStatus } from '../composables/domain/state.js'
+import { addAppDays, appCalendarDaysBetween, appDateTime, appNow, appToday, formatAppDate } from '../composables/timeContext.js'
+import { clearFocusFromRoute, focusElementWhenReady, readFocusQuery } from '../composables/focusNavigation.js'
+import { detectTaskEventConflicts, getConflictSummary } from '../composables/conflictDetection.js'
 
 const domain = useDomainCommands()
 const { tasks, courses } = domain
+const route = useRoute()
+const router = useRouter()
 const showForm = ref(false)
 const showNotice = ref(false)
 const noticeMessage = ref('')
 const editingId = ref(null)
 const error = ref('')
 const filter = ref(TASK_PLAN_STATE.scheduled)
+const filterTouched = ref(false)
 const showHistory = ref(false)
+const focusedTaskId = ref('')
+const focusMessage = ref('')
 const sortKey = ref('due')
 const form = ref(emptyForm())
 const deleteTarget = ref(null)
+// { message, data, editId } —— data 与 editId 都在打开对话框之前快照好。
+const saveConflict = ref(null)
 const rescheduleTarget = ref(null)
 const rescheduleDate = ref('')
-const undoToast = ref(null)
-let undoTimer = 0
+const toast = ref({ open: false, message: '', type: 'info', actionLabel: '', undoFn: null, viewFn: null, duration: 3200 })
+const undoTimer = 0
 
 // 一键智能整理：只改字段（补课程、分优先级），不删任何数据。
 const organizeMessage = ref('')
 let organizeTimer = 0
+let focusWaitTimer = 0
+let focusWaitAttempts = 0
+let focusHandled = ''
+
+function selectFilter(value) {
+  filterTouched.value = true
+  showHistory.value = false
+  filter.value = value
+}
 
 function smartOrganize() {
   const { list, changed } = classifyTasks(tasks.value, courses.value)
@@ -119,12 +140,39 @@ function save() {
     estimateMinutes: Math.max(0, Number(form.value.estimateMinutes) || 0),
     repeat: form.value.repeat,
   }
-  if (editingId.value) {
-    domain.updateTask(editingId.value, data)
+  // 正在编辑哪一条也要在弹确认之前快照：确认期间 editingId 若被改写，
+  // 晚读会让"新建"变成"覆盖某一条"。
+  const editId = editingId.value
+
+  if (data.dueDate) {
+    const conflicts = detectTaskEventConflicts(data, [...tasks.value, ...domain.events.value], data.dueDate, 'task')
+    const summary = getConflictSummary(conflicts)
+    if (summary.hasConflicts) {
+      // 与 EventsView 一致：冲突是「继续保存 / 返回修改」，不是破坏性操作，
+      // 确认键用 primary，避免红色危险键把正常保存暗示成删除。
+      saveConflict.value = { message: `${summary.message}\n是否继续保存？`, data, editId }
+      return
+    }
+  }
+
+  commitSave(data, editId)
+}
+
+/** 真正落盘的唯一出口：无冲突与用户确认继续两条路径共用，避免校验/写库漂移。 */
+function commitSave(data, editId) {
+  if (editId) {
+    domain.updateTask(editId, data)
   } else {
     domain.createTask({ ...data, createdFrom: 'manual' })
   }
   showForm.value = false
+}
+
+function confirmConflictSave() {
+  const target = saveConflict.value
+  saveConflict.value = null
+  if (!target) return
+  commitSave(target.data, target.editId)
 }
 
 function remove() {
@@ -145,12 +193,8 @@ function toggleTask(task) {
 }
 
 function openReschedule(task) {
-  const tomorrow = new Date()
-  tomorrow.setHours(0, 0, 0, 0)
-  tomorrow.setDate(tomorrow.getDate() + 1)
-  const pad = (value) => String(value).padStart(2, '0')
   rescheduleTarget.value = task
-  rescheduleDate.value = `${tomorrow.getFullYear()}-${pad(tomorrow.getMonth() + 1)}-${pad(tomorrow.getDate())}`
+  rescheduleDate.value = addAppDays(appToday.value, 1)
 }
 
 function saveReschedule() {
@@ -213,70 +257,51 @@ function showNoticeMessage(message) {
   }, 3500)
 }
 
+function showToast(message, { type = 'info', actionLabel = '', undoFn = null, viewFn = null, duration = 3200 } = {}) {
+  toast.value = { open: true, message, type, actionLabel, undoFn, viewFn, duration }
+}
+
 onBeforeUnmount(() => {
   window.clearTimeout(noticeMessageTimer)
   window.clearTimeout(undoTimer)
   window.clearTimeout(organizeTimer)
+  window.clearTimeout(focusWaitTimer)
 })
 
 function dueTimestamp(task) {
   if (!task.dueDate) return Infinity
-  return new Date(`${task.dueDate}T${task.dueTime || '23:59'}`).getTime()
+  return appDateTime(task.dueDate, task.dueTime || '23:59')
 }
 
 function dueInfo(task) {
   if (!task.dueDate) return { text: '无截止日期', cls: '' }
-  const today = todayStr()
-  const targetDay = new Date(task.dueDate + 'T00:00:00')
-  const todayDate = new Date(today + 'T00:00:00')
-  const days = Math.round((targetDay - todayDate) / 86400000)
-  const isOverdue = taskStatus(task) === 'overdue' && dueTimestamp(task) < Date.now()
+  const today = appToday.value
+  const days = appCalendarDaysBetween(today, task.dueDate)
+  const isOverdue = taskStatus(task, appNow.value) === 'overdue' && dueTimestamp(task) < appNow.value.getTime()
   if (isOverdue) return { text: days < 0 ? `逾期 ${-days} 天` : '已逾期', cls: 'overdue' }
   if (days === 0) return { text: task.dueTime ? `今天 ${task.dueTime}` : '今天截止', cls: 'today' }
   if (days === 1) return { text: task.dueTime ? `明天 ${task.dueTime}` : '明天截止', cls: 'soon' }
-  return { text: `${fmtDate(task.dueDate)}${task.dueTime ? ` ${task.dueTime}` : ''}`, cls: '' }
+  return { text: `${formatAppDate(task.dueDate)}${task.dueTime ? ` ${task.dueTime}` : ''}`, cls: '' }
 }
 
-const taskView = computed(() => {
-  let unplanned = 0
-  let scheduled = 0
-  let done = 0
-  for (const task of tasks.value) {
-    if (isArchived(task)) continue
-    const planState = taskPlanningState(task)
-    if (planState === TASK_PLAN_STATE.completed) done++
-    else if (planState === TASK_PLAN_STATE.scheduled) scheduled++
-    else if (planState === TASK_PLAN_STATE.unplanned) unplanned++
-  }
-  const sorted = [...tasks.value].sort((a, b) => {
-    const aCompleted = taskStatus(a) === 'completed'
-    const bCompleted = taskStatus(b) === 'completed'
-    if (aCompleted !== bCompleted) return aCompleted ? 1 : -1
-    if (sortKey.value === 'priority') {
-      const priorityDiff = (PRIORITIES[a.priority]?.order ?? 1) - (PRIORITIES[b.priority]?.order ?? 1)
-      if (priorityDiff) return priorityDiff
-      return dueTimestamp(a) - dueTimestamp(b)
-    }
-    if (sortKey.value === 'created') {
-      const createdDiff = String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? ''))
-      if (createdDiff) return createdDiff
-      return dueTimestamp(a) - dueTimestamp(b)
-    }
-    const dueDiff = dueTimestamp(a) - dueTimestamp(b)
-    if (dueDiff) return dueDiff
-    return (PRIORITIES[a.priority]?.order ?? 1) - (PRIORITIES[b.priority]?.order ?? 1)
-  })
-  const archived = tasks.value.filter(isArchived).length
-  const current = sorted.filter((task) => !isArchived(task))
-  const visible = showHistory.value
-    ? sorted.filter(isArchived)
-    : filter.value === 'all'
-      ? current
-      : current.filter((task) => taskPlanningState(task) === filter.value)
-  return { counts: { unplanned, scheduled, done, all: current.length, archived }, visible }
-})
+const taskView = computed(() => selectTaskView(tasks.value, {
+  now: appNow.value,
+  sortKey: sortKey.value,
+  filter: filter.value,
+  showHistory: showHistory.value,
+}))
 
 const counts = computed(() => taskView.value.counts)
+
+watch(
+  () => [counts.value.scheduled, counts.value.unplanned, counts.value.done, filterTouched.value, showHistory.value],
+  () => {
+    if (filterTouched.value || showHistory.value || route.query.focus) return
+    if (!counts.value.scheduled && counts.value.unplanned) filter.value = TASK_PLAN_STATE.unplanned
+    else if (!counts.value.scheduled && !counts.value.unplanned && counts.value.done) filter.value = TASK_PLAN_STATE.completed
+  },
+  { immediate: true }
+)
 
 function deleteTask(task) {
   deleteTarget.value = task
@@ -285,9 +310,12 @@ function deleteTask(task) {
 function archiveTask(task) {
   if (!task || isArchived(task)) return
   domain.archiveTask(task.id)
-  undoToast.value = { item: task, action: 'archive', text: '待办已归档' }
-  window.clearTimeout(undoTimer)
-  undoTimer = window.setTimeout(() => { undoToast.value = null }, 6000)
+  showToast('待办已归档', {
+    type: 'success',
+    actionLabel: '撤销',
+    undoFn: () => domain.restoreTask(task.id),
+    duration: 6000,
+  })
 }
 
 function confirmDelete() {
@@ -297,18 +325,12 @@ function confirmDelete() {
   if (index < 0) return
   domain.deleteTask(target.id)
   deleteTarget.value = null
-  undoToast.value = { item: target, index, action: 'delete', text: '待办已删除' }
-  window.clearTimeout(undoTimer)
-  undoTimer = window.setTimeout(() => { undoToast.value = null }, 6000)
-}
-
-function undoDelete() {
-  if (!undoToast.value) return
-  const { item, index, action } = undoToast.value
-  if (action === 'archive') domain.restoreTask(item.id)
-  else domain.restoreDeletedTask(item)
-  undoToast.value = null
-  window.clearTimeout(undoTimer)
+  showToast('待办已删除', {
+    type: 'warning',
+    actionLabel: '撤销',
+    undoFn: () => domain.restoreDeletedTask(target),
+    duration: 6000,
+  })
 }
 
 // 空状态文案按当前筛选变化
@@ -327,7 +349,9 @@ const emptyInfo = computed(() => {
     return { icon: '＋', title: '没有待安排日期的待办', description: '还没有日期的事项会留在这里。', hint: '', action: '' }
   }
   if (filter.value === TASK_PLAN_STATE.scheduled) {
-    return { icon: '✓', title: '没有已安排待办', description: '有明确日期的事项会出现在这里。', hint: '', action: '' }
+    return counts.value.unplanned > 0
+      ? { icon: '→', title: '暂时没有已安排的任务', description: `还有 ${counts.value.unplanned} 个待安排日期的待办。`, hint: '', action: '查看待安排' }
+      : { icon: '✓', title: '没有已安排待办', description: '有明确日期的事项会出现在这里。', hint: '', action: '添加待办' }
   }
   if (filter.value === TASK_PLAN_STATE.completed) {
     return { icon: '◐', title: '还没有已完成的待办', description: '完成待办后会出现在这里。', hint: '', action: '' }
@@ -336,6 +360,54 @@ const emptyInfo = computed(() => {
 })
 
 const visibleTasks = computed(() => taskView.value.visible)
+
+function emptyAction() {
+  if (emptyInfo.value.action === '查看待安排') selectFilter(TASK_PLAN_STATE.unplanned)
+  else openAdd()
+}
+
+async function focusRouteTask() {
+  const { id } = readFocusQuery(route)
+  if (!id || focusHandled === id) return
+  if (!tasks.value.length) {
+    if (focusWaitAttempts >= 12) {
+      focusWaitAttempts = 0
+      focusHandled = id
+      focusMessage.value = '这条待办可能已删除或已移动。'
+      await clearFocusFromRoute(router, route)
+      return
+    }
+    focusWaitAttempts += 1
+    window.clearTimeout(focusWaitTimer)
+    focusWaitTimer = window.setTimeout(() => { void focusRouteTask() }, 150)
+    return
+  }
+  focusWaitAttempts = 0
+  focusHandled = id
+  const task = tasks.value.find((item) => String(item.id) === id)
+  if (!task) {
+    focusMessage.value = '这条待办可能已删除或已移动。'
+    await clearFocusFromRoute(router, route)
+    return
+  }
+  showHistory.value = isArchived(task)
+  if (!showHistory.value) {
+    const state = taskPlanningState(task, appNow.value)
+    filter.value = state === TASK_PLAN_STATE.completed ? TASK_PLAN_STATE.completed : state === TASK_PLAN_STATE.scheduled ? TASK_PLAN_STATE.scheduled : TASK_PLAN_STATE.unplanned
+  }
+  focusedTaskId.value = id
+  await nextTick()
+  const element = await focusElementWhenReady(id)
+  if (element) focusMessage.value = ''
+  else focusMessage.value = '这条待办可能已删除或已移动。'
+  await clearFocusFromRoute(router, route)
+}
+
+watch(
+  () => [route.query.focus, tasks.value.length, filter.value, showHistory.value],
+  () => { void focusRouteTask() },
+  { immediate: true }
+)
 
 const courseNames = computed(() => [...new Set(courses.value.map((course) => course.name).filter(Boolean))])
 
@@ -365,7 +437,7 @@ function taskFocusSummary(task) {
         <p class="page-desc">把要做的事情放这里，按截止时间轻松管理。</p>
       </div>
       <div class="page-actions">
-        <button class="btn btn-ghost" @click="showHistory = !showHistory">{{ showHistory ? '返回当前' : `历史 ${counts.archived || ''}` }}</button>
+        <button class="btn btn-ghost" :aria-expanded="showHistory" @click="showHistory = !showHistory">{{ showHistory ? '返回当前' : `历史 ${counts.archived || ''}` }}</button>
         <label class="sort-select">
           <span>排序</span>
           <select v-model="sortKey">
@@ -378,20 +450,21 @@ function taskFocusSummary(task) {
       </div>
     </header>
 
-    <p v-if="noticeMessage" class="notice-success">✓ {{ noticeMessage }}</p>
-    <p v-if="organizeMessage && !noticeMessage" class="notice-success">✓ {{ organizeMessage }}</p>
+    <p v-if="noticeMessage" class="notice-success" role="status">✓ {{ noticeMessage }}</p>
+    <p v-if="organizeMessage && !noticeMessage" class="notice-success" role="status">✓ {{ organizeMessage }}</p>
+    <p v-if="focusMessage" class="notice-success" role="status">{{ focusMessage }}</p>
 
-    <div class="segmented task-toolbar" role="tablist" aria-label="待办筛选">
+    <div class="segmented task-toolbar" role="group" aria-label="待办筛选">
       <template v-if="!showHistory">
-         <button :class="{ on: filter === 'unplanned' }" @click="filter = 'unplanned'">待安排日期 <b>{{ counts.unplanned }}</b></button>
-      <button :class="{ on: filter === 'scheduled' }" @click="filter = 'scheduled'">已安排 <b>{{ counts.scheduled }}</b></button>
-      <button :class="{ on: filter === 'completed' }" @click="filter = 'completed'">已完成 <b>{{ counts.done }}</b></button>
-      <button :class="{ on: filter === 'all' }" @click="filter = 'all'">全部 <b>{{ counts.all }}</b></button>
+         <button :aria-pressed="filter === 'unplanned'" :class="{ on: filter === 'unplanned' }" @click="selectFilter('unplanned')">待安排日期 <b>{{ counts.unplanned }}</b></button>
+      <button :aria-pressed="filter === 'scheduled'" :class="{ on: filter === 'scheduled' }" @click="selectFilter('scheduled')">已安排 <b>{{ counts.scheduled }}</b></button>
+      <button :aria-pressed="filter === 'completed'" :class="{ on: filter === 'completed' }" @click="selectFilter('completed')">已完成 <b>{{ counts.done }}</b></button>
+      <button :aria-pressed="filter === 'all'" :class="{ on: filter === 'all' }" @click="selectFilter('all')">全部 <b>{{ counts.all }}</b></button>
       </template>
       <span v-else class="history-label">归档历史 · {{ counts.archived }} 条</span>
     </div>
 
-    <EmptyState
+    <EmptyState :level="2"
       v-if="visibleTasks.length === 0"
       class="empty-box card"
       :icon="emptyInfo.icon"
@@ -399,10 +472,10 @@ function taskFocusSummary(task) {
       :description="emptyInfo.description"
       :hint="emptyInfo.hint"
       :primary-label="emptyInfo.action"
-      @primary="openAdd"
+      @primary="emptyAction"
     />
 
-    <VirtualList v-else v-slot="{ item: task }" class="task-list" :items="visibleTasks" :estimated-height="62" :gap="8" :threshold="40">
+    <VirtualList v-else v-slot="{ item: task }" class="task-list" :items="visibleTasks" :estimated-height="62" :gap="8" :threshold="40" :reveal-key="focusedTaskId">
       <SwipeActionItem
         :left-label="swipeLabel(task, 'left')"
         :right-label="swipeLabel(task, 'right')"
@@ -412,7 +485,8 @@ function taskFocusSummary(task) {
       >
           <article
             class="card task"
-            :class="{ done: taskStatus(task) === 'completed', archived: isArchived(task) }"
+            :class="{ done: taskStatus(task, appNow) === 'completed', archived: isArchived(task), 'focus-target-highlight': focusedTaskId === task.id }"
+            :data-focus-id="task.id"
           @click="openEdit(task)"
         >
           <span v-if="task.priority === 'high'" class="urgent-bar" aria-hidden="true"></span>
@@ -430,7 +504,7 @@ function taskFocusSummary(task) {
 <span v-if="taskFocusSummary(task)" class="course-tag focus-tag">{{ taskFocusSummary(task) }}</span>
           <div class="task-main">
             <div class="task-topline">
-              <h3>{{ task.title }}</h3>
+              <h2>{{ task.title }}</h2>
               <span class="priority" :class="task.priority ?? 'normal'">
                 {{ PRIORITIES[task.priority]?.label ?? '普通' }}
               </span>
@@ -444,10 +518,10 @@ function taskFocusSummary(task) {
 
           <div class="more" @click.stop>
             <button v-if="!isArchived(task) && taskStatus(task) === 'overdue'" class="link-btn reschedule-link" title="重新安排日期" @click.stop="openReschedule(task)">重新安排</button>
-            <button v-if="isArchived(task)" class="link-btn" title="恢复待办" @click="domain.restoreTask(task.id)">↶</button>
-            <button class="link-btn" title="编辑待办" @click="openEdit(task)">✎</button>
-            <button v-if="!isArchived(task) && taskStatus(task) === 'completed'" class="link-btn" title="归档待办" @click="archiveTask(task)">▱</button>
-            <button class="link-btn danger" title="删除待办" @click="deleteTask(task)">🗑</button>
+            <button v-if="isArchived(task)" class="link-btn" aria-label="恢复待办" title="恢复待办" @click="domain.restoreTask(task.id)">↶</button>
+            <button class="link-btn" aria-label="编辑待办" title="编辑待办" @click="openEdit(task)">✎</button>
+            <button v-if="!isArchived(task) && taskStatus(task) === 'completed'" class="link-btn" aria-label="归档待办" title="归档待办" @click="archiveTask(task)">▱</button>
+            <button class="link-btn danger" aria-label="删除待办" title="删除待办" @click="deleteTask(task)">🗑</button>
           </div>
         </article>
       </SwipeActionItem>
@@ -455,42 +529,42 @@ function taskFocusSummary(task) {
 
     <Modal v-if="showForm" :open="showForm" :title="editingId ? '编辑待办' : '添加待办'" @close="showForm = false">
       <div class="form">
-        <label>待办内容 *</label>
-        <input v-model="form.title" placeholder="例如：完成高数第三章作业" />
+        <label for="tasks-title">待办内容 *</label>
+        <input id="tasks-title" v-model="form.title" placeholder="例如：完成高数第三章作业" />
 
-        <label>所属课程或类别</label>
-        <input v-model="form.course" list="course-options" placeholder="选填，可直接输入" @change="linkCourseFromName" />
+        <label for="tasks-course">所属课程或类别</label>
+        <input id="tasks-course" v-model="form.course" list="course-options" placeholder="选填，可直接输入" @change="linkCourseFromName" />
         <datalist id="course-options">
           <option v-for="name in courseNames" :key="name" :value="name"></option>
         </datalist>
 
         <div class="form-row">
           <div>
-            <label>截止日期</label>
-            <input v-model="form.dueDate" type="date" />
+            <label for="tasks-due-date">截止日期</label>
+            <input id="tasks-due-date" v-model="form.dueDate" type="date" />
           </div>
           <div>
-            <label>截止时间</label>
-            <input v-model="form.dueTime" type="time" :disabled="!form.dueDate" />
+            <label for="tasks-due-time">截止时间</label>
+            <input id="tasks-due-time" v-model="form.dueTime" type="time" :disabled="!form.dueDate" />
           </div>
         </div>
 
-        <label>优先级</label>
-        <select v-model="form.priority">
+        <label for="tasks-priority">优先级</label>
+        <select id="tasks-priority" v-model="form.priority">
           <option value="high">高优先级</option>
           <option value="normal">普通</option>
           <option value="low">低优先级</option>
         </select>
 
         <div class="form-row">
-          <div><label>预计时长（分钟）</label><input v-model="form.estimateMinutes" type="number" min="0" inputmode="numeric" placeholder="选填" /></div>
-          <div><label>重复</label><select v-model="form.repeat"><option value="none">不重复</option><option value="weekly">每周（完成后生成下周）</option></select></div>
+          <div><label for="tasks-estimate-minutes">预计时长（分钟）</label><input id="tasks-estimate-minutes" v-model="form.estimateMinutes" type="number" min="0" inputmode="numeric" placeholder="选填" /></div>
+          <div><label for="tasks-repeat">重复</label><select id="tasks-repeat" v-model="form.repeat"><option value="none">不重复</option><option value="weekly">每周（完成后生成下周）</option></select></div>
         </div>
 
-        <label>备注</label>
-        <textarea v-model="form.note" rows="3" placeholder="选填"></textarea>
+        <label for="tasks-note">备注</label>
+        <textarea id="tasks-note" v-model="form.note" rows="3" placeholder="选填"></textarea>
 
-        <p v-if="error" class="error">{{ error }}</p>
+        <p v-if="error" class="error" role="alert">{{ error }}</p>
         <div class="actions">
           <button v-if="editingId" class="btn btn-danger" @click="remove">删除</button>
           <button class="btn btn-primary" @click="save">保存</button>
@@ -506,6 +580,18 @@ function taskFocusSummary(task) {
       @commit="onNoticeCommit"
     />
     <ConfirmDialog :open="Boolean(deleteTarget)" title="删除待办" :message="`确定删除待办“${deleteTarget?.title || ''}”吗？删除后可在短时间内撤销。`" confirm-label="删除" @close="deleteTarget = null" @confirm="confirmDelete" />
+    <!-- 冲突提示会叠在「添加/编辑待办」表单之上，所以 v-if 随目标挂载（见 ConfirmDialog 顶部说明）。 -->
+    <ConfirmDialog
+      v-if="saveConflict"
+      :open="Boolean(saveConflict)"
+      title="时间冲突"
+      :message="saveConflict?.message || ''"
+      confirm-label="继续保存"
+      cancel-label="返回修改"
+      tone="primary"
+      @close="saveConflict = null"
+      @confirm="confirmConflictSave"
+    />
     <Modal v-if="rescheduleTarget" :open="Boolean(rescheduleTarget)" title="重新安排日期" @close="rescheduleTarget = null">
       <div class="reschedule-form">
         <p>为“{{ rescheduleTarget.title }}”选择一个新的截止日期。</p>
@@ -513,7 +599,7 @@ function taskFocusSummary(task) {
         <div class="actions"><button class="btn" @click="rescheduleTarget = null">取消</button><button class="btn btn-primary" @click="saveReschedule">保存日期</button></div>
       </div>
     </Modal>
-    <div v-if="undoToast" class="undo-toast" role="status" aria-live="polite"><span>{{ undoToast.text }}</span><button type="button" @click="undoDelete">撤销</button></div>
+    <Toast v-model:open="toast.open" :message="toast.message" :type="toast.type" :action-label="toast.actionLabel" :undo-fn="toast.undoFn" :view-fn="toast.viewFn" :duration="toast.duration" @action="() => {}" @close="toast.open = false" />
   </div>
 </template>
 
@@ -563,7 +649,7 @@ function taskFocusSummary(task) {
   gap: 12px;
   padding: 11px 14px;
   cursor: pointer;
-  transition: transform 0.15s, box-shadow 0.15s, border-color 0.15s;
+  transition: transform var(--dur-fast) var(--ease-standard), box-shadow var(--dur-fast) var(--ease-standard), border-color var(--dur-fast) var(--ease-standard);
 }
 .task:hover {
   border-color: var(--border-strong);
@@ -599,7 +685,7 @@ function taskFocusSummary(task) {
   border: 2px solid #c3cbd9;
   border-radius: 8px;
   background: #fff;
-  transition: background 0.14s, border-color 0.14s;
+  transition: background var(--dur-fast) var(--ease-standard), border-color var(--dur-fast) var(--ease-standard);
 }
 .check:hover {
   border-color: #19a878;
@@ -618,14 +704,14 @@ function taskFocusSummary(task) {
   gap: 7px;
   min-width: 0;
 }
-.task-topline h3 {
+.task-topline h2 {
   overflow: hidden;
   font-size: 14px;
   font-weight: 650;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.task.done .task-topline h3 {
+.task.done .task-topline h2 {
   text-decoration: line-through;
 }
 .priority,
@@ -636,22 +722,25 @@ function taskFocusSummary(task) {
   font-weight: 700;
   border-radius: 5px;
 }
+/* 语义标签一律保证 ≥4.5:1（原来 #d43f3f/#feecec 是 4.02、
+   #7b55d4/#f1ebff 是 4.42、#b86b16/#fff5df 是 3.76，都不到 AA）。
+   高优先用 --danger + color-mix 底，暗色主题下也自动成立。 */
 .priority.high {
-  color: #d43f3f;
-  background: #feecec;
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, var(--card));
 }
 .priority.normal {
   color: var(--primary);
   background: var(--primary-soft);
 }
 .priority.low {
-  color: #607084;
+  color: #5a6a7e;
   background: #eef1f5;
 }
 .course-tag {
   max-width: 150px;
   overflow: hidden;
-  color: #7b55d4;
+  color: #6a45c4;
   text-overflow: ellipsis;
   white-space: nowrap;
   background: #f1ebff;
@@ -680,7 +769,7 @@ function taskFocusSummary(task) {
 .due.today,
 .due.soon {
   padding: 4px 8px;
-  color: #b86b16;
+  color: #9a560c;
   font-weight: 800;
   border-radius: 6px;
   background: #fff5df;
@@ -690,13 +779,13 @@ function taskFocusSummary(task) {
   color: var(--danger);
   font-weight: 800;
   border-radius: 6px;
-  background: #feecec;
+  background: color-mix(in srgb, var(--danger) 12%, var(--card));
 }
 .more {
   display: flex;
   gap: 2px;
   opacity: 0;
-  transition: opacity 0.14s;
+  transition: opacity var(--dur-fast) var(--ease-standard);
 }
 .task:hover .more,
 .task:focus-within .more {
@@ -745,8 +834,6 @@ function taskFocusSummary(task) {
 .actions .btn-danger {
   margin-right: auto;
 }
-.undo-toast { position: fixed; right: 18px; bottom: 18px; z-index: 110; display: flex; align-items: center; gap: 14px; max-width: calc(100vw - 28px); padding: 10px 12px 10px 14px; color: var(--text); border: 1px solid var(--border); border-radius: 10px; background: var(--card); box-shadow: var(--shadow-md); font-size: 13px; }
-.undo-toast button { padding: 5px 8px; color: var(--primary); font-weight: 800; border: 0; border-radius: 6px; background: var(--primary-soft); }
 
 @media (max-width: 720px) {
   .page-head {
@@ -773,6 +860,5 @@ function taskFocusSummary(task) {
   .form-row {
     grid-template-columns: 1fr;
   }
-  .undo-toast { right: 14px; bottom: calc(76px + env(safe-area-inset-bottom)); }
 }
 </style>

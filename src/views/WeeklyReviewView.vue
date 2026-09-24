@@ -1,16 +1,25 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useStoredRef } from '../composables/store'
 import { moodLog } from '../composables/atmosphereStore.js'
 import { selectWeeklyReview } from '../composables/domain/weeklySelectors.js'
+import { appNow } from '../composables/timeContext.js'
+import { useDomainCommands } from '../composables/domain/commands.js'
 
 const tasks = useStoredRef('sl_tasks', [])
 const courses = useStoredRef('sl_courses', [])
 const milestones = useStoredRef('sl_exams', [])
 const bills = useStoredRef('sl_bills', [])
-const transactions = useStoredRef('sl_expenses', [])
+const transactions = useStoredRef('sl_expenses', [], { deep: false })
 const events = useStoredRef('sl_events', [])
 const notes = useStoredRef('sl_quick_notes', [])
+
+// ⚠ 这里原来写的是 `const { notes: noteCommands } = useDomainCommands()`，而
+// `useDomainCommands()` 返回的 `notes` 是**存储 ref**（数组），不是命令对象——
+// `noteCommands.createNote` 从来就不存在，点「一键生成回顾笔记」会在这一行直接抛
+// `TypeError: noteCommands.createNote is not a function`。命令按仓库惯例从
+// `domain.createNote` 上取（TasksView / quickRecord/adapters.js 都是这个写法）。
+const domain = useDomainCommands()
 
 const review = computed(() => selectWeeklyReview({
   tasks: tasks.value,
@@ -21,10 +30,66 @@ const review = computed(() => selectWeeklyReview({
   events: events.value,
   notes: notes.value,
   moodLog: moodLog.value,
-}, new Date()))
+}, appNow.value))
 
 const weekLabel = computed(() => `${review.value.week.startDate} — ${new Date(`${review.value.week.endDate}T00:00:00`).toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' })}`)
 const moodLabel = computed(() => ({ sunny: '晴朗', cloudy: '多云', rain: '低落' }[review.value.mood.dominant] || '未记录'))
+
+// 生成回顾笔记的结果提示。改造前这里是两处**原生 `alert()`**：浏览器级对话框，阻塞页面、
+// 不受主题控制、读屏拿不到，而且在测试环境（happy-dom）里 `alert` 是 `undefined`，
+// 调用直接抛 TypeError，这条路径根本没法验证。现在按本仓最常见的做法改成页面内联提示
+// （与 NotesView 的 noteMessage / TodayView 的 showExperienceMessage 同一形态）。
+// 行为上唯一的变化是"不再阻塞"——两句文案逐字未改。
+const reviewMessage = ref('')
+
+function generateReviewNote() {
+  const r = review.value
+  const lines = [
+    `# 本周回顾（${weekLabel.value}）`,
+    '',
+    '## 待办完成',
+    `- 完成：${r.tasks.completed} 项（作业 ${r.tasks.homeworkCompleted} · 复习 ${r.tasks.reviewCompleted}）`,
+    `- 新增：${r.tasks.created} 项`,
+    `- 待处理：${r.tasks.pending} 项`,
+    `- 专注：${r.tasks.focusMinutes} 分钟`,
+    '',
+    '## 学习节奏',
+    `- 课程：${r.courses.sessions} 节（${r.courses.courses} 门）`,
+    `- 笔记新增：${r.notes.created} 条`,
+    '',
+    '## 收支',
+    `- 支出：¥${r.finance.expense.toFixed(2)}`,
+    `- 收入：¥${r.finance.income.toFixed(2)}`,
+    `- 交易笔数：${r.finance.count}`,
+    r.finance.categories.length ? `- 分类 TOP：${r.finance.categories.slice(0, 3).map(c => `${c.key} ¥${c.amount.toFixed(2)}`).join('、')}` : '',
+    `- 账单应付：${r.bills.due} · 已支付 ${r.bills.paid} (¥${r.bills.paidAmount.toFixed(2)})`,
+    '',
+    '## 心情',
+    `- 本周：${moodLabel.value}（记录 ${r.mood.days} 天）`,
+    `- 细分：晴 ${r.mood.sunny} · 多云 ${r.mood.cloudy} · 低落 ${r.mood.rain}`,
+    '',
+    '## 下周预告',
+    r.nextWeek.length ? r.nextWeek.map(item => `- ${item.date.slice(5)} ${item.time || ''} [${item.sourceType === 'task' ? '待办' : item.sourceType === 'event' ? '日程' : item.sourceType === 'milestone' ? '重要日期' : '账单'}] ${item.title}`).join('\n') : '- 暂无',
+    '',
+    '---',
+    '*由学习生活台自动生成*'
+  ].filter(Boolean).join('\n')
+
+  // `createNote` 是**同步**命令（返回新建的那条笔记，内容为空时抛错），所以这里用
+  // try/catch 而不是 `.then/.catch`——原来那条 promise 链串在一个同步返回值上，
+  // 一个 `.then` 都取不到，两条 alert 全是不可达的死代码。
+  try {
+    domain.createNote({
+      title: `本周回顾 ${weekLabel.value}`,
+      content: lines,
+      course: '',
+      courseId: '',
+    })
+    reviewMessage.value = '回顾笔记已生成，可在「笔记」页面查看'
+  } catch {
+    reviewMessage.value = '生成失败，请重试'
+  }
+}
 </script>
 
 <template>
@@ -34,8 +99,13 @@ const moodLabel = computed(() => ({ sunny: '晴朗', cloudy: '多云', rain: '�
         <h1 class="page-title">本周回顾</h1>
         <p class="page-desc">{{ weekLabel }} · 从已经发生的记录里，看见这一周。</p>
       </div>
-      <router-link class="btn btn-ghost" to="/">回到今天</router-link>
+      <div class="page-head-actions">
+        <button type="button" class="btn btn-primary" @click="generateReviewNote">一键生成回顾笔记</button>
+        <router-link class="btn btn-ghost" to="/">回到今天</router-link>
+      </div>
     </header>
+
+    <p v-if="reviewMessage" class="notice-success" role="status">✓ {{ reviewMessage }}</p>
 
     <section class="review-grid">
       <article class="card review-card review-primary">
@@ -75,6 +145,7 @@ const moodLabel = computed(() => ({ sunny: '晴朗', cloudy: '多云', rain: '�
 </template>
 
 <style scoped>
+.notice-success { margin: 12px 0 0; color: var(--success); font-size: 12px; }
 .review-page { gap: 18px; }
 .review-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
 .review-card { display: flex; flex-direction: column; gap: 6px; min-height: 132px; padding: 17px; }
@@ -96,4 +167,6 @@ const moodLabel = computed(() => ({ sunny: '晴朗', cloudy: '多云', rain: '�
 .empty-hint { margin-top: 16px; color: var(--ink-faint); font-size: 13px; }
 @media (max-width: 900px) { .review-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 520px) { .review-grid { grid-template-columns: 1fr; } .review-card { min-height: auto; } .highlight-list li { grid-template-columns: 38px minmax(0, 1fr); } .highlight-list time { grid-column: 2; } }
+.page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.page-head-actions { display: flex; gap: 8px; }
 </style>

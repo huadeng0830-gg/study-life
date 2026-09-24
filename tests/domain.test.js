@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { migrateDomainData } from '../src/composables/domain/migrations.js'
 import { detachCourseRelations } from '../src/composables/domain/relations.js'
-import { reminderAction, selectActionCenter, selectDayAgenda, selectReminders } from '../src/composables/domain/selectors.js'
+import { reminderAction, selectActionCenter, selectDayAgenda, selectReminders, selectTaskView } from '../src/composables/domain/selectors.js'
 import { isBillDueSoon, taskPlanningState, taskStatus } from '../src/composables/domain/state.js'
 
 describe('domain state and projections', () => {
@@ -83,6 +83,45 @@ describe('domain state and projections', () => {
     expect(taskPlanningState(task, new Date('2026-08-29T09:00:00'))).toBe('unplanned')
     expect(selectDayAgenda({ tasks: [task] }, new Date('2026-08-29T09:00:00'))).toEqual([])
     expect(task.dueDate).toBe('')
+  })
+
+  it('projects task counts, history and filtering from one decorated pass', () => {
+    const now = new Date('2026-08-29T10:00:00')
+    const tasks = [
+      { id: 'scheduled', title: '交作业', dueDate: '2026-08-30', priority: 'high' },
+      { id: 'unplanned', title: '买洗衣液', dueDate: '' },
+      { id: 'done', title: '已完成', status: 'completed', dueDate: '2026-08-28' },
+      { id: 'cancelled', title: '已取消', status: 'cancelled', dueDate: '2026-08-28' },
+      { id: 'archived', title: '归档项', archivedAt: '2026-08-27T00:00:00Z', dueDate: '2026-08-27' },
+    ]
+
+    const current = selectTaskView(tasks, { now, sortKey: 'due', filter: 'scheduled' })
+    expect(current.counts).toEqual({ unplanned: 1, scheduled: 1, done: 1, all: 4, archived: 1 })
+    expect(current.visible.map((task) => task.id)).toEqual(['scheduled'])
+
+    const history = selectTaskView(tasks, { now, sortKey: 'due', filter: 'scheduled', showHistory: true })
+    expect(history.visible.map((task) => task.id)).toEqual(['archived'])
+  })
+
+  it('reminders do not sort the entire milestone collection before applying the final limit', () => {
+    const filteredMilestones = new Proxy([
+      { id: 'milestone-1', name: '近期期末', date: '2026-09-03' },
+    ], {
+      get(target, property, receiver) {
+        if (property === 'map') throw new Error('提醒投影不应先物化并排序全部重要日期')
+        return Reflect.get(target, property, receiver)
+      },
+    })
+    const milestones = new Proxy([
+      { id: 'milestone-1', name: '近期期末', date: '2026-09-03' },
+    ], {
+      get(target, property, receiver) {
+        if (property === 'filter') return () => filteredMilestones
+        return Reflect.get(target, property, receiver)
+      },
+    })
+
+    expect(selectReminders({ milestones }, new Date('2026-09-02T10:00:00')).map((item) => item.sourceId)).toEqual(['milestone-1'])
   })
 
   it('does not project a paid bill after it advances beyond its reminder window', () => {

@@ -1,4 +1,4 @@
-import { useStoredRef } from './core.js'
+import { clock, touchStoredRef, useStoredRef } from './core.js'
 import {
   currentTimes,
   periodIndex,
@@ -9,7 +9,7 @@ import { todayStr, MAX_WEEK, dateString } from './utils.js'
 
 export const semester = useStoredRef('sl_semester', {
   start: (function defaultSemesterStart() {
-    const d = new Date()
+    const d = new Date(clock.value)
     const year = d.getFullYear()
     const month = d.getMonth()
     const p = (n) => String(n).padStart(2, '0')
@@ -19,6 +19,40 @@ export const semester = useStoredRef('sl_semester', {
 })
 
 export const scheduleExceptions = useStoredRef('sl_schedule_exceptions', [])
+
+export function upsertScheduleException(value) {
+  if (!value?.date) return null
+  const type = value.type === 'makeup' ? 'makeup' : 'off'
+  const endDate = type === 'off' && value.endDate && value.endDate > value.date ? value.endDate : null
+  const sourceWeek = type === 'makeup' && Number.isFinite(Number(value.sourceWeek)) && Number(value.sourceWeek) > 0
+    ? Number(value.sourceWeek)
+    : null
+  const exception = {
+    id: value.id || `exception-${value.date}`,
+    date: value.date,
+    type,
+    sourceDay: type === 'makeup' ? Math.min(6, Math.max(0, Number(value.sourceDay) || 0)) : null,
+    sourceWeek,
+    endDate,
+    note: value.note,
+    updatedAt: value.updatedAt || new Date().toISOString(),
+  }
+  const index = value.id
+    ? scheduleExceptions.value.findIndex((item) => item.id === value.id)
+    : scheduleExceptions.value.findIndex((item) => item.date === exception.date)
+  if (index >= 0) scheduleExceptions.value[index] = exception
+  else scheduleExceptions.value.push(exception)
+  touchStoredRef('sl_schedule_exceptions')
+  return exception
+}
+
+export function removeScheduleException(id) {
+  const index = scheduleExceptions.value.findIndex((item) => item.id === id)
+  if (index < 0) return null
+  const exception = scheduleExceptions.value.splice(index, 1)[0]
+  touchStoredRef('sl_schedule_exceptions')
+  return exception
+}
 
 export function weekOf(dateStr) {
   const start = new Date(semester.value.start + 'T00:00:00')
@@ -49,26 +83,64 @@ export function courseInWeek(c, week) {
 }
 
 export function scheduleExceptionForDate(date) {
-  return scheduleExceptions.value.find((item) => item.date === date) ?? null
+  return scheduleExceptions.value.find((item) => {
+    if (!item || !item.date) return false
+    if (item.type === 'off' && item.endDate && item.date <= date && date <= item.endDate) return true
+    return item.date === date
+  }) ?? null
 }
 
-export function coursesForDate(courseList, date) {
+export function scheduleDateContext(date) {
   const target = new Date(date + 'T00:00:00')
   const actualDay = target.getDay() === 0 ? 6 : target.getDay() - 1
   const week = weekOf(date)
   const exception = scheduleExceptionForDate(date)
-  if (exception?.type === 'off') return []
   const sourceDay = exception?.type === 'makeup'
     ? Math.min(6, Math.max(0, Number(exception.sourceDay) || 0))
     : actualDay
-  return courseList
-    .filter((course) => course.day === sourceDay && courseInWeek(course, week))
+  const sourceWeek = exception?.type === 'makeup' && Number.isFinite(Number(exception.sourceWeek)) && Number(exception.sourceWeek) > 0
+    ? Number(exception.sourceWeek)
+    : week
+  return {
+    actualDay,
+    week,
+    exception,
+    sourceDay,
+    sourceWeek,
+  }
+}
+
+function courseDayIndex(courseList) {
+  const index = new Map()
+  for (const course of Array.isArray(courseList) ? courseList : []) {
+    const bucket = index.get(course?.day) ?? []
+    bucket.push(course)
+    index.set(course?.day, bucket)
+  }
+  return index
+}
+
+function coursesForDateFromIndex(index, date) {
+  const { actualDay, exception, sourceDay, sourceWeek } = scheduleDateContext(date)
+  if (exception?.type === 'off') return []
+  return (index.get(sourceDay) ?? [])
+    .filter((course) => course.day === sourceDay && courseInWeek(course, sourceWeek))
     .map((course) => ({
       ...course,
       displayDay: actualDay,
       sourceDay,
       exceptionDate: exception ? date : '',
     }))
+}
+
+export function coursesForDate(courseList, date) {
+  return coursesForDateFromIndex(courseDayIndex(courseList), date)
+}
+
+// 同一轮需要多个日期时只建立一次星期索引，避免首页/周回顾对整张课表重复扫描。
+export function coursesForDates(courseList, dates) {
+  const index = courseDayIndex(courseList)
+  return (Array.isArray(dates) ? dates : []).map((date) => coursesForDateFromIndex(index, date))
 }
 
 export function weekLabel(c) {

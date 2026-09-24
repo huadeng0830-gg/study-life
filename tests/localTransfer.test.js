@@ -147,6 +147,39 @@ describe('导入与撤销', () => {
     expect(categories.find((item) => item.key === 'study')).toBeTruthy()
   })
 
+  it('合并账本偏好时保留两端分类覆盖，并以本机规则优先', async () => {
+    localStorage.setItem('sl_ledger_freq', JSON.stringify({
+      pinned: ['food'],
+      hidden: ['life'],
+      categoryOverrides: [{ term: '早餐', key: 'food', direction: 'expense' }],
+    }))
+    const pkg = {
+      app: 'study-life',
+      version: 2,
+      modules: ['expenses'],
+      data: {
+        sl_ledger_freq: {
+          pinned: ['drink'],
+          hidden: [],
+          categoryOverrides: [
+            { term: '早餐', key: 'snack', direction: 'expense' },
+            { term: '生活费', key: 'allowance', direction: 'income' },
+          ],
+        },
+      },
+    }
+
+    await importTransferPackage(pkg, 'merge')
+    expect(JSON.parse(localStorage.getItem('sl_ledger_freq'))).toEqual({
+      pinned: ['food', 'drink'],
+      hidden: ['life'],
+      categoryOverrides: [
+        { term: '早餐', key: 'food', direction: 'expense' },
+        { term: '生活费', key: 'allowance', direction: 'income' },
+      ],
+    })
+  })
+
   it('中途取消会自动恢复导入前数据，不留下半次导入', async () => {
     localStorage.setItem('sl_tasks', JSON.stringify([{ id: 'old-task' }]))
     localStorage.setItem('sl_exams', JSON.stringify([{ id: 'old-exam' }]))

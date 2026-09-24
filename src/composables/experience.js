@@ -1,9 +1,10 @@
 import { normalizeFocusSession } from './focusTimer.js'
 import { isTaskActionable, taskStatus } from './domain/state.js'
+import { clock } from './store/core.js'
 
 function pad(value) { return String(value).padStart(2, '0') }
 
-export function dayText(value = new Date()) {
+export function dayText(value = clock.value) {
   const date = new Date(value)
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
 }
@@ -113,7 +114,7 @@ function mondayOf(now) {
   return date
 }
 
-export function weeklyPulse({ tasks = [], focusSessions = [], courseCheckins = [], moodLog = {} } = {}, now = new Date()) {
+export function weeklyPulse({ tasks = [], focusSessions = [], courseCheckins = [], moodLog = {} } = {}, now = clock.value) {
   const start = mondayOf(now).getTime()
   const end = start + 7 * 86400000
   const done = tasks.filter((task) => task.completedAt && new Date(task.completedAt).getTime() >= start && new Date(task.completedAt).getTime() < end).length

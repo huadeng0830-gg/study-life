@@ -20,7 +20,6 @@ beforeEach(() => {
 
 describe('QuickRecord 业务适配与撤销', () => {
   it.each([
-    ['待办', { id: 'qr-todo', type: 'todo', title: '明天拿快递', raw: '明天拿快递', date: '2026-09-03', time: '10:00' }, 'tasks', 'title'],
     ['作业', { id: 'qr-homework', type: 'homework', title: '交高数第三章作业', raw: '周五交高数第三章作业', course: '高数', date: '2026-09-04', time: '18:00' }, 'tasks', 'courseId'],
     ['支出', { id: 'qr-expense', type: 'expense', title: '午饭', raw: '午饭18元', amount: 18, category: 'food', date: '2026-09-02', time: '12:00' }, 'transactions', 'direction'],
     ['收入', { id: 'qr-income', type: 'income', title: '生活费', raw: '生活费到账500', amount: 500, category: 'other', date: '2026-09-02', time: '09:00' }, 'transactions', 'direction'],
@@ -131,7 +130,7 @@ describe('QuickRecord 业务适配与撤销', () => {
   it('同一批保存的多个结果可合并撤销', () => {
     const results = [
       quickRecord.save({ id: 'qr-batch-a', type: 'expense', title: '早餐', raw: '早餐6', amount: 6 }),
-      quickRecord.save({ id: 'qr-batch-b', type: 'todo', title: '拿快递', raw: '拿快递' }),
+      quickRecord.save({ id: 'qr-batch-b', type: 'todo', title: '整理资料', raw: '整理资料' }),
     ]
     expect(domain.transactions.value).toHaveLength(1)
     expect(domain.tasks.value).toHaveLength(1)
@@ -229,5 +228,22 @@ describe('QuickRecord 业务适配与撤销', () => {
 
     expect(domain.deleteNote(note.id)).toMatchObject({ id: note.id })
     expect(domain.tasks.value[0]).toMatchObject({ sourceType: '', sourceId: '', relationId: '' })
+  })
+
+  it('Note 重复转换保持幂等，并分别维护待办与日程关系', () => {
+    const note = domain.createNote({ id: 'note-idempotent', content: '周五交实验报告' })
+    const firstTask = quickRecord.convertNote(note.id, 'todo')
+    const secondTask = quickRecord.convertNote(note.id, 'todo')
+    const firstEvent = quickRecord.convertNote(note.id, 'event')
+    const secondEvent = quickRecord.convertNote(note.id, 'event')
+
+    expect(firstTask).toMatchObject({ ok: true, entityType: 'task' })
+    expect(firstTask).not.toHaveProperty('duplicate')
+    expect(secondTask).toMatchObject({ ok: true, duplicate: true, entityType: 'task', entityId: firstTask.entityId })
+    expect(firstEvent).toMatchObject({ ok: true, entityType: 'event' })
+    expect(firstEvent).not.toHaveProperty('duplicate')
+    expect(secondEvent).toMatchObject({ ok: true, duplicate: true, entityType: 'event', entityId: firstEvent.entityId })
+    expect(domain.tasks.value.filter((item) => item.sourceId === note.id)).toHaveLength(1)
+    expect(domain.events.value.filter((item) => item.sourceId === note.id)).toHaveLength(1)
   })
 })
