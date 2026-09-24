@@ -7,6 +7,13 @@
 // 3. 更早的版本逐条下移，最多保留 3 个版本，超出即删除。
 export const RELEASE_UPDATES = Object.freeze([
   {
+    version: '2026年09月25日-版本1',
+    signature: '8d840b7189',
+    notes: [
+      '阶段6a（cloudSync拆分）：同步核心拆为 state/http/transfer/spaceOps 四模块并由 cloudSync.js 门面再导出全部公共API，补齐 syncPayloadMatchesBaseline 等缺失导入，行数均低于800且 175 个测试文件全绿',
+    ],
+  },
+  {
     version: '2026年09月24日-版本5',
     signature: 'fa1d584f88',
     notes: [
@@ -20,21 +27,13 @@ export const RELEASE_UPDATES = Object.freeze([
       '阶段4（设计令牌全量迁移）：字号/字重/圆角硬编码机械包裹为var()共1264处不改数值语义，:root新增v5刻度--fs-*/--fw-*/--radius-*与别名；对比度审计可静态解析登记过的--fs-*/--fw-大字门槛；DESIGN_TOKENS.md补全刻度表与例外清单；修复image/*被误当块注释导致LocalTransfer与BatchImport漏迁',
     ],
   },
-  {
-    version: '2026年09月24日-版本3',
-    signature: 'b99640b659',
-    notes: [
-      '全站响应式断点收敛为520/760/900三档，统一各页面工具栏与页头换行节奏',
-      '考试页窄屏判定与课表页头断点对齐到760，账单与提醒表单并入520小屏档',
-    ],
-  },
 ])
 
 // 对用户展示、version.txt 和更新检测统一使用此版本号；后续同日发布只递增“版本”序号。
 export const RELEASE_VERSION = RELEASE_UPDATES[0].version
 
 // 与第一条签名保持一致，交给 vite.config.js 校验源码一致性。
-export const RELEASE_SOURCE_SIGNATURE = 'fa1d584f88'
+export const RELEASE_SOURCE_SIGNATURE = '8d840b7189'
 
 // 兼容旧引用：当前版本的更新说明。
 export const RELEASE_NOTES = RELEASE_UPDATES[0].notes
