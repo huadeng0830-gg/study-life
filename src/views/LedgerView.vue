@@ -2403,15 +2403,15 @@ function createBillFromSuggest() {
    （dist/assets 的编译 CSS，去掉 scope 属性后反压缩）整体重建，**原有注释在重建中丢失**。
    第三十八轮已按 scope 归属清掉其中属于别组件的同值副本。新增规则时请照常写注释。 */
 .page {
-  gap:var(--space-md,16px);
+  gap:16px;
   flex-direction:column;
   display:flex}
 .ledger-tabs {
   align-self:flex-start}
 .block-title {
   margin:0 0 8px;
-  font-size:13.5px;
-  font-weight:750}
+  font-size:var(--fs-13-5);
+  font-weight:var(--fw-750)}
 .block-head {
   justify-content:space-between;
   align-items:center;
@@ -2444,8 +2444,8 @@ function createBillFromSuggest() {
   display:flex}
 .hero-label {
   color:var(--ink-faint);
-  font-size:12.5px;
-  font-weight:700}
+  font-size:var(--fs-12-5);
+  font-weight:var(--fw-700)}
 .spend-metrics {
   grid-template-columns:repeat(3,minmax(0,1fr));
   gap:8px;
@@ -2453,7 +2453,7 @@ function createBillFromSuggest() {
 .spend-metric {
   border:1px solid var(--border);
   background:var(--bg-tint);
-  border-radius:11px;
+  border-radius:var(--radius-11);
   flex-direction:column;
   gap:5px;
   min-width:0;
@@ -2461,15 +2461,15 @@ function createBillFromSuggest() {
   display:flex}
 .spend-metric small {
   color:var(--ink-soft);
-  font-size:11px;
-  font-weight:700}
+  font-size:var(--fs-11);
+  font-weight:var(--fw-700)}
 .spend-metric b {
   letter-spacing:-.02em;
   text-overflow:ellipsis;
   white-space:nowrap;
   font-variant-numeric:tabular-nums;
   font-size:max(16px,min(2.3vw,23px));
-  font-weight:900;
+  font-weight:var(--fw-900);
   line-height:1.1;
   overflow:hidden}
 .spend-metric.current {
@@ -2480,17 +2480,17 @@ function createBillFromSuggest() {
 .hero-sub {
   color:var(--ink-faint);
   font-variant-numeric:tabular-nums;
-  font-size:11.5px}
+  font-size:var(--fs-11-5)}
 .hero-compare {
   color:var(--ink-soft);
   background:var(--bg-tint);
   font-variant-numeric:tabular-nums;
-  border-radius:999px;
+  border-radius:var(--radius-pill);
   align-self:flex-start;
   margin:0;
   padding:3px 9px;
-  font-size:11.5px;
-  font-weight:700}
+  font-size:var(--fs-11-5);
+  font-weight:var(--fw-700)}
 .hero-compare.up {
   color:var(--warning);
   background:color-mix(in srgb, var(--warning) 10%, var(--card))}
@@ -2506,11 +2506,11 @@ function createBillFromSuggest() {
   background:var(--bg-tint);
   color:var(--ink-soft);
   font-variant-numeric:tabular-nums;
-  border-radius:10px;
+  border-radius:var(--radius-10);
   margin:0;
   padding:6px 10px;
-  font-size:11.5px;
-  font-weight:700}
+  font-size:var(--fs-11-5);
+  font-weight:var(--fw-700)}
 .hero-stat>.pending-block.over {
   border-color:var(--warning);
   background:color-mix(in srgb, var(--warning) 10%, var(--card));
@@ -2518,7 +2518,7 @@ function createBillFromSuggest() {
 .ledger-quick-entry {
   border:1px solid var(--border-strong);
   background:var(--card);
-  border-radius:12px;
+  border-radius:var(--radius-12);
   justify-content:space-between;
   align-items:center;
   gap:14px;
@@ -2530,10 +2530,10 @@ function createBillFromSuggest() {
   min-width:0;
   display:flex}
 .ledger-quick-entry b {
-  font-size:13px}
+  font-size:var(--fs-13)}
 .ledger-quick-entry small {
   color:var(--ink-soft);
-  font-size:11px}
+  font-size:var(--fs-11)}
 .ledger-quick-entry .btn {
   flex:none;
   min-height:42px}
@@ -2550,7 +2550,7 @@ function createBillFromSuggest() {
   border:1px solid var(--border);
   background:var(--card);
   transition:border-color var(--dur-fast) var(--ease-standard), box-shadow var(--dur-fast) var(--ease-standard);
-  border-radius:12px;
+  border-radius:var(--radius-12);
   align-items:center;
   gap:10px;
   padding:11px 14px;
@@ -2567,21 +2567,21 @@ function createBillFromSuggest() {
 .p-main b {
   text-overflow:ellipsis;
   white-space:nowrap;
-  font-size:13.5px;
+  font-size:var(--fs-13-5);
   overflow:hidden}
 .p-main small {
   color:var(--ink-soft);
   font-variant-numeric:tabular-nums;
-  font-size:11.5px}
+  font-size:var(--fs-11-5)}
 .p-close {
   color:var(--ink-faint);
   cursor:pointer;
   background:0 0;
   border:none;
-  border-radius:7px;
+  border-radius:var(--radius-7);
   width:26px;
   height:26px;
-  font-size:12px}
+  font-size:var(--fs-12)}
 .p-close:hover {
   color:var(--ink-soft);
   background:var(--bg)}
@@ -2599,7 +2599,7 @@ function createBillFromSuggest() {
   cursor:pointer;
   height:40px;
   transition:border-color var(--dur-fast) var(--ease-standard), background var(--dur-fast) var(--ease-standard), transform var(--dur-fast) var(--ease-standard);
-  border-radius:12px;
+  border-radius:var(--radius-12);
   align-items:center;
   gap:7px;
   padding:0 14px;
@@ -2609,28 +2609,28 @@ function createBillFromSuggest() {
   background:var(--primary-soft);
   transform:translateY(-1px)}
 .freq-icon {
-  font-size:14px}
+  font-size:var(--fs-14)}
 .freq-pill b {
-  font-size:13px;
-  font-weight:700}
+  font-size:var(--fs-13);
+  font-weight:var(--fw-700)}
 .freq-pill small {
   color:var(--ink-soft);
   font-variant-numeric:tabular-nums;
-  font-size:11.5px}
+  font-size:var(--fs-11-5)}
 .search-row {
   align-items:center;
   gap:8px;
   display:flex}
 .search-icon {
   opacity:.7;
-  font-size:13px}
+  font-size:var(--fs-13)}
 .search-input {
   flex:1;
   min-width:0}
 .filter-panel {
   border:1px solid var(--border);
   background:var(--bg-tint);
-  border-radius:12px;
+  border-radius:var(--radius-12);
   flex-direction:column;
   gap:10px;
   margin-top:10px;
@@ -2642,7 +2642,7 @@ function createBillFromSuggest() {
   display:flex}
 .custom-range i {
   color:var(--ink-faint);
-  font-size:12px;
+  font-size:var(--fs-12);
   font-style:normal}
 .custom-range input {
   width:auto}
@@ -2672,16 +2672,16 @@ function createBillFromSuggest() {
   gap:8px;
   margin:0;
   padding-top:14px;
-  font-size:11.5px;
-  font-weight:800;
+  font-size:var(--fs-11-5);
+  font-weight:var(--fw-800);
   display:flex}
 .feed-day-item.first .feed-day {
   padding-top:0}
 .feed-day small {
   color:var(--ink-soft);
   letter-spacing:0;
-  font-size:10.5px;
-  font-weight:600}
+  font-size:var(--fs-10-5);
+  font-weight:var(--fw-600)}
 .feed-transaction-item {
   height:62px}
 .feed-item {
@@ -2689,7 +2689,7 @@ function createBillFromSuggest() {
   cursor:pointer;
   height:100%;
   transition:background var(--dur-fast) var(--ease-standard);
-  border-radius:11px;
+  border-radius:var(--radius-11);
   align-items:center;
   gap:12px;
   padding:10px 12px;
@@ -2708,19 +2708,19 @@ function createBillFromSuggest() {
 .fi-main b {
   text-overflow:ellipsis;
   white-space:nowrap;
-  font-size:14px;
-  font-weight:650;
+  font-size:var(--fs-14);
+  font-weight:var(--fw-650);
   overflow:hidden}
 .fi-main small {
   color:var(--ink-faint);
   font-variant-numeric:tabular-nums;
-  font-size:11.5px}
+  font-size:var(--fs-11-5)}
 .fi-amount {
   color:var(--text);
   font-variant-numeric:tabular-nums;
   flex:none;
-  font-size:14.5px;
-  font-weight:750}
+  font-size:var(--fs-14-5);
+  font-weight:var(--fw-750)}
 .fi-amount.income,.fi-amount.refund {
   color:var(--success)}
 .quick-form {
@@ -2735,22 +2735,22 @@ function createBillFromSuggest() {
   align-self:flex-end;
   min-height:24px;
   padding:3px 8px;
-  font-size:12px;
-  font-weight:700}
+  font-size:var(--fs-12);
+  font-weight:var(--fw-700)}
 .natural-entry-link:hover {
   background:var(--primary-soft);
-  border-radius:6px}
+  border-radius:var(--radius-6)}
 .amount-input {
   text-align:center;
   letter-spacing:.02em;
   font-variant-numeric:tabular-nums;
   width:100%;
   padding:12px 14px;
-  font-size:26px;
-  font-weight:800}
+  font-size:var(--fs-26);
+  font-weight:var(--fw-800)}
 .direction-toggle {
   background:var(--bg-tint);
-  border-radius:10px;
+  border-radius:var(--radius-10);
   grid-template-columns:1fr 1fr;
   gap:4px;
   padding:3px;
@@ -2761,9 +2761,9 @@ function createBillFromSuggest() {
   cursor:pointer;
   background:0 0;
   border:0;
-  border-radius:8px;
-  font-size:13px;
-  font-weight:750}
+  border-radius:var(--radius-8);
+  font-size:var(--fs-13);
+  font-weight:var(--fw-750)}
 .direction-toggle button.on {
   color:var(--primary);
   background:var(--card);
@@ -2771,28 +2771,28 @@ function createBillFromSuggest() {
 .name-input {
   width:100%;
   padding:11px 13px;
-  font-size:14.5px}
+  font-size:var(--fs-14-5)}
 .more-toggle {
   color:var(--ink-faint);
   cursor:pointer;
   background:0 0;
   border:none;
-  border-radius:7px;
+  border-radius:var(--radius-7);
   align-self:flex-start;
   padding:4px 8px;
-  font-size:12px;
-  font-weight:600}
+  font-size:var(--fs-12);
+  font-weight:var(--fw-600)}
 .more-toggle:hover {
   color:var(--primary);
   background:var(--primary-soft)}
 .more-toggle i {
   margin-left:4px;
-  font-size:10px;
+  font-size:var(--fs-10);
   font-style:normal}
 .more-area {
   border:1px solid var(--border);
   background:var(--bg-tint);
-  border-radius:12px;
+  border-radius:var(--radius-12);
   flex-direction:column;
   gap:10px;
   padding:12px;
@@ -2800,7 +2800,7 @@ function createBillFromSuggest() {
 .cat-chips .chip {
   height:32px;
   padding:0 12px;
-  font-size:12px}
+  font-size:var(--fs-12)}
 .more-grid {
   grid-template-columns:1fr 1fr;
   gap:10px;
@@ -2813,12 +2813,12 @@ function createBillFromSuggest() {
   align-self:flex-start;
   min-height:24px;
   padding:2px 8px;
-  font-size:11.5px}
+  font-size:var(--fs-11-5)}
 .more-grid label {
   color:var(--ink-soft);
   flex-direction:column;
   gap:5px;
-  font-size:11.5px;
+  font-size:var(--fs-11-5);
   display:flex}
 .quick-actions {
   gap:8px;
@@ -2827,18 +2827,18 @@ function createBillFromSuggest() {
 .save-btn {
   flex:1;
   height:44px;
-  font-size:15px}
+  font-size:var(--fs-15)}
 .quick-actions .btn-ghost {
   height:44px}
 .dup-warn,.cycle-suggest {
   color:var(--warning);
   border:1px solid color-mix(in srgb, var(--warning) 35%, var(--card));
   background:var(--bg-tint);
-  border-radius:10px;
+  border-radius:var(--radius-10);
   flex-direction:column;
   gap:8px;
   padding:10px 12px;
-  font-size:12.5px;
+  font-size:var(--fs-12-5);
   display:flex}
 .cycle-suggest {
   color:var(--ink-soft);
@@ -2855,8 +2855,8 @@ function createBillFromSuggest() {
 .detail-amount {
   text-align:center;
   font-variant-numeric:tabular-nums;
-  font-size:32px;
-  font-weight:900}
+  font-size:var(--fs-32);
+  font-weight:var(--fw-900)}
 .detail-amount.income,.detail-amount.refund {
   color:var(--success)}
 .detail-meta {
@@ -2864,15 +2864,15 @@ function createBillFromSuggest() {
   flex-wrap:wrap;
   justify-content:center;
   gap:6px 14px;
-  font-size:12.5px;
+  font-size:var(--fs-12-5);
   display:flex}
 .detail-note {
   color:var(--ink-soft);
   background:var(--bg-tint);
-  border-radius:10px;
+  border-radius:var(--radius-10);
   margin:0;
   padding:10px 12px;
-  font-size:12.5px}
+  font-size:var(--fs-12-5)}
 .detail-actions {
   flex-wrap:wrap;
   justify-content:center;
@@ -2886,8 +2886,8 @@ function createBillFromSuggest() {
   color:var(--ink-soft);
   flex-direction:column;
   gap:5px;
-  font-size:11.5px;
-  font-weight:700;
+  font-size:var(--fs-11-5);
+  font-weight:var(--fw-700);
   display:flex}
 .detail-edit-grid label:last-child {
   grid-column:1/-1}
@@ -2903,7 +2903,7 @@ function createBillFromSuggest() {
 .bill-form-intro {
   color:var(--ink-faint);
   margin:-4px 0 1px;
-  font-size:12.5px;
+  font-size:var(--fs-12-5);
   line-height:1.5}
 .bill-form-grid {
   grid-template-columns:1fr 1fr;
@@ -2921,24 +2921,24 @@ function createBillFromSuggest() {
 .refund-hint {
   color:var(--ink-soft);
   margin:0;
-  font-size:12.5px;
+  font-size:var(--fs-12-5);
   line-height:1.6}
 .bill-field>span {
   color:var(--ink-soft);
-  font-size:12px;
-  font-weight:700}
+  font-size:var(--fs-12);
+  font-weight:var(--fw-700)}
 .bill-field>span i {
   color:var(--primary);
   margin-left:4px;
-  font-size:10px;
+  font-size:var(--fs-10);
   font-style:normal;
-  font-weight:700}
+  font-weight:var(--fw-700)}
 .bill-field>span em {
   color:var(--ink-faint);
   margin-left:4px;
-  font-size:10px;
+  font-size:var(--fs-10);
   font-style:normal;
-  font-weight:500}
+  font-weight:var(--fw-500)}
 .bill-field input,.bill-field select {
   width:100%;
   min-width:0;
@@ -2948,7 +2948,7 @@ function createBillFromSuggest() {
 .bill-money-input b {
   color:var(--ink-faint);
   pointer-events:none;
-  font-size:14px;
+  font-size:var(--fs-14);
   position:absolute;
   top:50%;
   left:13px;
@@ -2963,7 +2963,7 @@ function createBillFromSuggest() {
   cursor:pointer;
   border:1px solid var(--border);
   background:var(--bg-tint);
-  border-radius:12px;
+  border-radius:var(--radius-12);
   align-items:center;
   gap:10px;
   min-width:0;
@@ -2981,19 +2981,19 @@ function createBillFromSuggest() {
   min-width:0;
   display:flex}
 .bill-switch b {
-  font-size:12.5px}
+  font-size:var(--fs-12-5)}
 .bill-switch small {
   color:var(--ink-faint);
   text-overflow:ellipsis;
   white-space:nowrap;
-  font-size:10px;
+  font-size:var(--fs-10);
   overflow:hidden}
 .switch-track {
   width:34px;
   height:20px;
   transition:background var(--dur-base) var(--ease-standard);
   background:#cbd2df;
-  border-radius:999px;
+  border-radius:var(--radius-pill);
   flex:0 0 34px;
   position:relative}
 .switch-track i {
@@ -3001,7 +3001,7 @@ function createBillFromSuggest() {
   height:14px;
   transition:transform var(--dur-base) var(--ease-standard);
   background:#fff;
-  border-radius:50%;
+  border-radius:var(--radius-circle);
   position:absolute;
   top:3px;
   left:3px;
@@ -3016,10 +3016,10 @@ function createBillFromSuggest() {
 .bill-error {
   color:var(--danger);
   background:var(--bg-tint);
-  border-radius:9px;
+  border-radius:var(--radius-9);
   margin:-5px 0 0;
   padding:9px 11px;
-  font-size:12px}
+  font-size:var(--fs-12)}
 .bill-form-actions {
   justify-content:flex-end;
   gap:8px;
@@ -3035,7 +3035,7 @@ function createBillFromSuggest() {
 .tab-desc {
   color:var(--ink-faint);
   margin:0;
-  font-size:12.5px}
+  font-size:var(--fs-12-5)}
 .bill-group+.bill-group {
   margin-top:18px}
 .bill-list {
@@ -3076,22 +3076,22 @@ function createBillFromSuggest() {
 .b-main b {
   text-overflow:ellipsis;
   white-space:nowrap;
-  font-size:14px;
+  font-size:var(--fs-14);
   overflow:hidden}
 .b-main small {
   color:var(--ink-soft);
   font-variant-numeric:tabular-nums;
-  font-size:11.5px}
+  font-size:var(--fs-11-5)}
 .b-amount {
   white-space:nowrap;
   font-variant-numeric:tabular-nums;
-  font-size:15.5px;
-  font-weight:800}
+  font-size:var(--fs-15-5);
+  font-weight:var(--fw-800)}
 .b-amount small {
   color:var(--ink-faint);
   margin-left:2px;
-  font-size:10.5px;
-  font-weight:600}
+  font-size:var(--fs-10-5);
+  font-weight:var(--fw-600)}
 .b-actions {
   gap:6px;
   display:flex}
@@ -3099,11 +3099,11 @@ function createBillFromSuggest() {
   opacity:.6}
 .bill-row.today .b-main small {
   color:var(--danger);
-  font-weight:700}
+  font-weight:var(--fw-700)}
 .form-note {
   color:var(--ink-faint);
   margin:4px 0 0;
-  font-size:11.5px;
+  font-size:var(--fs-11-5);
   line-height:1.5}
 
 
@@ -3116,7 +3116,7 @@ function createBillFromSuggest() {
 .month-nav b {
   text-align:center;
   min-width:72px;
-  font-size:15px}
+  font-size:var(--fs-15)}
 .mn-btn {
   width:32px;
   height:32px;
@@ -3124,8 +3124,8 @@ function createBillFromSuggest() {
   border:1px solid var(--border);
   background:var(--card);
   cursor:pointer;
-  border-radius:9px;
-  font-size:16px}
+  border-radius:var(--radius-9);
+  font-size:var(--fs-16)}
 .mn-btn:hover:not(:disabled) {
   color:var(--primary);
   border-color:var(--primary)}
@@ -3139,7 +3139,7 @@ function createBillFromSuggest() {
 .review-export .btn {
   min-height:30px;
   padding:4px 10px;
-  font-size:11.5px}
+  font-size:var(--fs-11-5)}
 .review-tab {
   flex-direction:column;
   gap:14px;
@@ -3155,16 +3155,16 @@ function createBillFromSuggest() {
   display:flex}
 .rs-top span {
   color:var(--ink-soft);
-  font-size:13px}
+  font-size:var(--fs-13)}
 .rs-top b {
   font-variant-numeric:tabular-nums;
   letter-spacing:-.01em;
-  font-size:30px;
-  font-weight:900}
+  font-size:var(--fs-30);
+  font-weight:var(--fw-900)}
 .rs-facts {
   border:1px solid var(--border);
   background:var(--border);
-  border-radius:11px;
+  border-radius:var(--radius-11);
   grid-template-columns:repeat(3,1fr);
   gap:1px;
   display:grid;
@@ -3178,11 +3178,11 @@ function createBillFromSuggest() {
   display:flex}
 .rs-facts small {
   color:var(--ink-faint);
-  font-size:10.5px}
+  font-size:var(--fs-10-5)}
 .rs-facts b {
   text-overflow:ellipsis;
   white-space:nowrap;
-  font-size:12.5px;
+  font-size:var(--fs-12-5);
   overflow:hidden}
 .cat-bars {
   flex-direction:column;
@@ -3203,7 +3203,7 @@ function createBillFromSuggest() {
   font:inherit;
   background:0 0;
   border:0;
-  border-radius:9px;
+  border-radius:var(--radius-9);
   padding:3px 4px}
 .cat-bar-row.cat-bar-link:hover {
   background:var(--bg-tint)}
@@ -3212,7 +3212,7 @@ function createBillFromSuggest() {
 .cat-more-note {
   color:var(--ink-faint);
   margin:8px 0 0;
-  font-size:11.5px;
+  font-size:var(--fs-11-5);
   line-height:1.5}
 /* ---------- 回顾「分类分布」 ----------
    .rc-bar 是 .cat-bar-row 的四列版本（名称 / 进度条 / 金额 / 展开箭头）；
@@ -3225,7 +3225,7 @@ function createBillFromSuggest() {
 .rc-sum {
   color:var(--ink-faint);
   font-variant-numeric:tabular-nums;
-  font-size:11.5px}
+  font-size:var(--fs-11-5)}
 .rc-item {
   flex-direction:column;
   display:flex}
@@ -3237,7 +3237,7 @@ function createBillFromSuggest() {
   font:inherit;
   background:0 0;
   border:0;
-  border-radius:9px;
+  border-radius:var(--radius-9);
   grid-template-columns:minmax(0,92px) minmax(0,1fr) auto 12px;
   padding:5px 6px}
 .cat-bar-row.rc-bar:hover {
@@ -3255,11 +3255,11 @@ function createBillFromSuggest() {
 .rc-bar .cb-meta {
   color:var(--ink-faint);
   font-variant-numeric:tabular-nums;
-  font-size:10px}
+  font-size:var(--fs-10)}
 .cb-caret {
   color:var(--ink-faint);
   text-align:right;
-  font-size:9px}
+  font-size:var(--fs-9)}
 .rc-detail {
   border-left:2px solid var(--primary-soft);
   flex-direction:column;
@@ -3273,12 +3273,12 @@ function createBillFromSuggest() {
   font:inherit;
   background:0 0;
   border:0;
-  border-radius:7px;
+  border-radius:var(--radius-7);
   grid-template-columns:minmax(0,1fr) auto auto;
   align-items:center;
   gap:10px;
   padding:6px 5px;
-  font-size:12.5px;
+  font-size:var(--fs-12-5);
   display:grid}
 .rc-detail-row:hover {
   background:var(--bg-tint)}
@@ -3286,7 +3286,7 @@ function createBillFromSuggest() {
   color:var(--primary)}
 .rc-detail-row small {
   color:var(--ink-faint);
-  font-size:11px}
+  font-size:var(--fs-11)}
 .rc-detail-row b {
   font-variant-numeric:tabular-nums}
 .rd-name {
@@ -3296,7 +3296,7 @@ function createBillFromSuggest() {
 .rc-detail-foot {
   color:var(--ink-faint);
   margin:4px 0 0;
-  font-size:11px}
+  font-size:var(--fs-11)}
 .rc-toggle {
   align-self:flex-start;
   margin-top:10px}
@@ -3320,11 +3320,11 @@ function createBillFromSuggest() {
   color:var(--ink-soft);
   white-space:nowrap;
   text-overflow:ellipsis;
-  font-size:12px;
+  font-size:var(--fs-12);
   overflow:hidden}
 .cb-track {
   background:var(--border);
-  border-radius:999px;
+  border-radius:var(--radius-pill);
   height:8px;
   overflow:hidden}
 .cb-track i {
@@ -3335,8 +3335,8 @@ function createBillFromSuggest() {
 .cb-value {
   color:var(--text);
   font-variant-numeric:tabular-nums;
-  font-size:12px;
-  font-weight:700}
+  font-size:var(--fs-12);
+  font-weight:var(--fw-700)}
 .cal-week {
   grid-template-columns:repeat(7,1fr);
   gap:4px;
@@ -3345,7 +3345,7 @@ function createBillFromSuggest() {
 .cal-week span {
   color:var(--ink-faint);
   text-align:center;
-  font-size:10.5px}
+  font-size:var(--fs-10-5)}
 .cal-grid {
   grid-template-columns:repeat(7,1fr);
   gap:4px;
@@ -3357,11 +3357,11 @@ function createBillFromSuggest() {
   font-variant-numeric:tabular-nums;
   background:0 0;
   border:none;
-  border-radius:9px;
+  border-radius:var(--radius-9);
   flex-direction:column;
   align-items:center;
   gap:3px;
-  font-size:12px;
+  font-size:var(--fs-12);
   display:flex;
   position:relative}
 .cal-cell:hover {
@@ -3370,7 +3370,7 @@ function createBillFromSuggest() {
   cursor:default}
 .cal-cell i {
   background:#c9d4f2;
-  border-radius:50%;
+  border-radius:var(--radius-circle);
   width:6px;
   height:6px}
 .cal-cell.l2 i {
@@ -3387,15 +3387,15 @@ function createBillFromSuggest() {
 .cal-detail {
   border:1px solid var(--border);
   background:var(--bg-tint);
-  border-radius:11px;
+  border-radius:var(--radius-11);
   margin-top:12px;
   padding:11px 13px}
 .cal-detail>b {
-  font-size:13px}
+  font-size:var(--fs-13)}
 .cal-detail>small {
   color:var(--ink-faint);
   margin:2px 0 6px;
-  font-size:11px;
+  font-size:var(--fs-11);
   display:block}
 .cd-row {
   cursor:pointer;
@@ -3404,13 +3404,13 @@ function createBillFromSuggest() {
   align-items:center;
   gap:10px;
   padding:6px 0;
-  font-size:12.5px;
+  font-size:var(--fs-12-5);
   display:grid}
 .cd-row:hover b {
   color:var(--primary)}
 .cd-row small {
   color:var(--ink-faint);
-  font-size:11px}
+  font-size:var(--fs-11)}
 .cd-row b {
   font-variant-numeric:tabular-nums}
 .category-block {
@@ -3423,7 +3423,7 @@ function createBillFromSuggest() {
   display:flex}
 .category-scope-tabs,.category-view-tabs {
   background:var(--bg-tint);
-  border-radius:9px;
+  border-radius:var(--radius-9);
   gap:5px;
   padding:3px;
   display:flex;
@@ -3433,11 +3433,11 @@ function createBillFromSuggest() {
   cursor:pointer;
   background:0 0;
   border:0;
-  border-radius:7px;
+  border-radius:var(--radius-7);
   flex:none;
   padding:7px 10px;
-  font-size:11.5px;
-  font-weight:700}
+  font-size:var(--fs-11-5);
+  font-weight:var(--fw-700)}
 .category-scope-tabs button.on,.category-view-tabs button.on {
   color:var(--primary);
   background:var(--card);
@@ -3446,9 +3446,9 @@ function createBillFromSuggest() {
   color:var(--ink-faint);
   text-align:center;
   padding:14px 8px;
-  font-size:12px}
+  font-size:var(--fs-12)}
 .cat-row {
-  border-radius:10px;
+  border-radius:var(--radius-10);
   align-items:center;
   gap:10px;
   padding:7px 10px;
@@ -3461,20 +3461,20 @@ function createBillFromSuggest() {
   border:1px solid var(--border);
   background:var(--card);
   cursor:pointer;
-  border-radius:9px;
+  border-radius:var(--radius-9);
   width:34px;
   height:34px;
-  font-size:17px}
+  font-size:var(--fs-17)}
 .cat-name {
   flex-direction:column;
   flex:1;
   min-width:0;
   display:flex}
 .cat-row b {
-  font-size:13px}
+  font-size:var(--fs-13)}
 .cat-name small {
   color:var(--ink-faint);
-  font-size:10px}
+  font-size:var(--fs-10)}
 .cat-ops {
   gap:4px;
   display:flex}
@@ -3526,7 +3526,7 @@ function createBillFromSuggest() {
 .rs-facts {
   grid-template-columns:1fr}
 .rs-top b {
-  font-size:26px}
+  font-size:var(--fs-26)}
 .cal-cell {
   height:40px}
 .cat-bar-row.rc-bar {
@@ -3557,7 +3557,7 @@ function createBillFromSuggest() {
 .spend-metric {
   padding:9px 8px}
 .spend-metric b {
-  font-size:15px}
+  font-size:var(--fs-15)}
 .detail-actions .btn {
   flex:40%}
 .detail-edit-grid {

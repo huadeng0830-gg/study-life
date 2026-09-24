@@ -618,12 +618,22 @@ const toHexIn = (value, tokens) => {
  *   - `min(30px, 3vw)`          → null ✗（min 的值只会**更小**，不是下界）
  *   - `calc(30px - 1vw)`        → null ✗（减去的视口单位可能更大）
  *   - `max(3vw, 30px)`          → null ✗（第一项不是 px 就不猜，保守放过）
- *   - `1.5rem` / `150%` / `2em` / `var(--fs-xl)` → null ✗（相对值，静态读不出真实像素）
+ *   - `1.5rem` / `150%` / `2em` → null ✗（相对值，静态读不出真实像素）
+ *   - `var(--fs-24)`            → 24 ✓（阶段 4：`:root` 里的字号刻度令牌可静态解析）
+ *   - `var(--fs-xl)`            → null ✗（未登记的令牌不猜，从严）
  * 特别注意 `%`：`parseFloat('150%')` 会得到 150，直接当 px 用会把 150% 判成"大字"
  * 从而**放宽**门槛——这是本轮夹具抓到的第一个真漏洞。
  */
 export function fontSizeLowerBoundPx(value) {
-  const text = String(value ?? '').trim()
+  let text = String(value ?? '').trim()
+  // 阶段 4 字号全量令牌化后，声明里常见 var(--fs-24)。只解析 :root 里登记过的
+  // --fs-* 刻度（值必须是纯 px），未登记的一律保持 null → 按正文从严。
+  const fsVar = /^var\(\s*(--fs-[\w-]+)\s*\)$/i.exec(text)
+  if (fsVar) {
+    const mapped = baseTokens[fsVar[1]]
+    text = mapped && /^[\d.]+px$/i.test(String(mapped).trim()) ? String(mapped).trim() : text
+    if (fsVar && text.startsWith('var(')) return null
+  }
   const plain = /^([\d.]+)px$/i.exec(text)
   if (plain) return Number.parseFloat(plain[1])
   const grow = /^(?:clamp|max)\(\s*([\d.]+)px\s*,/i.exec(text)
@@ -631,6 +641,15 @@ export function fontSizeLowerBoundPx(value) {
   const add = /^calc\(\s*([\d.]+)px\s*\+/i.exec(text)
   if (add) return Number.parseFloat(add[1])
   return null
+}
+
+/** 把 `var(--fw-700)` 解析成 `700`（仅认 :root 登记过的 --fw-* 刻度）。 */
+export function fontWeightTokenValue(value) {
+  const text = String(value ?? '').trim()
+  const fwVar = /^var\(\s*(--fw-[\w-]+)\s*\)$/i.exec(text)
+  if (!fwVar) return text
+  const mapped = baseTokens[fwVar[1]]
+  return mapped != null && /^\d{3}$/.test(String(mapped).trim()) ? String(mapped).trim() : text
 }
 
 /**
@@ -649,7 +668,7 @@ export function fontSizeLowerBoundPx(value) {
 export function largeTextThreshold(entry) {
   const size = fontSizeLowerBoundPx(entry?.fontSize)
   if (size === null) return PRIMARY_TEXT_MIN
-  const weight = String(entry?.fontWeight ?? '').trim().toLowerCase()
+  const weight = fontWeightTokenValue(entry?.fontWeight).trim().toLowerCase()
   const bold = weight === 'bold' || weight === 'bolder' || (/^\d{3}$/.test(weight) && Number(weight) >= 600)
   if (size >= 24) return LARGE_MIN
   if (size >= 18.66 && bold) return LARGE_MIN

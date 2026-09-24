@@ -614,19 +614,19 @@ function taskFocusSummary(task) {
   align-items: center;
   gap: 7px;
   color: var(--ink-faint);
-  font-size: 12px;
-  font-weight: 600;
+  font-size: var(--fs-12);
+  font-weight: var(--fw-600);
 }
 .sort-select select {
   padding: 7px 9px;
-  font-size: 12.5px;
+  font-size: var(--fs-12-5);
 }
 .notice-success {
   padding: 8px 12px;
   color: #087a58;
-  font-size: 12.5px;
+  font-size: var(--fs-12-5);
   border: 1px solid #b9e6d5;
-  border-radius: 9px;
+  border-radius: var(--radius-9);
   background: #effaf6;
 }
 .task-list {
@@ -657,8 +657,8 @@ function taskFocusSummary(task) {
 }
 .reschedule-link { flex: 0 0 auto; padding-inline: 5px; color: var(--primary); }
 .reschedule-form { display: flex; flex-direction: column; gap: 14px; }
-.reschedule-form p { color: var(--ink-soft); font-size: 13px; line-height: 1.5; }
-.reschedule-form label { display: flex; flex-direction: column; gap: 6px; color: var(--ink-soft); font-size: 12px; font-weight: 700; }
+.reschedule-form p { color: var(--ink-soft); font-size: var(--fs-13); line-height: 1.5; }
+.reschedule-form label { display: flex; flex-direction: column; gap: 6px; color: var(--ink-soft); font-size: var(--fs-12); font-weight: var(--fw-700); }
 .reschedule-form input { width: 100%; }
 .reschedule-form .actions { display: flex; justify-content: flex-end; gap: 8px; }
 .task.done {
@@ -670,7 +670,7 @@ function taskFocusSummary(task) {
   top: 10px;
   bottom: 10px;
   width: 3px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--danger);
 }
 .check {
@@ -679,10 +679,10 @@ function taskFocusSummary(task) {
   width: 24px;
   height: 24px;
   flex: 0 0 24px;
-  font-weight: 800;
-  font-size: 13px;
+  font-weight: var(--fw-800);
+  font-size: var(--fs-13);
   border: 2px solid #767f94;
-  border-radius: 8px;
+  border-radius: var(--radius-8);
   background: #fff;
   transition: background var(--dur-fast) var(--ease-standard), border-color var(--dur-fast) var(--ease-standard);
 }
@@ -707,8 +707,8 @@ function taskFocusSummary(task) {
 }
 .task-topline h2 {
   overflow: hidden;
-  font-size: 14px;
-  font-weight: 650;
+  font-size: var(--fs-14);
+  font-weight: var(--fw-650);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -719,9 +719,9 @@ function taskFocusSummary(task) {
 .course-tag {
   flex: 0 0 auto;
   padding: 2px 7px;
-  font-size: 10.5px;
-  font-weight: 700;
-  border-radius: 5px;
+  font-size: var(--fs-10-5);
+  font-weight: var(--fw-700);
+  border-radius: var(--radius-5);
 }
 /* 语义标签一律保证 ≥4.5:1（原来 #d43f3f/#feecec 是 4.02、
    #7b55d4/#f1ebff 是 4.42、#b86b16/#fff5df 是 3.76，都不到 AA）。
@@ -754,7 +754,7 @@ function taskFocusSummary(task) {
   overflow: hidden;
   margin-top: 3px;
   color: var(--ink-soft);
-  font-size: 11.5px;
+  font-size: var(--fs-11-5);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -762,8 +762,8 @@ function taskFocusSummary(task) {
   flex: 0 0 auto;
   max-width: 170px;
   color: var(--ink-soft);
-  font-size: 12px;
-  font-weight: 600;
+  font-size: var(--fs-12);
+  font-weight: var(--fw-600);
   text-align: right;
   font-variant-numeric: tabular-nums;
 }
@@ -771,15 +771,15 @@ function taskFocusSummary(task) {
 .due.soon {
   padding: 4px 8px;
   color: #9a560c;
-  font-weight: 800;
-  border-radius: 6px;
+  font-weight: var(--fw-800);
+  border-radius: var(--radius-6);
   background: #fff5df;
 }
 .due.overdue {
   padding: 4px 8px;
   color: var(--danger);
-  font-weight: 800;
-  border-radius: 6px;
+  font-weight: var(--fw-800);
+  border-radius: var(--radius-6);
   background: color-mix(in srgb, var(--danger) 12%, var(--card));
 }
 .more {
@@ -805,7 +805,7 @@ function taskFocusSummary(task) {
 .form label {
   margin-top: 6px;
   color: var(--ink-soft);
-  font-size: 13px;
+  font-size: var(--fs-13);
 }
 .form input,
 .form select,
@@ -824,7 +824,7 @@ function taskFocusSummary(task) {
 }
 .error {
   color: var(--danger);
-  font-size: 13px;
+  font-size: var(--fs-13);
 }
 .actions {
   display: flex;

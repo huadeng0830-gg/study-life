@@ -1826,9 +1826,9 @@ defineExpose({ stopBackgroundWork })
 .settings-hint {
   padding: 10px 12px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-12);
   line-height: 1.6;
-  border-radius: 8px;
+  border-radius: var(--radius-8);
   background: var(--bg);
 }
 .setting-section {
@@ -1843,11 +1843,11 @@ defineExpose({ stopBackgroundWork })
   flex-wrap: wrap;
 }
 .setting-head h4 {
-  font-size: 14px;
+  font-size: var(--fs-14);
 }
 .setting-note {
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--fs-11);
 }
 .setting-row {
   display: flex;
@@ -1872,9 +1872,9 @@ defineExpose({ stopBackgroundWork })
   flex: 0 0 30px;
   height: 30px;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-12);
   border: 1px solid var(--border);
-  border-radius: 7px;
+  border-radius: var(--radius-7);
   background: var(--card);
 }
 .setting-del:hover:not(:disabled) {
@@ -1907,7 +1907,7 @@ defineExpose({ stopBackgroundWork })
   flex: 0 0 auto;
   /* 这一行没有自己的底色，落在 Modal 的 var(--card) 上：写死的 #9a6414 在深色只有 3.18:1。 */
   color: var(--warning);
-  font-size: 10.5px;
+  font-size: var(--fs-10-5);
   white-space: nowrap;
 }
 .tab-bar {
@@ -1917,28 +1917,28 @@ defineExpose({ stopBackgroundWork })
 }
 .tab-btn {
   padding: 8px 14px;
-  font-size: 13px;
+  font-size: var(--fs-13);
   color: var(--muted);
   border: 1px solid var(--border);
-  border-radius: 9px;
+  border-radius: var(--radius-9);
   background: var(--card);
 }
 .tab-btn.on {
   color: var(--on-primary, #fff);
-  font-weight: 700;
+  font-weight: var(--fw-700);
   border-color: var(--primary);
   background: var(--primary);
 }
 .error {
   color: var(--danger);
-  font-size: 13px;
+  font-size: var(--fs-13);
 }
 .muted-tip {
-  font-size: 13px;
+  font-size: var(--fs-13);
   color: var(--muted);
   line-height: 1.6;
   background: var(--bg);
-  border-radius: 8px;
+  border-radius: var(--radius-8);
   padding: 10px 12px;
 }
 .settings-toast {
@@ -1951,53 +1951,53 @@ defineExpose({ stopBackgroundWork })
      白条配上亮绿字（约 1.7:1），所以底一起从 --card 混出来。改前浅/深都是 4.49:1
      （本身就差一点不到 AA），改后浅 4.88、深 6.72:1。 */
   color: var(--success);
-  font-size: 12px;
-  border-radius: 8px;
+  font-size: var(--fs-12);
+  border-radius: var(--radius-8);
   background: color-mix(in srgb, var(--success) 10%, var(--card));
 }
 .toast-enter-active, .toast-leave-active { transition: opacity var(--dur-base) var(--ease-standard); }
 .toast-enter-from, .toast-leave-to { opacity: 0; }
 
 /* ---------- 作息方案编辑器 ---------- */
-.plan-picker { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 11px; background: var(--bg-tint); }
+.plan-picker { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-11); background: var(--bg-tint); }
 .plan-picker-row { display: flex; align-items: center; gap: 10px; }
 .plan-picker-row .seg { flex-wrap: wrap; overflow-x: visible; }
-.pp-label { flex: 0 0 44px; color: var(--ink-faint); font-size: 11.5px; font-weight: 700; }
+.pp-label { flex: 0 0 44px; color: var(--ink-faint); font-size: var(--fs-11-5); font-weight: var(--fw-700); }
 .plan-head { display: flex; align-items: center; gap: 10px; margin-top: 4px; }
-.plan-title { font-size: 15px; font-weight: 800; }
+.plan-title { font-size: var(--fs-15); font-weight: var(--fw-800); }
 /* 「有未保存改动」的小圆点是琥珀语义，落在 var(--card) 上：
    写死的 #b86b16 在深色卡片上只有 3.36:1。 */
-.dirty-dot { color: var(--warning); font-size: 11.5px; font-weight: 700; }
+.dirty-dot { color: var(--warning); font-size: var(--fs-11-5); font-weight: var(--fw-700); }
 .plan-tools { display: flex; flex-wrap: wrap; gap: 7px; }
-.plan-tools .btn-sm { padding: 6px 11px; font-size: 12px; }
+.plan-tools .btn-sm { padding: 6px 11px; font-size: var(--fs-12); }
 .tool-panel {
   display: flex;
   flex-direction: column;
   gap: 9px;
   padding: 12px;
   border: 1px dashed var(--border-strong);
-  border-radius: 11px;
+  border-radius: var(--radius-11);
   background: var(--bg-tint);
 }
-.tool-panel-title { color: var(--ink-soft); font-size: 12px; font-weight: 700; }
-.tool-tip { margin: 0; color: var(--ink-faint); font-size: 11px; line-height: 1.5; }
+.tool-panel-title { color: var(--ink-soft); font-size: var(--fs-12); font-weight: var(--fw-700); }
+.tool-tip { margin: 0; color: var(--ink-faint); font-size: var(--fs-11); line-height: 1.5; }
 .copy-list { display: flex; flex-wrap: wrap; gap: 7px; }
-.copy-item { padding: 7px 12px; font-size: 12.5px; border: 1px solid var(--border); border-radius: 9px; background: var(--card); cursor: pointer; transition: border-color var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard), background var(--dur-fast) var(--ease-standard); }
+.copy-item { padding: 7px 12px; font-size: var(--fs-12-5); border: 1px solid var(--border); border-radius: var(--radius-9); background: var(--card); cursor: pointer; transition: border-color var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard), background var(--dur-fast) var(--ease-standard); }
 .copy-item:hover { border-color: var(--primary); color: var(--primary); background: var(--primary-soft); }
 .batch-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .batch-controls select, .batch-controls input { width: auto; min-width: 0; }
-.batch-controls i { color: var(--ink-faint); font-size: 11px; }
+.batch-controls i { color: var(--ink-faint); font-size: var(--fs-11); }
 .diff-list { display: flex; flex-direction: column; gap: 5px; max-height: 240px; overflow-y: auto; }
-.diff-row { display: flex; align-items: center; gap: 8px; font-size: 12px; font-variant-numeric: tabular-nums; }
+.diff-row { display: flex; align-items: center; gap: 8px; font-size: var(--fs-12); font-variant-numeric: tabular-nums; }
 .diff-label { flex: 0 0 76px; overflow: hidden; color: var(--text); white-space: nowrap; text-overflow: ellipsis; }
 .diff-row s { color: var(--ink-faint); }
 .diff-row i { color: var(--primary); font-style: normal; }
-.diff-row b { color: var(--primary); font-weight: 700; }
+.diff-row b { color: var(--primary); font-weight: var(--fw-700); }
 .apply-btn { align-self: flex-start; }
 .gen-apply-row { display: flex; gap: 8px; flex-wrap: wrap; }
 .gen-box {
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-10);
   padding: 12px 14px;
   background: var(--bg-tint);
   display: flex;
@@ -2005,13 +2005,13 @@ defineExpose({ stopBackgroundWork })
   gap: 10px;
 }
 .gen-title {
-  font-size: 13px;
-  font-weight: 700;
+  font-size: var(--fs-13);
+  font-weight: var(--fw-700);
   color: var(--primary);
 }
-.gen-title.as-btn { width: 100%; text-align: left; background: none; border: none; cursor: pointer; font-size: 13px; font-weight: 750; color: var(--text); padding: 0; display: flex; justify-content: space-between; align-items: center; }
+.gen-title.as-btn { width: 100%; text-align: left; background: none; border: none; cursor: pointer; font-size: var(--fs-13); font-weight: var(--fw-750); color: var(--text); padding: 0; display: flex; justify-content: space-between; align-items: center; }
 .gen-title.as-btn:hover { color: var(--primary); }
-.gen-title.as-btn i { font-style: normal; color: var(--ink-faint); font-size: 11px; }
+.gen-title.as-btn i { font-style: normal; color: var(--ink-faint); font-size: var(--fs-11); }
 .gen-grid {
   display: flex;
   flex-wrap: wrap;
@@ -2021,14 +2021,14 @@ defineExpose({ stopBackgroundWork })
   display: flex;
   align-items: center;
   gap: 5px;
-  font-size: 12px;
+  font-size: var(--fs-12);
   color: var(--muted);
 }
 .gen-item input,
 .gen-item select {
   padding: 5px 7px;
-  font-size: 12px;
-  border-radius: 6px;
+  font-size: var(--fs-12);
+  border-radius: var(--radius-6);
 }
 .gen-item .num {
   width: 62px;
@@ -2043,11 +2043,11 @@ defineExpose({ stopBackgroundWork })
   display: inline-flex;
   align-items: center;
   padding: 9px 14px;
-  border-radius: 8px;
+  border-radius: var(--radius-8);
   background: var(--primary);
   color: var(--on-primary, #fff);
-  font-size: 12px;
-  font-weight: 700;
+  font-size: var(--fs-12);
+  font-weight: var(--fw-700);
   cursor: pointer;
 }
 .file-button input { display: none; }
@@ -2061,7 +2061,7 @@ defineExpose({ stopBackgroundWork })
   overflow-x: auto;
   background: var(--card);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-10);
   padding: 3px;
 }
 .seg button {
@@ -2069,8 +2069,8 @@ defineExpose({ stopBackgroundWork })
   border: none;
   background: transparent;
   padding: 7px 14px;
-  border-radius: 8px;
-  font-size: 14px;
+  border-radius: var(--radius-8);
+  font-size: var(--fs-14);
   color: var(--muted);
 }
 .seg button:disabled {
@@ -2080,7 +2080,7 @@ defineExpose({ stopBackgroundWork })
 .seg button.on {
   background: var(--primary);
   color: var(--on-primary, #fff);
-  font-weight: 600;
+  font-weight: var(--fw-600);
 }
 /* 导入结果横幅：绿字 + 写死浅绿底成对写法，底一起从 --card 混出来。 */
 .import-result-banner {
@@ -2089,13 +2089,13 @@ defineExpose({ stopBackgroundWork })
   justify-content: space-between;
   gap: 8px;
   padding: 9px 11px;
-  border-radius: 9px;
+  border-radius: var(--radius-9);
   background: color-mix(in srgb, var(--success) 10%, var(--card));
   color: var(--success);
-  font-size: 12px;
-  font-weight: 700;
+  font-size: var(--fs-12);
+  font-weight: var(--fw-700);
 }
-.btn-xs { flex: 0 0 auto; padding: 4px 8px; font-size: 10.5px; }
+.btn-xs { flex: 0 0 auto; padding: 4px 8px; font-size: var(--fs-10-5); }
 
 /* ---------- 识别结果总览（第一级） ---------- */
 .recognition-overview { display: flex; flex-direction: column; gap: 10px; padding-top: 4px; }
@@ -2108,7 +2108,7 @@ defineExpose({ stopBackgroundWork })
   gap: 10px;
   padding: 9px 11px;
   border: 1px solid var(--border);
-  border-radius: 11px;
+  border-radius: var(--radius-11);
   background: var(--card);
   transition: opacity var(--dur-fast) var(--ease-standard);
 }
@@ -2117,28 +2117,28 @@ defineExpose({ stopBackgroundWork })
 .scheme-check { display: flex; align-items: center; }
 .scheme-check input { width: 16px; height: 16px; accent-color: var(--primary); cursor: pointer; }
 .scheme-card-main { min-width: 0; cursor: pointer; display: flex; flex-direction: column; gap: 3px; }
-.scheme-card-title { font-size: 13px; font-weight: 750; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.scheme-card-status { font-size: 11.5px; line-height: 1.4; }
+.scheme-card-title { font-size: var(--fs-13); font-weight: var(--fw-750); color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.scheme-card-status { font-size: var(--fs-11-5); line-height: 1.4; }
 /* .ok / .warn 是同一组状态色（都在 .scheme-card 的 var(--card) 上），一起换成令牌：
    写死的 #08785a / #9a6414 在深色卡片上分别只有 2.91 / 3.18:1。 */
 .scheme-card-status.ok { color: var(--success); }
 .scheme-card-status.warn { color: var(--warning); }
-.detected-title { margin: 2px 0 0; color: var(--ink-faint); font-size: 11px; }
+.detected-title { margin: 2px 0 0; color: var(--ink-faint); font-size: var(--fs-11); }
 .import-foot { display: flex; justify-content: space-between; gap: 8px; }
 .overview-foot { align-items: center; }
 .overview-foot .btn-primary { margin-left: auto; }
 
 /* ---------- 详情编辑（第二级） ---------- */
-.detail-target { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 11px; background: var(--bg-tint); }
+.detail-target { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-11); background: var(--bg-tint); }
 /* 三种（命中 / 缺失 / 不适用）提示原本只有一条跟主题走；这里把另外两条也成对迁移：
    底色一起从 --card 混出来，深色下才不是两条白条配亮色字。 */
-.assignment-message { margin: 0; padding: 8px 10px; border-radius: 8px; background: color-mix(in srgb, var(--success) 10%, var(--card)); color: var(--success); font-size: 11.5px; line-height: 1.5; }
+.assignment-message { margin: 0; padding: 8px 10px; border-radius: var(--radius-8); background: color-mix(in srgb, var(--success) 10%, var(--card)); color: var(--success); font-size: var(--fs-11-5); line-height: 1.5; }
 .assignment-message.missing { background: color-mix(in srgb, var(--warning) 10%, var(--card)); color: var(--warning); }
 .assignment-message.matched { background: #eef4ff; color: #2456b8; }
 .detail-tabs { align-self: flex-start; }
 .detail-tabs button { padding: 7px 14px; }
 .detail-rows { display: flex; flex-direction: column; gap: 6px; max-height: 46vh;max-height:46dvh; overflow-y: auto; padding-right: 2px; }
-.detail-row { padding: 4px 6px; border-radius: 9px; }
+.detail-row { padding: 4px 6px; border-radius: var(--radius-9); }
 /* 异常行的底/边是写死的琥珀浅色，行内的琥珀文字要跟着令牌走，底就必须一起迁移。
    这里刻意只用 6% 而不是 Toast 那套 10%：这一行里还有 var(--muted) 的间隔箭头，
    10% 混合底会让它在浅色掉到 4.34:1（10% 深底同理 4.31:1）；实测 6% 是同时保住
@@ -2146,42 +2146,42 @@ defineExpose({ stopBackgroundWork })
 .detail-row.issue { padding: 7px; border: 1px solid color-mix(in srgb, var(--warning) 35%, var(--card)); background: color-mix(in srgb, var(--warning) 6%, var(--card)); }
 .detail-row-main { display: grid; grid-template-columns: minmax(0, 1fr) 110px 14px 110px 26px; align-items: center; gap: 6px; }
 .detail-row-main i { color: var(--muted); font-style: normal; text-align: center; }
-.detail-row-main input[type='time'] { padding: 6px; font-size: 12.5px; }
-.detail-row-issues { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px; margin-top: 5px; color: var(--warning); font-size: 11px; line-height: 1.45; }
+.detail-row-main input[type='time'] { padding: 6px; font-size: var(--fs-12-5); }
+.detail-row-issues { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px; margin-top: 5px; color: var(--warning); font-size: var(--fs-11); line-height: 1.45; }
 .detail-foot { display: flex; justify-content: space-between; gap: 10px; }
 .detail-foot .btn-primary { margin-left: auto; }
 .it-row { display: grid; grid-template-columns: 54px minmax(0,1fr); align-items: center; gap: 8px; }
-.it-row > span { color: var(--ink-faint); font-size: 11.5px; font-weight: 700; }
+.it-row > span { color: var(--ink-faint); font-size: var(--fs-11-5); font-weight: var(--fw-700); }
 .choice-chips { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }
-.choice-chips button { padding: 7px 11px; border: 1px solid var(--border); border-radius: 999px; background: var(--card); color: var(--ink-soft); font-size: 12px; cursor: pointer; }
-.choice-chips button.on { border-color: var(--primary); background: var(--primary-soft); color: var(--primary); font-weight: 700; }
+.choice-chips button { padding: 7px 11px; border: 1px solid var(--border); border-radius: var(--radius-pill); background: var(--card); color: var(--ink-soft); font-size: var(--fs-12); cursor: pointer; }
+.choice-chips button.on { border-color: var(--primary); background: var(--primary-soft); color: var(--primary); font-weight: var(--fw-700); }
 .grow { min-width: 0; flex: 1; }
 
 /* ---------- 导入计划（第三级） ---------- */
-.plan-summary { margin: 0 0 4px; font-size: 13px; color: var(--text); }
+.plan-summary { margin: 0 0 4px; font-size: var(--fs-13); color: var(--text); }
 /* .ok-text / .warning-text 是同一句汇总里的状态对，一起换成令牌
    （写死的 #08785a / #9a6414 在深色卡片上只有 2.91 / 3.18:1）。 */
 .plan-summary b.ok-text { color: var(--success); }
 .plan-summary b.warning-text { color: var(--warning); }
 .plan-items { display: flex; flex-direction: column; gap: 8px; max-height: 46vh;max-height:46dvh; overflow-y: auto; padding-right: 2px; }
-.plan-item { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 11px; background: var(--card); }
+.plan-item { display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-11); background: var(--card); }
 /* 原来写死 #e5b4b4 / #fffafa：深色主题下整个 .plan-item 会变成一块白底，
    而它的兄弟条目用的是 var(--card)，同一个列表里两种底色。改成从 --danger 混出来，
    两个主题都跟着主题走。 */
 .plan-item.blocked { border-color: color-mix(in srgb, var(--danger) 30%, var(--card)); background: color-mix(in srgb, var(--danger) 8%, var(--card)); }
 .plan-item-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.plan-item-label { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.plan-action { padding: 5px 8px; font-size: 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--card); color: var(--text); }
-.plan-diff-summary { margin: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; color: var(--ink-soft); font-size: 11.5px; }
-.plan-diff-list { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border-radius: 8px; background: var(--bg-tint); }
-.plan-warning { margin: 0; color: var(--warning); font-size: 11.5px; }
-.plan-blocker { margin: 0; color: var(--danger); font-size: 11.5px; font-weight: 700; }
-.plan-skip-note { margin: 0; color: var(--ink-faint); font-size: 11.5px; }
+.plan-item-label { font-size: var(--fs-13); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.plan-action { padding: 5px 8px; font-size: var(--fs-12); border: 1px solid var(--border); border-radius: var(--radius-8); background: var(--card); color: var(--text); }
+.plan-diff-summary { margin: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; color: var(--ink-soft); font-size: var(--fs-11-5); }
+.plan-diff-list { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border-radius: var(--radius-8); background: var(--bg-tint); }
+.plan-warning { margin: 0; color: var(--warning); font-size: var(--fs-11-5); }
+.plan-blocker { margin: 0; color: var(--danger); font-size: var(--fs-11-5); font-weight: var(--fw-700); }
+.plan-skip-note { margin: 0; color: var(--ink-faint); font-size: var(--fs-11-5); }
 .plan-foot { display: flex; justify-content: flex-end; gap: 10px; margin-top: 12px; }
 
 /* 时间行：上午/下午/晚上分组 */
 .plan-list { display: flex; flex-direction: column; gap: 14px; }
-.section-label { color: var(--ink-faint); font-size: 11px; font-weight: 800; letter-spacing: .06em; margin-bottom: 6px; }
+.section-label { color: var(--ink-faint); font-size: var(--fs-11); font-weight: var(--fw-800); letter-spacing: .06em; margin-bottom: 6px; }
 .plan-section-group { display: flex; flex-direction: column; gap: 6px; }
 .plan-row {
   display: grid;
@@ -2189,16 +2189,16 @@ defineExpose({ stopBackgroundWork })
   align-items: center;
   gap: 10px;
   padding: 6px 8px;
-  border-radius: 10px;
+  border-radius: var(--radius-10);
 }
 .plan-row:nth-child(odd) { background: var(--bg-tint); }
 .plan-row.has-error { background: #fff7f0; box-shadow: inset 2px 0 0 var(--danger); }
-.plan-row-label { overflow: hidden; font-size: 13px; font-weight: 600; white-space: nowrap; text-overflow: ellipsis; }
+.plan-row-label { overflow: hidden; font-size: var(--fs-13); font-weight: var(--fw-600); white-space: nowrap; text-overflow: ellipsis; }
 .plan-row-times { display: flex; align-items: center; gap: 6px; justify-content: flex-end; }
-.plan-row-times input[type='time'] { width: 104px; padding: 6px 7px; font-size: 13px; border-radius: 8px; }
+.plan-row-times input[type='time'] { width: 104px; padding: 6px 7px; font-size: var(--fs-13); border-radius: var(--radius-8); }
 .plan-row-times i { color: var(--muted); font-style: normal; }
-.plan-row-error { color: var(--danger); font-size: 11px; }
-.plan-error-tip { margin: 4px 0 0; color: var(--danger); font-size: 11.5px; }
+.plan-row-error { color: var(--danger); font-size: var(--fs-11); }
+.plan-error-tip { margin: 4px 0 0; color: var(--danger); font-size: var(--fs-11-5); }
 
 /* 草稿操作栏 */
 .draft-bar {
@@ -2223,10 +2223,10 @@ background: linear-gradient(180deg, rgba(255, 255, 255, 0), var(--card) 34%);
 /* 季适用校区 chips */
 .season-block + .season-block { margin-top: 12px; }
 .season-scope { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 2px 0 2px 6px; }
-.scope-label { color: var(--ink-faint); font-size: 11px; font-weight: 700; }
-.scope-note { flex-basis: 100%; color: var(--ink-faint); font-size: 10.5px; }
+.scope-label { color: var(--ink-faint); font-size: var(--fs-11); font-weight: var(--fw-700); }
+.scope-note { flex-basis: 100%; color: var(--ink-faint); font-size: var(--fs-10-5); }
 .conflict-tip { margin: 0 0 8px; }
-.season-date-warning { display: block; margin: 4px 0 0 6px; color: var(--warning); font-size: 10.5px; }
+.season-date-warning { display: block; margin: 4px 0 0 6px; color: var(--warning); font-size: var(--fs-10-5); }
 
 @media (max-width: 520px) {
   .it-row { grid-template-columns: 48px minmax(0, 1fr); }

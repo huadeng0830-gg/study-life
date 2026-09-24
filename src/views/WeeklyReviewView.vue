@@ -145,26 +145,26 @@ function generateReviewNote() {
 </template>
 
 <style scoped>
-.notice-success { margin: 12px 0 0; color: var(--success); font-size: 12px; }
+.notice-success { margin: 12px 0 0; color: var(--success); font-size: var(--fs-12); }
 .review-page { gap: 18px; }
 .review-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
 .review-card { display: flex; flex-direction: column; gap: 6px; min-height: 132px; padding: 17px; }
-.review-kicker { color: var(--ink-faint); font-size: 12px; font-weight: 750; }
-.review-card strong { font-size: 29px; font-weight: 900; letter-spacing: -.02em; }
-.review-card strong small { font-size: 13px; }
-.review-card span, .review-card small { color: var(--ink-soft); font-size: 12px; line-height: 1.45; }
+.review-kicker { color: var(--ink-faint); font-size: var(--fs-12); font-weight: var(--fw-750); }
+.review-card strong { font-size: var(--fs-29); font-weight: var(--fw-900); letter-spacing: -.02em; }
+.review-card strong small { font-size: var(--fs-13); }
+.review-card span, .review-card small { color: var(--ink-soft); font-size: var(--fs-12); line-height: 1.45; }
 .review-primary { border-color: color-mix(in srgb, var(--primary) 34%, var(--border)); background: var(--primary-soft); }
 .next-week-card { padding: 18px; }
 .section-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
-.section-head h2 { font-size: 16px; }
-.section-head p { margin-top: 4px; color: var(--ink-faint); font-size: 12px; }
-.section-head > span { color: var(--primary); font-size: 12px; font-weight: 800; }
+.section-head h2 { font-size: var(--fs-16); }
+.section-head p { margin-top: 4px; color: var(--ink-faint); font-size: var(--fs-12); }
+.section-head > span { color: var(--primary); font-size: var(--fs-12); font-weight: var(--fw-800); }
 .highlight-list { display: flex; flex-direction: column; gap: 7px; margin: 15px 0 0; padding: 0; list-style: none; }
-.highlight-list li { display: grid; grid-template-columns: 42px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 9px; background: var(--bg-tint); }
-.highlight-list li > span { color: var(--primary); font-size: 11px; font-weight: 750; }
-.highlight-list b { overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
-.highlight-list time { color: var(--ink-faint); font-size: 11px; font-variant-numeric: tabular-nums; }
-.empty-hint { margin-top: 16px; color: var(--ink-faint); font-size: 13px; }
+.highlight-list li { display: grid; grid-template-columns: 42px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 9px 10px; border-radius: var(--radius-9); background: var(--bg-tint); }
+.highlight-list li > span { color: var(--primary); font-size: var(--fs-11); font-weight: var(--fw-750); }
+.highlight-list b { overflow: hidden; font-size: var(--fs-13); text-overflow: ellipsis; white-space: nowrap; }
+.highlight-list time { color: var(--ink-faint); font-size: var(--fs-11); font-variant-numeric: tabular-nums; }
+.empty-hint { margin-top: 16px; color: var(--ink-faint); font-size: var(--fs-13); }
 @media (max-width: 900px) { .review-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 520px) { .review-grid { grid-template-columns: 1fr; } .review-card { min-height: auto; } .highlight-list li { grid-template-columns: 38px minmax(0, 1fr); } .highlight-list time { grid-column: 2; } }
 .page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; flex-wrap: wrap; }

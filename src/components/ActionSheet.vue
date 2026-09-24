@@ -183,7 +183,7 @@ function itemDelay(index) {
 }
 .sheet-card {
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: var(--radius-14);
   background: var(--card);
   box-shadow: var(--shadow-md, 0 8px 24px rgba(35, 52, 93, 0.08));
   animation: sheet-item-in var(--dur-base, 220ms) var(--ease-out, cubic-bezier(0.16, 1, 0.3, 1)) both;
@@ -194,13 +194,13 @@ function itemDelay(index) {
   text-align: center;
 }
 .sheet-head h3 {
-  font-size: 13.5px;
-  font-weight: 750;
+  font-size: var(--fs-13-5);
+  font-weight: var(--fw-750);
 }
 .sheet-head p {
   margin-top: 3px;
   color: var(--ink-faint);
-  font-size: 11.5px;
+  font-size: var(--fs-11-5);
   line-height: 1.45;
 }
 .sheet-actions {
@@ -217,7 +217,7 @@ function itemDelay(index) {
   color: var(--text);
   text-align: left;
   border: 0;
-  border-radius: 11px;
+  border-radius: var(--radius-11);
   background: transparent;
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
@@ -225,7 +225,7 @@ function itemDelay(index) {
 }
 .sheet-action + .sheet-action {
   border-top: 1px solid var(--border);
-  border-radius: 0 0 11px 11px;
+  border-radius: 0 0 var(--radius-11) var(--radius-11);
 }
 .sheet-action:hover:not(:disabled) {
   background: var(--bg);
@@ -245,11 +245,11 @@ function itemDelay(index) {
 }
 .sheet-action.primary {
   color: var(--primary);
-  font-weight: 700;
+  font-weight: var(--fw-700);
 }
 .sheet-action-icon {
   flex: 0 0 26px;
-  font-size: 20px;
+  font-size: var(--fs-20);
   line-height: 1;
   text-align: center;
 }
@@ -260,26 +260,26 @@ function itemDelay(index) {
   min-width: 0;
 }
 .sheet-action-copy b {
-  font-size: 14px;
-  font-weight: 650;
+  font-size: var(--fs-14);
+  font-weight: var(--fw-650);
 }
 .sheet-action-copy small {
   color: var(--ink-faint);
-  font-size: 11px;
+  font-size: var(--fs-11);
   line-height: 1.4;
 }
 .sheet-empty {
   padding: 16px;
   color: var(--ink-faint);
-  font-size: 12px;
+  font-size: var(--fs-12);
   text-align: center;
 }
 .sheet-cancel {
   min-height: 50px;
   padding: 14px;
   color: var(--ink-soft);
-  font-size: 14.5px;
-  font-weight: 700;
+  font-size: var(--fs-14-5);
+  font-weight: var(--fw-700);
   touch-action: manipulation;
 }
 .sheet-cancel:hover {

@@ -349,9 +349,9 @@ function daysLabel(day) {
   gap: 4px;
   padding: 12px 14px;
   color: var(--muted);
-  font-size: 13px;
+  font-size: var(--fs-13);
   line-height: 1.55;
-  border-radius: 10px;
+  border-radius: var(--radius-10);
   background: var(--primary-soft);
 }
 .batch-help b {
@@ -379,22 +379,22 @@ function daysLabel(day) {
   display: inline-flex;
   align-items: center;
   padding: 9px 14px;
-  border-radius: 8px;
+  border-radius: var(--radius-8);
   background: var(--primary);
   color: var(--on-primary, #fff);
-  font-size: 12px;
-  font-weight: 700;
+  font-size: var(--fs-12);
+  font-weight: var(--fw-700);
   cursor: pointer;
 }
-.batch-image-upload .crop-button{display:inline-flex;align-items:center;justify-content:center;padding:8px 12px;color:var(--primary);font-size:12px;font-weight:700;border:1px solid var(--primary);border-radius:8px;background:var(--primary-soft);cursor:pointer}.batch-image-upload .crop-button.busy{opacity:.55;cursor:not-allowed}
-.batch-image-upload .excel-button{display:inline-flex;align-items:center;justify-content:center;padding:8px 12px;color:#2268ba;font-size:12px;font-weight:700;border:1px solid #8bb7ec;border-radius:8px;background:#f1f7ff;cursor:pointer}.batch-image-upload .excel-button.busy{opacity:.55;cursor:not-allowed}
+.batch-image-upload .crop-button{display:inline-flex;align-items:center;justify-content:center;padding:8px 12px;color:var(--primary);font-size:var(--fs-12);font-weight:var(--fw-700);border:1px solid var(--primary);border-radius:var(--radius-8);background:var(--primary-soft);cursor:pointer}.batch-image-upload .crop-button.busy{opacity:.55;cursor:not-allowed}
+.batch-image-upload .excel-button{display:inline-flex;align-items:center;justify-content:center;padding:8px 12px;color:#2268ba;font-size:var(--fs-12);font-weight:var(--fw-700);border:1px solid #8bb7ec;border-radius:var(--radius-8);background:#f1f7ff;cursor:pointer}.batch-image-upload .excel-button.busy{opacity:.55;cursor:not-allowed}
 .file-button.busy {
   pointer-events: none;
   opacity: 0.7;
 }
 .ocr-hint {
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--fs-11);
   margin: 0;
 }
 /* OCR 结果提示：绿字 + 写死的浅绿底/边成对出现，三者一起改成令牌混色，
@@ -403,27 +403,27 @@ function daysLabel(day) {
   margin: 2px 0 0;
   padding: 8px 10px;
   color: var(--success);
-  font-size: 11px;
+  font-size: var(--fs-11);
   line-height: 1.55;
   border: 1px solid color-mix(in srgb, var(--success) 35%, var(--card));
-  border-radius: 8px;
+  border-radius: var(--radius-8);
   background: color-mix(in srgb, var(--success) 10%, var(--card));
 }
 .batch-preview-wrap {
   overflow: hidden;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-10);
 }
 .batch-summary {
   display: flex;
   align-items: center;
   gap: 12px;
   padding: 10px 12px;
-  font-size: 12px;
+  font-size: var(--fs-12);
   border-bottom: 1px solid var(--border);
   background: var(--bg-tint);
 }
-.batch-summary b { font-size: 12px; }
+.batch-summary b { font-size: var(--fs-12); }
 .ok-text { color: var(--success); }
 .error-text { color: var(--danger); }
 /* #b88921 与同栏的 .ok-text 是同一对「可导入 / 需确认」语义色，写死的琥珀在浅色
@@ -437,7 +437,7 @@ function daysLabel(day) {
   width: 100%;
   min-width: 760px;
   border-collapse: collapse;
-  font-size: 12px;
+  font-size: var(--fs-12);
 }
 .batch-table th,
 .batch-table td {
@@ -482,10 +482,10 @@ function daysLabel(day) {
   padding: 14px;
   color: var(--success);
   border: 1px solid color-mix(in srgb, var(--success) 35%, var(--card));
-  border-radius: 12px;
+  border-radius: var(--radius-12);
   background: color-mix(in srgb, var(--success) 6%, var(--card));
 }
-.batch-success span { color: var(--muted); font-size: 12px; line-height: 1.55; }
+.batch-success span { color: var(--muted); font-size: var(--fs-12); line-height: 1.55; }
 .batch-success>div { display: flex; justify-content: flex-end; gap: 8px; }
 .error-message { display: flex; align-items: center; gap: 6px; padding: 6px 8px; }
 .review-message { display: flex; align-items: center; gap: 6px; padding: 6px 8px; color: var(--warning); }
@@ -496,11 +496,11 @@ function daysLabel(day) {
   padding: 12px;
   color: var(--warning);
   border: 1px solid color-mix(in srgb, var(--warning) 35%, var(--card));
-  border-radius: 10px;
+  border-radius: var(--radius-10);
   background: color-mix(in srgb, var(--warning) 10%, var(--card));
 }
-.review-checklist header b { display: block; color: var(--warning); font-size: 13px; }
-.review-checklist header span { display: block; margin-top: 3px; font-size: 11px; line-height: 1.5; }
+.review-checklist header b { display: block; color: var(--warning); font-size: var(--fs-13); }
+.review-checklist header span { display: block; margin-top: 3px; font-size: var(--fs-11); line-height: 1.5; }
 .review-checklist ol {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -511,20 +511,20 @@ function daysLabel(day) {
   overflow: auto;
   list-style: none;
 }
-.review-checklist li { min-width: 0; padding: 9px 10px; border: 1px solid color-mix(in srgb, var(--warning) 35%, var(--card)); border-radius: 8px; background: var(--card); }
+.review-checklist li { min-width: 0; padding: 9px 10px; border: 1px solid color-mix(in srgb, var(--warning) 35%, var(--card)); border-radius: var(--radius-8); background: var(--card); }
 .review-course-title { display: flex; align-items: center; gap: 8px; }
-.review-course-title strong { overflow: hidden; color: var(--text); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-.review-course-title span { flex: none; margin-left: auto; color: var(--muted); font-size: 10px; }
+.review-course-title strong { overflow: hidden; color: var(--text); font-size: var(--fs-12); text-overflow: ellipsis; white-space: nowrap; }
+.review-course-title span { flex: none; margin-left: auto; color: var(--muted); font-size: var(--fs-10); }
 .review-course-title button,
-.review-edit-actions button { flex: none; padding: 4px 7px; color: var(--warning); font-size: 10px; font-weight: 700; border: 1px solid color-mix(in srgb, var(--warning) 35%, var(--card)); border-radius: 6px; background: color-mix(in srgb, var(--warning) 10%, var(--card)); cursor: pointer; }
-.review-checklist p { margin: 5px 0; color: var(--muted); font-size: 10px; line-height: 1.5; }
-.review-checklist em { color: var(--warning); font-size: 10px; font-style: normal; font-weight: 700; line-height: 1.5; }
+.review-edit-actions button { flex: none; padding: 4px 7px; color: var(--warning); font-size: var(--fs-10); font-weight: var(--fw-700); border: 1px solid color-mix(in srgb, var(--warning) 35%, var(--card)); border-radius: var(--radius-6); background: color-mix(in srgb, var(--warning) 10%, var(--card)); cursor: pointer; }
+.review-checklist p { margin: 5px 0; color: var(--muted); font-size: var(--fs-10); line-height: 1.5; }
+.review-checklist em { color: var(--warning); font-size: var(--fs-10); font-style: normal; font-weight: var(--fw-700); line-height: 1.5; }
 .review-edit-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 7px; margin-top: 9px; }
 .review-edit-grid label { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
 .review-edit-grid label.wide { grid-column: span 2; }
-.review-edit-grid label span { color: var(--muted); font-size: 9px; }
+.review-edit-grid label span { color: var(--muted); font-size: var(--fs-9); }
 .review-edit-grid input,
-.review-edit-grid select { width: 100%; min-width: 0; box-sizing: border-box; padding: 6px 7px; font-size: 11px; border: 1px solid var(--border); border-radius: 6px; background: var(--card); }
+.review-edit-grid select { width: 100%; min-width: 0; box-sizing: border-box; padding: 6px 7px; font-size: var(--fs-11); border: 1px solid var(--border); border-radius: var(--radius-6); background: var(--card); }
 .review-edit-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 8px; }
 .review-edit-actions button.save { color: var(--on-primary, #fff); border-color: var(--primary); background: var(--primary); }
 .review-edit-actions button:disabled { cursor: not-allowed; opacity: .5; }
@@ -544,7 +544,7 @@ function daysLabel(day) {
   .batch-mobile-card {
     padding: 10px;
     border: 1px solid var(--border);
-    border-radius: 10px;
+    border-radius: var(--radius-10);
     background: var(--card);
   }
   .batch-mobile-card.invalid { border-color: #f3b7b7; background: #fff7f7; }
@@ -558,19 +558,19 @@ function daysLabel(day) {
     align-items: center;
     gap: 7px;
   }
-  .batch-mobile-head span { color: var(--muted); font-size: 10px; }
+  .batch-mobile-head span { color: var(--muted); font-size: var(--fs-10); }
   .batch-mobile-head b {
     overflow: hidden;
-    font-size: 13px;
+    font-size: var(--fs-13);
     text-overflow: ellipsis;
     white-space: nowrap;
   }
   .batch-mobile-head em {
     padding: 2px 5px;
     color: var(--danger);
-    font-size: 9px;
+    font-size: var(--fs-9);
     font-style: normal;
-    border-radius: 5px;
+    border-radius: var(--radius-5);
     background: color-mix(in srgb, var(--danger) 12%, var(--card));
   }
   /* 与上面「需修改」的 em 完全对称：同样是「语义字 + 同色浅底」，上面已经用
@@ -583,15 +583,15 @@ function daysLabel(day) {
     margin: 9px 0 0;
   }
   .batch-mobile-card dl>div { min-width: 0; }
-  .batch-mobile-card dt { color: var(--muted); font-size: 9px; }
+  .batch-mobile-card dt { color: var(--muted); font-size: var(--fs-9); }
   .batch-mobile-card dd {
     overflow: hidden;
     margin: 1px 0 0;
-    font-size: 11px;
+    font-size: var(--fs-11);
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .batch-mobile-card p { margin: 8px 0 0; color: var(--danger); font-size: 10px; line-height: 1.5; }
+  .batch-mobile-card p { margin: 8px 0 0; color: var(--danger); font-size: var(--fs-10); line-height: 1.5; }
   .batch-success>div { display: grid; grid-template-columns: 1fr 1fr; }
 }
 </style>

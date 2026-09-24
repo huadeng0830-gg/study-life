@@ -94,8 +94,8 @@ function clear() {
 }
 .time-wheel-preview {
   color: var(--primary);
-  font-size: 30px;
-  font-weight: 800;
+  font-size: var(--fs-30);
+  font-weight: var(--fw-800);
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.04em;
   text-align: center;
@@ -116,18 +116,18 @@ function clear() {
 }
 .time-wheel-unit {
   color: var(--ink-faint);
-  font-size: 11px;
+  font-size: var(--fs-11);
 }
 .time-wheel-colon {
   flex: 0 0 auto;
   padding-bottom: 18px;
   color: var(--muted);
-  font-size: 24px;
-  font-weight: 800;
+  font-size: var(--fs-24);
+  font-weight: var(--fw-800);
 }
 .time-wheel-hint {
   color: var(--ink-faint);
-  font-size: 11px;
+  font-size: var(--fs-11);
   line-height: 1.5;
   text-align: center;
 }

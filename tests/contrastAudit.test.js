@@ -11,6 +11,7 @@ import {
   crossRuleContrastOffenders,
   focusIndicatorOffenders,
   fontSizeLowerBoundPx,
+  fontWeightTokenValue,
   gradientSurfaceOffenders,
   inlineSurfaceOffenders,
   largeTextThreshold,
@@ -718,13 +719,27 @@ describe('聚焦指示器的非文本对比度（第四十五轮，WCAG 1.4.11�
       expect(minOf('14px')).toBe(4.5)
     })
 
-    it('读不准就从严：rem / em / % / var() / 没写，一律按正文', () => {
+    it('读不准就从严：rem / em / % / 未登记 var() / 没写，一律按正文', () => {
       expect(minOf('1.5rem')).toBe(4.5)
       expect(minOf('2em')).toBe(4.5)
       expect(minOf('150%')).toBe(4.5)
       expect(minOf('var(--fs-xl)')).toBe(4.5)
       expect(minOf(undefined)).toBe(4.5)
       expect(largeTextThreshold(undefined)).toBe(4.5)
+    })
+
+    it('阶段 4：:root 登记过的 --fs-*/--fw-* 刻度令牌可静态解析', () => {
+      expect(fontSizeLowerBoundPx('var(--fs-24)')).toBe(24)
+      expect(fontSizeLowerBoundPx('var(--fs-19)')).toBe(19)
+      expect(minOf('var(--fs-24)')).toBe(3)
+      expect(minOf('var(--fs-19)', 'var(--fw-700)')).toBe(3)
+      expect(minOf('var(--fs-19)', 'var(--fw-400)')).toBe(4.5)
+      expect(minOf('var(--fs-14)')).toBe(4.5)
+      expect(fontWeightTokenValue('var(--fw-700)')).toBe('700')
+      expect(fontWeightTokenValue('700')).toBe('700')
+      // 别名指针（--fs-body → var(--fs-14)）不递归猜，读不准仍从严
+      expect(fontSizeLowerBoundPx('var(--fs-body)')).toBe(null)
+      expect(minOf('var(--fs-body)')).toBe(4.5)
     })
 
     it('只认"数学上保证"的下界：clamp / max / calc 加速算大字，减法与 min 不算', () => {

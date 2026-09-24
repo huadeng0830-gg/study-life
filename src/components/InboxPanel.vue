@@ -25,16 +25,16 @@ const visibleNotes = computed(() => expanded.value ? filteredNotes.value : filte
 .inbox-row:first-of-type { border-top: 0; }
 .inbox-row > div:first-child { display: flex; flex: 1; flex-direction: column; gap: 2px; min-width: 0; }
 .inbox-row b, .inbox-row span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.inbox-row b { font-size: 13px; }
-.inbox-row span { color: var(--ink-soft); font-size: 11.5px; }
-.inbox-row small { color: var(--primary); font-size: 10.5px; }
+.inbox-row b { font-size: var(--fs-13); }
+.inbox-row span { color: var(--ink-soft); font-size: var(--fs-11-5); }
+.inbox-row small { color: var(--primary); font-size: var(--fs-10-5); }
 .inbox-tags { display: flex; flex-wrap: wrap; gap: 5px; margin: -2px 0 5px; }
-.inbox-tags button { padding: 4px 7px; color: var(--ink-soft); font-size: 10.5px; font-weight: 700; border: 1px solid var(--border); border-radius: 999px; background: var(--bg); }
+.inbox-tags button { padding: 4px 7px; color: var(--ink-soft); font-size: var(--fs-10-5); font-weight: var(--fw-700); border: 1px solid var(--border); border-radius: var(--radius-pill); background: var(--bg); }
 .inbox-tags button.on { color: var(--primary); border-color: var(--primary); background: var(--primary-soft); }
-.inbox-empty { margin: 10px 0 0; color: var(--ink-soft); font-size: 12px; }
+.inbox-empty { margin: 10px 0 0; color: var(--ink-soft); font-size: var(--fs-12); }
 .inbox-actions { display: flex; gap: 4px; }
-.inbox-actions button { display: inline-flex; align-items: center; justify-content: center; min-width: 24px; min-height: 24px; padding: 4px 8px; color: var(--primary); font-size: 10.5px; font-weight: 750; white-space: nowrap; border: 0; border-radius: 6px; background: var(--primary-soft); }
+.inbox-actions button { display: inline-flex; align-items: center; justify-content: center; min-width: 24px; min-height: 24px; padding: 4px 8px; color: var(--primary); font-size: var(--fs-10-5); font-weight: var(--fw-750); white-space: nowrap; border: 0; border-radius: var(--radius-6); background: var(--primary-soft); }
 .inbox-actions button.quiet { color: var(--ink-soft); background: var(--bg-tint); }
-.inbox-toggle { align-self: flex-start; margin-top: 8px; padding: 5px 7px; color: var(--primary); font-size: 11px; font-weight: 750; border: 0; border-radius: 6px; background: var(--primary-soft); }
+.inbox-toggle { align-self: flex-start; margin-top: 8px; padding: 5px 7px; color: var(--primary); font-size: var(--fs-11); font-weight: var(--fw-750); border: 0; border-radius: var(--radius-6); background: var(--primary-soft); }
 @media (max-width: 520px) { .inbox-row { align-items: flex-start; flex-direction: column; padding: 9px 0; } .inbox-actions { width: 100%; } .inbox-actions button { flex: 1; } }
 </style>

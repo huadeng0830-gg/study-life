@@ -93,8 +93,8 @@ const typeClass = computed(() => ({
   gap: 10px;
   max-width: min(560px, calc(100vw - 32px));
   padding: 10px 14px;
-  border-radius: 10px;
-  font-size: 13px;
+  border-radius: var(--radius-10);
+  font-size: var(--fs-13);
   box-shadow: var(--shadow-md);
   pointer-events: auto;
 }
@@ -141,10 +141,10 @@ const typeClass = computed(() => ({
   min-width: 24px;
   min-height: 24px;
   padding: 4px 9px;
-  font-size: 11.5px;
-  font-weight: 700;
+  font-size: var(--fs-11-5);
+  font-weight: var(--fw-700);
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--radius-6);
   cursor: pointer;
 }
 .toast-undo,
@@ -159,10 +159,10 @@ const typeClass = computed(() => ({
   display: grid;
   place-items: center;
   color: var(--ink-faint);
-  font-size: 14px;
+  font-size: var(--fs-14);
   line-height: 1;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-6);
   background: transparent;
 }
 .toast-close:hover {

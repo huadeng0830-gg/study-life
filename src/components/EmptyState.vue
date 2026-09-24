@@ -47,9 +47,9 @@ const emit = defineEmits(['primary', 'secondary'])
   width: 44px;
   height: 44px;
   color: var(--primary);
-  font-size: 21px;
+  font-size: var(--fs-21);
   border: 1px solid var(--border);
-  border-radius: 13px;
+  border-radius: var(--radius-13);
   background: var(--bg-tint);
 }
 
@@ -88,19 +88,19 @@ const emit = defineEmits(['primary', 'secondary'])
   max-width: 420px;
 }
 .es-copy h3 {
-  font-size: 14.5px;
-  font-weight: 700;
+  font-size: var(--fs-14-5);
+  font-weight: var(--fw-700);
 }
 .es-copy p {
   margin-top: 3px;
   color: var(--ink-soft);
-  font-size: 12.5px;
+  font-size: var(--fs-12-5);
   line-height: 1.55;
 }
 .es-copy small {
   margin-top: 3px;
   color: var(--ink-faint);
-  font-size: 11px;
+  font-size: var(--fs-11);
 }
 .es-actions {
   display: flex;

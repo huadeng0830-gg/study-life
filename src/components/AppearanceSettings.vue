@@ -615,7 +615,7 @@ const previewStyle = computed(() => ({
 }
 .appearance-tabs {
   background:var(--bg);
-  border-radius:10px;
+  border-radius:var(--radius-10);
   gap:5px;
   margin-bottom:14px;
   padding:4px;
@@ -624,10 +624,10 @@ const previewStyle = computed(() => ({
   color:var(--muted);
   background:0 0;
   border:0;
-  border-radius:7px;
+  border-radius:var(--radius-7);
   flex:1;
   padding:9px;
-  font-weight:700}
+  font-weight:var(--fw-700)}
 .appearance-tabs button.on {
   background:var(--card);
   color:var(--primary);
@@ -646,7 +646,7 @@ const previewStyle = computed(() => ({
   cursor:pointer;
   transition:all var(--dur-fast) var(--ease-standard);
   border:2px solid #0000;
-  border-radius:12px;
+  border-radius:var(--radius-12);
   flex-direction:column;
   align-items:center;
   gap:6px;
@@ -661,14 +661,14 @@ const previewStyle = computed(() => ({
   width:36px;
   height:36px;
   box-shadow:0 0 0 2px #fff,0 0 0 3px var(--border);
-  border-radius:50%}
+  border-radius:var(--radius-circle)}
 .theme-name {
-  font-size:12px;
-  font-weight:600}
+  font-size:var(--fs-12);
+  font-weight:var(--fw-600)}
 .custom-color-picker {
   border:1px dashed var(--border);
   background:var(--bg);
-  border-radius:10px;
+  border-radius:var(--radius-10);
   padding:10px}
 .custom-color-picker label {
   color:var(--text);
@@ -678,7 +678,7 @@ const previewStyle = computed(() => ({
 .custom-color-picker input {
   cursor:pointer;
   border:none;
-  border-radius:8px;
+  border-radius:var(--radius-8);
   width:44px;
   height:44px}
 .divider {
@@ -698,13 +698,13 @@ const previewStyle = computed(() => ({
   color:var(--muted);
   text-align:left;
   border:1px solid #0000;
-  border-radius:8px;
+  border-radius:var(--radius-8);
   padding:9px 11px}
 .target-list button.on,.mode-row button.on {
   border-color:var(--primary);
   background:var(--primary-soft);
   color:var(--primary);
-  font-weight:700}
+  font-weight:var(--fw-700)}
 .wallpaper-editor {
   flex-direction:column;
   gap:12px;
@@ -721,7 +721,7 @@ const previewStyle = computed(() => ({
   display:flex!important}
 .wallpaper-preview {
   background:var(--border);
-  border-radius:10px;
+  border-radius:var(--radius-10);
   min-height:200px;
   position:relative;
   overflow:hidden}
@@ -747,17 +747,17 @@ const previewStyle = computed(() => ({
   backdrop-filter:blur(4px);
   color:#1f2937;
   background:#ffffffe6;
-  border-radius:8px;
+  border-radius:var(--radius-8);
   padding:8px 12px;
   position:absolute;
   bottom:12px;
   left:12px}
 .preview-card b {
-  font-size:13px;
+  font-size:var(--fs-13);
   display:block}
 .preview-card span {
   color:#6b7280;
-  font-size:11px;
+  font-size:var(--fs-11);
   display:block}
 .upload-row {
   gap:8px;
@@ -767,12 +767,12 @@ const previewStyle = computed(() => ({
   color:var(--on-primary,#fff);
   cursor:pointer;
   transition:transform var(--dur-instant) var(--ease-standard), background var(--dur-fast) var(--ease-standard);
-  border-radius:8px;
+  border-radius:var(--radius-8);
   flex:1;
   justify-content:center;
   align-items:center;
   padding:11px 14px;
-  font-weight:600;
+  font-weight:var(--fw-600);
   display:flex}
 .file-button:active {
   transform:scale(.97)}
@@ -784,7 +784,7 @@ const previewStyle = computed(() => ({
   border:1px solid var(--border);
   background:var(--bg);
   color:var(--text);
-  border-radius:8px;
+  border-radius:var(--radius-8);
   align-items:center;
   gap:8px;
   padding:8px 10px;
@@ -792,31 +792,31 @@ const previewStyle = computed(() => ({
 .control-grid>label>b {
   color:var(--muted);
   margin-left:auto;
-  font-size:11px}
+  font-size:var(--fs-11)}
 .control-grid>label input[type=range] {
   background:var(--border);
   -webkit-appearance:none;
-  border-radius:2px;
+  border-radius:var(--radius-2);
   flex:1;
   height:4px}
 .control-grid>label input[type=range]::-webkit-slider-thumb {
   -webkit-appearance:none;
   background:var(--primary);
   cursor:pointer;
-  border-radius:50%;
+  border-radius:var(--radius-circle);
   width:16px;
   height:16px}
 .control-grid>label select {
   border:1px solid var(--border);
   background:var(--card);
   color:var(--text);
-  border-radius:6px;
+  border-radius:var(--radius-6);
   flex:1;
   padding:6px 10px}
 .wallpaper-actions {
   border:1px solid var(--border);
   background:var(--bg);
-  border-radius:8px;
+  border-radius:var(--radius-8);
   flex-direction:column;
   gap:8px;
   padding:10px;
@@ -824,26 +824,26 @@ const previewStyle = computed(() => ({
 .action-hint {
   color:var(--muted);
   margin-top:2px;
-  font-size:11px;
+  font-size:var(--fs-11);
   display:block}
 .color-row {
   border:1px solid var(--border);
   background:var(--bg);
-  border-radius:8px;
+  border-radius:var(--radius-8);
   align-items:center;
   gap:8px;
   padding:8px 10px;
   display:flex}
 .color-swatch {
   border:1px solid var(--border);
-  border-radius:4px;
+  border-radius:var(--radius-4);
   width:24px;
   height:24px}
 .color-row input {
   cursor:pointer;
   background:0 0;
   border:none;
-  border-radius:4px;
+  border-radius:var(--radius-4);
   width:32px;
   height:32px;
   padding:0}
@@ -861,7 +861,7 @@ const previewStyle = computed(() => ({
   width:100%;
   color:var(--text);
   resize:vertical;
-  border-radius:8px;
+  border-radius:var(--radius-8);
   padding:10px;
   font-family:inherit}
 .quotes-editor input[type=text] {
@@ -869,7 +869,7 @@ const previewStyle = computed(() => ({
   background:var(--bg);
   width:100%;
   color:var(--text);
-  border-radius:6px;
+  border-radius:var(--radius-6);
   padding:8px 10px}
 .layout-editor {
   flex-direction:column;
@@ -878,12 +878,12 @@ const previewStyle = computed(() => ({
 .layout-editor>div>p {
   color:var(--muted);
   margin:4px 0 8px;
-  font-size:12px}
+  font-size:var(--fs-12)}
 .module-sort>div {
   border:1px solid var(--border);
   background:var(--bg);
   cursor:move;
-  border-radius:8px;
+  border-radius:var(--radius-8);
   grid-template-columns:22px 1fr auto 30px 30px;
   align-items:center;
   gap:8px;
@@ -891,12 +891,12 @@ const previewStyle = computed(() => ({
   display:grid}
 
 .module-sort label {
-  font-size:12px}
+  font-size:var(--fs-12)}
 .module-sort button {
   border:1px solid var(--border);
   background:var(--bg);
   color:var(--muted);
-  border-radius:4px;
+  border-radius:var(--radius-4);
   padding:4px 8px}
 .module-sort button:disabled {
   opacity:.3}
@@ -910,7 +910,7 @@ const previewStyle = computed(() => ({
   cursor:pointer;
   transition:all var(--dur-fast) var(--ease-standard);
   border:2px solid #0000;
-  border-radius:10px;
+  border-radius:var(--radius-10);
   flex-direction:column;
   align-items:center;
   gap:6px;
@@ -922,7 +922,7 @@ const previewStyle = computed(() => ({
   border-color:var(--primary);
   background:var(--primary-soft)}
 .skin-options label span {
-  font-size:20px}
+  font-size:var(--fs-20)}
 .swipe-editor {
   flex-direction:column;
   gap:16px;
@@ -932,11 +932,11 @@ const previewStyle = computed(() => ({
 .swipe-intro p {
   color:var(--muted);
   margin:0;
-  font-size:12px}
+  font-size:var(--fs-12)}
 .swipe-category {
   border:1px solid var(--border);
   background:var(--bg);
-  border-radius:10px;
+  border-radius:var(--radius-10);
   flex-direction:column;
   gap:8px;
   padding:12px;
@@ -946,12 +946,12 @@ const previewStyle = computed(() => ({
   gap:10px;
   display:flex}
 .swipe-category-icon {
-  font-size:20px}
+  font-size:var(--fs-20)}
 .swipe-category-header b {
   display:block}
 .swipe-category-header span {
   color:var(--muted);
-  font-size:12px;
+  font-size:var(--fs-12);
   display:block}
 .swipe-direction-row {
   grid-template-columns:1fr 1fr;
@@ -960,15 +960,15 @@ const previewStyle = computed(() => ({
 .swipe-action-card {
   border:1px solid var(--border);
   background:var(--card);
-  border-radius:8px;
+  border-radius:var(--radius-8);
   flex-direction:column;
   gap:8px;
   padding:12px;
   display:flex}
 .swipe-action-title {
   color:var(--text);
-  font-size:13px;
-  font-weight:600}
+  font-size:var(--fs-13);
+  font-weight:var(--fw-600)}
 .swipe-action-select-wrap {
   align-items:center;
   display:flex}
@@ -978,17 +978,17 @@ const previewStyle = computed(() => ({
   cursor:pointer;
   transition:border-color var(--dur-fast) var(--ease-standard);
   border:2px solid #0000;
-  border-radius:6px;
+  border-radius:var(--radius-6);
   flex:1;
   padding:8px 10px;
-  font-weight:600}
+  font-weight:var(--fw-600)}
 .swipe-action-select:hover {
   border-color:var(--border)}
 .privacy-note {
   color:var(--muted);
   text-align:center;
   margin:8px 0 0;
-  font-size:11px}
+  font-size:var(--fs-11)}
 @media (max-width:760px) {
   .appearance-tabs {
   grid-template-columns:1fr 1fr;
@@ -1024,7 +1024,7 @@ const previewStyle = computed(() => ({
   border:1px solid var(--border);
   background:var(--bg);
   transition:box-shadow var(--dur-fast) var(--ease-standard), border-color var(--dur-fast) var(--ease-standard);
-  border-radius:9px;
+  border-radius:var(--radius-9);
   align-items:center;
   gap:8px;
   padding:2px;
@@ -1040,7 +1040,7 @@ const previewStyle = computed(() => ({
   justify-content:space-between;
   align-items:center;
   padding:0 10px;
-  font-size:13px;
+  font-size:var(--fs-13);
   display:flex}
 .module-row-main input {
   width:18px;
@@ -1054,9 +1054,9 @@ const previewStyle = computed(() => ({
   cursor:grab;
   touch-action:none;
   border:0;
-  border-radius:7px;
+  border-radius:var(--radius-7);
   place-items:center;
-  font-size:18px;
+  font-size:var(--fs-18);
   display:grid}
 .module-drag:hover {
   color:var(--primary);
@@ -1065,17 +1065,17 @@ const previewStyle = computed(() => ({
   align-self:flex-start;
   margin-top:2px;
   padding:6px 12px;
-  font-size:12px}
+  font-size:var(--fs-12)}
 .performance-row {
   border:1px solid var(--border);
   background:var(--bg);
   color:var(--text);
-  border-radius:8px;
+  border-radius:var(--radius-8);
   justify-content:space-between;
   align-items:center;
   gap:12px;
   padding:10px;
-  font-size:12px;
+  font-size:var(--fs-12);
   display:flex}
 .performance-row span {
   flex-direction:column;
@@ -1097,7 +1097,7 @@ const previewStyle = computed(() => ({
   display:flex}
 .schedule-style small {
   color:var(--muted);
-  font-size:12px}
+  font-size:var(--fs-12)}
 
 </style>
 

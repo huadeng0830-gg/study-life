@@ -568,7 +568,7 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 6px;
   color: var(--ink-soft);
-  font-size: 12.5px;
+  font-size: var(--fs-12-5);
   cursor: pointer;
   white-space: nowrap;
 }
@@ -624,9 +624,9 @@ onBeforeUnmount(() => {
 .repeat-tag {
   padding: 2.5px 8px;
   color: var(--ink-faint);
-  font-size: 10.5px;
-  font-weight: 650;
-  border-radius: 6px;
+  font-size: var(--fs-10-5);
+  font-weight: var(--fw-650);
+  border-radius: var(--radius-6);
   background: var(--bg-tint);
 }
 .category { color: var(--primary); background: var(--primary-soft); }
@@ -638,11 +638,11 @@ onBeforeUnmount(() => {
   height: 24px;
   flex: 0 0 auto;
   color: var(--ink-faint);
-  font-size: 13px;
-  font-weight: 900;
+  font-size: var(--fs-13);
+  font-weight: var(--fw-900);
   letter-spacing: 0.05em;
   border: none;
-  border-radius: 7px;
+  border-radius: var(--radius-7);
   background: transparent;
   cursor: pointer;
   transition: background var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard);
@@ -658,17 +658,17 @@ onBeforeUnmount(() => {
   min-width: 118px;
   padding: 5px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-10);
   background: var(--card);
   box-shadow: var(--shadow-md);
 }
 .card-menu button {
   padding: 8px 11px;
   color: var(--text);
-  font-size: 12.5px;
+  font-size: var(--fs-12-5);
   text-align: left;
   border: none;
-  border-radius: 7px;
+  border-radius: var(--radius-7);
   background: transparent;
   cursor: pointer;
   transition: background var(--dur-fast) var(--ease-standard);
@@ -692,25 +692,25 @@ onBeforeUnmount(() => {
   width: 60px;
   height: 68px;
   flex: 0 0 60px;
-  border-radius: 16px;
+  border-radius: var(--radius-16);
   background: linear-gradient(160deg, #eef2ff 0%, #f4f0ff 100%);
 }
 /* 渐变底取 #eef2ff→#f4f0ff 的中间值 #f1f1ff 作对比度基准；
    #3d4ec0 在其上 6.15:1（AA 正文 4.5 余量充足）。原 #8a94d8 只有 2.57:1。 */
-.date-tile small { color: #3d4ec0; font-size: 11px; font-weight: 700; line-height: 1.2; }
-.date-tile b { color: #3d4ec0; font-size: 23px; font-weight: 900; line-height: 1.15; letter-spacing: 0.01em; }
+.date-tile small { color: #3d4ec0; font-size: var(--fs-11); font-weight: var(--fw-700); line-height: 1.2; }
+.date-tile b { color: #3d4ec0; font-size: var(--fs-23); font-weight: var(--fw-900); line-height: 1.15; letter-spacing: 0.01em; }
 .exam-info { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .name {
   overflow: hidden;
   font-size: clamp(19px, 1.6vw, 23px);
-  font-weight: 750;
+  font-weight: var(--fw-750);
   letter-spacing: -0.01em;
   line-height: 1.25;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.date { color: var(--ink-soft); font-size: 13px; font-variant-numeric: tabular-nums; }
-.loc { overflow: hidden; color: var(--ink-faint); font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
+.date { color: var(--ink-soft); font-size: var(--fs-13); font-variant-numeric: tabular-nums; }
+.loc { overflow: hidden; color: var(--ink-faint); font-size: var(--fs-11-5); text-overflow: ellipsis; white-space: nowrap; }
 
 /* 剩余天数：整张卡最显眼的信息 */
 .count {
@@ -721,22 +721,22 @@ onBeforeUnmount(() => {
   flex: 0 0 auto;
   color: var(--primary);
 }
-.count small { color: var(--ink-faint); font-size: 11px; font-weight: 700; }
+.count small { color: var(--ink-faint); font-size: var(--fs-11); font-weight: var(--fw-700); }
 .count .num {
   font-size: clamp(42px, 3.6vw, 50px);
-  font-weight: 900;
+  font-weight: var(--fw-900);
   line-height: 1.02;
   letter-spacing: -0.02em;
   font-variant-numeric: tabular-nums;
   transition: opacity var(--dur-base) var(--ease-standard);
 }
-.count .num.tiny { font-size: 22px; letter-spacing: 0; }
-.count .unit { margin-top: 2px; color: var(--ink-soft); font-size: 12px; font-weight: 700; }
-.countdown-human { display: block; max-width: 120px; color: inherit; font-size: 14px; font-weight: 800; line-height: 1.35; text-align: right; }
+.count .num.tiny { font-size: var(--fs-22); letter-spacing: 0; }
+.count .unit { margin-top: 2px; color: var(--ink-soft); font-size: var(--fs-12); font-weight: var(--fw-700); }
+.countdown-human { display: block; max-width: 120px; color: inherit; font-size: var(--fs-14); font-weight: var(--fw-800); line-height: 1.35; text-align: right; }
 .count.hot { color: var(--danger); }
 .count.hot .unit { color: var(--danger); }
 .count.past { color: var(--ink-faint); }
-.count.past .num { font-size: 17px; }
+.count.past .num { font-size: var(--fs-17); }
 
 /* 底部轻量时间轴：今天 ── ● 目标日 */
 .timeline {
@@ -745,13 +745,13 @@ onBeforeUnmount(() => {
   gap: 8px;
   margin-top: 2px;
 }
-.tl-label { color: var(--ink-faint); font-size: 10.5px; white-space: nowrap; font-variant-numeric: tabular-nums; }
-.tl-label.strong { color: var(--ink-soft); font-weight: 700; margin-right: 10px; }
+.tl-label { color: var(--ink-faint); font-size: var(--fs-10-5); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.tl-label.strong { color: var(--ink-soft); font-weight: var(--fw-700); margin-right: 10px; }
 .tl-track {
   position: relative;
   flex: 1;
   height: 3px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: #e7ecf6;
 }
 .tl-track i { position: absolute; inset: 0; border-radius: inherit; background: linear-gradient(90deg, rgba(69,111,232,.32), rgba(120,100,220,.32)); }
@@ -761,7 +761,7 @@ onBeforeUnmount(() => {
   height: 7px;
   flex: 0 0 7px;
   margin-left: -12px;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   background: var(--primary);
   box-shadow: 0 0 0 3px rgba(69, 111, 232, 0.14);
 }
@@ -772,7 +772,7 @@ onBeforeUnmount(() => {
   gap: 8px;
 }
 .form label {
-  font-size: 13px;
+  font-size: var(--fs-13);
   color: var(--ink-soft);
   margin-top: 6px;
 }
@@ -802,7 +802,7 @@ onBeforeUnmount(() => {
 }
 .error {
   color: var(--danger);
-  font-size: 13px;
+  font-size: var(--fs-13);
 }
 .actions {
   display: flex;
@@ -839,13 +839,13 @@ onBeforeUnmount(() => {
   /* 手机端保持横向三段（日期牌/标题/数字），仅按比例收紧，不做纵向堆叠 */
   .exam { padding: 16px 16px 14px; gap: 12px; }
   .exam-main { gap: 12px; }
-  .date-tile { width: 50px; height: 58px; flex-basis: 50px; border-radius: 13px; }
-  .date-tile small { font-size: 10px; }
-  .date-tile b { font-size: 19px; }
-  .name { font-size: 18px; }
-  .date { font-size: 12px; }
+  .date-tile { width: 50px; height: 58px; flex-basis: 50px; border-radius: var(--radius-13); }
+  .date-tile small { font-size: var(--fs-10); }
+  .date-tile b { font-size: var(--fs-19); }
+  .name { font-size: var(--fs-18); }
+  .date { font-size: var(--fs-12); }
   .count { min-width: 72px; }
-  .count .num { font-size: 38px; }
+  .count .num { font-size: var(--fs-38); }
 
   .form-row {
     grid-template-columns: 1fr;
@@ -854,5 +854,5 @@ onBeforeUnmount(() => {
 </style>
 
 <style scoped>
-.review-message{margin:0;color:var(--success);font-size:12.5px;font-weight:700}.review-action{align-self:flex-start;margin-top:12px;padding:7px 10px;color:var(--primary);font-size:12px;font-weight:750;border:1px solid var(--primary);border-radius:8px;background:var(--primary-soft)}.review-action:hover{background:var(--primary);color:var(--on-primary,#fff)}
+.review-message{margin:0;color:var(--success);font-size:var(--fs-12-5);font-weight:var(--fw-700)}.review-action{align-self:flex-start;margin-top:12px;padding:7px 10px;color:var(--primary);font-size:var(--fs-12);font-weight:var(--fw-750);border:1px solid var(--primary);border-radius:var(--radius-8);background:var(--primary-soft)}.review-action:hover{background:var(--primary);color:var(--on-primary,#fff)}
 </style>

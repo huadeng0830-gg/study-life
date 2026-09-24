@@ -243,7 +243,7 @@ function exceptionDetail(item) {
 .muted-tip {
   margin: 0;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-12);
   line-height: 1.6;
 }
 .type-tabs { display: flex; gap: 8px; }
@@ -251,10 +251,10 @@ function exceptionDetail(item) {
   flex: 1;
   padding: 9px 12px;
   color: var(--muted);
-  font-size: 13px;
-  font-weight: 700;
+  font-size: var(--fs-13);
+  font-weight: var(--fw-700);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-10);
   background: var(--card);
   cursor: pointer;
   transition: color var(--dur-fast) var(--ease-standard), border-color var(--dur-fast) var(--ease-standard), background var(--dur-fast) var(--ease-standard);
@@ -275,13 +275,13 @@ function exceptionDetail(item) {
   flex-direction: column;
   gap: 6px;
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--fs-11);
 }
 .exception-form input, .exception-form select { width: 100%; }
 .exception-note { grid-column: 1 / -1; }
 .exception-note input { margin-top: 0; }
-.makeup-preview { margin: -4px 0 0; color: var(--primary); font-size: 12px; }
-.error { margin: 0; color: var(--danger); font-size: 12px; }
+.makeup-preview { margin: -4px 0 0; color: var(--primary); font-size: var(--fs-12); }
+.error { margin: 0; color: var(--danger); font-size: var(--fs-12); }
 .save-row { display: flex; justify-content: flex-end; }
 .divider { height: 1px; background: var(--border); }
 .exception-list {
@@ -298,7 +298,7 @@ function exceptionDetail(item) {
   gap: 10px;
   padding: 11px 12px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-10);
   background: var(--card);
 }
 .exception-item>div {
@@ -308,20 +308,20 @@ function exceptionDetail(item) {
   gap: 7px;
   min-width: 0;
 }
-.exception-item b { font-size: 12px; }
+.exception-item b { font-size: var(--fs-12); }
 .exception-item span {
   padding: 3px 6px;
   color: #b13f3f;
-  font-size: 9px;
-  font-weight: 800;
-  border-radius: 5px;
+  font-size: var(--fs-9);
+  font-weight: var(--fw-800);
+  border-radius: var(--radius-5);
   background: #feecec;
 }
 .exception-item span.makeup { color: #6b3fd4; background: #f1ebff; }
-.exception-item small { width: 100%; color: var(--muted); font-size: 10px; }
+.exception-item small { width: 100%; color: var(--muted); font-size: var(--fs-10); }
 .exception-item.editing { border-color: var(--primary); background: var(--primary-soft); }
 .exception-actions { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; }
-.manager-empty { margin: 0; color: var(--muted); font-size: 13px; text-align: center; padding: 10px 0; }
+.manager-empty { margin: 0; color: var(--muted); font-size: var(--fs-13); text-align: center; padding: 10px 0; }
 
 @media (max-width: 760px) {
   .exception-form { grid-template-columns: 1fr 1fr; }

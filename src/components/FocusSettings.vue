@@ -120,13 +120,13 @@ async function save() {
   gap: 10px;
 }
 .focus-settings h4 {
-  font-size: 14px;
+  font-size: var(--fs-14);
   margin: 0;
 }
 .hint {
   margin: 0;
   color: var(--ink-soft);
-  font-size: 12px;
+  font-size: var(--fs-12);
   line-height: 1.5;
 }
 .time-grid {
@@ -139,9 +139,9 @@ async function save() {
   align-items: center;
   gap: 6px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-10);
   padding: 8px 10px;
-  font-size: 13px;
+  font-size: var(--fs-13);
   color: var(--ink-soft);
 }
 .time-grid input {
@@ -152,12 +152,12 @@ async function save() {
 }
 .time-grid small {
   color: var(--ink-faint);
-  font-size: 12px;
+  font-size: var(--fs-12);
 }
 .reset-btn {
   align-self: flex-start;
   padding: 6px 12px;
-  font-size: 12.5px;
+  font-size: var(--fs-12-5);
 }
 .toggle-row {
   display: flex;
@@ -176,11 +176,11 @@ async function save() {
 .toggle-row small {
   margin-top: 2px;
   color: var(--ink-faint);
-  font-size: 12px;
+  font-size: var(--fs-12);
 }
 .error {
   color: var(--danger);
-  font-size: 12.5px;
+  font-size: var(--fs-12-5);
   margin: 0;
 }
 .actions {

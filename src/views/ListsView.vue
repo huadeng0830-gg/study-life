@@ -454,44 +454,44 @@ function showToast(message, { type = 'info', actionLabel = '', undoFn = null, vi
 .empty-box { max-width: 640px; width: 100%; margin: 0 auto; }
 .shopping-layout { display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 12px; align-items: start; }
 .list-sidebar { position: sticky; top: 20px; display: flex; flex-direction: column; gap: 6px; }
-.list-tab { position: relative; display: flex; align-items: flex-start; flex-direction: column; gap: 4px; width: 100%; padding: 11px 13px; color: var(--text); text-align: left; border: 1px solid var(--border); border-radius: 11px; background: var(--card); transition: border-color var(--dur-fast) var(--ease-standard), background var(--dur-fast) var(--ease-standard), box-shadow var(--dur-fast) var(--ease-standard); }
+.list-tab { position: relative; display: flex; align-items: flex-start; flex-direction: column; gap: 4px; width: 100%; padding: 11px 13px; color: var(--text); text-align: left; border: 1px solid var(--border); border-radius: var(--radius-11); background: var(--card); transition: border-color var(--dur-fast) var(--ease-standard), background var(--dur-fast) var(--ease-standard), box-shadow var(--dur-fast) var(--ease-standard); }
 /* 悬停底色原来写死 #fdfdff：浅色下几乎看不出与 var(--card) 的区别（等于没有悬停反馈），
    深色下则是一块刺眼的白。改成 var(--bg-tint)，浅色下比卡片略暗、深色下比卡片略深，
    两个主题里都是真实的「可点」反馈。 */
 .list-tab:hover { border-color: var(--border-strong); background: var(--bg-tint); }
 .list-tab .tab-line { display: flex; align-items: center; gap: 7px; overflow: hidden; width: 100%; }
-.tab-icon { font-style: normal; font-size: 14px; }
-.list-tab b { overflow: hidden; font-size: 13.5px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
-.list-tab small { color: var(--ink-soft); font-size: 11px; font-variant-numeric: tabular-nums; }
-.tab-progress { width: 100%; height: 4px; border-radius: 999px; background: #eef1f6; overflow: hidden; }
+.tab-icon { font-style: normal; font-size: var(--fs-14); }
+.list-tab b { overflow: hidden; font-size: var(--fs-13-5); font-weight: var(--fw-700); text-overflow: ellipsis; white-space: nowrap; }
+.list-tab small { color: var(--ink-soft); font-size: var(--fs-11); font-variant-numeric: tabular-nums; }
+.tab-progress { width: 100%; height: 4px; border-radius: var(--radius-pill); background: #eef1f6; overflow: hidden; }
 .tab-progress i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--primary), var(--brand-grad-b)); transition: width var(--dur-slow) var(--ease-standard); }
 .list-tab.active { color: var(--primary); border-color: var(--primary); box-shadow: inset 0 0 0 1px var(--primary), var(--shadow-sm); background: var(--primary-soft); }
 .shopping-card { padding: 0; overflow: hidden; }
 .list-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 18px 22px 12px; }
-.section-code { color: var(--primary); font-size: 9px; font-weight: 900; letter-spacing: .16em; }
+.section-code { color: var(--primary); font-size: var(--fs-9); font-weight: var(--fw-900); letter-spacing: .16em; }
 /* 清单名是页面 h1 下的一级区块标题，所以是 h2（原来是 h3，跳级）。
    注意这个选择器按**标签**写，改标题层级时必须同步改这里，否则样式会掉。 */
-.list-head h2 { margin-top: 2px; font-size: 19px; }
+.list-head h2 { margin-top: 2px; font-size: var(--fs-19); }
 .list-menu { display: flex; gap: 6px; }
-.list-menu button, .clear-bought { padding: 6px 9px; color: var(--ink-soft); font-size: 12px; border: none; border-radius: 7px; background: transparent; transition: background var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard); }
+.list-menu button, .clear-bought { padding: 6px 9px; color: var(--ink-soft); font-size: var(--fs-12); border: none; border-radius: var(--radius-7); background: transparent; transition: background var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard); }
 .list-menu button:hover, .clear-bought:hover:not(:disabled) { background: var(--bg); color: var(--text); }
 .list-menu .danger-link:hover { color: var(--danger); background: color-mix(in srgb, var(--danger) 12%, var(--card)); }
-.summary-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; margin: 0 22px; overflow: hidden; border: 1px solid var(--border); border-radius: 11px; background: var(--border); }
+.summary-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; margin: 0 22px; overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius-11); background: var(--border); }
 .summary-grid div { display: flex; flex-direction: column; gap: 3px; padding: 11px 14px; background: var(--bg-tint); }
-.summary-grid span { color: var(--ink-faint); font-size: 11px; }
-.summary-grid b { font-size: 19px; font-weight: 800; font-variant-numeric: tabular-nums; }
-.summary-grid .type-summary { font-size: 14px; }
-.updated-note { margin: 8px 24px 0; color: var(--ink-faint); font-size: 10.5px; }
+.summary-grid span { color: var(--ink-faint); font-size: var(--fs-11); }
+.summary-grid b { font-size: var(--fs-19); font-weight: var(--fw-800); font-variant-numeric: tabular-nums; }
+.summary-grid .type-summary { font-size: var(--fs-14); }
+.updated-note { margin: 8px 24px 0; color: var(--ink-faint); font-size: var(--fs-10-5); }
 .quick-add { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; padding: 14px 22px 12px; }
 .item-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 0 22px 10px; border-bottom: 1px solid var(--border); }
 /* 这组「分段控件」原来是写死的 #eef1f7 轨道 + 半透明白悬停：
    浅色下是一块浅灰，深色下整条轨道和悬停态都会发白。
    改成用令牌——轨道取 --bg-tint（在高对比度下正好又变回 #eef1f7，与原样一致），
    悬停从 --card 混出来，两个主题都跟着主题走。 */
-.item-toolbar > div { display: inline-flex; gap: 3px; padding: 3px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-tint); }
-.item-toolbar > div button { padding: 5px 10px; color: var(--ink-soft); font-size: 12px; font-weight: 600; border: none; border-radius: 6px; background: transparent; transition: background var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard); }
+.item-toolbar > div { display: inline-flex; gap: 3px; padding: 3px; border: 1px solid var(--border); border-radius: var(--radius-8); background: var(--bg-tint); }
+.item-toolbar > div button { padding: 5px 10px; color: var(--ink-soft); font-size: var(--fs-12); font-weight: var(--fw-600); border: none; border-radius: var(--radius-6); background: transparent; transition: background var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard); }
 .item-toolbar > div button:hover { background: color-mix(in srgb, var(--card) 85%, transparent); color: var(--text); }
-.item-toolbar > div button.on { color: var(--primary); font-weight: 700; background: var(--card); box-shadow: 0 1px 3px rgba(22,34,64,.12); }
+.item-toolbar > div button.on { color: var(--primary); font-weight: var(--fw-700); background: var(--card); box-shadow: 0 1px 3px rgba(22,34,64,.12); }
 .clear-bought:disabled { opacity: .45; cursor: not-allowed; }
 .item-list { display: flex; flex-direction: column; }
 .item-list :deep(.swipe-item) { border-radius: 0; background: var(--card); }
@@ -501,24 +501,24 @@ function showToast(message, { type = 'info', actionLabel = '', undoFn = null, vi
 .shopping-item:hover { background: var(--bg-tint); }
 .shopping-item.done { opacity: .55; }
 .shopping-item.done .item-copy b { text-decoration: line-through; }
-.item-check { display: grid; place-items: center; width: 23px; height: 23px; flex: 0 0 23px; font-weight: 800; font-size: 12px; border: 2px solid #767f94; border-radius: 7px; background: #fff; transition: background var(--dur-fast) var(--ease-standard), border-color var(--dur-fast) var(--ease-standard); }
+.item-check { display: grid; place-items: center; width: 23px; height: 23px; flex: 0 0 23px; font-weight: var(--fw-800); font-size: var(--fs-12); border: 2px solid #767f94; border-radius: var(--radius-7); background: #fff; transition: background var(--dur-fast) var(--ease-standard), border-color var(--dur-fast) var(--ease-standard); }
 .item-check:hover { border-color: #19a878; }
 /* 勾选态白勾必须压在够深的绿上：#19a878/#fff 只有 3.04:1（AA 要 4.5:1），压到 #0c8058 得 4.95:1。 */
 .item-check.checked { color: #fff; border-color: #0c8058; background: #0c8058; }
 .item-copy { flex: 1; min-width: 0; }
 .item-copy > div { display: flex; align-items: center; gap: 7px; }
-.item-copy b { overflow: hidden; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
-.item-copy span { padding: 3px 6px; color: var(--primary); font-size: 9px; font-weight: 700; border-radius: 5px; background: var(--primary-soft); }
-.item-copy small { display: block; overflow: hidden; margin-top: 3px; color: var(--ink-soft); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-.item-price { color: var(--text); font-size: 13px; font-weight: 750; white-space: nowrap; font-variant-numeric: tabular-nums; }
-.items-empty { padding: 30px 20px; color: var(--ink-soft); font-size: 13px; text-align: center; }
+.item-copy b { overflow: hidden; font-weight: var(--fw-650); text-overflow: ellipsis; white-space: nowrap; }
+.item-copy span { padding: 3px 6px; color: var(--primary); font-size: var(--fs-9); font-weight: var(--fw-700); border-radius: var(--radius-5); background: var(--primary-soft); }
+.item-copy small { display: block; overflow: hidden; margin-top: 3px; color: var(--ink-soft); font-size: var(--fs-11); text-overflow: ellipsis; white-space: nowrap; }
+.item-price { color: var(--text); font-size: var(--fs-13); font-weight: var(--fw-750); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.items-empty { padding: 30px 20px; color: var(--ink-soft); font-size: var(--fs-13); text-align: center; }
 .form { display: flex; flex-direction: column; gap: 8px; }
-.form label { margin-top: 6px; color: var(--ink-soft); font-size: 13px; }
+.form label { margin-top: 6px; color: var(--ink-soft); font-size: var(--fs-13); }
 .form input, .form select { width: 100%; }
 .form-row { display: grid; gap: 9px; }
 .form-row.three { grid-template-columns: .7fr .8fr 1fr; }
 .form-row > div { display: flex; flex-direction: column; gap: 7px; }
-.error { color: var(--danger); font-size: 13px; }
+.error { color: var(--danger); font-size: var(--fs-13); }
 .actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 14px; }
 .actions .btn-danger { margin-right: auto; }
 @media (max-width: 900px) {

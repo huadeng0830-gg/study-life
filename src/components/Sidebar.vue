@@ -633,10 +633,10 @@ function openMobileTool(key) {
   height: 38px;
   flex: 0 0 38px;
   color: #fff;
-  font-size: 11px;
-  font-weight: 900;
+  font-size: var(--fs-11);
+  font-weight: var(--fw-900);
   letter-spacing: 0.06em;
-  border-radius: 12px 4px 12px 4px;
+  border-radius: var(--radius-12) var(--radius-4) var(--radius-12) var(--radius-4);
   background: linear-gradient(145deg, var(--brand-grad-a), var(--brand-grad-b));
   box-shadow: 0 8px 18px rgba(69, 111, 232, 0.22);
 }
@@ -646,14 +646,14 @@ function openMobileTool(key) {
   min-width: 0;
 }
 .brand-copy strong {
-  font-size: 17px;
+  font-size: var(--fs-17);
   letter-spacing: 0.02em;
 }
 .brand-copy small {
   margin-top: 1px;
   color: var(--muted);
-  font-size: 8px;
-  font-weight: 800;
+  font-size: var(--fs-8);
+  font-weight: var(--fw-800);
   letter-spacing: 0.16em;
 }
 .nav {
@@ -673,8 +673,8 @@ function openMobileTool(key) {
   /* 原来是 #98a1b2，在白色侧边栏上只有 2.60:1，
      10px 的小字几乎看不清。改用最弱文字 token（5.19:1）。 */
   color: var(--ink-faint);
-  font-size: 10px;
-  font-weight: 800;
+  font-size: var(--fs-10);
+  font-weight: var(--fw-800);
   letter-spacing: 0.1em;
 }
 .nav-item {
@@ -683,10 +683,10 @@ function openMobileTool(key) {
   align-items: center;
   gap: 10px;
   padding: 10px 14px;
-  border-radius: 10px;
+  border-radius: var(--radius-10);
   color: var(--ink-soft);
   text-decoration: none;
-  font-size: 14.5px;
+  font-size: var(--fs-14-5);
   transition: background var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard);
   white-space: nowrap;
 }
@@ -702,10 +702,10 @@ function openMobileTool(key) {
 .nav-item.active {
   background: var(--primary-soft);
   color: var(--primary);
-  font-weight: 650;
+  font-weight: var(--fw-650);
 }
 .icon {
-  font-size: 17px;
+  font-size: var(--fs-17);
   width: 20px;
   text-align: center;
   position: relative;
@@ -716,7 +716,7 @@ function openMobileTool(key) {
   right: -6px;
   width: 8px;
   height: 8px;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   background: var(--danger);
   border: 1.5px solid var(--card);
 }
@@ -724,7 +724,7 @@ function openMobileTool(key) {
   margin-top: 10px;
   border: 1px solid var(--border);
   background: var(--card);
-  border-radius: 8px;
+  border-radius: var(--radius-8);
   padding: 6px;
   color: var(--muted);
 }
@@ -745,14 +745,14 @@ function openMobileTool(key) {
   margin-top: 12px;
   padding-top: 10px;
   border-top: 1px solid var(--border);
-  font-size: 11px;
+  font-size: var(--fs-11);
   color: var(--ink-faint);
   text-align: center;
 }
 .kbd-hint {
   display: block;
   margin-top: 3px;
-  font-size: 10px;
+  font-size: var(--fs-10);
 }
 .sidebar.collapsed .footer {
   visibility: hidden;
@@ -784,7 +784,7 @@ function openMobileTool(key) {
   width: 64px;
   min-height: 40px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-10);
   background: var(--primary-soft);
   color: var(--primary);
   line-height: 1;
@@ -796,12 +796,12 @@ function openMobileTool(key) {
   color: var(--on-primary, #fff);
 }
 .quick-add-symbol {
-  font-size: 21px;
+  font-size: var(--fs-21);
   transition: transform var(--dur-fast) var(--ease-standard);
 }
 .quick-add-label {
-  font-size: 11px;
-  font-weight: 650;
+  font-size: var(--fs-11);
+  font-weight: var(--fw-650);
 }
 .quick-add-button.active .quick-add-symbol {
   transform: rotate(45deg);
@@ -820,8 +820,8 @@ function openMobileTool(key) {
 }
 .theme-label {
   color: var(--ink-faint);
-  font-size: 10px;
-  font-weight: 800;
+  font-size: var(--fs-10);
+  font-weight: var(--fw-800);
   letter-spacing: 0.08em;
 }
 .theme-dots {
@@ -832,7 +832,7 @@ function openMobileTool(key) {
   width: 18px;
   height: 18px;
   border: 2px solid #fff;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   box-shadow: 0 0 0 1px var(--border);
   transition: transform var(--dur-fast) var(--ease-standard), box-shadow var(--dur-fast) var(--ease-standard);
 }
@@ -902,19 +902,19 @@ function openMobileTool(key) {
     color: var(--ink-soft);
     text-decoration: none;
     border: 0;
-    border-radius: 10px;
+    border-radius: var(--radius-10);
     background: transparent;
     touch-action: manipulation;
     -webkit-tap-highlight-color: transparent;
   }
-  .mobile-nav-item > span { height: 22px; font-size: 20px; line-height: 22px; }
+  .mobile-nav-item > span { height: 22px; font-size: var(--fs-20); line-height: 22px; }
   .mobile-nav-item small,
-  .mobile-more-item small { overflow: hidden; max-width: 100%; font-size: 11px; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
-  .mobile-nav-item.active { color: var(--primary); font-weight: 800; background: var(--primary-soft); }
-  .mobile-ledger-trigger { width: 100%; min-width: 0; min-height: 54px; color: var(--primary); border: 1px solid var(--primary); border-radius: 10px; background: var(--primary-soft); box-shadow: none; }
-  .mobile-ledger-trigger > span { display: grid; place-items: center; height: 22px; font-size: 22px; line-height: 22px; }
+  .mobile-more-item small { overflow: hidden; max-width: 100%; font-size: var(--fs-11); line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
+  .mobile-nav-item.active { color: var(--primary); font-weight: var(--fw-800); background: var(--primary-soft); }
+  .mobile-ledger-trigger { width: 100%; min-width: 0; min-height: 54px; color: var(--primary); border: 1px solid var(--primary); border-radius: var(--radius-10); background: var(--primary-soft); box-shadow: none; }
+  .mobile-ledger-trigger > span { display: grid; place-items: center; height: 22px; font-size: var(--fs-22); line-height: 22px; }
   .mobile-ledger-trigger.active { color: var(--primary); background: var(--card); box-shadow: none; }
-  .more-trigger > span { font-size: 25px; font-weight: 800; line-height: 18px; }
+  .more-trigger > span { font-size: var(--fs-25); font-weight: var(--fw-800); line-height: 18px; }
   /* 「更多功能」抽屉：遮罩铺满视口，面板贴**右**边缘的 off-canvas 形态
      （右锚不是随便挑的：右划关闭的手势方向必须与出场方向一致——面板往右滑出去，
      手指也往右拖；左锚 + 右划会出现"手指往右拖、松手却往左飞"的方向反转。
@@ -951,7 +951,7 @@ function openMobileTool(key) {
     padding: 14px max(12px, env(safe-area-inset-right)) calc(14px + env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
     border: 0;
     border-left: 1px solid var(--border);
-    border-radius: 16px 0 0 16px;
+    border-radius: var(--radius-16) 0 0 var(--radius-16);
     background: var(--card);
     box-shadow: -12px 0 34px rgba(29, 48, 93, 0.22);
     /* 横向手势归抽屉（右划关闭），纵向仍然留给内容滚动。 */
@@ -959,13 +959,13 @@ function openMobileTool(key) {
     transition: transform var(--dur-base) var(--ease-standard), opacity var(--dur-fast) var(--ease-standard);
   }
   .mobile-more-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
-  .mobile-more-head button { width: 30px; height: 30px; color: var(--muted); font-size: 22px; border: 0; border-radius: 50%; background: var(--bg); }
+  .mobile-more-head button { width: 30px; height: 30px; color: var(--muted); font-size: var(--fs-22); border: 0; border-radius: var(--radius-circle); background: var(--bg); }
   .mobile-more-group + .mobile-more-group { margin-top: 13px; padding-top: 11px; border-top: 1px solid var(--border); }
-  .mobile-more-group h3 { margin: 0 0 7px 2px; color: var(--ink-faint); font-size: 11px; font-weight: 800; letter-spacing: .04em; }
+  .mobile-more-group h3 { margin: 0 0 7px 2px; color: var(--ink-faint); font-size: var(--fs-11); font-weight: var(--fw-800); letter-spacing: .04em; }
   .mobile-more-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
   .mobile-more-item { min-height: 66px; color: var(--text); background: var(--bg); }
   .mobile-more-item.subdued { color: var(--ink-soft); background: var(--bg-tint); }
-  .mobile-more-item > span { font-size: 21px; }
+  .mobile-more-item > span { font-size: var(--fs-21); }
   /* 面板从**右边**滑进滑出（off-canvas 右外侧开始，与右划关闭同向），遮罩只做透明度淡入淡出。
      102% 必须与 drawerDrag.js 的 DRAWER_EXIT_SHIFT 保持一致（有测试比对这两个数）。 */
   .more-sheet-enter-active,

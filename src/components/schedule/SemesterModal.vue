@@ -50,8 +50,8 @@ function save() {
 .muted-tip {
   margin: 0;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--fs-12);
   line-height: 1.6;
 }
-.date-warning { margin: -4px 0 0; color: var(--danger); font-size: 12px; }
+.date-warning { margin: -4px 0 0; color: var(--danger); font-size: var(--fs-12); }
 </style>

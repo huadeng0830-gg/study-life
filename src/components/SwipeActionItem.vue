@@ -234,7 +234,7 @@ onBeforeUnmount(() => {
   position: relative;
   min-width: 0;
   overflow: hidden;
-  border-radius: 12px;
+  border-radius: var(--radius-12);
   contain: layout paint;
 }
 .swipe-actions {
@@ -259,8 +259,8 @@ onBeforeUnmount(() => {
        白字只有 2.8~3.2:1，必须用 --on-primary / --on-danger（深色字）。
      - 写死的深色底（绿 #0f7a58 / 灰 #667085）白字始终达标，保持 #fff。 */
   color: var(--on-primary, #fff);
-  font-size: 12px;
-  font-weight: 800;
+  font-size: var(--fs-12);
+  font-weight: var(--fw-800);
   cursor: pointer;
 }
 .swipe-action.primary { background: var(--primary); color: var(--on-primary, #fff); }

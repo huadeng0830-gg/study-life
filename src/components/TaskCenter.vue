@@ -169,12 +169,12 @@ onBeforeUnmount(() => {
   padding: 9px 14px;
   color: var(--on-primary, #fff);
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--primary);
   box-shadow: 0 10px 24px rgba(31, 41, 55, 0.22);
   font: inherit;
-  font-size: 12.5px;
-  font-weight: 700;
+  font-size: var(--fs-12-5);
+  font-weight: var(--fw-700);
   animation: task-pill-in var(--dur-base, 220ms) var(--ease-spring, ease);
 }
 .task-pill.is-done {
@@ -191,16 +191,16 @@ onBeforeUnmount(() => {
   flex: 0 0 9px;
   width: 9px;
   height: 9px;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   background: currentColor;
 }
 .task-pill-badge {
   min-width: 17px;
   padding: 0 5px;
   color: var(--primary);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--card);
-  font-size: 11px;
+  font-size: var(--fs-11);
   line-height: 17px;
   text-align: center;
 }
@@ -220,8 +220,8 @@ onBeforeUnmount(() => {
 .task-group-title {
   margin: 0;
   color: var(--ink-faint);
-  font-size: 11px;
-  font-weight: 800;
+  font-size: var(--fs-11);
+  font-weight: var(--fw-800);
   letter-spacing: 0.06em;
 }
 .task-link {
@@ -230,8 +230,8 @@ onBeforeUnmount(() => {
   border: 0;
   background: none;
   font: inherit;
-  font-size: 12px;
-  font-weight: 700;
+  font-size: var(--fs-12);
+  font-weight: var(--fw-700);
 }
 .task-row {
   display: flex;
@@ -239,7 +239,7 @@ onBeforeUnmount(() => {
   gap: 10px;
   padding: 12px;
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius-12);
   background: var(--bg);
 }
 .task-row.is-result {
@@ -257,21 +257,21 @@ onBeforeUnmount(() => {
   gap: 7px;
   margin: 0;
   color: var(--text);
-  font-size: 13.5px;
-  font-weight: 700;
+  font-size: var(--fs-13-5);
+  font-weight: var(--fw-700);
 }
 .task-row-dot {
   flex: 0 0 8px;
   width: 8px;
   height: 8px;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   background: var(--primary);
 }
 .task-row-status {
   flex: 0 0 8px;
   width: 8px;
   height: 8px;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   background: #14966d;
 }
 .task-row-status[data-status="warning"] { background: #d98324; }
@@ -279,19 +279,19 @@ onBeforeUnmount(() => {
 .task-row-status[data-status="cancelled"] { background: var(--ink-faint); }
 .task-row-tag {
   color: var(--ink-faint);
-  font-size: 11px;
-  font-weight: 700;
+  font-size: var(--fs-11);
+  font-weight: var(--fw-700);
 }
 .task-row-message {
   margin: 0;
   color: var(--ink-soft);
-  font-size: 12.5px;
+  font-size: var(--fs-12-5);
   line-height: 1.5;
 }
 .task-row-detail {
   margin: 0;
   color: var(--primary);
-  font-size: 12px;
+  font-size: var(--fs-12);
   font-variant-numeric: tabular-nums;
 }
 .task-row-meta {
@@ -299,7 +299,7 @@ onBeforeUnmount(() => {
   gap: 8px;
   margin: 0;
   color: var(--ink-faint);
-  font-size: 11px;
+  font-size: var(--fs-11);
   line-height: 1.5;
 }
 .task-row-hint {
@@ -310,7 +310,7 @@ onBeforeUnmount(() => {
 .task-row-note {
   flex: 0 0 auto;
   min-height: 34px;
-  font-size: 12px;
+  font-size: var(--fs-12);
 }
 .task-row-note {
   color: var(--ink-faint);
@@ -319,7 +319,7 @@ onBeforeUnmount(() => {
   margin: 0;
   padding: 18px 4px;
   color: var(--ink-faint);
-  font-size: 12.5px;
+  font-size: var(--fs-12-5);
   line-height: 1.6;
   text-align: center;
 }

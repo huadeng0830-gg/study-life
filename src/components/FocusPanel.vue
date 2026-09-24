@@ -540,11 +540,11 @@ onBeforeUnmount(() => {
 .focus-flash {
   margin: 0;
   padding: 8px 12px;
-  border-radius: 9px;
+  border-radius: var(--radius-9);
   color: #087a58;
   background: #effaf6;
   border: 1px solid #b9e6d5;
-  font-size: 12.5px;
+  font-size: var(--fs-12-5);
 }
 .focus-active,
 .focus-rest,
@@ -557,8 +557,8 @@ onBeforeUnmount(() => {
 }
 .focus-goal-label {
   color: var(--ink-soft);
-  font-size: 13px;
-  font-weight: 600;
+  font-size: var(--fs-13);
+  font-weight: var(--fw-600);
   align-self: flex-start;
 }
 .focus-goal-row {
@@ -571,7 +571,7 @@ onBeforeUnmount(() => {
   flex: 1;
   min-width: min(240px, 100%);
   padding: 10px 12px;
-  border-radius: 10px;
+  border-radius: var(--radius-10);
 }
 .goal-input[readonly] {
   color: var(--ink-soft);
@@ -593,14 +593,14 @@ onBeforeUnmount(() => {
 }
 .recent-label {
   color: var(--ink-faint);
-  font-size: 12px;
+  font-size: var(--fs-12);
 }
 .recent-chip {
   border: 1px solid var(--border);
   background: var(--bg-tint);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   padding: 5px 10px;
-  font-size: 12px;
+  font-size: var(--fs-12);
   color: var(--ink-soft);
   cursor: pointer;
 }
@@ -626,7 +626,7 @@ onBeforeUnmount(() => {
   min-width: 0;
 }
 .focus-target strong {
-  font-size: 15px;
+  font-size: var(--fs-15);
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -634,17 +634,17 @@ onBeforeUnmount(() => {
 }
 .focus-type-tag {
   flex: 0 0 auto;
-  font-size: 11px;
-  font-weight: 700;
+  font-size: var(--fs-11);
+  font-weight: var(--fw-700);
   padding: 3px 8px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--primary-soft);
   color: var(--primary);
 }
 .focus-state-line {
   margin: 0;
   color: var(--ink-faint);
-  font-size: 12.5px;
+  font-size: var(--fs-12-5);
 }
 .focus-actions {
   display: flex;
@@ -664,11 +664,11 @@ onBeforeUnmount(() => {
   min-width: 56px;
   padding: 8px 14px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-10);
   background: var(--card);
   color: var(--ink-soft);
-  font-weight: 650;
-  font-size: 14px;
+  font-weight: var(--fw-650);
+  font-size: var(--fs-14);
   cursor: pointer;
 }
 .time-chip.on {
@@ -678,35 +678,35 @@ onBeforeUnmount(() => {
 }
 .start-btn {
   min-height: 48px;
-  font-size: 15px;
-  border-radius: 12px;
+  font-size: var(--fs-15);
+  border-radius: var(--radius-12);
 }
 .link-hint {
   margin: 0;
   color: var(--ink-faint);
-  font-size: 12px;
+  font-size: var(--fs-12);
 }
 .focus-done-mark {
   width: 44px;
   height: 44px;
   display: grid;
   place-items: center;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   background: #e7f8f1;
   /* #14966d 在 #e7f8f1 上只有 3.40:1；#067654 得 5.12:1（与 AppearanceSettings 同步）。 */
   color: #067654;
-  font-size: 22px;
-  font-weight: 900;
+  font-size: var(--fs-22);
+  font-weight: var(--fw-900);
 }
 .focus-done-title {
   margin: 0;
-  font-size: 16px;
-  font-weight: 700;
+  font-size: var(--fs-16);
+  font-weight: var(--fw-700);
 }
 .focus-done-time {
   margin: 0;
   color: var(--ink-soft);
-  font-size: 13.5px;
+  font-size: var(--fs-13-5);
 }
 .focus-done-actions {
   display: flex;
@@ -723,8 +723,8 @@ onBeforeUnmount(() => {
   /* 写死的 #087a58 落在主题卡片的 var(--card) 上，深色主题只有 2.97:1
      （浅色 5.34:1）——13px/600 属正文，门槛 4.5。改用令牌后浅色 5.63、深色 8.15。 */
   color: var(--success);
-  font-size: 13px;
-  font-weight: 600;
+  font-size: var(--fs-13);
+  font-weight: var(--fw-600);
 }
 .focus-rest-row {
   display: flex;
@@ -733,12 +733,12 @@ onBeforeUnmount(() => {
   gap: 8px;
   padding-top: 4px;
   color: var(--ink-faint);
-  font-size: 12.5px;
+  font-size: var(--fs-12-5);
 }
 .rest-btn {
   padding: 7px 12px;
   min-height: 38px;
-  font-size: 12.5px;
+  font-size: var(--fs-12-5);
 }
 .todo-picker {
   display: flex;
@@ -755,7 +755,7 @@ onBeforeUnmount(() => {
   gap: 3px;
   padding: 11px 12px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-10);
   background: var(--card);
   text-align: left;
   cursor: pointer;
@@ -766,16 +766,16 @@ onBeforeUnmount(() => {
 }
 .todo-option-title {
   color: var(--text);
-  font-size: 14px;
-  font-weight: 600;
+  font-size: var(--fs-14);
+  font-weight: var(--fw-600);
 }
 .todo-option small {
   color: var(--ink-faint);
-  font-size: 12px;
+  font-size: var(--fs-12);
 }
 .empty-line {
   color: var(--ink-faint);
-  font-size: 13px;
+  font-size: var(--fs-13);
   padding: 8px 0;
 }
 .custom-time {
@@ -785,23 +785,23 @@ onBeforeUnmount(() => {
 }
 .custom-time label {
   color: var(--ink-soft);
-  font-weight: 600;
-  font-size: 13px;
+  font-weight: var(--fw-600);
+  font-size: var(--fs-13);
 }
 .custom-time input {
-  font-size: 18px;
+  font-size: var(--fs-18);
   padding: 10px 12px;
 }
 .custom-hint,
 .early-hint {
   margin: 0;
   color: var(--ink-faint);
-  font-size: 12.5px;
+  font-size: var(--fs-12-5);
 }
 .custom-error {
   margin: 0;
   color: var(--danger);
-  font-size: 12.5px;
+  font-size: var(--fs-12-5);
 }
 .modal-actions {
   display: flex;
@@ -813,8 +813,8 @@ onBeforeUnmount(() => {
 }
 .early-text {
   margin: 0;
-  font-size: 15px;
-  font-weight: 700;
+  font-size: var(--fs-15);
+  font-weight: var(--fw-700);
 }
 @media (max-width: 520px) {
   .focus-goal-row {

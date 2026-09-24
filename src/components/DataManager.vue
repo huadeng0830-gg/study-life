@@ -1722,16 +1722,16 @@ async function confirmRestoreBackup() {
   border:1px solid color-mix(in srgb, var(--warning) 35%, var(--card));
   background:color-mix(in srgb, var(--warning) 10%, var(--card));
   color:var(--warning);
-  border-radius:10px;
+  border-radius:var(--radius-10);
   padding:10px 12px;
-  font-size:12px;
+  font-size:var(--fs-12);
   line-height:1.55}
 .mobile-data-nav {
   display:none}
 .data-section {
   border:1px solid var(--border);
   background:var(--bg-tint);
-  border-radius:12px;
+  border-radius:var(--radius-12);
   align-items:flex-start;
   gap:13px;
   padding:14px;
@@ -1741,11 +1741,11 @@ async function confirmRestoreBackup() {
   height:38px;
   color:var(--primary);
   background:var(--primary-soft);
-  border-radius:10px;
+  border-radius:var(--radius-10);
   flex:0 0 38px;
   place-items:center;
-  font-size:20px;
-  font-weight:800;
+  font-size:var(--fs-20);
+  font-weight:var(--fw-800);
   display:grid}
 .section-icon.restore {
   color:var(--success);
@@ -1761,26 +1761,26 @@ async function confirmRestoreBackup() {
   background:#e0f7ff}
 .update-message {
   color:var(--primary);
-  font-size:11px}
+  font-size:var(--fs-11)}
 .section-copy {
   flex-direction:column;
   align-items:flex-start;
   gap:7px;
   display:flex}
 .section-copy h4 {
-  font-size:14px}
+  font-size:var(--fs-14)}
 .section-copy p,.local-note {
   color:var(--muted);
-  font-size:12px;
+  font-size:var(--fs-12);
   line-height:1.55}
 .file-button {
   color:var(--primary);
   cursor:pointer;
   background:var(--primary-soft);
-  border-radius:8px;
+  border-radius:var(--radius-8);
   padding:8px 14px;
-  font-size:13px;
-  font-weight:700;
+  font-size:var(--fs-13);
+  font-weight:var(--fw-700);
   display:inline-flex}
 .file-button input {
   display:none}
@@ -1788,11 +1788,11 @@ async function confirmRestoreBackup() {
   color:var(--text);
   align-items:center;
   gap:7px;
-  font-size:12px;
+  font-size:var(--fs-12);
   display:inline-flex}
 .device-name-row {
   background:var(--bg);
-  border-radius:9px;
+  border-radius:var(--radius-9);
   grid-template-columns:auto minmax(0,1fr) auto;
   align-items:center;
   gap:8px;
@@ -1802,7 +1802,7 @@ async function confirmRestoreBackup() {
   display:grid}
 .device-name-row label {
   color:var(--muted);
-  font-size:11px}
+  font-size:var(--fs-11)}
 .device-name-row input {
   width:100%;
   min-width:0}
@@ -1814,28 +1814,28 @@ async function confirmRestoreBackup() {
   border:1px solid var(--border);
   text-align:center;
   letter-spacing:.2em;
-  border-radius:8px;
+  border-radius:var(--radius-8);
   flex:1;
   padding:8px 10px;
-  font-size:14px}
+  font-size:var(--fs-14)}
 .sync-hint {
   color:var(--ink-faint);
-  font-size:11px;
+  font-size:var(--fs-11);
   line-height:1.5}
 .conn-times {
   width:100%;
   color:var(--ink-soft,#55607a);
   background:var(--bg);
-  border-radius:9px;
+  border-radius:var(--radius-9);
   flex-direction:column;
   gap:4px;
   padding:9px 11px;
-  font-size:11.5px;
+  font-size:var(--fs-11-5);
   line-height:1.5;
   display:flex}
 .conn-times b {
   font-variant-numeric:tabular-nums;
-  font-weight:700}
+  font-weight:var(--fw-700)}
 .conn-times i {
   color:var(--ink-faint);
   font-style:normal}
@@ -1853,12 +1853,12 @@ async function confirmRestoreBackup() {
   border:1px solid color-mix(in srgb, var(--warning) 35%, var(--card));
   background:color-mix(in srgb, var(--warning) 10%, var(--card));
   color:var(--warning);
-  border-radius:9px;
+  border-radius:var(--radius-9);
   flex-direction:column;
   gap:6px;
   margin-top:10px;
   padding:10px 12px;
-  font-size:12px;
+  font-size:var(--fs-12);
   line-height:1.55;
   display:flex}
 .conflict-guide span {
@@ -1877,12 +1877,12 @@ async function confirmRestoreBackup() {
 .ops-label {
   color:var(--ink-faint);
   letter-spacing:.08em;
-  font-size:10px;
-  font-weight:800}
+  font-size:var(--fs-10);
+  font-weight:var(--fw-800)}
 .pull-scope {
   border:1px dashed var(--border);
   background:var(--bg);
-  border-radius:9px;
+  border-radius:var(--radius-9);
   flex-direction:column;
   gap:7px;
   width:100%;
@@ -1898,10 +1898,10 @@ async function confirmRestoreBackup() {
   color:var(--primary);
   background:var(--primary-soft);
   border:none;
-  border-radius:8px;
+  border-radius:var(--radius-8);
   padding:3px 10px;
-  font-size:11.5px;
-  font-weight:700}
+  font-size:var(--fs-11-5);
+  font-weight:var(--fw-700)}
 .scope-grid {
   grid-template-columns:repeat(auto-fill,minmax(132px,1fr));
   gap:6px;
@@ -1912,11 +1912,11 @@ async function confirmRestoreBackup() {
   cursor:pointer;
   border:1px solid var(--border);
   background:var(--card);
-  border-radius:8px;
+  border-radius:var(--radius-8);
   align-items:center;
   gap:7px;
   padding:4px 8px;
-  font-size:12.5px;
+  font-size:var(--fs-12-5);
   display:flex}
 .scope-item input {
   accent-color:var(--primary)}
@@ -1938,21 +1938,21 @@ async function confirmRestoreBackup() {
   background:color-mix(in srgb, var(--success) 14%, var(--card))}
 .sync-status {
   background:var(--bg-tint);
-  border-radius:8px;
+  border-radius:var(--radius-8);
   margin-top:10px;
   padding:8px 10px;
-  font-size:12px;
+  font-size:var(--fs-12);
   line-height:1.6}
 .sync-recovery {
   color:var(--success);
   border:1px solid color-mix(in srgb, var(--success) 35%, var(--card));
   background:color-mix(in srgb, var(--success) 10%, var(--card));
-  border-radius:9px;
+  border-radius:var(--radius-9);
   flex-direction:column;
   gap:5px;
   margin:10px 0;
   padding:10px 12px;
-  font-size:12px;
+  font-size:var(--fs-12);
   display:flex}
 .sync-recovery.danger {
   color:var(--danger);
@@ -1969,12 +1969,12 @@ async function confirmRestoreBackup() {
   color:#236175;
   background:#f1fbfe;
   border:1px solid #b9ddea;
-  border-radius:9px;
+  border-radius:var(--radius-9);
   flex-wrap:wrap;
   gap:6px 12px;
   margin-top:9px;
   padding:9px 11px;
-  font-size:11px;
+  font-size:var(--fs-11);
   line-height:1.5;
   display:flex}
 .sync-preview-card small {
@@ -2023,16 +2023,16 @@ async function confirmRestoreBackup() {
   background:var(--card);
   min-width:0;
   color:var(--text);
-  border-radius:8px;
+  border-radius:var(--radius-8);
   padding:8px 9px;
-  font-size:11px}
+  font-size:var(--fs-11)}
 .sync-section-copy {
   width:100%;
   min-width:0}
 .sync-status-card {
   border:1px solid color-mix(in srgb, var(--success) 35%, var(--card));
   background:color-mix(in srgb, var(--success) 6%, var(--card));
-  border-radius:12px;
+  border-radius:var(--radius-12);
   grid-template-columns:minmax(0,1fr) auto;
   gap:10px 18px;
   min-height:142px;
@@ -2056,18 +2056,18 @@ async function confirmRestoreBackup() {
   color:var(--muted);
   letter-spacing:.08em;
   margin-bottom:5px;
-  font-size:10px;
-  font-weight:800;
+  font-size:var(--fs-10);
+  font-weight:var(--fw-800);
   display:block}
 .sync-status-copy h5,.sync-empty-card h5 {
   color:var(--text);
   margin:0;
-  font-size:21px;
+  font-size:var(--fs-21);
   line-height:1.2}
 .sync-status-copy p,.sync-empty-card p {
   color:var(--muted);
   margin:6px 0 0;
-  font-size:12px;
+  font-size:var(--fs-12);
   line-height:1.55}
 .sync-status-meta {
   align-content:start;
@@ -2081,14 +2081,14 @@ async function confirmRestoreBackup() {
   display:flex}
 .sync-status-meta i {
   color:var(--muted);
-  font-size:10px;
+  font-size:var(--fs-10);
   font-style:normal}
 .sync-status-meta b {
   color:var(--text);
   text-overflow:ellipsis;
   white-space:nowrap;
-  font-size:12px;
-  font-weight:700;
+  font-size:var(--fs-12);
+  font-weight:var(--fw-700);
   overflow:hidden}
 .sync-main-action {
   grid-column:1/-1;
@@ -2111,10 +2111,10 @@ async function confirmRestoreBackup() {
   display:flex}
 .sync-setting-row b {
   color:var(--text);
-  font-size:13px}
+  font-size:var(--fs-13)}
 .sync-setting-row span {
   color:var(--muted);
-  font-size:11px;
+  font-size:var(--fs-11);
   line-height:1.45}
 .switch {
   width:48px;
@@ -2123,7 +2123,7 @@ async function confirmRestoreBackup() {
   border:1px solid var(--border);
   background:var(--bg);
   cursor:pointer;
-  border-radius:999px;
+  border-radius:var(--radius-pill);
   flex:none;
   justify-content:center;
   align-items:center;
@@ -2134,10 +2134,10 @@ async function confirmRestoreBackup() {
   height:22px;
   box-shadow:var(--shadow-sm);
   background:#fff;
-  border-radius:50%;
+  border-radius:var(--radius-circle);
   place-items:center;
-  font-size:10px;
-  font-weight:800;
+  font-size:var(--fs-10);
+  font-weight:var(--fw-800);
   display:grid}
 .switch.on {
   color:#fff;
@@ -2161,18 +2161,18 @@ async function confirmRestoreBackup() {
 .section-line-head h5,.advanced-group h5 {
   color:var(--text);
   margin:0;
-  font-size:14px}
+  font-size:var(--fs-14)}
 .section-line-head span {
   color:var(--muted);
-  font-size:11px}
+  font-size:var(--fs-11)}
 .text-button {
   color:var(--primary);
   cursor:pointer;
   background:0 0;
   border:0;
   padding:4px 0;
-  font-size:12px;
-  font-weight:800}
+  font-size:var(--fs-12);
+  font-weight:var(--fw-800)}
 .text-button:disabled {
   color:var(--ink-faint,#a4adbd);
   cursor:not-allowed}
@@ -2202,12 +2202,12 @@ async function confirmRestoreBackup() {
   position:relative}
 .device-icon {
   background:var(--bg);
-  border-radius:9px;
+  border-radius:var(--radius-9);
   flex:0 0 32px;
   place-items:center;
   width:32px;
   height:32px;
-  font-size:17px;
+  font-size:var(--fs-17);
   display:grid}
 .device-copy {
   flex-direction:column;
@@ -2221,23 +2221,23 @@ async function confirmRestoreBackup() {
   white-space:nowrap;
   align-items:center;
   gap:6px;
-  font-size:13px;
+  font-size:var(--fs-13);
   display:flex;
   overflow:hidden}
 .device-copy strong em {
   color:var(--success);
   background:color-mix(in srgb, var(--success) 10%, var(--card));
-  border-radius:5px;
+  border-radius:var(--radius-5);
   flex:none;
   padding:2px 5px;
-  font-size:9px;
+  font-size:var(--fs-9);
   font-style:normal;
-  font-weight:800}
+  font-weight:var(--fw-800)}
 .device-copy>span {
   color:var(--muted);
   text-overflow:ellipsis;
   white-space:nowrap;
-  font-size:10.5px;
+  font-size:var(--fs-10-5);
   overflow:hidden}
 .icon-button {
   width:30px;
@@ -2246,8 +2246,8 @@ async function confirmRestoreBackup() {
   background:var(--primary-soft);
   cursor:pointer;
   border:0;
-  border-radius:7px;
-  font-size:15px}
+  border-radius:var(--radius-7);
+  font-size:var(--fs-15)}
 .device-menu {
   align-self:center;
   position:relative}
@@ -2256,9 +2256,9 @@ async function confirmRestoreBackup() {
   height:30px;
   color:var(--muted);
   cursor:pointer;
-  border-radius:7px;
+  border-radius:var(--radius-7);
   place-items:center;
-  font-size:15px;
+  font-size:var(--fs-15);
   line-height:1;
   list-style:none;
   display:grid}
@@ -2273,7 +2273,7 @@ async function confirmRestoreBackup() {
   background:var(--card);
   min-width:112px;
   box-shadow:var(--shadow-md);
-  border-radius:8px;
+  border-radius:var(--radius-8);
   padding:4px;
   position:absolute;
   top:calc(100% + 4px);
@@ -2285,9 +2285,9 @@ async function confirmRestoreBackup() {
   cursor:pointer;
   background:0 0;
   border:0;
-  border-radius:6px;
+  border-radius:var(--radius-6);
   padding:7px 9px;
-  font-size:11px}
+  font-size:var(--fs-11)}
 .device-menu-popover button:hover {
   background:color-mix(in srgb, var(--danger) 8%, var(--card))}
 .device-more {
@@ -2295,7 +2295,7 @@ async function confirmRestoreBackup() {
   display:block}
 .device-name-edit {
   background:var(--bg);
-  border-radius:9px;
+  border-radius:var(--radius-9);
   grid-template-columns:auto minmax(0,1fr) auto auto;
   align-items:center;
   gap:7px;
@@ -2304,7 +2304,7 @@ async function confirmRestoreBackup() {
   display:grid}
 .device-name-edit label {
   color:var(--muted);
-  font-size:11px}
+  font-size:var(--fs-11)}
 .device-name-edit input {
   width:100%;
   min-width:0}
@@ -2323,20 +2323,20 @@ async function confirmRestoreBackup() {
   display:flex}
 .space-summary span {
   color:var(--muted);
-  font-size:10px}
+  font-size:var(--fs-10)}
 .space-summary code,.space-id-detail code {
   overflow-wrap:anywhere;
   color:var(--ink-soft,#55607a);
   letter-spacing:.08em;
-  font-size:11px}
+  font-size:var(--fs-11)}
 .space-summary details {
   flex:none;
   position:relative}
 .space-summary summary,.pull-scope-details summary,.sync-advanced>summary {
   color:var(--primary);
   cursor:pointer;
-  font-size:12px;
-  font-weight:800}
+  font-size:var(--fs-12);
+  font-weight:var(--fw-800)}
 .space-summary summary {
   list-style:none}
 .space-summary summary::-webkit-details-marker {
@@ -2347,7 +2347,7 @@ async function confirmRestoreBackup() {
   background:var(--card);
   min-width:220px;
   box-shadow:var(--shadow-md);
-  border-radius:8px;
+  border-radius:var(--radius-8);
   align-items:center;
   gap:10px;
   padding:9px 10px;
@@ -2375,13 +2375,13 @@ async function confirmRestoreBackup() {
 .advanced-group p {
   color:var(--muted);
   margin:0;
-  font-size:11px;
+  font-size:var(--fs-11);
   line-height:1.55}
 .pull-scope-details {
   margin-top:4px}
 .pull-scope-details>summary {
   padding:4px 0;
-  font-size:11px;
+  font-size:var(--fs-11);
   display:inline-block}
 .pull-scope-details .pull-scope {
   margin-top:5px}
@@ -2393,7 +2393,7 @@ async function confirmRestoreBackup() {
 .sync-empty-card {
   border:1px solid var(--border);
   background:var(--bg);
-  border-radius:12px;
+  border-radius:var(--radius-12);
   gap:5px;
   padding:16px;
   display:grid}
@@ -2405,7 +2405,7 @@ async function confirmRestoreBackup() {
 .disconnect-confirm p {
   color:var(--ink-soft,#55607a);
   margin:0;
-  font-size:13px;
+  font-size:var(--fs-13);
   line-height:1.6}
 @media (max-width:760px) {
   .space-actions,.join-form {
@@ -2423,12 +2423,12 @@ async function confirmRestoreBackup() {
 .merge-intro {
   color:var(--muted);
   margin:0;
-  font-size:12px;
+  font-size:var(--fs-12);
   line-height:1.55}
 .merge-conflict {
   border:1px solid color-mix(in srgb, var(--warning) 35%, var(--card));
   background:color-mix(in srgb, var(--warning) 6%, var(--card));
-  border-radius:10px;
+  border-radius:var(--radius-10);
   padding:11px 12px}
 .merge-conflict-head {
   color:var(--warning);
@@ -2437,7 +2437,7 @@ async function confirmRestoreBackup() {
   display:flex}
 .merge-conflict-head small,.merge-reason {
   color:var(--warning);
-  font-size:11px}
+  font-size:var(--fs-11)}
 .merge-fields {
   gap:5px;
   margin-top:8px;
@@ -2445,7 +2445,7 @@ async function confirmRestoreBackup() {
 .merge-field {
   grid-template-columns:90px 1fr 1fr;
   gap:7px;
-  font-size:11px;
+  font-size:var(--fs-11);
   line-height:1.45;
   display:grid}
 .merge-field span {
@@ -2469,12 +2469,12 @@ async function confirmRestoreBackup() {
 .confirm-row {
   color:var(--ink-soft,#55607a);
   background:var(--bg);
-  border-radius:8px;
+  border-radius:var(--radius-8);
   grid-template-columns:92px minmax(0,1fr);
   align-items:baseline;
   gap:10px;
   padding:7px 10px;
-  font-size:12.5px;
+  font-size:var(--fs-12-5);
   display:grid}
 .confirm-row+.confirm-row {
   margin-top:-3px}
@@ -2484,12 +2484,12 @@ async function confirmRestoreBackup() {
 .restore-preview {
   border:1px solid color-mix(in srgb, var(--success) 35%, var(--card));
   background:color-mix(in srgb, var(--success) 10%, var(--card));
-  border-radius:10px;
+  border-radius:var(--radius-10);
   flex-wrap:wrap;
   align-items:center;
   gap:8px;
   padding:12px;
-  font-size:12px;
+  font-size:var(--fs-12);
   display:flex}
 .restore-preview b {
   text-overflow:ellipsis;
@@ -2499,16 +2499,16 @@ async function confirmRestoreBackup() {
 .restore-preview span {
   color:var(--success);
   background:color-mix(in srgb, var(--success) 10%, var(--card));
-  border-radius:6px;
+  border-radius:var(--radius-6);
   padding:4px 7px}
 .restore-preview .btn {
   margin-left:auto}
 .success {
   color:var(--success);
-  font-size:13px}
+  font-size:var(--fs-13)}
 .error {
   color:var(--danger);
-  font-size:13px}
+  font-size:var(--fs-13)}
 .local-note {
   padding:0 4px}
 .ios-warning {
@@ -2534,11 +2534,11 @@ async function confirmRestoreBackup() {
   background:var(--bg);
   cursor:pointer;
   border:0;
-  border-radius:8px;
+  border-radius:var(--radius-8);
   place-items:center;
   padding:0;
-  font-size:12px;
-  font-weight:700;
+  font-size:var(--fs-12);
+  font-weight:var(--fw-700);
   display:grid}
 .mobile-data-nav button:active {
   color:var(--primary);
@@ -2554,7 +2554,7 @@ async function confirmRestoreBackup() {
   flex-basis:32px;
   width:32px;
   height:32px;
-  font-size:17px}
+  font-size:var(--fs-17)}
 .section-copy {
   width:100%;
   min-width:0}
@@ -2614,7 +2614,7 @@ async function confirmRestoreBackup() {
   display:grid}
 .health-grid span {
   background:var(--bg);
-  border-radius:8px;
+  border-radius:var(--radius-8);
   flex-direction:column;
   gap:3px;
   min-width:0;
@@ -2622,11 +2622,11 @@ async function confirmRestoreBackup() {
   display:flex}
 .health-grid small {
   color:var(--muted);
-  font-size:10px}
+  font-size:var(--fs-10)}
 .health-grid b {
   text-overflow:ellipsis;
   white-space:nowrap;
-  font-size:11px;
+  font-size:var(--fs-11);
   overflow:hidden}
 .health-largest {
   flex-wrap:wrap;
@@ -2634,11 +2634,11 @@ async function confirmRestoreBackup() {
   gap:5px;
   width:100%;
   display:flex;
-  font-size:10.5px!important}
+  font-size:var(--fs-10-5) !important}
 .health-largest span {
   background:var(--bg);
   color:var(--ink-soft);
-  border-radius:5px;
+  border-radius:var(--radius-5);
   padding:3px 6px}
 @media (max-width:760px) {
   .health-grid {

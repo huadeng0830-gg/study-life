@@ -54,7 +54,7 @@ function styleFor(width) {
   display: block;
   width: 100%;
   height: 11px;
-  border-radius: 7px;
+  border-radius: var(--radius-7);
   background: linear-gradient(90deg, var(--border) 25%, var(--bg-tint) 37%, var(--border) 63%);
   background-size: 400% 100%;
   animation: skeleton-shimmer 1.5s ease-in-out infinite;

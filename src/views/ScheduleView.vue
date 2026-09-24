@@ -1411,14 +1411,14 @@ watch(
   align-items:center;
   display:flex}
 .head h2 {
-  font-size:22px}
+  font-size:var(--fs-22)}
 .head-btns {
   gap:10px;
   display:flex}
 .schedule-settings {
   border:1px solid var(--border);
   background:var(--bg-tint);
-  border-radius:12px;
+  border-radius:var(--radius-12);
   grid-template-columns:repeat(3,minmax(0,1fr));
   gap:12px;
   padding:14px;
@@ -1433,10 +1433,10 @@ watch(
   width:100%;
   color:var(--ink-faint);
   letter-spacing:.04em;
-  font-size:11px}
+  font-size:var(--fs-11)}
 .schedule-settings .btn {
   padding:7px 10px;
-  font-size:12px}
+  font-size:var(--fs-12)}
 .toolbar {
   flex-wrap:wrap;
   align-items:center;
@@ -1449,11 +1449,11 @@ watch(
   display:flex}
 .seg-label {
   color:var(--muted);
-  font-size:13px}
+  font-size:var(--fs-13)}
 .seg {
   background:var(--card);
   border:1px solid var(--border);
-  border-radius:10px;
+  border-radius:var(--radius-10);
   max-width:100%;
   padding:3px;
   display:flex;
@@ -1462,26 +1462,26 @@ watch(
   color:var(--muted);
   background:0 0;
   border:none;
-  border-radius:8px;
+  border-radius:var(--radius-8);
   flex:none;
   padding:7px 14px;
-  font-size:14px}
+  font-size:var(--fs-14)}
 .seg button:disabled {
   opacity:.35;
   cursor:default}
 .seg button.on {
   background:var(--primary);
   color:var(--on-primary,#fff);
-  font-weight:600}
+  font-weight:var(--fw-600)}
 .seg .wn {
   min-width:84px;
   color:var(--text);
-  border-radius:8px;
+  border-radius:var(--radius-8);
   flex:none;
   place-items:center;
   padding:7px 14px;
-  font-size:14px;
-  font-weight:700;
+  font-size:var(--fs-14);
+  font-weight:var(--fw-700);
   display:grid}
 .seg .wn.thisweek {
   color:var(--primary)}
@@ -1511,7 +1511,7 @@ watch(
 .form label {
   color:var(--muted);
   margin-top:6px;
-  font-size:13px}
+  font-size:var(--fs-13)}
 .form input,.form select {
   width:100%}
 .row {
@@ -1529,19 +1529,19 @@ watch(
   display:flex}
 .swatch {
   border:3px solid #0000;
-  border-radius:50%;
+  border-radius:var(--radius-circle);
   width:28px;
   height:28px}
 
 .error {
   color:var(--danger);
-  font-size:13px}
+  font-size:var(--fs-13)}
 .muted-tip {
   color:var(--muted);
   background:var(--bg);
-  border-radius:8px;
+  border-radius:var(--radius-8);
   padding:10px 12px;
-  font-size:13px;
+  font-size:var(--fs-13);
   line-height:1.6}
 
 .auto-mode-hint {
@@ -1550,12 +1550,12 @@ watch(
   align-items:baseline;
   gap:10px;
   margin:-6px 0 0;
-  font-size:12px;
+  font-size:var(--fs-12);
   line-height:1.5;
   display:flex}
 .auto-mode-hint small {
   color:var(--ink-faint);
-  font-size:11px}
+  font-size:var(--fs-11)}
 .auto-mode-hint.auto small:before {
   content:"·";
   margin:0 6px}
@@ -1613,7 +1613,7 @@ watch(
 }
 @media (max-width:520px) {
   .head h2 {
-  font-size:20px}
+  font-size:var(--fs-20)}
 .row {
   flex-direction:column}
 .colors {
@@ -1639,9 +1639,9 @@ watch(
 .settings-hint {
   color:var(--muted);
   background:var(--bg);
-  border-radius:8px;
+  border-radius:var(--radius-8);
   padding:10px 12px;
-  font-size:12px;
+  font-size:var(--fs-12);
   line-height:1.6}
 .setting-section {
   flex-direction:column;
@@ -1677,15 +1677,15 @@ watch(
 .gen-box {
   border:1px solid var(--border);
   background:var(--bg-tint);
-  border-radius:10px;
+  border-radius:var(--radius-10);
   flex-direction:column;
   gap:10px;
   padding:12px 14px;
   display:flex}
 .gen-title {
   color:var(--primary);
-  font-size:13px;
-  font-weight:700}
+  font-size:var(--fs-13);
+  font-weight:var(--fw-700)}
 .gen-grid {
   flex-wrap:wrap;
   gap:8px 16px;
@@ -1694,12 +1694,12 @@ watch(
   color:var(--muted);
   align-items:center;
   gap:5px;
-  font-size:12px;
+  font-size:var(--fs-12);
   display:flex}
 .gen-item input,.gen-item select {
-  border-radius:6px;
+  border-radius:var(--radius-6);
   padding:5px 7px;
-  font-size:12px}
+  font-size:var(--fs-12)}
 
 .gen-item input[type=time] {
   width:96px}
@@ -1710,20 +1710,20 @@ watch(
 .cell-add-hint {
   color:var(--muted);
   background:var(--bg);
-  border-radius:8px;
+  border-radius:var(--radius-8);
   flex-wrap:wrap;
   justify-content:space-between;
   align-items:center;
   gap:10px;
   margin-top:12px;
   padding:10px 12px;
-  font-size:12px;
+  font-size:var(--fs-12);
   line-height:1.6;
   display:flex}
 .cell-add-hint .btn {
   flex:none;
   padding:7px 12px;
-  font-size:12px}
+  font-size:var(--fs-12)}
 .tab-bar {
   flex-wrap:wrap;
   gap:6px;
@@ -1732,14 +1732,14 @@ watch(
   color:var(--muted);
   border:1px solid var(--border);
   background:var(--card);
-  border-radius:9px;
+  border-radius:var(--radius-9);
   padding:8px 14px;
-  font-size:13px}
+  font-size:var(--fs-13)}
 .tab-btn.on {
   color:var(--on-primary,#fff);
   border-color:var(--primary);
   background:var(--primary);
-  font-weight:700}
+  font-weight:var(--fw-700)}
 .cell-existing {
   flex-wrap:wrap;
   align-items:center;
@@ -1748,21 +1748,21 @@ watch(
   display:flex}
 .ce-label {
   color:var(--muted);
-  font-size:12px}
+  font-size:var(--fs-12)}
 .cell-chip {
   color:var(--primary);
   background:var(--primary-soft);
-  border-radius:6px;
+  border-radius:var(--radius-6);
   padding:4px 8px;
-  font-size:11px;
-  font-weight:600}
+  font-size:var(--fs-11);
+  font-weight:var(--fw-600)}
 .cell-chip.clash {
   color:var(--danger);
   background:color-mix(in srgb, var(--danger) 12%, var(--card))}
 .course-links {
   border:1px solid var(--border);
   background:var(--bg);
-  border-radius:10px;
+  border-radius:var(--radius-10);
   margin-top:14px;
   padding:12px}
 .course-links-head,.course-link-columns {
@@ -1775,23 +1775,23 @@ watch(
   display:block}
 .course-links-head small,.link-empty,.link-list small {
   color:var(--muted);
-  font-size:12px}
+  font-size:var(--fs-12)}
 .link-progress {
   color:var(--primary);
   background:var(--primary-soft);
   white-space:nowrap;
-  border-radius:999px;
+  border-radius:var(--radius-pill);
   padding:4px 7px;
-  font-size:12px;
-  font-weight:700}
+  font-size:var(--fs-12);
+  font-weight:var(--fw-700)}
 .course-link-columns>div {
   flex:1;
   min-width:0}
 .course-link-columns {
   margin-top:10px}
 .link-label {
-  font-size:12px;
-  font-weight:700}
+  font-size:var(--fs-12);
+  font-weight:var(--fw-700)}
 .link-empty {
   margin:6px 0}
 .link-list {
@@ -1804,7 +1804,7 @@ watch(
 .link-list span {
   text-overflow:ellipsis;
   white-space:nowrap;
-  font-size:12px;
+  font-size:var(--fs-12);
   display:block;
   overflow:hidden}
 .link-list .done {
@@ -1812,8 +1812,8 @@ watch(
   text-decoration:line-through}
 .link-action {
   color:var(--primary);
-  font-size:12px;
-  font-weight:700;
+  font-size:var(--fs-12);
+  font-weight:var(--fw-700);
   text-decoration:none}
 @media (max-width:520px) {
   .course-link-columns {
@@ -1833,9 +1833,9 @@ watch(
   -webkit-overflow-scrolling:touch;
   touch-action:pan-y;
   transition:border-color var(--dur-base) var(--ease-standard), box-shadow var(--dur-base) var(--ease-standard);
-  border-radius:10px;
+  border-radius:var(--radius-10);
   padding:10px 14px;
-  font-size:14px;
+  font-size:var(--fs-14);
   line-height:1.55;
   overflow-y:auto}
 /* 不再写 outline:none：scoped 类选择器的特异性会压过全局 :focus-visible 焦点环。

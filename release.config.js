@@ -7,6 +7,13 @@
 // 3. 更早的版本逐条下移，最多保留 3 个版本，超出即删除。
 export const RELEASE_UPDATES = Object.freeze([
   {
+    version: '2026年09月24日-版本4',
+    signature: 'b3182c202f',
+    notes: [
+      '阶段4（设计令牌全量迁移）：字号/字重/圆角硬编码机械包裹为var()共1264处不改数值语义，:root新增v5刻度--fs-*/--fw-*/--radius-*与别名；对比度审计可静态解析登记过的--fs-*/--fw-大字门槛；DESIGN_TOKENS.md补全刻度表与例外清单；修复image/*被误当块注释导致LocalTransfer与BatchImport漏迁',
+    ],
+  },
+  {
     version: '2026年09月24日-版本3',
     signature: 'b99640b659',
     notes: [
@@ -1398,7 +1405,7 @@ export const RELEASE_UPDATES = Object.freeze([
 export const RELEASE_VERSION = RELEASE_UPDATES[0].version
 
 // 与第一条签名保持一致，交给 vite.config.js 校验源码一致性。
-export const RELEASE_SOURCE_SIGNATURE = 'b99640b659'
+export const RELEASE_SOURCE_SIGNATURE = 'b3182c202f'
 
 // 兼容旧引用：当前版本的更新说明。
 export const RELEASE_NOTES = RELEASE_UPDATES[0].notes

@@ -215,16 +215,16 @@ watch(() => props.open, (open) => {
   width: 100%;
   min-height: 44px;
   padding: 10px 12px;
-  font-size: 14px;
+  font-size: var(--fs-14);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-10);
   background: var(--bg);
 }
-.search-summary { margin: 0; color: var(--muted); font-size: 12px; }
-.search-hint { margin: 6px 0 2px; color: var(--muted); font-size: 12.5px; }
+.search-summary { margin: 0; color: var(--muted); font-size: var(--fs-12); }
+.search-hint { margin: 6px 0 2px; color: var(--muted); font-size: var(--fs-12-5); }
 .search-groups { display: flex; flex-direction: column; gap: 12px; max-height: 60vh;max-height:60dvh; overflow-y: auto; }
-.search-group h4 { display: flex; align-items: center; gap: 6px; margin: 0 0 6px; color: var(--ink-soft); font-size: 12px; }
-.group-count { color: var(--muted); font-weight: 600; }
+.search-group h4 { display: flex; align-items: center; gap: 6px; margin: 0 0 6px; color: var(--ink-soft); font-size: var(--fs-12); }
+.group-count { color: var(--muted); font-weight: var(--fw-600); }
 .search-result {
   display: flex;
   align-items: center;
@@ -236,16 +236,16 @@ watch(() => props.open, (open) => {
   text-align: left;
   color: var(--text);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-8);
   background: var(--card);
   cursor: pointer;
 }
 .search-result:hover { border-color: var(--primary); background: var(--primary-soft); }
 .search-result + .search-result { margin-top: 5px; }
-.result-title { min-width: 0; overflow: hidden; font-size: 13.5px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.result-title { min-width: 0; overflow: hidden; font-size: var(--fs-13-5); font-weight: var(--fw-700); text-overflow: ellipsis; white-space: nowrap; }
 /* 关键词高亮：用 mark 保留语义（读屏会提示"已标记"），
    底色从主色派生，随主题与壁纸取色一起变化。 */
-.search-hit { padding: 0 1px; border-radius: 3px; background: color-mix(in srgb, var(--primary) 20%, transparent); color: inherit; }
-.result-meta { flex: 0 0 auto; max-width: 45%; overflow: hidden; color: var(--muted); font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
+.search-hit { padding: 0 1px; border-radius: var(--radius-3); background: color-mix(in srgb, var(--primary) 20%, transparent); color: inherit; }
+.result-meta { flex: 0 0 auto; max-width: 45%; overflow: hidden; color: var(--muted); font-size: var(--fs-11-5); text-overflow: ellipsis; white-space: nowrap; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); border: 0; }
 </style>

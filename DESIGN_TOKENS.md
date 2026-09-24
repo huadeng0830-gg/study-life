@@ -82,19 +82,78 @@ CSS 定义在 `src/style.css` 的 `:root`，JS 镜像在 `src/composables/motion
 - 纯 CSS 动画靠 `style.css` 里的两条全局兜底：`@media (prefers-reduced-motion: reduce)` 与 `:root[data-performance='reduced']`。它们会把 `transition-duration`/`animation-duration` 压到 `0.01ms !important` —— **不要**把这两个属性也改成 token。
 - 装饰性元素（例如节日粒子）在 `reducedEffects` 时应当**不渲染**，而不只是把动画压成 0.01ms——否则 18 个节点仍然留在 DOM 里。
 
-## 3. 其他令牌
+## 3. 字号 / 字重 / 圆角刻度（阶段 4 全量迁移）
+
+定义位置：`src/style.css` 的 `:root`「v5 尺度令牌」块。阶段 4 把全仓硬编码 `font-size` / `font-weight` / `border-radius` 机械包裹成 `var()`，**不改数值语义**（迁移前后像素值一一对应）。
+
+### 字号 `--fs-*`
+
+| 刻度 | 值 | 刻度 | 值 |
+| --- | --- | --- | --- |
+| `--fs-8` … `--fs-16` | 8–16px（半像素用 `--fs-9-5` / `--fs-10-5` / `--fs-11-5` / `--fs-12-5` / `--fs-13-5` / `--fs-14-5` / `--fs-15-5`） | `--fs-17` `--fs-18` `--fs-19` `--fs-20` | 17–20px |
+| `--fs-21` `--fs-22` `--fs-23` `--fs-24` `--fs-25` `--fs-26` `--fs-29` `--fs-30` `--fs-32` `--fs-36` `--fs-38` `--fs-45` | 按实际存量刻度登记 | | |
+
+语义别名（只读，不新增值）：
+
+| 令牌 | 指向 | 用途 |
+| --- | --- | --- |
+| `--fs-page-title` | `var(--fs-23)` | `.page-title` |
+| `--fs-body` | `var(--fs-14)` | 表单控件与 `.btn` |
+| `--fs-aux` | `var(--fs-12-5)` | `.page-desc` |
+
+**例外（刻意不令牌化）**：
+
+- `clamp()` / `max()` / `min()` 字号保持字面量——对比度审计要读可证下界，包一层 `var()` 反而读不出。
+- `@media (pointer: coarse)` 下的 `font-size: 16px !important` **必须保持字面量**（iOS 防缩放），`tests/mobileViewport.test.js` 锁死；迁移脚本对该组合放行。
+
+### 字重 `--fw-*`
+
+`--fw-400` / `500` / `600` / `650` / `700` / `750` / `800` / `850` / `900` → 对应数字。`normal` / `bold` / `bolder` / `lighter` 关键字保持字面量。
+
+对比度审计的大字门槛会解析 `var(--fw-700)` → `700`（`fontWeightTokenValue`），未登记的 `var(--fw-*)` 仍按正文从严。
+
+### 圆角 `--radius-*`
+
+| 令牌 | 值 | 备注 |
+| --- | --- | --- |
+| `--radius-2` … `--radius-18` | 2–18px 按存量刻度登记 | 主体刻度 |
+| `--radius-pill` | `999px` | 药丸形；存量 `99px` 亦映射到此（99→999，药丸视觉等价） |
+| `--radius-circle` | `50%` | |
+| `--card-radius` | `var(--radius-14)` | 卡片圆角别名 |
+| `--radius-s` | `var(--radius-9)` | 小圆角别名 |
+
+**例外**：
+
+- `border-radius: 0` 保持字面量（零值无令牌）。
+- 多角值逐分量令牌化，`0` 分量保持 `0`：`0 0 10px` → `0 0 var(--radius-10)`；`45%` 这类非 `50%` 百分比保持字面量。
+- `calc(var(--radius-s) - 2px)` 这类计算式在令牌化后仍合法。
+
+### 对比度审计与令牌
+
+`fontSizeLowerBoundPx` 只解析 `:root` 里登记过、且值为纯 px 的 `--fs-*`；`var(--fs-body)` 这类别名指针（值是 `var(...)`）不递归，仍返回 `null` → 按正文 4.5 从严。`var(--fs-xl)` 未登记 → 同样从严。`tests/contrastAudit.test.js` 锁住这条边界。
+
+### 迁移残留清单（已知且刻意）
+
+| 残留 | 位置 | 理由 |
+| --- | --- | --- |
+| `16px !important` 字面量 | `style.css` `@media (pointer: coarse)` | iOS 防缩放，测试锁死 |
+| `clamp`/`max`/`min` 字号 | FocusPanel / TodayView 等时钟 | 可证下界审计需要字面量 |
+| `0` / `inherit` / `calc()` 圆角 | 各处 | 零值或计算式无对应刻度 |
+| `0 0 var(--radius-10)` 中的 `0` | App / ActionSheet 底角 | 多角值的零分量保持字面量 |
+
+## 4. 其他令牌
 
 | 类别 | 令牌 |
 | --- | --- |
-| 圆角 | `--card-radius` 14px、`--radius-s` 9px |
+| 圆角 | `--card-radius` 14px、`--radius-s` 9px（完整刻度见 §3） |
 | 触控 | `--tap-min` 44px（`@media (pointer: coarse)` 下作为最小命中高度） |
 | 焦点 | `--focus-solid`、`--focus-halo`、`--focus-width` 2px、`--focus-offset` 2px |
-| 字体 | `--fs-page-title` 23px（`.page-title`）、`--fs-body` 14px（表单控件与 `.btn`）、`--fs-aux` 12.5px（`.page-desc`） |
+| 字体 | `--fs-page-title` 23px（`.page-title`）、`--fs-body` 14px（表单控件与 `.btn`）、`--fs-aux` 12.5px（`.page-desc`）；完整 `--fs-*` / `--fw-*` 刻度见 §3 |
 | 阴影 | `--shadow-sm`、`--shadow-md` |
 
-### 为什么这里少了几个令牌
+### 为什么这里少了几个令牌（历史说明，阶段 4 后语义已变）
 
-`--radius-m`（12px）、`--fs-module-title`（17px）、`--fs-card-title`（15px）、`--fs-num-hero`、`--fs-num-big`（28px）曾经定义在 `:root` 里，但全仓没有任何一处 `var()` 引用：12px / 17px / 15px 的实际使用点全是硬编码（且 17px、15px 出现的位置多是指图标、按钮，与「模块标题 / 卡片标题」的语义对不上），`--fs-num-big` 的 28px 与 `--fs-num-hero` 的那串 `clamp()` 则一次都没出现过。这类「定义了却没人消费」的令牌会让设计系统看起来比实际完整，已全部删除；等组件侧真的统一到某一档时，把令牌与消费者一起加回来。
+`--radius-m`（12px）、`--fs-module-title`（17px）、`--fs-card-title`（15px）、`--fs-num-hero`、`--fs-num-big`（28px）曾经定义在 `:root` 里，但全仓没有任何一处 `var()` 引用，属于「定义了却没人消费」，曾被删除。**阶段 4 全量迁移后**，12px / 15px / 17px 已重新以刻度形式出现在 §3（`--radius-12`、`--fs-15`、`--fs-17` 等），并由真实 `var()` 消费者撑着；语义别名（模块标题 / 卡片标题）仍未重建——等组件侧真的要统一到某一语义档时，把别名与消费者一起加回来。`--fs-num-hero` 与 `--fs-num-big` 的 `clamp()` 写法保持字面量（见 §3 例外）。
 
 ### `--success` / `--warning` 为什么不在 `theme.js` 的调色板里
 
@@ -124,7 +183,7 @@ CSS 定义在 `src/style.css` 的 `:root`，JS 镜像在 `src/composables/motion
 
 **所以：核对具名主题的对比度时，取 `style.css` 的值。** 拿 `THEMES[*].primary` 去算会得出一批不存在的失败组合（曾经据此误判「四个主题的幽灵按钮都不达 AA」，实际六个主题都是 4.72–5.22 全部达标）。`tests/contrastAudit.test.js` 现在有一条断言同时锁住「三个具名主题的 `--primary`/`--primary-soft` 各不相同且等于 `style.css` 里的写定值」和「别把 meta 色当令牌」，就是为了防这两件事。
 
-## 4. 新增或修改令牌的检查清单
+## 5. 新增或修改令牌的检查清单
 
 1. **运行时写入的变量必须登记。** `theme.js` 的 `THEME_VARIABLES` 列表决定切换主题时清理哪些内联变量。新增一个由 `theme.js` 在运行时设置的变量却忘了登记，就会在"深色 → 自定义主题"这类切换中残留上一套主题的值。注：只写在 `style.css` 的 `:root` / `:root[data-theme='dark']` 里的令牌（如 `--success`）不在此列，因为它们从不写内联样式。
 2. **五套调色板一起改。** 默认、紫、绿、粉、高对比度（外加深色的 `theme.js` 分支）。`npm run audit:contrast` 会一次性核对，它现在也会把「语义色文字 / 语义色浅底（`color-mix` 混色）」算进去。

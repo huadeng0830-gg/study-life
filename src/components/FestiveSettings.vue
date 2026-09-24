@@ -398,7 +398,7 @@ watch(
   gap: 10px;
   padding: 10px 12px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-10);
   background: var(--card);
   cursor: pointer;
 }
@@ -412,14 +412,14 @@ watch(
   flex-direction: column;
   gap: 2px;
   color: var(--text);
-  font-size: 13px;
-  font-weight: 650;
+  font-size: var(--fs-13);
+  font-weight: var(--fw-650);
 }
 .switch-row small,
 .field small {
   color: var(--ink-faint);
-  font-size: 11px;
-  font-weight: 400;
+  font-size: var(--fs-11);
+  font-weight: var(--fw-400);
 }
 
 .field {
@@ -429,8 +429,8 @@ watch(
 }
 .field label {
   color: var(--ink-soft);
-  font-size: 12.5px;
-  font-weight: 700;
+  font-size: var(--fs-12-5);
+  font-weight: var(--fw-700);
 }
 .field input {
   min-height: 40px;
@@ -450,24 +450,24 @@ watch(
 }
 .anni-head span {
   color: var(--ink-soft);
-  font-size: 12.5px;
-  font-weight: 700;
+  font-size: var(--fs-12-5);
+  font-weight: var(--fw-700);
 }
 .anni-hint {
   color: var(--ink-faint);
-  font-size: 11px;
+  font-size: var(--fs-11);
 }
 .add-btn {
   min-height: 40px;
   padding: 8px 12px;
-  font-size: 12.5px;
+  font-size: var(--fs-12-5);
 }
 .empty-line {
   padding: 10px 12px;
   color: var(--ink-faint);
-  font-size: 12px;
+  font-size: var(--fs-12);
   border: 1px dashed var(--border);
-  border-radius: 9px;
+  border-radius: var(--radius-9);
   background: var(--bg);
 }
 .anni-list {
@@ -490,10 +490,10 @@ watch(
   min-height: 40px;
   padding: 0 11px;
   color: var(--danger);
-  font-size: 12px;
-  font-weight: 700;
+  font-size: var(--fs-12);
+  font-weight: var(--fw-700);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-8);
   background: var(--card);
 }
 .del-btn:hover {
@@ -510,7 +510,7 @@ watch(
 }
 .lunar-hint {
   color: var(--ink-faint);
-  font-size: 11px;
+  font-size: var(--fs-11);
   line-height: 1.5;
 }
 .lunar-list {
@@ -538,7 +538,7 @@ watch(
   align-items: center;
   gap: 4px;
   color: var(--ink-soft);
-  font-size: 12px;
+  font-size: var(--fs-12);
   white-space: nowrap;
 }
 .lunar-leap input {
@@ -550,7 +550,7 @@ watch(
 .lunar-resolve {
   grid-column: 1 / -1;
   color: var(--text);
-  font-size: 12px;
+  font-size: var(--fs-12);
   font-variant-numeric: tabular-nums;
 }
 .lunar-resolve.off {
@@ -568,16 +568,16 @@ watch(
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 13px;
+  font-size: var(--fs-13);
 }
 /* 「只读」徽标是琥珀色语义的「字 + 浅底」成对写法，底一起从 --card 混出来：
    只改字的话深色主题下 #fff2d8 仍是白药丸，亮琥珀字压上去约 1.7:1。 */
 .readonly-badge {
   padding: 2px 7px;
   color: var(--warning);
-  font-size: 10px;
-  font-weight: 700;
-  border-radius: 999px;
+  font-size: var(--fs-10);
+  font-weight: var(--fw-700);
+  border-radius: var(--radius-pill);
   background: color-mix(in srgb, var(--warning) 10%, var(--card));
 }
 .solar-chips {
@@ -588,9 +588,9 @@ watch(
 .chip {
   padding: 5px 9px;
   color: var(--ink-soft);
-  font-size: 12px;
+  font-size: var(--fs-12);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-8);
   background: var(--card);
 }
 .chip b {
@@ -600,13 +600,13 @@ watch(
 .lunar-table-wrap {
   overflow-x: auto;
   border: 1px solid var(--border);
-  border-radius: 9px;
+  border-radius: var(--radius-9);
   background: var(--card);
 }
 .lunar-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 12px;
+  font-size: var(--fs-12);
   font-variant-numeric: tabular-nums;
 }
 .lunar-table th,
@@ -618,8 +618,8 @@ watch(
 }
 .lunar-table thead th {
   color: var(--ink-soft);
-  font-size: 11.5px;
-  font-weight: 700;
+  font-size: var(--fs-11-5);
+  font-weight: var(--fw-700);
   background: var(--bg);
 }
 .lunar-table th:first-child,
@@ -627,7 +627,7 @@ watch(
   position: sticky;
   left: 0;
   background: var(--card);
-  font-weight: 700;
+  font-weight: var(--fw-700);
 }
 /* 首行去上边框要同时匹配 th 和 td：年份那一列现在是 <th scope="row">，
    只写 td 的话改完之后首行的年份格会重新长出上边框。 */
@@ -647,18 +647,18 @@ watch(
 }
 .table-note {
   color: var(--ink-faint);
-  font-size: 11px;
+  font-size: var(--fs-11);
   line-height: 1.5;
 }
 .table-note code {
   padding: 1px 5px;
-  border-radius: 5px;
+  border-radius: var(--radius-5);
   background: var(--bg);
 }
 /* 「已自动保存」提示落在 Modal 的 var(--card) 上：原 #0d9463 浅色 3.87:1、深色 4.11:1。 */
 .saved-hint {
   color: var(--success);
-  font-size: 12px;
+  font-size: var(--fs-12);
   text-align: right;
 }
 
@@ -669,7 +669,7 @@ watch(
     gap: 6px;
     padding: 9px;
     border: 1px solid var(--border);
-    border-radius: 10px;
+    border-radius: var(--radius-10);
     background: var(--bg);
   }
   .del-btn,

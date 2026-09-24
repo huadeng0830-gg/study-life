@@ -39,24 +39,79 @@
   --ink-soft: #55607a;
   --ink-faint: #626d84;
   --bg-tint: #f9fafd;
-  --card-radius: 14px;
-  --radius-s: 9px;
-  /* 这里原本还有一个 --radius-m: 12px。全仓 22 处 border-radius: 12px 全是硬编码，
-     没有一处引用过它，属于「定义了却没人消费」，已删除：样式表里没有任何一处
-     用 12px，留着只会让设计系统看起来比实际完整。等组件批量迁移时，把令牌和
-     消费者一起加回来（tests/styleHooks.test.js 会挡住只定义不消费的令牌）。
-     同样理由删掉的还有 --fs-module-title / --fs-card-title / --fs-num-hero /
-     --fs-num-big：见下面的字体层级。 */
-  --focus-ring: rgba(61, 99, 216, 0.28);
+  /* ---------- v5 尺度令牌：字号 / 字重 / 圆角（阶段 4 全量迁移） ----------
+     此前全仓 font-size 约 678 处、font-weight 约 229 处、border-radius 约 333 处
+     硬编码，语义别名只有 --fs-body/--fs-aux/--fs-page-title 与 --card-radius/--radius-s。
+     现在把实际出现过的每一档数值都收成刻度令牌，并由组件侧机械替换消费——
+     令牌与消费者同一批提交，tests/styleHooks.test.js 挡住「只定义不消费」。
+     语义别名保留，改为指向刻度（单值事实来源）。 */
+  --radius-2: 2px;
+  --radius-3: 3px;
+  --radius-4: 4px;
+  --radius-5: 5px;
+  --radius-6: 6px;
+  --radius-7: 7px;
+  --radius-8: 8px;
+  --radius-9: 9px;
+  --radius-10: 10px;
+  --radius-11: 11px;
+  --radius-12: 12px;
+  --radius-13: 13px;
+  --radius-14: 14px;
+  --radius-16: 16px;
+  --radius-18: 18px;
+  --radius-pill: 999px;
+  --radius-circle: 50%;
+  --card-radius: var(--radius-14);
+  --radius-s: var(--radius-9);
 
-  /* 字体层级。三个令牌都各自有真实消费者：--fs-page-title 给 .page-title，
-     --fs-body 给全站基础正文（表单控件与 .btn），--fs-aux 给 .page-desc。
-     刻意不再保留「看起来该有」的空档：17px / 15px 的实际使用点是图标、按钮、
-     列表项，和「模块标题 / 卡片标题」对不上；28px 与那串 clamp 在全仓一次都没
-     出现过。需要时再和消费者一起加。 */
-  --fs-page-title: 23px;
-  --fs-body: 14px;
-  --fs-aux: 12.5px;
+  --fs-8: 8px;
+  --fs-9: 9px;
+  --fs-9-5: 9.5px;
+  --fs-10: 10px;
+  --fs-10-5: 10.5px;
+  --fs-11: 11px;
+  --fs-11-5: 11.5px;
+  --fs-12: 12px;
+  --fs-12-5: 12.5px;
+  --fs-13: 13px;
+  --fs-13-5: 13.5px;
+  --fs-14: 14px;
+  --fs-14-5: 14.5px;
+  --fs-15: 15px;
+  --fs-15-5: 15.5px;
+  --fs-16: 16px;
+  --fs-17: 17px;
+  --fs-18: 18px;
+  --fs-19: 19px;
+  --fs-20: 20px;
+  --fs-21: 21px;
+  --fs-22: 22px;
+  --fs-23: 23px;
+  --fs-24: 24px;
+  --fs-25: 25px;
+  --fs-26: 26px;
+  --fs-29: 29px;
+  --fs-30: 30px;
+  --fs-32: 32px;
+  --fs-36: 36px;
+  --fs-38: 38px;
+  --fs-45: 45px;
+  --fs-page-title: var(--fs-23);
+  --fs-body: var(--fs-14);
+  --fs-aux: var(--fs-12-5);
+
+  --fw-400: 400;
+  --fw-500: 500;
+  --fw-600: 600;
+  --fw-650: 650;
+  --fw-700: 700;
+  --fw-750: 750;
+  --fw-800: 800;
+  --fw-850: 850;
+  --fw-900: 900;
+
+  --focus-ring: rgba(61, 99, 216, 0.28);
 
   /* ---------- v3 动效 token：统一时长与缓动曲线 ----------
      此前各组件硬编码 0.13s~0.3s 与各不相同的缓动，手感不一致。
@@ -153,7 +208,7 @@ body {
   color: var(--text);
   font-family: 'Microsoft YaHei', 'PingFang SC', system-ui, -apple-system,
     sans-serif;
-  font-size: 15px;
+  font-size: var(--fs-15);
 }
 
 /* 横屏 / 移动浏览器地址栏收放时，100vh 会大于真正的可见高度，
@@ -183,7 +238,7 @@ textarea {
   font-size: var(--fs-body);
   padding: 8px 10px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-8);
   outline: none;
   background: var(--card);
   color: var(--text);
@@ -270,10 +325,10 @@ summary:focus:not(:focus-visible) {
 
 .btn {
   border: none;
-  border-radius: 8px;
+  border-radius: var(--radius-8);
   padding: 9px 18px;
   font-size: var(--fs-body);
-  font-weight: 600;
+  font-weight: var(--fw-600);
   transition: background var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard), transform var(--dur-fast) var(--ease-standard),
     box-shadow var(--dur-fast) var(--ease-standard), opacity var(--dur-fast) var(--ease-standard);
 }
@@ -320,7 +375,7 @@ summary:focus:not(:focus-visible) {
   vertical-align: -0.16em;
   border: 2px solid currentColor;
   border-top-color: transparent;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   animation: btn-spin 720ms linear infinite;
 }
 
@@ -379,7 +434,7 @@ summary:focus:not(:focus-visible) {
 .card {
   background: var(--card);
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: var(--radius-14);
   padding: 22px;
   box-shadow: var(--shadow-sm);
 }
@@ -525,7 +580,7 @@ summary:focus:not(:focus-visible) {
 }
 .page-title {
   font-size: var(--fs-page-title);
-  font-weight: 800;
+  font-weight: var(--fw-800);
   letter-spacing: -0.02em;
   line-height: 1.25;
 }
@@ -556,8 +611,8 @@ summary:focus:not(:focus-visible) {
 .segmented > button {
   padding: 6px 13px;
   color: var(--ink-soft);
-  font-size: 12.5px;
-  font-weight: 600;
+  font-size: var(--fs-12-5);
+  font-weight: var(--fw-600);
   border: none;
   border-radius: calc(var(--radius-s) - 2px);
   background: transparent;
@@ -577,7 +632,7 @@ summary:focus:not(:focus-visible) {
 }
 .segmented > button b {
   margin-left: 4px;
-  font-weight: 800;
+  font-weight: var(--fw-800);
 }
 
 /* Chip（多选筛选片） */
@@ -589,10 +644,10 @@ summary:focus:not(:focus-visible) {
 .chip {
   padding: 6px 12px;
   color: var(--ink-soft);
-  font-size: 12.5px;
-  font-weight: 600;
+  font-size: var(--fs-12-5);
+  font-weight: var(--fw-600);
   border: 1px solid var(--border-strong);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--card);
   transition: border-color var(--dur-fast) var(--ease-standard), background var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard), box-shadow var(--dur-fast) var(--ease-standard);
 }
@@ -612,10 +667,10 @@ summary:focus:not(:focus-visible) {
 .link-btn {
   padding: 5px 9px;
   color: var(--ink-soft);
-  font-size: 12px;
-  font-weight: 600;
+  font-size: var(--fs-12);
+  font-weight: var(--fw-600);
   border: none;
-  border-radius: 7px;
+  border-radius: var(--radius-7);
   background: transparent;
   transition: background var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard);
 }
@@ -634,14 +689,14 @@ summary:focus:not(:focus-visible) {
   min-height: 100vh;
   min-height: 100dvh;
   padding: 32px 20px;
-  color: var(--ink, #1f2937);
+  color: var(--text);
   text-align: center;
   background: var(--bg, #f6f7fb);
 }
-.startup-error p { max-width: 620px; color: var(--ink-soft, #65708a); line-height: 1.7; }
+.startup-error p { max-width: 620px;   color: var(--ink-soft); line-height: 1.7; }
 .startup-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 8px; }
 .route-fallback { display: grid; place-items: center; min-height: 180px; padding: 24px; color: var(--ink-soft); text-align: center; }
-.route-fallback.error { color: var(--danger, #b42318); }
+.route-fallback.error { color: var(--danger); }
 
 /* ---------- 移动端性能：屏幕外区块延迟渲染 ----------
    content-visibility: auto 让视口外的卡片跳过首屏绘制，
@@ -680,7 +735,7 @@ summary:focus:not(:focus-visible) {
   will-change: transform, opacity;
 }
 .atmo-layer[data-decor='snow'] i {
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   box-shadow: 0 0 8px rgba(255, 255, 255, 0.7);
   animation-name: atmo-fall;
   animation-timing-function: linear;
@@ -693,7 +748,7 @@ summary:focus:not(:focus-visible) {
   animation-iteration-count: infinite;
 }
 .atmo-layer[data-decor='lantern'] i {
-  border-radius: 50% 50% 45% 45%;
+  border-radius: var(--radius-circle) var(--radius-circle) 45% 45%;
   opacity: 0.75;
   box-shadow: 0 0 14px var(--atmosphere-accent, #e23b3b);
   animation-name: atmo-lantern;
@@ -743,7 +798,7 @@ summary:focus:not(:focus-visible) {
   width: 320px;
   height: 320px;
   margin: -160px 0 0 -160px;
-  border-radius: 50%;
+  border-radius: var(--radius-circle);
   border: 2px solid var(--atmosphere-accent, #8b5cf6);
   opacity: 0;
   animation: atmo-halo var(--dur-reveal) var(--ease-out) 1;

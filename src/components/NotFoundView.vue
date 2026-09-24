@@ -12,5 +12,5 @@
 </template>
 
 <style scoped>
-.route-not-found{display:grid;place-items:center;align-content:center;min-height:42vh;min-height:42dvh;padding:32px;text-align:center}.route-not-found-code{margin:0;color:var(--primary);font-size:12px;font-weight:800;letter-spacing:.16em}.route-not-found h1{margin:8px 0 6px;font-size:24px}.route-not-found p:not(.route-not-found-code){margin:0 0 18px;color:var(--ink-soft);font-size:13px}
+.route-not-found{display:grid;place-items:center;align-content:center;min-height:42vh;min-height:42dvh;padding:32px;text-align:center}.route-not-found-code{margin:0;color:var(--primary);font-size:var(--fs-12);font-weight:var(--fw-800);letter-spacing:.16em}.route-not-found h1{margin:8px 0 6px;font-size:var(--fs-24)}.route-not-found p:not(.route-not-found-code){margin:0 0 18px;color:var(--ink-soft);font-size:var(--fs-13)}
 </style>

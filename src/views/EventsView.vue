@@ -348,40 +348,40 @@ function confirmRemove() {
 <style scoped>
 .events-toolbar { display: flex; align-items: end; gap: 12px; margin-bottom: 14px; padding: 12px; flex-wrap: wrap; }
 .events-filters { display: flex; gap: 6px; }
-.filter-tab { min-height: 38px; padding: 0 13px; color: var(--ink-soft); font-size: 12.5px; font-weight: 700; border: 1px solid var(--border); border-radius: 999px; background: var(--bg); cursor: pointer; }
+.filter-tab { min-height: 38px; padding: 0 13px; color: var(--ink-soft); font-size: var(--fs-12-5); font-weight: var(--fw-700); border: 1px solid var(--border); border-radius: var(--radius-pill); background: var(--bg); cursor: pointer; }
 .filter-tab.on { color: var(--on-primary, #fff); border-color: var(--primary); background: var(--primary); }
 .search-field { display: grid; flex: 1; gap: 5px; min-width: 200px; }
-.search-field input { width: 100%; min-height: 38px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); }
-.events-count { color: var(--muted); font-size: 11px; white-space: nowrap; }
+.search-field input { width: 100%; min-height: 38px; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-8); background: var(--bg); }
+.events-count { color: var(--muted); font-size: var(--fs-11); white-space: nowrap; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); border: 0; }
 .events-list { display: grid; gap: 8px; }
 .event-card { display: flex; align-items: center; gap: 12px; padding: 12px 14px; }
 .event-card.past { opacity: .68; }
 .event-card-main { display: grid; flex: 1; gap: 5px; min-width: 0; }
 .event-line1 { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.event-title { color: var(--ink); font-size: 14.5px; font-weight: 800; }
-.event-course { flex: 0 0 auto; padding: 2px 8px; color: var(--primary); font-size: 11px; font-weight: 700; border-radius: 999px; background: var(--primary-soft); }
-.event-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; color: var(--ink-soft); font-size: 12px; }
+.event-title { color: var(--text); font-size: var(--fs-14-5); font-weight: var(--fw-800); }
+.event-course { flex: 0 0 auto; padding: 2px 8px; color: var(--primary); font-size: var(--fs-11); font-weight: var(--fw-700); border-radius: var(--radius-pill); background: var(--primary-soft); }
+.event-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; color: var(--ink-soft); font-size: var(--fs-12); }
 .event-when { font-variant-numeric: tabular-nums; }
 .event-loc { color: var(--muted); }
-.event-note { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.5; white-space: pre-wrap; }
+.event-note { margin: 0; color: var(--muted); font-size: var(--fs-12); line-height: 1.5; white-space: pre-wrap; }
 .event-card-actions { display: flex; gap: 6px; flex: 0 0 auto; }
-.event-card-actions button { padding: 6px 9px; color: var(--primary); font-size: 11.5px; font-weight: 750; border: 0; border-radius: 6px; background: var(--primary-soft); }
+.event-card-actions button { padding: 6px 9px; color: var(--primary); font-size: var(--fs-11-5); font-weight: var(--fw-750); border: 0; border-radius: var(--radius-6); background: var(--primary-soft); }
 .event-card-actions .danger-text { color: var(--danger); background: var(--danger-soft); }
 .event-form { display: grid; gap: 12px; }
-.field { display: grid; gap: 5px; color: var(--ink-soft); font-size: 12px; font-weight: 700; }
-.field input, .field textarea { width: 100%; min-height: 40px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); font: inherit; color: var(--text); }
+.field { display: grid; gap: 5px; color: var(--ink-soft); font-size: var(--fs-12); font-weight: var(--fw-700); }
+.field input, .field textarea { width: 100%; min-height: 40px; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-8); background: var(--bg); font: inherit; color: var(--text); }
 /* 时间字段改成按钮：点开底部双列滚轮，外观与普通输入框一致 */
-.time-field { width: 100%; min-height: 40px; padding: 8px 10px; color: var(--text); text-align: left; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); font: inherit; font-variant-numeric: tabular-nums; touch-action: manipulation; }
+.time-field { width: 100%; min-height: 40px; padding: 8px 10px; color: var(--text); text-align: left; border: 1px solid var(--border); border-radius: var(--radius-8); background: var(--bg); font: inherit; font-variant-numeric: tabular-nums; touch-action: manipulation; }
 .time-field:hover { border-color: var(--primary); }
 .field textarea { resize: vertical; line-height: 1.6; }
 .form-grid { display: grid; gap: 12px; }
 .form-grid-inline { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.form-error { margin: 0; color: var(--danger); font-size: 12px; }
+.form-error { margin: 0; color: var(--danger); font-size: var(--fs-12); }
 .form-actions { display: flex; justify-content: flex-end; gap: 8px; }
 /* 提示落在 Modal 的 var(--card) 上，只改字色：原 #0d9463 在浅色 3.87:1、
    深色 4.11:1（深色卡片上写死的深绿一直读不出来）。 */
-.notice-success { margin: 12px 0 0; color: var(--success); font-size: 12px; text-align: center; }
+.notice-success { margin: 12px 0 0; color: var(--success); font-size: var(--fs-12); text-align: center; }
 @media (max-width: 520px) {
   .events-toolbar { align-items: stretch; }
   .search-field { flex-basis: 100%; }

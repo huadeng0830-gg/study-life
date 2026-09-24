@@ -373,7 +373,7 @@ onBeforeUnmount(cleanup)
   display: flex;
   flex-direction: column;
   background: var(--card);
-  border-radius: 14px;
+  border-radius: var(--radius-14);
   width: 420px;
   max-width: 100%;
   max-height: 85vh;
@@ -400,11 +400,11 @@ onBeforeUnmount(cleanup)
 .close {
   border: none;
   background: transparent;
-  font-size: 16px;
+  font-size: var(--fs-16);
   color: var(--muted);
   width: 32px;
   height: 32px;
-  border-radius: 8px;
+  border-radius: var(--radius-8);
 }
 .close:hover {
   background: var(--bg);
@@ -457,17 +457,17 @@ onBeforeUnmount(cleanup)
 .sheet-grabber span {
   width: 42px;
   height: 4px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--border-strong, var(--border));
 }
 .sheet-toggle {
   padding: 6px 11px;
   min-height: 30px;
   color: var(--primary);
-  font-size: 12px;
-  font-weight: 700;
+  font-size: var(--fs-12);
+  font-weight: var(--fw-700);
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--radius-8);
   background: var(--primary-soft);
   touch-action: manipulation;
 }
@@ -491,7 +491,7 @@ onBeforeUnmount(cleanup)
     max-height: 92vh;
     max-height: 92dvh;
     max-height: 92%;
-    border-radius: 18px 18px 0 0;
+    border-radius: var(--radius-18) var(--radius-18) 0 0;
   }
 
   .modal-head {

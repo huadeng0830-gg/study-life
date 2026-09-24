@@ -286,7 +286,7 @@ async function onCellKeydown(event, day, periodIndex) {
 
 <style scoped>
 .mobile-day-view {
-  border-radius: 14px;
+  border-radius: var(--radius-14);
   overflow: hidden;
 }
 .mobile-day-head {
@@ -306,10 +306,10 @@ async function onCellKeydown(event, day, periodIndex) {
   min-width: 0;
   text-align: center;
 }
-.mobile-day-head strong { font-size: 16px; }
-.mobile-day-head small { width: 100%; color: var(--danger); font-size: 11px; }
-.mobile-today-mark { padding: 2px 7px; color: var(--primary); font-size: 10px; font-weight: 800; border-radius: 999px; background: var(--primary-soft); }
-.day-nav { display: grid; place-items: center; width: 44px; height: 44px; color: var(--primary); font-size: 25px; border: 1px solid var(--border); border-radius: 10px; background: var(--card); }
+.mobile-day-head strong { font-size: var(--fs-16); }
+.mobile-day-head small { width: 100%; color: var(--danger); font-size: var(--fs-11); }
+.mobile-today-mark { padding: 2px 7px; color: var(--primary); font-size: var(--fs-10); font-weight: var(--fw-800); border-radius: var(--radius-pill); background: var(--primary-soft); }
+.day-nav { display: grid; place-items: center; width: 44px; height: 44px; color: var(--primary); font-size: var(--fs-25); border: 1px solid var(--border); border-radius: var(--radius-10); background: var(--card); }
 .day-nav:disabled { color: var(--ink-faint); opacity: .45; }
 .mobile-course-list { display: flex; flex-direction: column; gap: 8px; padding-top: 12px; }
 .mobile-course-row {
@@ -324,16 +324,16 @@ async function onCellKeydown(event, day, periodIndex) {
   text-align: left;
   border: 1px solid var(--border);
   border-left: 4px solid var(--course-color);
-  border-radius: 10px;
+  border-radius: var(--radius-10);
   background: var(--bg-tint);
 }
 .mobile-course-row:active { background: var(--primary-soft); }
-.mobile-course-time { color: var(--ink-soft); font-size: 11px; font-weight: 700; line-height: 1.4; }
+.mobile-course-time { color: var(--ink-soft); font-size: var(--fs-11); font-weight: var(--fw-700); line-height: 1.4; }
 .mobile-course-main { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-.mobile-course-main b { overflow: hidden; font-size: 14px; line-height: 1.35; }
-.mobile-course-main small { overflow: hidden; color: var(--ink-soft); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-.mobile-course-arrow { color: var(--ink-faint); font-size: 24px; text-align: center; }
-.mobile-day-empty { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 24px 4px 6px; color: var(--ink-soft); font-size: 13px; }
+.mobile-course-main b { overflow: hidden; font-size: var(--fs-14); line-height: 1.35; }
+.mobile-course-main small { overflow: hidden; color: var(--ink-soft); font-size: var(--fs-11); text-overflow: ellipsis; white-space: nowrap; }
+.mobile-course-arrow { color: var(--ink-faint); font-size: var(--fs-24); text-align: center; }
+.mobile-day-empty { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 24px 4px 6px; color: var(--ink-soft); font-size: var(--fs-13); }
 
 .timetable-wrap { overflow-x: auto; padding: 16px; }
 .timetable {
@@ -347,13 +347,13 @@ async function onCellKeydown(event, day, periodIndex) {
   grid-row: 1;
   text-align: center;
   padding: 8px 0;
-  font-weight: 600;
+  font-weight: var(--fw-600);
   color: var(--muted);
-  border-radius: 8px;
+  border-radius: var(--radius-8);
 }
 .tt-head.today { background: var(--primary-soft); color: var(--primary); }
-.today-tag { margin-left: 4px; font-size: 11px; background: var(--primary); color: var(--on-primary, #fff); padding: 1px 6px; border-radius: 999px; vertical-align: 2px; }
-.exception-tag { display: block; width: fit-content; margin: 3px auto 0; padding: 1px 5px; color: #b13f3f; font-size: 9px; font-weight: 800; border-radius: 5px; background: #feecec; }
+.today-tag { margin-left: 4px; font-size: var(--fs-11); background: var(--primary); color: var(--on-primary, #fff); padding: 1px 6px; border-radius: var(--radius-pill); vertical-align: 2px; }
+.exception-tag { display: block; width: fit-content; margin: 3px auto 0; padding: 1px 5px; color: #b13f3f; font-size: var(--fs-9); font-weight: var(--fw-800); border-radius: var(--radius-5); background: #feecec; }
 .exception-tag.makeup { color: #6b3fd4; background: #f1ebff; }
 .tt-period {
   display: flex;
@@ -362,15 +362,15 @@ async function onCellKeydown(event, day, periodIndex) {
   justify-content: center;
   gap: 2px;
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--fs-11);
   text-align: center;
   padding: 2px;
 }
-.tt-period b { font-size: 12px; color: var(--text); white-space: nowrap; }
+.tt-period b { font-size: var(--fs-12); color: var(--text); white-space: nowrap; }
 .tt-cell {
   background: var(--bg-tint);
   border: 1px dashed var(--border);
-  border-radius: 8px;
+  border-radius: var(--radius-8);
   min-height: 48px;
   cursor: pointer;
   transition: background var(--dur-fast) var(--ease-standard);
@@ -381,7 +381,7 @@ async function onCellKeydown(event, day, periodIndex) {
   z-index: 2;
   margin: 2px;
   padding: 6px 8px;
-  border-radius: 8px;
+  border-radius: var(--radius-8);
   border-left: 4px solid;
   cursor: pointer;
   overflow: hidden;
@@ -392,10 +392,10 @@ async function onCellKeydown(event, day, periodIndex) {
 }
 .course:hover { transform: scale(1.02); }
 .course.conflict { outline: 2px dashed var(--danger); outline-offset: -2px; }
-.c-name { font-size: 13px; font-weight: 600; }
-.c-week { font-size: 10px; color: var(--primary); font-weight: 600; }
-.c-sub { font-size: 11px; color: var(--muted); }
-.tip { color: var(--muted); font-size: 13px; }
+.c-name { font-size: var(--fs-13); font-weight: var(--fw-600); }
+.c-week { font-size: var(--fs-10); color: var(--primary); font-weight: var(--fw-600); }
+.c-sub { font-size: var(--fs-11); color: var(--muted); }
+.tip { color: var(--muted); font-size: var(--fs-13); }
 
 /* Skin variants */
 .skin-notebook {
@@ -408,22 +408,22 @@ async function onCellKeydown(event, day, periodIndex) {
 .skin-notebook .tt-head { color: #735f39; font-family: 'KaiTi', 'STKaiti', serif; }
 .skin-notebook .tt-cell { border-color: rgba(155, 128, 78, 0.32); background: rgba(255, 253, 247, 0.52); }
 .skin-notebook .tt-period b, .skin-notebook .course { font-family: 'KaiTi', 'STKaiti', serif; }
-.skin-notebook .course { border-left-width: 3px; border-radius: 5px 12px 7px 10px; box-shadow: 1px 2px 5px rgba(89, 68, 31, 0.1); }
+.skin-notebook .course { border-left-width: 3px; border-radius: var(--radius-5) var(--radius-12) var(--radius-7) var(--radius-10); box-shadow: 1px 2px 5px rgba(89, 68, 31, 0.1); }
 .skin-timeline { border: none; background: rgba(255, 255, 255, 0.9); box-shadow: none; }
 .skin-timeline .timetable { gap: 2px 8px; }
 .skin-timeline .tt-head { border-bottom: 2px solid var(--border); border-radius: 0; }
 .skin-timeline .tt-cell { min-height: 54px; border: none; border-bottom: 1px solid var(--border); border-radius: 0; background: transparent; }
 .skin-timeline .tt-cell.isToday { background: color-mix(in srgb, var(--primary) 5%, transparent); }
 .skin-timeline .tt-period { padding-right: 9px; border-right: 2px solid var(--border); }
-.skin-timeline .course { margin: 4px 2px; border-left-width: 3px; border-radius: 6px; }
+.skin-timeline .course { margin: 4px 2px; border-left-width: 3px; border-radius: var(--radius-6); }
 
 .warn-banner {
   background: #fef3c7;
   border: 1px solid #fcd34d;
   color: #92400e;
-  border-radius: 10px;
+  border-radius: var(--radius-10);
   padding: 10px 16px;
-  font-size: 14px;
+  font-size: var(--fs-14);
   margin: 0 16px 16px;
 }
 </style>

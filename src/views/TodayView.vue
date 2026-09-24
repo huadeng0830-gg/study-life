@@ -460,14 +460,14 @@ function countdownLabel(item) {
 .festive-narrative {
   color:var(--primary);
   margin-top:4px;
-  font-size:12.5px}
+  font-size:var(--fs-12-5)}
 .greeting {
   letter-spacing:-.01em;
   font-size:max(19px,min(2.2vw,24px))}
 .page-desc {
   color:var(--ink-soft);
   margin-top:5px;
-  font-size:12.5px}
+  font-size:var(--fs-12-5)}
 
 .head-actions {
   flex-wrap:wrap;
@@ -479,7 +479,7 @@ function countdownLabel(item) {
   flex:none;
   min-height:40px;
   padding:9px 13px;
-  font-size:13px}
+  font-size:var(--fs-13)}
 .mood-strip {
   border:1px solid var(--border);
   border-radius:var(--card-radius);
@@ -492,8 +492,8 @@ function countdownLabel(item) {
 .mood-label {
   color:var(--ink-soft);
   white-space:nowrap;
-  font-size:12.5px;
-  font-weight:700}
+  font-size:var(--fs-12-5);
+  font-weight:var(--fw-700)}
 .mood-options {
   flex-wrap:wrap;
   gap:4px;
@@ -504,9 +504,9 @@ function countdownLabel(item) {
   transition:background var(--dur-fast) var(--ease-standard), border-color var(--dur-fast) var(--ease-standard), transform var(--dur-fast) var(--ease-standard);
   background:0 0;
   border:1px solid #0000;
-  border-radius:10px;
+  border-radius:var(--radius-10);
   place-items:center;
-  font-size:20px;
+  font-size:var(--fs-20);
   display:grid}
 .mood-btn:hover {
   background:var(--bg-tint)}
@@ -520,7 +520,7 @@ function countdownLabel(item) {
   padding:8px 10px}
 .mood-hint {
   color:var(--ink-faint);
-  font-size:12px}
+  font-size:var(--fs-12)}
 
 .next-panel {
   border-radius:var(--card-radius);
@@ -540,8 +540,8 @@ function countdownLabel(item) {
 .next-label {
   color:var(--primary);
   letter-spacing:.14em;
-  font-size:10.5px;
-  font-weight:850}
+  font-size:var(--fs-10-5);
+  font-weight:var(--fw-850)}
 .next-title {
   letter-spacing:-.01em;
   text-overflow:ellipsis;
@@ -550,24 +550,24 @@ function countdownLabel(item) {
   overflow:hidden}
 .next-meta {
   color:var(--ink-soft);
-  font-size:12.5px}
+  font-size:var(--fs-12-5)}
 .next-empty-line {
   color:var(--ink-soft);
-  font-size:12px;
-  font-weight:600}
+  font-size:var(--fs-12);
+  font-weight:var(--fw-600)}
 .next-title.is-muted {
   color:var(--ink-soft);
-  font-size:15px;
-  font-weight:650}
+  font-size:var(--fs-15);
+  font-weight:var(--fw-650)}
 .next-state {
   color:var(--primary);
   background:var(--card);
   border:1px solid var(--border);
-  border-radius:999px;
+  border-radius:var(--radius-pill);
   align-self:flex-start;
   padding:4px 9px;
-  font-size:11.5px;
-  font-weight:750}
+  font-size:var(--fs-11-5);
+  font-weight:var(--fw-750)}
 .next-state.live {
   color:#fff;
   /* 渐变的最浅一档必须让白字达 AA：原来 #456fe8 只有 4.48:1（11.5px/750 属正文，
@@ -579,8 +579,8 @@ function countdownLabel(item) {
   color:var(--primary);
   white-space:nowrap;
   flex:none;
-  font-size:12.5px;
-  font-weight:750;
+  font-size:var(--fs-12-5);
+  font-weight:var(--fw-750);
   text-decoration:none}
 .next-action:hover {
   text-decoration:underline}
@@ -598,12 +598,12 @@ function countdownLabel(item) {
   margin-bottom:10px;
   display:flex}
 .panel-head h2 {
-  font-size:15.5px}
+  font-size:var(--fs-15-5)}
 .panel-link {
   color:var(--primary);
   white-space:nowrap;
-  font-size:12px;
-  font-weight:700;
+  font-size:var(--fs-12);
+  font-weight:var(--fw-700);
   text-decoration:none}
 .panel-link:hover {
   text-decoration:underline}
@@ -611,9 +611,9 @@ function countdownLabel(item) {
   color:var(--primary);
   border:1px solid color-mix(in srgb, var(--primary) 28%, var(--border));
   background:color-mix(in srgb, var(--primary) 10%, var(--card));
-  border-radius:9px;
+  border-radius:var(--radius-9);
   padding:8px 12px;
-  font-size:12.5px}
+  font-size:var(--fs-12-5)}
 .action-panel {
   border:1px solid var(--border);
   border-radius:var(--card-radius);
@@ -627,8 +627,8 @@ function countdownLabel(item) {
 .panel-subtitle {
   color:var(--ink-faint);
   margin-top:3px;
-  font-size:11.5px;
-  font-weight:500;
+  font-size:var(--fs-11-5);
+  font-weight:var(--fw-500);
   display:block}
 .action-list {
   flex-direction:column;
@@ -647,7 +647,7 @@ function countdownLabel(item) {
   color:var(--primary);
   flex:0 0 24px;
   place-items:center;
-  font-size:17px;
+  font-size:var(--fs-17);
   display:grid}
 .risk-row .action-mark,.risk-row .action-copy span {
   color:var(--danger)}
@@ -660,39 +660,39 @@ function countdownLabel(item) {
 .action-copy b {
   text-overflow:ellipsis;
   white-space:nowrap;
-  font-size:13.5px;
+  font-size:var(--fs-13-5);
   overflow:hidden}
 .action-copy span {
   color:var(--ink-soft);
-  font-size:11.5px}
+  font-size:var(--fs-11-5)}
 .quiet-empty {
   color:var(--ink-soft);
   border:1px dashed var(--border-strong);
   border-radius:var(--card-radius);
   background:var(--bg-tint);
   padding:14px 16px;
-  font-size:13px}
+  font-size:var(--fs-13)}
 .compact-link-row {
   min-height:42px;
   color:var(--text);
   align-items:center;
   gap:9px;
   padding:0 4px;
-  font-size:13px;
+  font-size:var(--fs-13);
   display:flex}
 .compact-link-row>span {
-  font-weight:750}
+  font-weight:var(--fw-750)}
 .compact-link-row>span b {
   color:var(--primary)}
 .compact-link-row small {
   color:var(--ink-faint);
-  font-size:11.5px}
+  font-size:var(--fs-11-5)}
 .compact-link-row a {
   color:var(--primary);
   white-space:nowrap;
   margin-left:auto;
-  font-size:12px;
-  font-weight:750;
+  font-size:var(--fs-12);
+  font-weight:var(--fw-750);
   text-decoration:none}
 .compact-button {
   text-align:left;
@@ -704,8 +704,8 @@ function countdownLabel(item) {
   color:var(--primary);
   white-space:nowrap;
   margin-left:auto;
-  font-size:12px;
-  font-weight:750}
+  font-size:var(--fs-12);
+  font-weight:var(--fw-750)}
 .inbox-entry {
   flex-direction:column;
   gap:7px;
@@ -716,7 +716,7 @@ function countdownLabel(item) {
   padding:16px 18px}
 .week-progress p {
   color:var(--ink-soft);
-  font-size:12px}
+  font-size:var(--fs-12)}
 .today-mood-lower {
   padding:3px 4px}
 .mood-toolbar {
@@ -739,7 +739,7 @@ function countdownLabel(item) {
   flex:0 0 32px;
   width:32px;
   height:32px;
-  font-size:17px}
+  font-size:var(--fs-17)}
 .today-mood-lower .mood-note {
   flex:160px;
   min-width:140px;
@@ -751,11 +751,11 @@ function countdownLabel(item) {
   gap:8px;
   display:flex}
 .event-detail h3 {
-  font-size:18px}
+  font-size:var(--fs-18)}
 .event-detail p {
   color:var(--ink-soft);
   margin:0;
-  font-size:13px}
+  font-size:var(--fs-13)}
 .event-detail .event-detail-note {
   color:var(--text);
   white-space:pre-wrap;
@@ -780,11 +780,11 @@ function countdownLabel(item) {
   width:26px;
   height:26px;
   transition:background var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard), border-color var(--dur-fast) var(--ease-standard);
-  border-radius:8px;
+  border-radius:var(--radius-8);
   flex:0 0 26px;
   place-items:center;
-  font-size:13px;
-  font-weight:900;
+  font-size:var(--fs-13);
+  font-weight:var(--fw-900);
   display:grid}
 .task-check:hover {
   border-color:var(--primary);
@@ -801,20 +801,20 @@ function countdownLabel(item) {
 .task-copy b {
   text-overflow:ellipsis;
   white-space:nowrap;
-  font-size:13.5px;
+  font-size:var(--fs-13-5);
   overflow:hidden}
 .task-copy span {
   color:var(--ink-soft);
-  font-size:11.5px}
+  font-size:var(--fs-11-5)}
 .task-copy span.danger {
   color:var(--danger);
-  font-weight:650}
+  font-weight:var(--fw-650)}
 .task-priority {
   color:var(--danger);
   flex:none;
-  font-size:11px;
+  font-size:var(--fs-11);
   font-style:normal;
-  font-weight:800}
+  font-weight:var(--fw-800)}
 
 
 
@@ -837,11 +837,11 @@ function countdownLabel(item) {
   color:var(--primary);
   background:var(--primary-soft);
   border:0;
-  border-radius:6px;
+  border-radius:var(--radius-6);
   flex:none;
   padding:4px 7px;
-  font-size:11px;
-  font-weight:750;
+  font-size:var(--fs-11);
+  font-weight:var(--fw-750);
   text-decoration:none}
 .bill-list {
   flex-direction:column;
@@ -853,7 +853,7 @@ function countdownLabel(item) {
   justify-content:space-between;
   align-items:center;
   gap:10px;
-  font-size:13px;
+  font-size:var(--fs-13);
   text-decoration:none;
   display:flex}
 .bill-row:first-child {
@@ -864,7 +864,7 @@ function countdownLabel(item) {
   color:var(--ink-soft);
   font-variant-numeric:tabular-nums;
   flex:none;
-  font-size:12px}
+  font-size:var(--fs-12)}
 
 
 

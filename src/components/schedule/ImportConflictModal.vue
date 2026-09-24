@@ -107,22 +107,22 @@ function formatPeriods(detail) {
 .conflict-item {
   padding: 12px;
   border: 1px solid color-mix(in srgb, var(--warning) 35%, var(--card));
-  border-radius: 10px;
+  border-radius: var(--radius-10);
   background: color-mix(in srgb, var(--warning) 10%, var(--card));
 }
-.conflict-item>b { color: var(--warning); font-size: 12px; }
-.conflict-item p { margin: 7px 0; font-size: 12px; line-height: 1.5; }
+.conflict-item>b { color: var(--warning); font-size: var(--fs-12); }
+.conflict-item p { margin: 7px 0; font-size: var(--fs-12); line-height: 1.5; }
 .conflict-item select { width: 100%; margin-top: 8px; }
 .conflict-match {
   padding: 7px 9px;
-  border-radius: 7px;
+  border-radius: var(--radius-7);
   /* 同 .conn-meta-item code：半透明白在深色主题下是一层浅色遮罩，改用 --card 混色。 */
   background: color-mix(in srgb, var(--card) 72%, transparent);
   color: var(--ink-soft);
-  font-size: 11.5px;
+  font-size: var(--fs-11-5);
   line-height: 1.5;
 }
-.conflict-match small { display: block; color: var(--warning); font-weight: 700; }
+.conflict-match small { display: block; color: var(--warning); font-weight: var(--fw-700); }
 .replace-all-schedule {
   display: flex;
   align-items: center;
@@ -131,7 +131,7 @@ function formatPeriods(detail) {
   padding-top: 12px;
   border-top: 1px solid var(--border);
   color: var(--ink-faint);
-  font-size: 11.5px;
+  font-size: var(--fs-11-5);
 }
 .replace-all-schedule b { color: var(--text); }
 .replace-all-schedule span { flex: 1 1 240px; }

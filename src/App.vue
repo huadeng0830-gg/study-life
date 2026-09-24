@@ -662,10 +662,10 @@ to {
   background:var(--primary);
   color:var(--on-primary);
   transition:transform var(--dur-fast) var(--ease-standard);
-  border-radius:0 0 10px;
+  border-radius:0 0 var(--radius-10);
   padding:10px 16px;
-  font-size:13px;
-  font-weight:700;
+  font-size:var(--fs-13);
+  font-weight:var(--fw-700);
   text-decoration:none;
   position:fixed;
   top:0;
@@ -692,11 +692,11 @@ to {
   box-shadow:var(--shadow-sm);
   background:#fffaf0;
   border:1px solid #f0d69c;
-  border-radius:10px;
+  border-radius:var(--radius-10);
   align-items:center;
   gap:8px;
   padding:9px 12px;
-  font-size:11px;
+  font-size:var(--fs-11);
   display:flex;
   position:fixed;
   left:50%;
@@ -711,11 +711,11 @@ to {
   box-shadow:var(--shadow-md);
   background:#fff9e8;
   border:1px solid #efd08b;
-  border-radius:10px;
+  border-radius:var(--radius-10);
   align-items:center;
   gap:8px;
   padding:10px 12px;
-  font-size:12px;
+  font-size:var(--fs-12);
   display:flex;
   position:fixed;
   left:50%;
@@ -767,11 +767,11 @@ to {
   background:var(--card);
   box-shadow:var(--shadow-md);
   pointer-events:none;
-  border-radius:10px;
+  border-radius:var(--radius-10);
   align-items:center;
   gap:12px;
   padding:9px 12px 9px 14px;
-  font-size:13px;
+  font-size:var(--fs-13);
   display:flex;
   position:fixed;
   transform:translate(-50%)}
@@ -780,10 +780,10 @@ to {
   background:var(--primary-soft);
   pointer-events:auto;
   border:0;
-  border-radius:6px;
+  border-radius:var(--radius-6);
   padding:4px 8px;
-  font-size:12px;
-  font-weight:800}
+  font-size:var(--fs-12);
+  font-weight:var(--fw-800)}
 .quick-record-toast-enter-active,.quick-record-toast-leave-active {
   transition:opacity var(--dur-fast) var(--ease-standard), transform var(--dur-fast) var(--ease-standard)}
 .quick-record-toast-enter-from,.quick-record-toast-leave-to {
@@ -806,7 +806,7 @@ to {
   background:var(--card);
   max-width:min(560px,100vw - 32px);
   box-shadow:var(--shadow-md);
-  border-radius:12px;
+  border-radius:var(--radius-12);
   align-items:center;
   gap:12px;
   padding:12px 14px;
@@ -823,23 +823,23 @@ to {
   min-width:0;
   display:flex}
 .global-error-copy b {
-  font-size:13px}
+  font-size:var(--fs-13)}
 .global-error-copy span {
   color:var(--ink-soft);
-  font-size:12px}
+  font-size:var(--fs-12)}
 .global-error-toast .ge-btn {
   flex:none;
   padding:7px 12px;
-  font-size:12.5px}
+  font-size:var(--fs-12-5)}
 .global-error-close {
   width:26px;
   height:26px;
   color:var(--ink-faint);
   background:0 0;
   border:none;
-  border-radius:8px;
+  border-radius:var(--radius-8);
   flex:none;
-  font-size:16px;
+  font-size:var(--fs-16);
   line-height:1}
 .global-error-close:hover {
   color:var(--ink-soft);

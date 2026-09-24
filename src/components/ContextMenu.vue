@@ -160,7 +160,7 @@ function choose(item) {
   max-width: min(260px, calc(100vw - 16px));
   padding: 5px;
   border: 1px solid var(--border);
-  border-radius: 13px;
+  border-radius: var(--radius-13);
   background: var(--card);
   box-shadow: 0 12px 32px rgba(24, 38, 76, 0.18);
   animation: context-menu-in var(--dur-fast, 150ms) var(--ease-out, cubic-bezier(0.16, 1, 0.3, 1));
@@ -171,8 +171,8 @@ function choose(item) {
 .context-menu-title {
   padding: 6px 10px 5px;
   color: var(--ink-faint);
-  font-size: 10.5px;
-  font-weight: 800;
+  font-size: var(--fs-10-5);
+  font-weight: var(--fw-800);
   letter-spacing: 0.04em;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -186,11 +186,11 @@ function choose(item) {
   min-height: 42px;
   padding: 9px 11px;
   color: var(--text);
-  font-size: 13.5px;
-  font-weight: 600;
+  font-size: var(--fs-13-5);
+  font-weight: var(--fw-600);
   text-align: left;
   border: 0;
-  border-radius: 9px;
+  border-radius: var(--radius-9);
   background: transparent;
   touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
@@ -220,7 +220,7 @@ function choose(item) {
 .context-menu-empty {
   padding: 12px 10px;
   color: var(--ink-faint);
-  font-size: 12px;
+  font-size: var(--fs-12);
   text-align: center;
 }
 

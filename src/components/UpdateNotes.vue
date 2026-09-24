@@ -31,11 +31,11 @@ function acknowledge() {
 
 <style scoped>
 .release-notes { display: flex; flex-direction: column; gap: 12px; }
-.release-version { align-self: flex-start; padding: 4px 8px; color: var(--primary); font-size: 10px; font-weight: 800; border-radius: 6px; background: var(--primary-soft); }
-.release-notes h4 { font-size: 16px; }
-.release-notes h4.previous-title { margin-top: 6px; font-size: 13px; color: var(--ink-faint); }
-.release-notes ul { display: flex; flex-direction: column; gap: 8px; margin: 0; padding-left: 20px; color: var(--muted); font-size: 12px; line-height: 1.55; }
+.release-version { align-self: flex-start; padding: 4px 8px; color: var(--primary); font-size: var(--fs-10); font-weight: var(--fw-800); border-radius: var(--radius-6); background: var(--primary-soft); }
+.release-notes h4 { font-size: var(--fs-16); }
+.release-notes h4.previous-title { margin-top: 6px; font-size: var(--fs-13); color: var(--ink-faint); }
+.release-notes ul { display: flex; flex-direction: column; gap: 8px; margin: 0; padding-left: 20px; color: var(--muted); font-size: var(--fs-12); line-height: 1.55; }
 .previous-group { display: flex; flex-direction: column; gap: 6px; }
-.previous-version { align-self: flex-start; padding: 2px 7px; color: var(--ink-faint); font-size: 10px; font-weight: 700; border-radius: 6px; background: var(--bg-tint); }
+.previous-version { align-self: flex-start; padding: 2px 7px; color: var(--ink-faint); font-size: var(--fs-10); font-weight: var(--fw-700); border-radius: var(--radius-6); background: var(--bg-tint); }
 .release-notes .btn { align-self: flex-end; min-width: 96px; margin-top: 4px; }
 </style>

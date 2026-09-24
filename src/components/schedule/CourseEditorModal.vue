@@ -209,33 +209,33 @@ function requestDelete() {
 .form { display: flex; flex-direction: column; gap: 8px; }
 .link-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .link-actions .link-action { padding: 0; color: var(--primary); font: inherit; background: transparent; border: 0; cursor: pointer; }
-.form label { color: var(--muted); font-size: 13px; margin-top: 6px; }
+.form label { color: var(--muted); font-size: var(--fs-13); margin-top: 6px; }
 .form input, .form select { width: 100%; }
 .row { display: flex; gap: 10px; margin-top: 6px; }
 .row > div { flex: 1; display: flex; flex-direction: column; gap: 8px; }
 .colors { display: flex; gap: 8px; margin: 4px 0; }
-.swatch { width: 28px; height: 28px; border: 3px solid transparent; border-radius: 50%; }
+.swatch { width: 28px; height: 28px; border: 3px solid transparent; border-radius: var(--radius-circle); }
 .swatch.picked { border-color: var(--text); }
-.error { color: var(--danger); font-size: 13px; }
-.cell-existing { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 8px 10px; background: var(--bg-tint); border-radius: 9px; }
-.ce-label { color: var(--ink-faint); font-size: 11px; font-weight: 700; }
-.cell-chip { padding: 3px 8px; color: var(--text); font-size: 12px; border: 1px solid var(--border); border-radius: 999px; background: var(--card); }
+.error { color: var(--danger); font-size: var(--fs-13); }
+.cell-existing { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; padding: 8px 10px; background: var(--bg-tint); border-radius: var(--radius-9); }
+.ce-label { color: var(--ink-faint); font-size: var(--fs-11); font-weight: var(--fw-700); }
+.cell-chip { padding: 3px 8px; color: var(--text); font-size: var(--fs-12); border: 1px solid var(--border); border-radius: var(--radius-pill); background: var(--card); }
 .cell-chip.clash { color: var(--danger); border-color: var(--danger); background: color-mix(in srgb, var(--danger) 10%, var(--card)); }
 .course-links { margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
 .course-links-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
-.course-links-head b { font-size: 13px; }
-.course-links-head small { display: block; margin-top: 3px; color: var(--muted); font-size: 11px; }
+.course-links-head b { font-size: var(--fs-13); }
+.course-links-head small { display: block; margin-top: 3px; color: var(--muted); font-size: var(--fs-11); }
 .course-link-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 10px; }
-.link-label { color: var(--ink-soft); font-size: 12px; font-weight: 700; }
-.link-empty { margin-top: 6px; color: var(--muted); font-size: 12px; }
-.link-list { display: flex; flex-direction: column; gap: 5px; margin: 7px 0; padding-left: 16px; font-size: 12px; }
+.link-label { color: var(--ink-soft); font-size: var(--fs-12); font-weight: var(--fw-700); }
+.link-empty { margin-top: 6px; color: var(--muted); font-size: var(--fs-12); }
+.link-list { display: flex; flex-direction: column; gap: 5px; margin: 7px 0; padding-left: 16px; font-size: var(--fs-12); }
 .link-list li { display: flex; justify-content: space-between; gap: 8px; }
 .link-list .done { text-decoration: line-through; opacity: .6; }
 .link-list small { color: var(--muted); white-space: nowrap; }
-.link-action { color: var(--primary); font-size: 11px; text-decoration: none; }
-.link-progress { color: var(--primary); font-size: 11px; font-weight: 700; }
+.link-action { color: var(--primary); font-size: var(--fs-11); text-decoration: none; }
+.link-progress { color: var(--primary); font-size: var(--fs-11); font-weight: var(--fw-700); }
 .actions { display: flex; justify-content: flex-end; align-items: center; gap: 10px; margin-top: 14px; }
 .actions .btn-danger { margin-right: auto; }
-.cell-add-hint { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 10px; color: var(--ink-soft); font-size: 12px; }
+.cell-add-hint { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 10px; color: var(--ink-soft); font-size: var(--fs-12); }
 @media (max-width: 520px) { .row, .course-link-columns { grid-template-columns: 1fr; flex-direction: column; } }
 </style>

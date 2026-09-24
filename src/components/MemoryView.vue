@@ -219,9 +219,9 @@ watch(() => props.open, (open) => {
 .memory-message {
   padding: 8px 12px;
   color: var(--primary);
-  font-size: 12.5px;
+  font-size: var(--fs-12-5);
   border: 1px solid var(--border);
-  border-radius: 9px;
+  border-radius: var(--radius-9);
   background: var(--primary-soft);
 }
 .memory-empty {
@@ -237,13 +237,13 @@ watch(() => props.open, (open) => {
   background: var(--card);
 }
 .story-title {
-  font-size: 17px;
-  font-weight: 800;
+  font-size: var(--fs-17);
+  font-weight: var(--fw-800);
   letter-spacing: -0.01em;
 }
 .story-p {
   color: var(--ink-soft);
-  font-size: 13.5px;
+  font-size: var(--fs-13-5);
   line-height: 1.7;
 }
 .story-stats {
@@ -257,21 +257,21 @@ watch(() => props.open, (open) => {
   gap: 3px;
   padding: 12px;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-10);
   background: var(--bg-tint);
 }
 .stat-cell b {
-  font-size: 17px;
-  font-weight: 850;
+  font-size: var(--fs-17);
+  font-weight: var(--fw-850);
   font-variant-numeric: tabular-nums;
 }
 .stat-cell span {
   color: var(--ink-faint);
-  font-size: 11.5px;
+  font-size: var(--fs-11-5);
 }
 .story-list h3 {
-  font-size: 13px;
-  font-weight: 750;
+  font-size: var(--fs-13);
+  font-weight: var(--fw-750);
   color: var(--text);
 }
 .story-list ul {
@@ -283,7 +283,7 @@ watch(() => props.open, (open) => {
 }
 .story-list li {
   color: var(--ink-soft);
-  font-size: 13px;
+  font-size: var(--fs-13);
 }
 
 @media (max-width: 520px) {

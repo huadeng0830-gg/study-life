@@ -226,31 +226,31 @@ watch(
 
 <style scoped>
 .notes-toolbar { display: flex; align-items: end; gap: 12px; margin-bottom: 14px; padding: 12px; }
-.search-field { display: grid; flex: 1; gap: 5px; color: var(--ink-soft); font-size: 11px; font-weight: 700; }
-.search-field input { width: 100%; min-height: 38px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); }
-.notes-archive-toggle { display: flex; align-items: center; gap: 6px; min-height: 38px; color: var(--ink-soft); font-size: 11px; white-space: nowrap; }
-.notes-count { color: var(--muted); font-size: 11px; white-space: nowrap; }
+.search-field { display: grid; flex: 1; gap: 5px; color: var(--ink-soft); font-size: var(--fs-11); font-weight: var(--fw-700); }
+.search-field input { width: 100%; min-height: 38px; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-8); background: var(--bg); }
+.notes-archive-toggle { display: flex; align-items: center; gap: 6px; min-height: 38px; color: var(--ink-soft); font-size: var(--fs-11); white-space: nowrap; }
+.notes-count { color: var(--muted); font-size: var(--fs-11); white-space: nowrap; }
 .notes-list { display: flex; flex-direction: column; gap: 8px; }
 .note-card { display: flex; align-items: center; gap: 12px; padding: 12px; }
 .note-card-main { display: grid; flex: 1; gap: 4px; min-width: 0; padding: 0; text-align: left; border: 0; background: transparent; cursor: pointer; }
-.note-card-title { overflow: hidden; color: var(--ink); font-size: 14px; font-weight: 800; text-overflow: ellipsis; white-space: nowrap; }
-.note-card-preview { overflow: hidden; color: var(--ink-soft); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-.note-card small { color: var(--muted); font-size: 10.5px; }
+.note-card-title { overflow: hidden; color: var(--text); font-size: var(--fs-14); font-weight: var(--fw-800); text-overflow: ellipsis; white-space: nowrap; }
+.note-card-preview { overflow: hidden; color: var(--ink-soft); font-size: var(--fs-12); text-overflow: ellipsis; white-space: nowrap; }
+.note-card small { color: var(--muted); font-size: var(--fs-10-5); }
 .note-card.archived { opacity: .72; }
 .note-card-actions { display: flex; gap: 6px; }
-.note-card-actions button { padding: 5px 7px; color: var(--primary); font-size: 11px; font-weight: 750; border: 0; border-radius: 6px; background: var(--primary-soft); }
+.note-card-actions button { padding: 5px 7px; color: var(--primary); font-size: var(--fs-11); font-weight: var(--fw-750); border: 0; border-radius: var(--radius-6); background: var(--primary-soft); }
 .note-card-actions .danger-text { color: var(--danger); background: var(--danger-soft); }
 .note-detail { display: grid; gap: 12px; }
 .note-detail p { margin: 0; white-space: pre-wrap; line-height: 1.7; }
 .note-detail small { color: var(--primary); }
-.note-edit-field { display: grid; gap: 5px; color: var(--ink-soft); font-size: 12px; font-weight: 700; }
-.note-edit-field input, .note-edit-field textarea { width: 100%; padding: 9px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); font: inherit; color: var(--text); }
+.note-edit-field { display: grid; gap: 5px; color: var(--ink-soft); font-size: var(--fs-12); font-weight: var(--fw-700); }
+.note-edit-field input, .note-edit-field textarea { width: 100%; padding: 9px 10px; border: 1px solid var(--border); border-radius: var(--radius-8); background: var(--bg); font: inherit; color: var(--text); }
 .note-edit-field textarea { resize: vertical; line-height: 1.6; }
-.note-error { margin: 0; color: var(--danger); font-size: 12px; }
+.note-error { margin: 0; color: var(--danger); font-size: var(--fs-12); }
 .note-relations { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding-top: 10px; border-top: 1px solid var(--border); }
-.note-relations strong { width: 100%; color: var(--ink-soft); font-size: 12px; }
-.relation-chip { padding: 4px 8px; color: var(--primary); font-size: 11px; text-decoration: none; border-radius: 999px; background: var(--primary-soft); }
-.relation-empty { color: var(--muted); font-size: 11px; }
+.note-relations strong { width: 100%; color: var(--ink-soft); font-size: var(--fs-12); }
+.relation-chip { padding: 4px 8px; color: var(--primary); font-size: var(--fs-11); text-decoration: none; border-radius: var(--radius-pill); background: var(--primary-soft); }
+.relation-empty { color: var(--muted); font-size: var(--fs-11); }
 .note-convert-actions { display: inline-flex; }
 .note-detail-actions { display: flex; justify-content: flex-end; gap: 8px; }
 @media (max-width: 520px) { .notes-toolbar { align-items: stretch; flex-wrap: wrap; } .search-field { flex-basis: 100%; } .note-card { align-items: stretch; flex-direction: column; } .note-card-actions { width: 100%; } .note-card-actions button { flex: 1; } }
