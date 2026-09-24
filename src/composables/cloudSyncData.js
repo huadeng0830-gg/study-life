@@ -1,53 +1,10 @@
 import { normalizeFestiveConfig } from './festive.js'
 import { normalizeMoodLog } from './mood.js'
 import { normalizeFocusSettings } from './focusTimer.js'
-import { DEFAULT_CATEGORIES } from './ledgerCategories.js'
+import { SYNC_DEFAULTS, SYNC_KEYS, isSyncKey } from './syncKeys.js'
 
-export const SYNC_DEFAULTS = {
-  sl_courses: [],
-  sl_course_templates: [],
-  sl_timecfg: {},
-  sl_semester: { start: '' },
-  sl_schedule_exceptions: [],
-  sl_schedule_note: '',
-  sl_tasks: [],
-  sl_events: [],
-  sl_quick_notes: [],
-  sl_quick_record_settings: { clipboardHint: true, recentTypes: [] },
-  sl_capture_enabled: true,
-  sl_focus_sessions: [],
-  sl_focus_settings: { quickTimes: [15, 25, 45, 60], lastUsedMinutes: 25, recentTemporaries: [], soundEnabled: true, vibrationEnabled: true, systemNotificationEnabled: true },
-  sl_course_checkins: [],
-  sl_exams: [],
-  sl_countdown_show_past: false,
-  sl_checklists: [],
-  sl_bills: [],
-  sl_expenses: [],
-  sl_ledger_categories: DEFAULT_CATEGORIES.map((category) => ({ ...category })),
-  sl_ledger_freq: { pinned: [], hidden: [], categoryOverrides: [] },
-  sl_ledger_fx: { base: 'CNY', rates: {}, updatedAt: '' },
-  sl_ledger_budget: { monthly: null, updatedAt: '' },
-  sl_ledger_templates: [],
-  sl_ocr_vocabulary: { courses: [], teachers: [], rooms: [], campuses: [] },
-  sl_theme: 'blue',
-  sl_custom_theme_color: '#456fe8',
-  sl_auto_wallpaper_color: false,
-  sl_wallpaper_accent: '#456fe8',
-  sl_appearance: {},
-  sl_wallpaper_config: {},
-  sl_performance_mode: 'auto',
-  sl_festive_config: { enabled: true, birthday: '', installDate: '', anniversaries: [] },
-  sl_festive_birthday_full: '',
-  sl_festive_lunar: [],
-  sl_ui_language: 'zh',
-  sl_mood_log: {},
-}
+export { SYNC_DEFAULTS, SYNC_KEYS, isSyncKey }
 
-/**
- * @type {(keyof typeof SYNC_DEFAULTS)[]}
- */
-export const SYNC_KEYS = Object.keys(SYNC_DEFAULTS)
-const SYNC_KEY_SET = new Set(SYNC_KEYS)
 /** @type {number} */
 export const MAX_SYNC_PAYLOAD_BYTES = 16 * 1024 * 1024
 /** @type {number} */
@@ -83,14 +40,6 @@ function sameSyncValue(left, right) {
  */
 export function hasMeaningfulLocalData(values = {}) {
   return SYNC_KEYS.some((key) => values[key] !== undefined && !sameSyncValue(values[key], SYNC_DEFAULTS[key]))
-}
-
-/**
- * @param {string} key
- * @returns {boolean}
- */
-export function isSyncKey(key) {
-  return typeof key === 'string' && SYNC_KEY_SET.has(key)
 }
 
 /**

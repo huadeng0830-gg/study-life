@@ -39,6 +39,35 @@ export function buildReleaseEntry(version, notes) {
   return `  {\n    version: '${String(version).replace(/'/g, "\\'")}',\n    signature: '',\n    notes: [\n${noteLines(notes)}\n    ],\n  },\n`
 }
 
+/** 更新弹窗最多展示的历史条数；与 release.config.js 头注释、releaseNotes.js 的 MAX_SHOWN 对齐。 */
+export const MAX_RELEASE_ENTRIES = 3
+
+/**
+ * 把 RELEASE_UPDATES 裁到最多 max 条（保留最新的在顶部）。
+ *
+ * 【为什么需要】release.config.js 曾堆积 150 个版本条目（约 127KB），整文件被
+ * releaseNotes.js 静态 import 进首屏 chunk；应用实际只展示最近 3 条。
+ * bump 脚本每次插入新条目后调用本函数，避免历史再次无限增长。
+ *
+ * @param {string} content release.config.js 全文
+ * @param {number} [max=MAX_RELEASE_ENTRIES]
+ * @returns {string} 裁剪后的内容；结构不符或未超限时原样返回
+ */
+export function trimReleaseUpdates(content, max = MAX_RELEASE_ENTRIES) {
+  const text = String(content ?? '')
+  const header = 'export const RELEASE_UPDATES = Object.freeze([\n'
+  const start = text.indexOf(header)
+  if (start === -1) return text
+  const bodyStart = start + header.length
+  const end = text.indexOf('\n])', bodyStart)
+  if (end === -1) return text
+  const body = text.slice(bodyStart, end)
+  const matches = [...body.matchAll(/^  \{\n[\s\S]*?^  \},$/gm)]
+  if (matches.length <= max) return text
+  const kept = matches.slice(0, max).map((match) => match[0]).join('\n')
+  return text.slice(0, bodyStart) + kept + text.slice(end)
+}
+
 /**
  * 检查一组版本说明是否可以写入。
  *

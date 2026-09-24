@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest'
 import {
   buildReleaseEntry,
   formatDateKey,
+  MAX_RELEASE_ENTRIES,
   nextVersion,
   replaceCurrentNotes,
+  trimReleaseUpdates,
   validateReleaseNotes,
 } from '../scripts/version-utils.mjs'
 
@@ -32,6 +34,50 @@ describe('version-utils', () => {
     expect(entry).toContain("signature: '',")
     expect(entry).toContain("'说明 A'")
     expect(entry).toContain("'说明 B\\' 带引号'")
+  })
+})
+
+describe('trimReleaseUpdates', () => {
+  function configWithVersions(versions) {
+    const entries = versions.map((version, index) => [
+      '  {',
+      `    version: '${version}',`,
+      `    signature: 'sig${index}',`,
+      '    notes: [',
+      `      '说明${index}：长度足够的一条说明',`,
+      '    ],',
+      '  },',
+    ].join('\n'))
+    return [
+      "export const RELEASE_SOURCE_SIGNATURE = 'abc'",
+      'export const RELEASE_UPDATES = Object.freeze([',
+      entries.join('\n'),
+      '])',
+      '',
+    ].join('\n')
+  }
+
+  it('超过上限时只保留顶部 max 条', () => {
+    const versions = ['v5', 'v4', 'v3', 'v2', 'v1']
+    const trimmed = trimReleaseUpdates(configWithVersions(versions), 3)
+    expect(trimmed).toContain("version: 'v5'")
+    expect(trimmed).toContain("version: 'v4'")
+    expect(trimmed).toContain("version: 'v3'")
+    expect(trimmed).not.toContain("version: 'v2'")
+    expect(trimmed).not.toContain("version: 'v1'")
+    expect(trimmed.match(/^  \{$/gm).length).toBe(MAX_RELEASE_ENTRIES)
+    expect(trimmed.trimEnd().endsWith('])')).toBe(true)
+    expect(trimmed.startsWith("export const RELEASE_SOURCE_SIGNATURE = 'abc'")).toBe(true)
+  })
+
+  it('未超限时原样返回', () => {
+    const config = configWithVersions(['v3', 'v2', 'v1'])
+    expect(trimReleaseUpdates(config, 3)).toBe(config)
+  })
+
+  it('结构不符时原样返回，不写坏文件', () => {
+    expect(trimReleaseUpdates('完全不是 release.config', 3)).toBe('完全不是 release.config')
+    expect(trimReleaseUpdates('', 3)).toBe('')
   })
 })
 

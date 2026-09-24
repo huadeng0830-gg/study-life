@@ -5,6 +5,7 @@ import { decryptData, encryptData } from '../utils/crypto.js'
 import { raceWithControls, throwIfAborted } from './asyncTask.js'
 import { deviceProfile } from './deviceIdentity.js'
 import { parseRetryAfterMs } from './syncErrors.js'
+import { setLocalChangedHandler } from './store/core.js'
 import {
   SYNC_DEFAULTS,
   SYNC_KEYS,
@@ -434,6 +435,10 @@ export function markLocalChanged(key = '', rawValue = undefined) {
   try { localStorage.setItem(syncStorageKey(SYNC_DIRTY_SIGNAL_KEY), `${Date.now()}-${localChangeSequence}`) } catch {}
   if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('study-life:sync-dirty', { detail: { key } }))
 }
+
+// 存储层写盘后经 core 的钩子回调到这里；core 不再静态依赖 cloudSync，
+// 避免 timeConfig 等业务 chunk 被整张同步图拖大。
+setLocalChangedHandler(markLocalChanged)
 
 const API = {
   verify: '/api/auth/verify',

@@ -8,7 +8,7 @@
 import { readFileSync, writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { computeSourceSignature, PROJECT_ROOT } from './source-signature.mjs'
-import { buildReleaseEntry, nextVersion, replaceCurrentNotes, validateReleaseNotes } from './version-utils.mjs'
+import { buildReleaseEntry, MAX_RELEASE_ENTRIES, nextVersion, replaceCurrentNotes, trimReleaseUpdates, validateReleaseNotes } from './version-utils.mjs'
 
 const RELEASE_PATH = fileURLToPath(new URL('../release.config.js', import.meta.url))
 
@@ -59,6 +59,10 @@ if (notes.length && amend) {
     `export const RELEASE_UPDATES = Object.freeze([\n${buildReleaseEntry(version, notes)}`
   )
 }
+
+// 1b. 无论新增还是只改说明，历史都裁到最多 MAX_RELEASE_ENTRIES 条：
+//     release.config.js 会被首屏静态打包，超长历史等于白背体积。
+candidate = trimReleaseUpdates(candidate, MAX_RELEASE_ENTRIES)
 
 // 2. 用“候选内容”计算签名：候选里的签名字段会被归一化，因此计算结果
 //    与最终落盘文件的签名一致（新条目 / 新说明的 notes 已经参与哈希）。

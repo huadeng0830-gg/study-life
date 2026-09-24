@@ -1,8 +1,19 @@
 import { effectScope, ref, triggerRef, watch, shallowRef, isRef } from 'vue'
-import { markLocalChanged } from '../cloudSync.js'
-import { isSyncKey } from '../cloudSyncData.js'
+import { isSyncKey } from '../syncKeys.js'
 import { mirrorLocalValue, mirrorLocalValues, setMirrorErrorHandler, setMirrorTimingHandler } from '../dataVault.js'
 import { recordSilentError } from '../globalError.js'
+
+// 云同步在启动时注册本机变更回调；存储层只依赖这个钩子，
+// 避免 core → cloudSync 的静态导入把整张同步图打进业务 chunk（timeConfig 等）。
+let localChangedHandler = null
+
+export function setLocalChangedHandler(handler) {
+  localChangedHandler = typeof handler === 'function' ? handler : null
+}
+
+function notifyLocalChanged(key = '', rawValue = undefined) {
+  if (localChangedHandler) localChangedHandler(key, rawValue)
+}
 
 const storedRefs = new Map()
 // 这些高增长集合由领域命令显式提交，避免每次嵌套修改递归遍历整棵状态树。
@@ -188,10 +199,10 @@ function writeNow(key, makeRaw) {
     // 来自响应式业务状态的写入是用户已确认的最新事实；即便是空集合，
     // 也必须覆盖影子副本，避免之后把已删除的数据重新恢复出来。
     mirrorLocalValue(key, raw, { allowEmpty: true }).catch((error) => reportPersistenceFailure(error, key, 'mirror'))
-    if (isSyncKey(key)) markLocalChanged(key, raw)
+    if (isSyncKey(key)) notifyLocalChanged(key, raw)
   } catch (error) {
     // 配额溢出/隐私模式等失败不阻塞应用，但必须留下排查线索。
-    reportPersistenceFailure(error, key, 'local')
+    reportPersistenceFailure(error, 'local')
   }
 }
 
@@ -235,7 +246,7 @@ function writePendingBatch() {
         observeStorage(key, { payloadBytes: payloadBytes(raw), serializeMs: 0, localStorageMs })
         markPersistenceSuccess()
         mirrorLocalValue(key, raw, { allowEmpty: true }).catch((error) => reportPersistenceFailure(error, key, 'mirror'))
-        if (isSyncKey(key)) markLocalChanged(key, raw)
+        if (isSyncKey(key)) notifyLocalChanged(key, raw)
       } catch (error) {
         reportPersistenceFailure(error, key, 'local')
       }
@@ -479,7 +490,7 @@ export async function restoreStoredValues(values, { markChanged = true } = {}) {
       if (storedRefs.has(key)) storedRefs.get(key).value = value
     }
     await mirrorLocalValues(rawValues)
-    if (markChanged && entries.some(([key]) => isSyncKey(key))) markLocalChanged()
+    if (markChanged && entries.some(([key]) => isSyncKey(key))) notifyLocalChanged()
     markPersistenceSuccess()
   } catch (error) {
     let rollbackError = null
