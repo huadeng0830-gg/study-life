@@ -163,7 +163,7 @@ After：全量 78 个测试文件、630 个测试通过。
 - [release.config.js](D:/study-life/study-life/release.config.js)（按显式发布请求同步版本说明与源码签名）
 - [quickRecord.test.js](D:/study-life/study-life/tests/quickRecord.test.js)
 - [quickRecordPanel.test.js](D:/study-life/study-life/tests/quickRecordPanel.test.js)
-- [本报告](D:/study-life/study-life/RECORD_LEDGER_UX_OPTIMIZATION_REPORT.md)
+- [本报告](RECORD_LEDGER_UX_OPTIMIZATION_REPORT.md)
 
 ## 19. Deliberately Not Added
 

@@ -17,7 +17,8 @@
   - `.playwright-cli/` — E2E 探测脚本（独立审计范围）
   - `public/*.png`, `public/*.svg`, `public/ocr/*.traineddata` — 纯二进制资源
   - `package-lock.json` — 自动生成
-  - `DESIGN_TOKENS.md`, `HANDOVER.md`, `FINAL_PRODUCT_AUDIT.md`, `SYSTEM_CLOSURE_AUDIT.md`, `UX_AUDIT_176_REPORT.md`, `LEDGER_FINAL_OPTIMIZATION_REPORT.md`, `RECORD_LEDGER_UX_OPTIMIZATION_REPORT.md`, `research-shortcut-platform-notes.md`, `NEXT_PROMPT.md` — 历史报告/交接文档，非运行时源码
+  - `DESIGN_TOKENS.md`, `HANDOVER.md` — 根目录现行文档（非运行时源码）
+  - `docs/archive/FINAL_PRODUCT_AUDIT.md`, `docs/archive/SYSTEM_CLOSURE_AUDIT.md`, `docs/archive/UX_AUDIT_176_REPORT.md`, `docs/archive/LEDGER_FINAL_OPTIMIZATION_REPORT.md`, `docs/archive/RECORD_LEDGER_UX_OPTIMIZATION_REPORT.md`, `docs/archive/NEXT_PROMPT.md`, `docs/research/research-shortcut-platform-notes.md` — 历史报告/交接归档文档，非运行时源码
 
 ## 基线状态
 
