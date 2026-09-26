@@ -7,6 +7,13 @@
 // 3. 更早的版本逐条下移，最多保留 3 个版本，超出即删除。
 export const RELEASE_UPDATES = Object.freeze([
   {
+    version: '2026年09月26日-版本1',
+    signature: '88d4c3323e',
+    notes: [
+      '阶段6b/6c：拆分 ScheduleView（1849→706行，7个composables）与 TimeSettingsModal（2238→726行，7个composables+4子组件）',
+    ],
+  },
+  {
     version: '2026年09月25日-版本1',
     signature: '8d840b7189',
     notes: [
@@ -20,20 +27,13 @@ export const RELEASE_UPDATES = Object.freeze([
       '阶段5（性能与分包）：release.config.js 历史从150条裁到3条并由bump脚本自动封顶，首屏不再背127KB发布说明；store/core 改经钩子回调本机变更并抽出轻量 syncKeys，断开 core 对 cloudSync 的静态依赖，timeConfig 等业务 chunk 不再拖入整张同步图；删除10个无引用旧图标约1MB，保留v2系列与OCR语言包',
     ],
   },
-  {
-    version: '2026年09月24日-版本4',
-    signature: 'b3182c202f',
-    notes: [
-      '阶段4（设计令牌全量迁移）：字号/字重/圆角硬编码机械包裹为var()共1264处不改数值语义，:root新增v5刻度--fs-*/--fw-*/--radius-*与别名；对比度审计可静态解析登记过的--fs-*/--fw-大字门槛；DESIGN_TOKENS.md补全刻度表与例外清单；修复image/*被误当块注释导致LocalTransfer与BatchImport漏迁',
-    ],
-  },
 ])
 
 // 对用户展示、version.txt 和更新检测统一使用此版本号；后续同日发布只递增“版本”序号。
 export const RELEASE_VERSION = RELEASE_UPDATES[0].version
 
 // 与第一条签名保持一致，交给 vite.config.js 校验源码一致性。
-export const RELEASE_SOURCE_SIGNATURE = '8d840b7189'
+export const RELEASE_SOURCE_SIGNATURE = '88d4c3323e'
 
 // 兼容旧引用：当前版本的更新说明。
 export const RELEASE_NOTES = RELEASE_UPDATES[0].notes

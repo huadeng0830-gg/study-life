@@ -12,6 +12,8 @@ coverage/
 dist/
 dist-bak
 dist-ssr
+wrangler-cli/
+temp_vitest_cache/
 *.cache
 test-results/
 playwright-report/
