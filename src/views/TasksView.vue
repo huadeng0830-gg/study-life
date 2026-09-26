@@ -683,7 +683,7 @@ function taskFocusSummary(task) {
   font-size: var(--fs-13);
   border: 2px solid #767f94;
   border-radius: var(--radius-8);
-  background: #fff;
+  background: var(--card);
   transition: background var(--dur-fast) var(--ease-standard), border-color var(--dur-fast) var(--ease-standard);
 }
 .check:hover {

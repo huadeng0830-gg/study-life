@@ -45,8 +45,13 @@ const SwipeActionSelector = defineComponent({
       // 不到 AA。同族的 primary / danger 早就按 AA 调过（见下一条注释），说明这是漏网
       // 而不是有意。改成与 style.css 的 --success 同值，5.12:1。
       success: { bg: '#e7f8f1', border: '#14966d', text: '#067654' },
-      // 与 style.css 的 --primary / --danger 对齐（原值 #456fe8/#ef4444 已按 AA 调整）。
-      primary: { bg: '#edf2ff', border: '#3d63d8', text: '#3d63d8' },
+      // primary 整组改引令牌：底 --primary-soft、字与描边 --primary，浅色 / 深色 / 具名主题下
+      // 底与字始终同源（原来写死同色值，只在默认蓝色主题里成立）。原值偏亮、已按 AA 调整过。
+      primary: { bg: 'var(--primary-soft)', border: 'var(--primary)', text: 'var(--primary)' },
+      // danger / success / muted 仍写死：它们的**浅底**没有对应令牌（DESIGN_TOKENS 里只有
+      // --danger / --success 这样的文字色，没有对应的 soft 浅底）。只把字换成 var() 会变成
+      // 「写死浅底 + 跟主题走的字」，深色主题下亮字压浅底会撞色；要迁就得三件套一起迁，
+      // 那需要先补令牌（阶段7 遗留项，补令牌要同步改 DESIGN_TOKENS.md）。
       danger: { bg: '#feecec', border: '#c62828', text: '#c62828' },
       muted: { bg: '#f3f4f6', border: '#9ca3af', text: '#5f6775' },
     }

@@ -501,7 +501,7 @@ function showToast(message, { type = 'info', actionLabel = '', undoFn = null, vi
 .shopping-item:hover { background: var(--bg-tint); }
 .shopping-item.done { opacity: .55; }
 .shopping-item.done .item-copy b { text-decoration: line-through; }
-.item-check { display: grid; place-items: center; width: 23px; height: 23px; flex: 0 0 23px; font-weight: var(--fw-800); font-size: var(--fs-12); border: 2px solid #767f94; border-radius: var(--radius-7); background: #fff; transition: background var(--dur-fast) var(--ease-standard), border-color var(--dur-fast) var(--ease-standard); }
+.item-check { display: grid; place-items: center; width: 23px; height: 23px; flex: 0 0 23px; font-weight: var(--fw-800); font-size: var(--fs-12); border: 2px solid #767f94; border-radius: var(--radius-7); background: var(--card); transition: background var(--dur-fast) var(--ease-standard), border-color var(--dur-fast) var(--ease-standard); }
 .item-check:hover { border-color: #19a878; }
 /* 勾选态白勾必须压在够深的绿上：#19a878/#fff 只有 3.04:1（AA 要 4.5:1），压到 #0c8058 得 4.95:1。 */
 .item-check.checked { color: #fff; border-color: #0c8058; background: #0c8058; }
