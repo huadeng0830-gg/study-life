@@ -7,6 +7,13 @@
 // 3. 更早的版本逐条下移，最多保留 3 个版本，超出即删除。
 export const RELEASE_UPDATES = Object.freeze([
   {
+    version: '2026年09月28日-版本2',
+    signature: '8d802de193',
+    notes: [
+      '阶段6e后续：LedgerView 930 行（仍超目标 130 行），核心拆分完成；1860/1865 测试通过，2 个预存测试基建问题',
+    ],
+  },
+  {
     version: '2026年09月28日-版本1',
     signature: '3a012ac53c',
     notes: [
@@ -20,20 +27,13 @@ export const RELEASE_UPDATES = Object.freeze([
       '阶段6b/6c：拆分 ScheduleView（1849→706行，7个composables）与 TimeSettingsModal（2238→726行，7个composables+4子组件）',
     ],
   },
-  {
-    version: '2026年09月25日-版本1',
-    signature: '8d840b7189',
-    notes: [
-      '阶段6a（cloudSync拆分）：同步核心拆为 state/http/transfer/spaceOps 四模块并由 cloudSync.js 门面再导出全部公共API，补齐 syncPayloadMatchesBaseline 等缺失导入，行数均低于800且 175 个测试文件全绿',
-    ],
-  },
 ])
 
 // 对用户展示、version.txt 和更新检测统一使用此版本号；后续同日发布只递增“版本”序号。
 export const RELEASE_VERSION = RELEASE_UPDATES[0].version
 
 // 与第一条签名保持一致，交给 vite.config.js 校验源码一致性。
-export const RELEASE_SOURCE_SIGNATURE = '3a012ac53c'
+export const RELEASE_SOURCE_SIGNATURE = '8d802de193'
 
 // 兼容旧引用：当前版本的更新说明。
 export const RELEASE_NOTES = RELEASE_UPDATES[0].notes
