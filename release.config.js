@@ -7,6 +7,13 @@
 // 3. 更早的版本逐条下移，最多保留 3 个版本，超出即删除。
 export const RELEASE_UPDATES = Object.freeze([
   {
+    version: '2026年09月28日-版本1',
+    signature: '3a012ac53c',
+    notes: [
+      '阶段6d/6e：拆分 DataManager（2502→469行，4个composables+6子组件）与 LedgerView（3475→930行，9个composables+8子组件/面板），LedgerView 仍超目标 130 行待后续优化',
+    ],
+  },
+  {
     version: '2026年09月26日-版本1',
     signature: '88d4c3323e',
     notes: [
@@ -20,20 +27,13 @@ export const RELEASE_UPDATES = Object.freeze([
       '阶段6a（cloudSync拆分）：同步核心拆为 state/http/transfer/spaceOps 四模块并由 cloudSync.js 门面再导出全部公共API，补齐 syncPayloadMatchesBaseline 等缺失导入，行数均低于800且 175 个测试文件全绿',
     ],
   },
-  {
-    version: '2026年09月24日-版本5',
-    signature: 'fa1d584f88',
-    notes: [
-      '阶段5（性能与分包）：release.config.js 历史从150条裁到3条并由bump脚本自动封顶，首屏不再背127KB发布说明；store/core 改经钩子回调本机变更并抽出轻量 syncKeys，断开 core 对 cloudSync 的静态依赖，timeConfig 等业务 chunk 不再拖入整张同步图；删除10个无引用旧图标约1MB，保留v2系列与OCR语言包',
-    ],
-  },
 ])
 
 // 对用户展示、version.txt 和更新检测统一使用此版本号；后续同日发布只递增“版本”序号。
 export const RELEASE_VERSION = RELEASE_UPDATES[0].version
 
 // 与第一条签名保持一致，交给 vite.config.js 校验源码一致性。
-export const RELEASE_SOURCE_SIGNATURE = '88d4c3323e'
+export const RELEASE_SOURCE_SIGNATURE = '3a012ac53c'
 
 // 兼容旧引用：当前版本的更新说明。
 export const RELEASE_NOTES = RELEASE_UPDATES[0].notes
