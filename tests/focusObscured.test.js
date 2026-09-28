@@ -146,7 +146,7 @@ const OCCLUDERS = [
   { file: 'components/schedule/BatchImportModal.vue', needle: 'position: sticky', note: '导入预览表的 sticky 表头' },
   { file: 'components/schedule/CourseManagerModal.vue', needle: 'position: sticky', note: '批量管理表的 sticky 表头' },
   { file: 'components/QuickRecordPanel.vue', needle: 'position: sticky', note: '底部保存栏（44px 按钮 + padding ≈ 56px）' },
-  { file: 'views/LedgerView.vue', needle: 'position: sticky', note: '账本页底部 sticky 条' },
+  { file: 'views/ledger-panels/BillFormModal.vue', needle: 'position: sticky', note: '账本页底部 sticky 条（随固定账单弹窗迁出 LedgerView，落在 BillFormModal 的 .bill-form-actions）' },
 ]
 
 /* ---------- 夹具：判据的判别力 ---------- */

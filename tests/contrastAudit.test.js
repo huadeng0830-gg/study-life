@@ -277,7 +277,10 @@ describe('实色底上的文字必须用 on-* 令牌', () => {
   it('纯近白底必须用 --card / --bg-tint 令牌', () => {
     const ALLOWED = new Set([
       'DataManager.vue|.switch span',
-      'LedgerView.vue|.switch-track i',
+      // 固定账单表单随 BillFormModal.vue 拆走后，这颗白点滑块搬进了子组件
+      // （scoped 样式不跨组件边界，LedgerView 里那份死副本已按可达性判据删掉）。
+      // 理由不变：开关滑块必须靠白/深对比才看得见。
+      'BillFormModal.vue|.switch-track i',
       'ListsView.vue|.item-check',
       'TasksView.vue|.check',
       // 壁纸预览上的白色毛玻璃面：底下是用户自选的任意壁纸，只有浅底才能配

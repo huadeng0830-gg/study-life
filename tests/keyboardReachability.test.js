@@ -269,7 +269,10 @@ describe('可点击元素必须能被键盘触发', () => {
   })
 
   it('账本页的三类操作行都是可聚焦、可回车触发的按钮', () => {
-    const ledger = readTemplate(resolve(srcDir, 'views', 'LedgerView.vue'))
+    // 拆分后：`feed-item` 在账本首页面板、`cd-row` 在回顾面板（两个新文件）。
+    // 判据本身一字未改，只把读取范围换成「当初这两处模板所在的文件」。
+    const ledger = readTemplate(resolve(srcDir, 'views', 'ledger-panels', 'LedgerHomePanel.vue'))
+      + readTemplate(resolve(srcDir, 'views', 'ledger-panels', 'ReviewPanel.vue'))
     const rows = [...openTags(ledger)].filter(
       ({ tag, attrs }) => tag === 'div' && /class="[^"]*\b(feed-item|cd-row)\b/.test(attrs),
     )
@@ -289,7 +292,8 @@ describe('可点击元素必须能被键盘触发', () => {
     // 按 ARIA 规范 button 的子节点是 presentational，于是内层按钮的语义被抹掉：
     // 读屏听不到它们是独立控件，行名还会被拼成「编辑固定账单「水费」 已支付 跳过本次」。
     // 现在编辑入口是一个真 `<button class="bill-main">`，动作按钮是它的**兄弟**。
-    const ledger = readTemplate(resolve(srcDir, 'views', 'LedgerView.vue'))
+    // 拆分后固定账单模板整个搬进了 views/ledger-panels/BillsPanel.vue。
+    const ledger = readTemplate(resolve(srcDir, 'views', 'ledger-panels', 'BillsPanel.vue'))
     const rows = [...openTags(ledger)].filter(
       ({ tag, attrs }) => tag === 'div' && /class="[^"]*\bbill-row\b/.test(attrs),
     )
@@ -303,7 +307,8 @@ describe('可点击元素必须能被键盘触发', () => {
       expect(attrs, head).toMatch(/@click="openBillForm\(\{\}, bill\.id\)"/)
     }
     const mainButtons = [...openTags(ledger)].filter(
-      ({ tag, attrs }) => tag === 'button' && /class="bill-main"/.test(attrs),
+      // class 里现在还带着 tap-target（粗指针命中区），所以按「含这个词」匹配而不是整串相等。
+      ({ tag, attrs }) => tag === 'button' && /class="[^"]*\bbill-main\b/.test(attrs),
     )
     expect(mainButtons, '每类账单行都要有一个编辑入口真按钮').toHaveLength(3)
     for (const { attrs } of mainButtons) {

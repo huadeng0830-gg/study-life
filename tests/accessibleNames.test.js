@@ -57,8 +57,9 @@ const symbolOnlyButtons = [
     call: 'openCustomTime',
     why: '自定义专注时长（内容只有全角＋）',
   },
-  { file: 'src/views/LedgerView.vue', call: 'shiftMonth(-1)', why: '上一个月（内容只有‹）' },
-  { file: 'src/views/LedgerView.vue', call: 'shiftMonth(1)', why: '下一个月（内容只有›）' },
+  // 拆分后翻月按钮整个在回顾面板里，判据（中文 aria-label + tap-target）一字未改。
+  { file: 'src/views/ledger-panels/ReviewPanel.vue', call: 'shiftMonth(-1)', why: '上一个月（内容只有‹）' },
+  { file: 'src/views/ledger-panels/ReviewPanel.vue', call: 'shiftMonth(1)', why: '下一个月（内容只有›）' },
   { file: 'src/views/ScheduleView.vue', call: 'goWeek(-1)', why: '上一周（内容只有‹）' },
   { file: 'src/views/ScheduleView.vue', call: 'goWeek(1)', why: '下一周（内容只有›）' },
 ]
@@ -80,6 +81,8 @@ describe('只有符号的按钮必须自带可访问名称', () => {
   for (const file of [
     'src/components/FocusPanel.vue',
     'src/views/LedgerView.vue',
+    // 拆分后回顾面板自己也有一批纯符号按钮（‹ ›），一并纳入兜底扫描。
+    'src/views/ledger-panels/ReviewPanel.vue',
     'src/views/ScheduleView.vue',
   ]) {
     it(`${file} 不再有「只有符号且没有名称」的按钮`, () => {
@@ -105,7 +108,8 @@ describe('只念得出数字的控件要补上单位或日期', () => {
   })
 
   it('月历格子带上月份、日期与账目摘要，并暴露选中态', () => {
-    const html = stripComments(source('src/views/LedgerView.vue'))
+    // 月历格子与它的标签函数（cellLabel 里的「几月几日」）随回顾面板一起拆走。
+    const html = stripComments(source('src/views/ledger-panels/ReviewPanel.vue'))
     expect(html).toMatch(/:aria-label="cellLabel\(cell\)"/)
     expect(html).toMatch(/:aria-pressed="selectedDay === cell\.day"/)
     // 标签本身要说清「几月几日」，否则和裸数字没区别。

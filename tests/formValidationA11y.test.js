@@ -150,7 +150,8 @@ describe('表单校验的无障碍接线', () => {
   })
 
   it('错误文案的 id 在整个文档里唯一，且都带 role=alert', () => {
-    const files = ['src/views/NotesView.vue', 'src/views/LedgerView.vue', 'src/views/EventsView.vue']
+    // 账单表单随固定账单弹窗拆进了子组件（BillFormModal.vue），id 唯一性照样全仓看。
+    const files = ['src/views/NotesView.vue', 'src/views/ledger-panels/BillFormModal.vue', 'src/views/EventsView.vue']
     const ids = []
     for (const file of files) {
       const source = readFileSync(resolve(projectRoot, file), 'utf8')
