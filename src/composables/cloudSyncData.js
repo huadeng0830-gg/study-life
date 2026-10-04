@@ -86,7 +86,7 @@ export const SYNC_MODULES = Object.freeze([
 
 /**
  * @param {unknown} moduleKeys
- * @returns {(keyof SyncDefaultsType)[]}
+ * @returns {(keyof typeof SYNC_DEFAULTS)[]}
  */
 export function moduleKeysFor(moduleKeys) {
   const selected = new Set(Array.isArray(moduleKeys) ? moduleKeys.filter((key) => typeof key === 'string') : [])
@@ -97,7 +97,7 @@ export function moduleKeysFor(moduleKeys) {
 
 /**
  * @param {unknown} keys
- * @returns {(keyof SyncDefaultsType)[]}
+ * @returns {(keyof typeof SYNC_DEFAULTS)[]}
  */
 export function normalizePullKeys(keys) {
   if (keys == null) return [...SYNC_KEYS]
@@ -107,7 +107,7 @@ export function normalizePullKeys(keys) {
 
 /**
  * @param {Record<string, unknown>} payload
- * @param {(keyof SyncDefaultsType)[]} keys
+ * @param {(keyof typeof SYNC_DEFAULTS)[]} keys
  * @returns {Record<string, unknown>}
  */
 export function pickSyncValues(payload, keys) {
@@ -147,7 +147,7 @@ export function isCompatibleValue(value, expected) {
 }
 
 /**
- * @param {keyof SyncDefaultsType} key
+ * @param {keyof typeof SYNC_DEFAULTS} key
  * @param {unknown} value
  * @returns {unknown}
  */
@@ -165,7 +165,7 @@ function normalizeIncomingValue(key, value) {
 }
 
 /**
- * @param {keyof SyncDefaultsType} key
+ * @param {keyof typeof SYNC_DEFAULTS} key
  * @param {unknown} value
  * @returns {boolean}
  */

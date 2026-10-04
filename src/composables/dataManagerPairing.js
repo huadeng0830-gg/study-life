@@ -21,6 +21,9 @@ import {
 import { syncSpaceBootstrapPending } from './syncSpace.js'
 import { recoveryText, syncSpaceSettings } from './syncSpace.js'
 import { resumeAutoSync, startAutoSyncCoordinator } from './autoSyncCoordinator.js'
+// revokeSyncDevice 原先漏了导入，confirmRemoveDevice() 里调用它会在运行时抛
+// ReferenceError —— 点"移除设备"必炸。它由 vue-tsc --checkJs 报出。
+import { revokeSyncDevice } from './cloudSyncSpaceOps.js'
 import { deviceProfile } from './deviceIdentity.js'
 import { localSafeMode } from './localSafeMode.js'
 import { useDataManagerStatus } from './dataManagerStatus.js'

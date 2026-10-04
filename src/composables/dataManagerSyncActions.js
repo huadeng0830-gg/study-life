@@ -29,6 +29,9 @@ import {
   syncNow,
 } from './autoSyncCoordinator.js'
 import { SYNC_MODULES, moduleKeysFor } from './cloudSyncData.js'
+// syncPreview 原先漏了导入，closeMergePreview() 里引用它会在运行时抛
+// ReferenceError（点"关闭预览"就炸）。它由 vue-tsc --checkJs 报出。
+import { syncPreview } from './cloudSyncState.js'
 import { deviceProfile } from './deviceIdentity.js'
 import { disableLocalSafeMode, localSafeMode } from './localSafeMode.js'
 import { useTaskProgress } from './taskProgress.js'

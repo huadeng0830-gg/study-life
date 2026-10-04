@@ -13,6 +13,8 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "typecheck": "vue-tsc --noEmit",
+    "typecheck:ratchet": "node scripts/typecheck-ratchet.mjs",
+    "typecheck:report": "node scripts/typecheck-ratchet.mjs --report",
     "check": "npm run lint && npm run typecheck && npm test && npm run build",
     "release:bump": "node scripts/bump-release.mjs",
     "audit:contrast": "node scripts/audit-contrast.mjs",
