@@ -7,6 +7,7 @@ import BackupSection from './data/BackupSection.vue'
 import AppUpdateSection from './data/AppUpdateSection.vue'
 import TransferSection from './data/TransferSection.vue'
 import DataHealthCard from './data/DataHealthCard.vue'
+import CalendarExportSection from './data/CalendarExportSection.vue'
 import RestoreSection from './data/RestoreSection.vue'
 import SyncPanel from './data/SyncPanel.vue'
 import MergeConflictModal from './data/MergeConflictModal.vue'
@@ -176,6 +177,8 @@ defineExpose({ exportBackup })
       <AppUpdateSection />
 
       <TransferSection ref="transferSectionRef" @open="showTransfer = true" />
+
+      <CalendarExportSection />
 
       <DataHealthCard />
 
