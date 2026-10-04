@@ -7,24 +7,74 @@
 // 3. 更早的版本逐条下移，最多保留 3 个版本，超出即删除。
 export const RELEASE_UPDATES = Object.freeze([
   {
-    version: '2026年09月28日-版本3',
-    signature: '0f816c0ac8',
+    version: '2026年10月04日-版本1',
+    signature: 'fe04eaa0e0',
     notes: [
-      '阶段全完成：8 阶段全绿。6 个巨型文件拆分完成（ScheduleView 706、TimeSettingsModal 726、DataManager 469、LedgerView 930、cloudSync 5 文件、ledger-panels 8 文件）。1860/1865 测试通过，2 个预存基建问题。对比度/隐私/无障碍全绿。签名 8d802de193 MATCH',
+      '修复发布签名闸门的三处根因：签名不再随工作区换行符变化（core.autocrlf + 无 .gitattributes 曾导致同一份源码算出三个不同签名）、二进制资源改为按原始字节入哈希（此前 png 与 OCR 语言包有近半数字节被 utf8 解码成 U+FFFD，换图标换模型都不触发闸门）、补上 sync-protocol.js 这个真正影响前后端产物的输入',
+      '新增 .gitattributes 统一换行；.gitignore 补齐 AGENTS.md 要求的 .env 与 .db/.sqlite*，并把交接草稿规则锚定到仓库根目录',
+      'bump 脚本与版本工具改为换行符无关，修复 CRLF 检出下说明被静默丢弃却仍打印成功的缺陷',
     ],
   },
   {
-    version: '2026年09月28日-版本2',
-    signature: '8d802de193',
+    version: '2026年10月01日-版本1',
+    signature: '7e6d692345',
     notes: [
-      '阶段6e后续：LedgerView 930 行（仍超目标 130 行），核心拆分完成；1860/1865 测试通过，2 个预存测试基建问题',
+      '账本全面审核修复：详情改金额放大100倍',
+      '退款继承币种与分摊并按我承担口径计算',
+      '账单日期推进锚点修复不可逆漂移',
+      '修复收支口径不一致导致的同屏矛盾',
+      '导出范围与界面合计对齐并防CSV公式注入',
+      '新增完整编辑入口与收入结余展示',
+      '新增预算节奏与导出全部历史',
     ],
   },
   {
-    version: '2026年09月28日-版本1',
-    signature: '3a012ac53c',
+    version: '2026年09月30日-版本4',
+    signature: '31231a0df8',
     notes: [
-      '阶段6d/6e：拆分 DataManager（2502→469行，4个composables+6子组件）与 LedgerView（3475→930行，9个composables+8子组件/面板），LedgerView 仍超目标 130 行待后续优化',
+      '修复测试环境整体失效：Node 22+ 内置的 localStorage 全局遮蔽了 happy-dom 的 Storage，1865 条用例里 552 条连带变红；同时补上丢失的 vitest 配置',
+      '修复账本「记一笔」四个事件处理器未从 composable 解构，导致保存、选分类等操作点下去完全没反应',
+      '修复 currencyField 被三个模块从不存在的导出里 import，记一笔、记录详情、固定账单在保存时才抛错',
+      '修复 ledgerNowHM / amountToCents / syncSpaceBootstrapPending 三处不存在的导入，生产构建此前一直是坏的',
+      '「打开摄像头」补上等待中的加载态，避免连点拉起多个摄像头请求',
+      '弹窗视口同步改为每帧一次并加 passive，消除 iOS 键盘弹出时的强制重排',
+      '预加载统一到 routePreload，省流量模式与 2G 网络下不再被后台下载课程表和账本',
+      '修复账本首次搜索/改筛选必抛 ReferenceError（feed.js 调用了本模块没有的 closeSwipe）',
+      '修复记录详情弹窗关不掉：@update:open 原本在给只有 getter 的 computed 赋值',
+      '修复待办深链 ?focus= 跳转崩溃：taskPlanningState 用了没导入',
+      '修复「创建固定账单」点了只关弹窗、事件没登记也没监听，草稿直接丢',
+      '修复课程冲突检测把普通函数当 ref 用，且读错字段，课程时间重叠永远检测不出来',
+      '修复「记一笔」点 × / 点遮罩 / 按 Esc 都关不掉：@close 绑到了只做表单收尾的 closeQuick，从不碰页面持有的 showQuick',
+      '修复「记下」保存成功后弹窗不消失：saveExpense 现在会返回是否真的存进去了，只在成功且非「连续记」时才收起',
+      '修复连续记账模式下「完成」是个死胡同：它仍然去保存一张空表单，改为正常退出连续记账',
+      '新增 6 条真实点击用例钉住记一笔的三条关闭路径、保存、保存并继续与失败不关闭',
+      '修复作息导入的一个提前 return 会让 importRunning 卡在 true，弹窗再也关不掉',
+      '修复分摊预览在 computed 里写状态：改为显式的派生标记，编辑既有分摊不会被覆盖',
+      '二维码解码降到 1000px 长边：手机照片原本要 48MB 像素缓冲和多秒主线程卡死',
+      '修复 DateTimeFormat 每次都新建：倒计时/账单/待办的日期换算快了一个数量级',
+      '修复专注面板的定时器在 KeepAlive 停用后仍每半秒空转，切走标签页照样烧 CPU',
+      '修复添加设备弹窗的有效期定时器在卸载时泄漏',
+      '二维码库不再随 PWA 安装预缓存（此前 qrcode+jsqr 白下一份）',
+      '同步指纹加了缓存：一次合并原本要把每条记录反复序列化上千次',
+      '同步合并的 id 问题按键分组，去掉键数×问题数的平方级扫描',
+      '智能整理把课程名列表提到循环外，整批只算一次',
+      'OCR 表格线检测去掉逐像素的函数调用开销（40 组结构化样本逐点比对结果完全一致）',
+      '考试卡片改为先算好再渲染：复习进度原本每张卡片要整表扫两遍待办',
+      '账本/日程/笔记/全局搜索的输入框加防抖，不再每敲一个字就跑一遍整表扫描',
+      '桌面端壁纸实时模糊上限压到 8px，超过部分改走预模糊图',
+      '定位高亮光晕从 box-shadow 改成 outline，不再每帧重绘整块文字',
+      '装饰粒子按屏幕宽度收敛（小屏 8 / 中屏 12 / 宽屏 18）',
+      'OCR 语言包加上长期缓存头，此前每次都走 no-cache 重新校验',
+      '清理：未使用的导入与变量、一处重复的路由 watcher、三个无人引用的 content-visibility 类、两处 transition: all',
+      '新增接线守卫与指纹稳定性用例：同族缺陷已在提交时即可拦截',
+      'Excel 导出重做：新增「汇总」工作表并排在第一位，一眼看清这个月花了多少',
+      '汇总只讲支出（合计 / 退款 / 净额 / 笔数），不再混入收入与结余',
+      'Excel 导出按币种分列统计（金额本就不折算，跨币种相加没有意义），并给出分类排行与占比',
+      'Excel 明细补上列宽、表头筛选下拉与千分位数字格式，不再是一堆裸数字',
+      '新增 10 条导出用例：真的写出 xlsx 再读回来核对值、格式、列宽与工作表顺序',
+      'wrangler 锁到 devDependencies 并固定版本，部署不再由 npx 临时解析',
+      '修复 2 个 high 级依赖漏洞（brace-expansion / fast-uri，均为构建期依赖，不进浏览器）',
+      '1872/1872 测试通过，lint、typecheck 与生产构建全绿',
     ],
   },
 ])
@@ -33,7 +83,7 @@ export const RELEASE_UPDATES = Object.freeze([
 export const RELEASE_VERSION = RELEASE_UPDATES[0].version
 
 // 与第一条签名保持一致，交给 vite.config.js 校验源码一致性。
-export const RELEASE_SOURCE_SIGNATURE = '0f816c0ac8'
+export const RELEASE_SOURCE_SIGNATURE = 'fe04eaa0e0'
 
 // 兼容旧引用：当前版本的更新说明。
 export const RELEASE_NOTES = RELEASE_UPDATES[0].notes

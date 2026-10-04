@@ -7,13 +7,15 @@
  */
 import { computed, ref } from 'vue'
 import { expenses, isRefundTransaction, freqPrefs } from '../ledger.js'
-import { amountToCents, mySpendCents } from '../ledgerSplit.js'
+import { amountToCents, normalizeAmount } from '../ledger.js'
+import { buildSplit, hasSplit, mySpendCents } from '../ledgerSplit.js'
 import { isBillPayment } from '../ledgerRelations.js'
 import { moneyRow, moneyWithCurrency } from '../../utils/formatters.js'
-import { appToday, ledgerNowHM } from '../timeContext.js'
-import { normalizeCurrency, currencyField } from '../ledgerFx.js'
+import { appToday } from '../timeContext.js'
+import { normalizeCurrency, currencyField, useLedgerFx } from '../ledgerFx.js'
 
 export function useTransactionDetail({ domain, notify, closeSwipe, flashTransaction, highlightTransaction, baseCurrency, ledgerToday, splitDetailNote }) {
+  const { fx } = useLedgerFx()
   const detailItem = ref(null)
   const detailExpense = computed(() => detailItem.value ? expenses.value.find((e) => e.id === detailItem.value) ?? null : null)
   const detailEdit = ref(false)
@@ -56,18 +58,29 @@ export function useTransactionDetail({ domain, notify, closeSwipe, flashTransact
   function saveDetailEdit() {
     const e = detailExpense.value
     if (!e) return
-    const amount = amountToCents(detailAmountInput.value)
+    // 【单位】命令层 `updateTransaction` 收的是**元**（它内部会 normalizeAmount）。
+    // 这里原先调 `amountToCents` 把「元」变成「分」再塞进去，于是
+    // normalizeAmount 把 1850 当成 1850 元 —— 每一次金额编辑都放大 100 倍。
+    // 正确做法与新建路径（useQuickEntryForm）一致：用 normalizeAmount 交出元。
+    const amount = normalizeAmount(detailAmountInput.value)
     if (amount === null) {
       notify('金额填写有误：不能为空，最多保留两位小数')
       return
     }
     try {
-      const updated = domain.updateTransaction(e.id, {
+      // 【分摊同步】总额变了而 split 停在旧值时，校验只查 Σ参与者===split.total，
+      // 两者都没变所以**校验通过**，于是「我承担」永远按旧份额计入所有合计。
+      // 这里按新的总额重建分摊，1 人时就是全额，不改变任何未分摊记录的语义。
+      const patch = {
         amount,
         cat: detailCategoryInput.value || 'other',
         date: detailDateInput.value || ledgerToday(),
-        currency: currencyField(detailCurrencyInput.value),
-      })
+        currency: currencyField(detailCurrencyInput.value, fx.value),
+      }
+      if (hasSplit(e)) {
+        patch.split = buildSplit(amount, { count: e.split.participants.length, mine: e.split.mine })
+      }
+      const updated = domain.updateTransaction(e.id, patch)
       if (!updated) return
       detailEdit.value = false
       closeSwipe()
@@ -83,6 +96,34 @@ export function useTransactionDetail({ domain, notify, closeSwipe, flashTransact
     if (!e) return
     closeDetail()
     return { name: e.name, amount: String(e.amount), cat: e.cat, note: e.note, direction: e.direction, currency: e.currency, split: e.split }
+  }
+
+  /**
+   * 「完整编辑」的预填：**带 id**。
+   *
+   * 为什么单独一个出口而不改 `againFromDetail`：后者语义是「再记一次相同的一笔」，
+   * 刻意不传 id；给它加上 id 会把「新建」悄悄变成「覆盖这一笔」。
+   * 这里返回带 id 的完整预填，让 `LedgerView` 的 `openQuick` 走编辑分支，
+   * 于是名称/账户/备注/时间/收支方向/分摊终于都能改
+   * （`useQuickEntryForm` 的 update 分支本来就写好了，此前从未被触发）。
+   */
+  function fullEditFromDetail() {
+    const e = detailExpense.value
+    if (!e) return null
+    closeDetail()
+    return {
+      id: e.id,
+      name: e.name,
+      amount: String(e.amount),
+      cat: e.cat,
+      date: e.date,
+      time: e.time,
+      note: e.note,
+      account: e.account,
+      direction: e.direction,
+      currency: e.currency,
+      split: e.split,
+    }
   }
 
   function undoBillPaymentFromDetail() {
@@ -119,10 +160,12 @@ export function useTransactionDetail({ domain, notify, closeSwipe, flashTransact
 
   function refundRemaining(item) {
     if (!item) return 0
+    // 与 `refundTransaction` 的上限同一口径（有分摊取 mine，否则取全额），
+    // 否则弹窗预填的金额会超过命令层允许的金额，用户点确认只会撞到 blocked。
     const already = expenses.value
       .filter((entry) => isRefundTransaction(entry) && entry.refundOf === item.id && !entry?.archivedAt && !entry?.deletedAt && !entry?.tombstone)
-      .reduce((sum, entry) => sum + (amountToCents(entry.amount) ?? 0), 0)
-    return Math.max(0, (amountToCents(item.amount) ?? 0) - already) / 100
+      .reduce((sum, entry) => sum + (mySpendCents(entry) ?? 0), 0)
+    return Math.max(0, (mySpendCents(item) ?? 0) - already) / 100
   }
 
   function openRefund() {
@@ -201,6 +244,7 @@ export function useTransactionDetail({ domain, notify, closeSwipe, flashTransact
     cancelDetailEdit,
     saveDetailEdit,
     againFromDetail,
+    fullEditFromDetail,
     undoBillPaymentFromDetail,
     deleteFromDetail,
     showRefund,

@@ -35,10 +35,26 @@ preview.log
 **/*backup*/
 *.backup.json
 *.export.json
+sl_*.json
+
+# 环境变量与本地密钥（AGENTS.md 要求：只允许提交占位符版本的 .env.example）
+.env
+.env.*
+!.env.example
+
+# 本地数据库（AGENTS.md 要求忽略 .db / .sqlite*）
+*.db
+*.sqlite
+*.sqlite3
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
 
 # 本地会话交接草稿：内容随协作过程变化，不作为项目源码或用户文档发布。
-HANDOFF.md
-NEXT_PROMPT.md
+# 前导斜杠把匹配锚定到仓库根目录：否则无斜杠模式会跨任意层级生效，
+# 把 docs/archive/ 下那两份（带已核实为真的过期状态标注）一起排除掉。
+/HANDOFF.md
+/NEXT_PROMPT.md
 
 # Editor directories and files
 .vscode/*

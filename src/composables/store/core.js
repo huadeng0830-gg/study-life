@@ -436,6 +436,8 @@ export function touchStoredRef(key) {
 
 export function migrateTaskCourseLinks(taskList, courseList) {
   if (!Array.isArray(taskList) || !Array.isArray(courseList)) return false
+  const candidates = taskList.filter((task) => task && !task.courseId && task.course)
+  if (!candidates.length) return false
   const byName = new Map()
   for (const course of courseList) {
     const name = String(course?.name ?? '').trim()
@@ -444,8 +446,7 @@ export function migrateTaskCourseLinks(taskList, courseList) {
     else byName.set(name, course.id)
   }
   let changed = false
-  for (const task of taskList) {
-    if (!task || task.courseId || !task.course) continue
+  for (const task of candidates) {
     const courseId = byName.get(String(task.course).trim())
     if (!courseId) continue
     task.courseId = courseId

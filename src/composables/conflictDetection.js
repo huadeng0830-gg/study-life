@@ -1,4 +1,4 @@
-import { currentTimes, periodIndex, currentCampusId } from './store/timeConfig.js'
+import { currentTimes, periodIndex } from './store/timeConfig.js'
 import { scheduleDateContext, courseInWeek, dateForWeekDay } from './store/schedule.js'
 import { isActiveEntity } from './domain/state.js'
 
@@ -12,16 +12,28 @@ import { isActiveEntity } from './domain/state.js'
 /** @typedef {{ hasConflicts: boolean, count: number, byType: Record<string, number>, message: string }} ConflictSummary */
 
 /**
- * @param {string} period
- * @param {string} [campusId]
+ * 取某个「节次 id」对应的起止分钟数。
+ *
+ * 【这里原本整体是坏的】store/timeConfig.js 导出的 currentTimes / periodIndex /
+ * currentCampusId 都是**普通函数**，不是 ref，原代码却当 ref 用
+ * （`currentCampusId.value`、`periodIndex.value[period]`、`currentTimes.value[campusId]`）——
+ * 函数没有 .value，于是 `undefined[period]` 直接抛 TypeError。
+ * 而且形状也不对：currentTimes() 返回的是**按节次顺序排好的数组**
+ * [{start,end}, ...]，不是 `object[campusId].periods[periodId]`。
+ *
+ * 之前没人发现，是因为课程冲突这一整条链路根本没有调用方（只有
+ * detectTaskEventConflicts 接进了界面）。等课程编辑器真的用它时才会炸，
+ * 所以这里一次性把取值方式和形状都对齐。
+ *
+ * @param {string} period 节次 id（如 timeConfig.periods[i].id）
  * @returns {TimeRange}
  */
-function periodToMinutes(period, campusId = currentCampusId.value) {
-  const periodInfo = periodIndex.value[period]
-  if (!periodInfo) return { start: 0, end: 0 }
-  const campus = currentTimes.value[campusId]?.periods?.[period]
-  if (!campus) return { start: 0, end: 0 }
-  return { start: campus.start, end: campus.end }
+function periodToMinutes(period) {
+  const index = periodIndex(period)
+  if (index < 0) return { start: 0, end: 0 }
+  const row = currentTimes()[index]
+  if (!row) return { start: 0, end: 0 }
+  return { start: Number(row.start) || 0, end: Number(row.end) || 0 }
 }
 
 /**
@@ -30,12 +42,14 @@ function periodToMinutes(period, campusId = currentCampusId.value) {
  * @returns {TimeRange|null}
  */
 function getCourseTimeRange(course, week) {
-  const context = scheduleDateContext(dateForWeekDay(week, course.day))
-  const { startPeriod, endPeriod } = course
-  const startMinutes = periodToMinutes(startPeriod).start
-  const endMinutes = periodToMinutes(endPeriod).end
-  if (startMinutes === 0 && endMinutes === 0) return null
-  return { start: startMinutes, end: endMinutes }
+  scheduleDateContext(dateForWeekDay(week, course.day))
+  // 课程上存的是 start / end 两个节次 id，不是 startPeriod / endPeriod
+  // （见 domain/commands.js 的 createCourse）。原来解构不存在的字段，
+  // 就算把上面的 .value 修好也永远拿到 undefined，一次冲突都检测不出来。
+  const start = periodToMinutes(course.start)
+  const end = periodToMinutes(course.end)
+  if (start.start === 0 && end.end === 0) return null
+  return { start: start.start, end: end.end }
 }
 
 /**

@@ -195,5 +195,7 @@ export function personalSpendTotals(list, { dateFilter = null } = {}) {
     expenseTotal: (expenseCents - refundCents) / 100,
     incomeTotal: incomeCents / 100,
     refundTotal: refundCents / 100,
+    // 结余 = 收入 − 支出（支出已含退款冲抵）。与 buildLedgerMonthReview 的 balance 同定义。
+    balance: (incomeCents - (expenseCents - refundCents)) / 100,
   }
 }

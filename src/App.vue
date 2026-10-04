@@ -29,7 +29,6 @@ import { isSyncSpaceBound, syncSpaceSettings } from './composables/syncSpace.js'
 import { autoSyncError, autoSyncState, startAutoSyncCoordinator, stopAutoSyncCoordinator } from './composables/autoSyncCoordinator.js'
 import { localSafeMode } from './composables/localSafeMode.js'
 import { persistenceState, dismissPersistenceNotice } from './composables/store/core.js'
-import { downloadEmergencyBackup } from './composables/emergencyExport.js'
 import { needsBackup } from './composables/backupReminder.js'
 import { attachFloatingSlot, createFloatingSlot, detachFloatingSlot, useFloatingOffset } from './composables/floatingStack.js'
 import { announce, announceAlert, clearAnnouncement, liveAlert, liveMessage } from './composables/liveRegion.js'
@@ -203,7 +202,13 @@ const ANNIVERSARY_KEYS = ['anniversary', 'anniversary-start']
 const ANNIVERSARY_COLORS = ['#fbbf24', '#fcd34d', '#fde68a', '#eab308', '#f59e0b', '#f97316']
 const ANNIVERSARY_DURATION = 4.2
 const isAnniversary = computed(() => ANNIVERSARY_KEYS.includes(festiveToday.value?.key ?? ''))
-const decorParticles = Array.from({ length: 18 }, (_, id) => ({
+// 每个粒子都是一个无限循环的 CSS 动画，并且各自提升为合成层。
+// 18 个在桌面端没问题，但在窄屏手机上就是 18 个铺满全屏高度的图层，
+// 光是 GPU 显存就上去了。这里按宽度收敛：小屏 8 个，中屏 12 个，宽屏 18 个。
+const decorCount = typeof window === 'undefined'
+  ? 18
+  : (window.innerWidth < 640 ? 8 : window.innerWidth < 1024 ? 12 : 18)
+const decorParticles = Array.from({ length: decorCount }, (_, id) => ({
   id,
   left: (id * 5.7 + 3) % 100,
   delay: (id % 9) * -1.1,
@@ -274,8 +279,11 @@ function viewQuickRecordEntity() {
   router.push(target)
 }
 
-function exportCurrentData() {
-  try { downloadEmergencyBackup() } catch {}
+async function exportCurrentData() {
+  try {
+    const { downloadEmergencyBackup } = await import('./composables/emergencyExport.js')
+    downloadEmergencyBackup()
+  } catch {}
 }
 
 function openDataManager() {

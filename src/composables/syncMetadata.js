@@ -121,17 +121,54 @@ export function canonicalSyncValue(value) {
 export const SYNC_MANIFEST_HASH_VERSION = 2
 
 /**
+ * 指纹缓存。
+ *
+ * 一次同步合并里，同一个实体会被反复算指纹：mergeOneEntity 算本地与远端各一次
+ * （syncMerge.js），buildEntityManifest 之后又整体算一次（syncMetadata.js），
+ * 冲突分支还会再算。也就是说 1000 条记录的合并要跑几千次
+ * 「JSON.stringify → JSON.parse → 递归拼稳定串 → FNV 逐字符」。
+ *
+ * 缓存键取**规范化后的 JSON 文本**而不是对象身份：文本就是内容的完整表示，
+ * 所以命中就一定等价，不存在对象被就地改过之后拿到过期指纹的风险
+ * （用 WeakMap 按身份缓存会有这个风险，那是拿数据正确性换速度，不能做）。
+ * 上限 512 条，超了就整批丢掉重来 —— 指纹计算是纯函数，丢缓存只损失命中率，
+ * 不会影响正确性。
+ */
+const HASH_CACHE_LIMIT = 512
+const hashCache = new Map()
+
+/**
  * @param {unknown} value
  * @returns {string}
  */
 export function hashSyncValue(value) {
+  // canonicalSyncValue(undefined) 返回 undefined，stableValue 再走 JSON.stringify
+  // 也会得到 undefined，接着 input.length 就抛了。所有调用点本来都判过 undefined，
+  // 这里直接把「没有值」映射成空指纹，让函数对任何输入都有定义。
+  if (value === undefined) return ''
+  let json
+  try {
+    json = JSON.stringify(value)
+  } catch {
+    // 含循环引用等无法序列化的值：退回原来的路径，让它以既有方式失败/降级。
+    json = null
+  }
+  if (json !== null) {
+    const cached = hashCache.get(json)
+    if (cached !== undefined) return cached
+  }
   const input = stableValue(canonicalSyncValue(value))
   let hash = 2166136261
   for (let index = 0; index < input.length; index++) {
     hash ^= input.charCodeAt(index)
     hash = Math.imul(hash, 16777619)
   }
-  return (hash >>> 0).toString(16).padStart(8, '0')
+  const result = (hash >>> 0).toString(16).padStart(8, '0')
+  if (json !== null) {
+    if (hashCache.size >= HASH_CACHE_LIMIT) hashCache.clear()
+    hashCache.set(json, result)
+  }
+  return result
 }
 
 /**

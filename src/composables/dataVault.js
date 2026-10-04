@@ -115,9 +115,9 @@ async function readRecords(db, keys) {
   return new Map(records)
 }
 
-async function readAllRecords(db) {
+async function readRecordKeys(db) {
   const transaction = db.transaction(STORE_NAME, 'readonly')
-  return requestResult(transaction.objectStore(STORE_NAME).getAll())
+  return requestResult(transaction.objectStore(STORE_NAME).getAllKeys())
 }
 
 async function writeRecords(db, entries) {
@@ -161,30 +161,47 @@ export function shouldMirrorValue(rawValue, previousValue, { allowEmpty = false 
   return allowEmpty || previousValue === undefined || !isEmptyCollection(rawValue) || isEmptyCollection(previousValue)
 }
 
-function deferStartupMirror(entries) {
-  if (!entries.length || !mirrorHostAlive()) return
+function deferStartupMirror(keys) {
+  if (!keys.length || !mirrorHostAlive()) return
   const flush = () => {
     // 延迟期间页面可能已经被卸载（宿主消失），此时这批写盘已经没有意义。
     if (!mirrorHostAlive()) return
     // 延迟期间用户可能已经修改过数据；只把此刻 localStorage 的最新值
     // 放回统一队列，不能让启动时捕获的旧快照覆盖刚写入的影子副本。
-    for (const [key] of entries) {
+    for (const key of keys) {
       const latest = localStorage.getItem(key)
-      if (latest !== null) pendingMirrorWrites.set(key, { raw: latest, allowEmpty: false })
+      if (latest !== null) {
+        const pending = pendingMirrorWrites.get(key)
+        pendingMirrorWrites.set(key, { raw: latest, allowEmpty: pending?.allowEmpty === true })
+      }
     }
     void flushMirrorWrites()
   }
-  // 启动阶段以 localStorage 为即时数据源，影子副本可稍后补齐。
-  // 延后写入可避免 iPhone 首次点导航时与 IndexedDB 事务争抢主线程。
-  if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
-    window.requestIdleCallback(flush, { timeout: 2400 })
-  } else {
-    window.setTimeout(flush, 2200)
+  // 启动阶段以 localStorage 为即时数据源；至少等首屏启动窗口过去再比对整批副本，
+  // 避免 iPhone 在 Vault、App 与首页分包仍加载时就克隆大型 IndexedDB 值。
+  const registry = mirrorTimerRegistry()
+  const timer = window.setTimeout(() => {
+    registry?.delete(timer)
+    if (!mirrorHostAlive()) return
+    flush()
+  }, 8000)
+  registry?.add(timer)
+}
+
+function reportVaultTiming(onTiming, label, startedAt, details = {}) {
+  try {
+    onTiming?.({
+      label,
+      durationMs: Math.round((timingNow() - startedAt) * 100) / 100,
+      ...details,
+    })
+  } catch {
+    // 诊断回调不能改变安全副本恢复结果。
   }
 }
 
 // 在应用读取数据前执行：本地存储意外缺失时，从设备内的影子副本恢复。
-export async function initializeDataVault() {
+export async function initializeDataVault({ onTiming } = {}) {
   bindMirrorLifecycleFlush()
   try {
     // 请求持久化存储，防止 iOS 等系统在存储紧张时自动清除数据
@@ -195,7 +212,9 @@ export async function initializeDataVault() {
         }
       }).catch(() => {})
     }
+    let phaseStartedAt = timingNow()
     const db = await openVault()
+    reportVaultTiming(onTiming, 'vault.open', phaseStartedAt)
     if (!db) {
       // IndexedDB 不存在时没有可恢复的 Vault；仍精确清掉已删除功能的本机键。
       // 若 IndexedDB 只是暂时打开失败，则保留键，下一次启动继续尝试清理。
@@ -204,48 +223,65 @@ export async function initializeDataVault() {
       }
       return []
     }
-    const backups = await readAllRecords(db)
-    const backupMap = new Map(backups.map((record) => [record.key, record]))
+    phaseStartedAt = timingNow()
+    const backupKeys = (await readRecordKeys(db)).filter((key) => managedKey(key))
+    reportVaultTiming(onTiming, 'vault.keys', phaseStartedAt, { count: backupKeys.length })
 
-    // 先在内存中形成只包含已删除功能的精确快照，再清理 Vault，最后清理
-    // localStorage。任一步失败都会保留原始 localStorage 数据，避免半套清理。
-    const retiredSnapshot = new Map()
+    // 删除已退休键只需要知道键是否存在，不必把对应的大段业务值读进内存。
+    // 先清 Vault，再清 localStorage；任一步失败都会保留本机业务数据。
+    const retiredKeys = []
     for (const key of RETIRED_COURIER_KEYS) {
       const localValue = localStorage.getItem(key)
-      const vaultValue = backupMap.get(key)?.value
-      if (localValue !== null || vaultValue !== undefined) retiredSnapshot.set(key, { localValue, vaultValue })
+      if (localValue !== null || backupKeys.includes(key)) retiredKeys.push(key)
     }
-    if (retiredSnapshot.size) {
-      await deleteRecords(db, [...retiredSnapshot.keys()])
-      for (const key of retiredSnapshot.keys()) localStorage.removeItem(key)
-      for (const key of retiredSnapshot.keys()) backupMap.delete(key)
+    if (retiredKeys.length) {
+      phaseStartedAt = timingNow()
+      await deleteRecords(db, retiredKeys)
+      for (const key of retiredKeys) localStorage.removeItem(key)
+      reportVaultTiming(onTiming, 'vault.retired-cleanup', phaseStartedAt, { count: retiredKeys.length })
     }
+
+    // 通常启动时 localStorage 已完整：先列出副本键，只读取本机确实缺失的记录。
+    // 以前 getAll() 会在每次启动时克隆所有大型任务、账单和笔记，即使它们完全相同。
+    let missingBackupKeys = backupKeys.filter((key) =>
+      !RETIRED_COURIER_KEY_SET.has(key) && localStorage.getItem(key) === null
+    )
+    phaseStartedAt = timingNow()
+    const missingBackups = new Map()
+    const attemptedBackupReads = new Set()
+    while (missingBackupKeys.length) {
+      const records = await readRecords(db, missingBackupKeys)
+      for (const [key, record] of records) missingBackups.set(key, record)
+      for (const key of missingBackupKeys) attemptedBackupReads.add(key)
+      // Another open tab may remove a local key while IndexedDB is answering.
+      // Recheck once per key so that this startup still restores the latest missing values.
+      missingBackupKeys = backupKeys.filter((key) =>
+        !RETIRED_COURIER_KEY_SET.has(key)
+        && !attemptedBackupReads.has(key)
+        && localStorage.getItem(key) === null
+      )
+    }
+    reportVaultTiming(onTiming, 'vault.restore-read', phaseStartedAt, { count: missingBackups.size })
 
     const localKeys = Object.keys(localStorage).filter(managedKey)
-    const keys = new Set([...localKeys, ...backupMap.keys()])
+    const candidateKeys = new Set([...localKeys, ...backupKeys])
     const restored = []
-    const pendingMirrors = []
+    phaseStartedAt = timingNow()
 
-    for (const key of keys) {
+    for (const key of candidateKeys) {
       if (!managedKey(key) || RETIRED_COURIER_KEY_SET.has(key)) continue
       const localValue = localStorage.getItem(key)
-      const backup = backupMap.get(key)
+      const backup = missingBackups.get(key)
       if (localValue === null && backup?.value !== undefined) {
         localStorage.setItem(key, backup.value)
         restored.push(key)
-      } else if (localValue !== null) {
-        // 启动阶段的空集合可能来自浏览器异常清理，不能覆盖最后一份非空安全副本。
-        // 内容相同不重复写入；之前每次启动都会重写全部 sl_* 键。
-        const changed = !backup || backup.value !== localValue
-        if (changed && (!backup || !isEmptyCollection(localValue) || isEmptyCollection(backup.value))) {
-          pendingMirrors.push([key, localValue])
-        }
       }
     }
 
-    // 恢复检查完成即可显示页面；安全副本的常规刷新放到后台串行执行，
-    // 避免 iPhone 每次启动都等待多次 IndexedDB 写入。
-    deferStartupMirror(pendingMirrors)
+    // 副本刷新和完整值比较延迟到空闲时；本机数据恢复仍然在启动 gate 内完成。
+    // 空集合保护仍由后台 flush 里的 shouldMirrorValue 执行。
+    deferStartupMirror(Object.keys(localStorage).filter(managedKey))
+    reportVaultTiming(onTiming, 'vault.restore', phaseStartedAt, { restored: restored.length })
     return restored
   } catch {
     // IndexedDB 不可用时仍使用 localStorage，避免阻断应用启动。
@@ -278,7 +314,7 @@ async function flushMirrorWrites() {
     const safeEntries = entries
       .filter(([key, value]) => {
         const backup = previous.get(key)
-        return shouldMirrorValue(value.raw, backup?.value, value)
+        return backup?.value !== value.raw && shouldMirrorValue(value.raw, backup?.value, value)
       })
       .map(([key, value]) => [key, value.raw])
     safeEntryCount = safeEntries.length

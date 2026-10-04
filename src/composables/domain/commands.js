@@ -5,7 +5,7 @@ import { amountToCents, classifyTransaction, isRefundTransaction, normalizeAmoun
 // 新增可选字段的来源：币种（多币种记账）与分摊（报销分摊）。
 // 两个模块都只做纯规范化，不反向依赖这里，所以不会形成循环导入。
 import { normalizeCurrency } from '../ledgerFx.js'
-import { normalizeSplit, validateSplit } from '../ledgerSplit.js'
+import { mySpendCents, normalizeSplit, validateSplit } from '../ledgerSplit.js'
 import { transactionBillId } from '../ledgerRelations.js'
 import { detachCourseRelations } from './relations.js'
 import { defaultAccount, defaultReminderMinutes, policyDateKey, policyTimeKey } from '../settingsPolicy.js'
@@ -45,17 +45,46 @@ function addMonthsKey(value, count) {
   target.setUTCDate(Math.min(day, lastDay))
   return target.toISOString().slice(0, 10)
 }
+/**
+ * 从 `from` 起按月推进 `count` 期，**始终以 `anchorDay` 为基准日**。
+ *
+ * 【为什么需要锚点】朴素写法 `addMonthsKey(bill.nextDate, 1)` 每推进一次就把
+ * 「被缩短过的日期」当成新基准：31 号 → 2 月被压成 28 → 再推进变成 **3-28**，
+ * 而且不可逆，于是房租从 3 月起永久提前 3 天。锚点让缩短只影响当月，
+ * 3 月仍回到 31 号。
+ *
+ * `anchorDay` 缺省取 `from` 的日，与旧数据行为一致（单期推进结果完全不变）。
+ */
+function addMonthsKeyAnchored(from, count, anchorDay) {
+  const [year, month] = dateParts(from)
+  const anchor = Number.isFinite(anchorDay) && anchorDay >= 1 && anchorDay <= 31 ? anchorDay : dateParts(from)[2]
+  const target = new Date(Date.UTC(year, month - 1 + count, 1))
+  const lastDay = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0)).getUTCDate()
+  target.setUTCDate(Math.min(anchor, lastDay))
+  return target.toISOString().slice(0, 10)
+}
 function nextBillDate(bill) {
+  // 非法 nextDate 曾经一路走到 toISOString() 抛 RangeError（Invalid time value），
+  // 而 skipBill 没有守卫，异常会冒到全局 errorHandler。这里就地兜住：
+  // 读不出日期就按「今天」推进，至少保证账单不会变成一个点不动也删不掉的东西。
+  const from = validDateKey(bill.nextDate) ? bill.nextDate : policyDateKey()
+  // 锚点只在按月推进的周期里有意义；weekly 走 +7 天本来就不会漂移。
+  const anchorDay = dateParts(from)[2]
   const advance = (date) => bill.cycle === 'weekly' ? addDaysKey(date, 7)
-    : bill.cycle === 'quarterly' ? addMonthsKey(date, 3)
-      : bill.cycle === 'yearly' ? addMonthsKey(date, 12)
-        : bill.cycle === 'once' ? date : addMonthsKey(date, 1)
-  let cursor = bill.nextDate
-  let next = advance(cursor)
+    : bill.cycle === 'quarterly' ? addMonthsKeyAnchored(date, 3, anchorDay)
+      : bill.cycle === 'yearly' ? addMonthsKeyAnchored(date, 12, anchorDay)
+        : bill.cycle === 'once' ? date : addMonthsKeyAnchored(date, 1, anchorDay)
+  let next = advance(from)
   const today = policyDateKey()
+  // `autoRenew: false` 此前是个死字段：BillFormModal 有开关、createBill 也存了，
+  // 但推进逻辑从不读它，所以关掉之后日期照样一路滚到未来，用户的操作毫无效果。
+  //
+  // 语义定为「不追赶」：不启用时**不把日期推到今天之后**——即使用户几个月没打开应用，
+  // 账单也停在原处等他，而不是静默地跳过好几期（跳过的期数本来就不留任何痕迹）。
+  // 用户仍可手动「跳过本次」把它顺延一期，或改回 autoRenew 继续自动推进。
+  if (bill.autoRenew === false) return next
   while (next <= today && bill.cycle !== 'once') {
-    cursor = next
-    next = advance(cursor)
+    next = advance(next)
   }
   return next
 }
@@ -270,15 +299,27 @@ export function useDomainCommands() {
     }
     const amount = normalizeAmount(value.amount)
     if (amount === null) return { blocked: true, reason: '退款金额需大于 0，且最多保留两位小数。' }
-    const originalCents = amountToCents(original.amount) ?? 0
+    // 【上限按「我承担」算，不按总额】整个账本对外回答的是「我实际承担多少」
+    // （mySpendCents），退款必须用同一个口径冲减，否则一笔 2 人 AA 的支出
+    // （总额 ¥100 / 我承担 ¥60）能退掉 ¥100，让本月花费变成 −¥40。
+    const originalCents = mySpendCents(original) ?? 0
     const alreadyCents = transactions.value
       .filter((entry) => isRefundTransaction(entry) && entry.refundOf === id && !entry?.archivedAt && !entry?.deletedAt && !entry?.tombstone)
-      .reduce((sum, entry) => sum + (amountToCents(entry.amount) ?? 0), 0)
+      .reduce((sum, entry) => sum + (mySpendCents(entry) ?? 0), 0)
     const amountCents = amountToCents(amount) ?? 0
     if (amountCents > originalCents - alreadyCents) {
-      return { blocked: true, reason: `退款金额不能超过剩余可退 ¥${((originalCents - alreadyCents) / 100).toFixed(2)}。` }
+      return { blocked: true, reason: `退款金额不能超过剩余可退 ${((originalCents - alreadyCents) / 100).toFixed(2)}。` }
     }
     const now = stamp()
+    // 【币种必须继承】外币支出的退款若不带 currency，会被导出与合计归到基准币种桶里，
+    // 变成「用 9.99 人民币冲减一笔 9.99 美元的支出」。
+    const currency = normalizeCurrency(original.currency)
+    // 【分摊必须继承】同理：原支出按 split.mine 计入，退款也必须按 mine 计入，
+    // 否则退掉的是全额、抵扣的只是我那一份。
+    const hasSplitInput = value.split !== undefined && value.split !== null
+    if (hasSplitInput && !validateSplit(value.split).ok) {
+      return { blocked: true, reason: `分摊数据不合法：${validateSplit(value.split).issues[0]}` }
+    }
     const item = {
       id: createId('ex'),
       name: value.name ? String(value.name).trim() : original.name,
@@ -291,6 +332,8 @@ export function useDomainCommands() {
       direction: 'refund',
       refundOf: id,
       source: value.source || 'refund',
+      ...(currency ? { currency } : {}),
+      ...(hasSplitInput ? { split: normalizeSplit(value.split) } : original.split ? { split: normalizeSplit(original.split) } : {}),
       createdAt: now, updatedAt: now, ...origin(value),
     }
     transactions.value.push(item)

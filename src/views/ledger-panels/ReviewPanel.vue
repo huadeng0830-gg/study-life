@@ -30,6 +30,7 @@ const props = defineProps({
   shiftMonth: { type: Function, required: true },
   exportLedgerCsv: { type: Function, required: true },
   exportLedgerXlsx: { type: Function, required: true },
+  exportAllLedgerXlsx: { type: Function, required: true },
   revealReviewCategory: { type: Function, required: true },
   toggleReviewCategory: { type: Function, required: true },
   openDetail: { type: Function, required: true },
@@ -75,6 +76,9 @@ function cellLabel(cell) {
     <span class="review-export" role="group" aria-label="导出账单">
       <button class="btn btn-sm" type="button" @click="exportLedgerCsv">导出 CSV</button>
       <button class="btn btn-sm" type="button" @click="exportLedgerXlsx">导出 Excel</button>
+      <!-- 「导出全部历史」：此前导出被硬编码成当月，想拿完整数据只能一个月一个月点。
+           用 aria-label 说清范围，避免用户以为导出的还是当前月。 -->
+      <button class="btn btn-sm" type="button" aria-label="导出全部历史账单，不限当前月份" @click="props.exportAllLedgerXlsx()">导出全部</button>
     </span>
   </div>
 
@@ -89,7 +93,10 @@ function cellLabel(cell) {
   <template v-else>
     <section class="review-summary card">
       <div class="rs-top">
-        <span>记录了 {{ reviewCount }} 笔<template v-if="monthlyReview.refundTotal"> · 退款 ¥{{ monthlyReview.refundTotal.toFixed(2) }}</template></span>
+        <!-- 「退款」写在标题行里，而上方大数字是**净额**（支出 − 退款）、
+             下方「分类分布」那句是**毛额**（退款不进分类）——两个数字天然不等。
+             所以这里把大数字的标签说清楚，否则用户会以为下面那句算错了。 -->
+        <span>记录了 {{ reviewCount }} 笔<template v-if="monthlyReview.refundTotal"> · 退款 ¥{{ monthlyReview.refundTotal.toFixed(2) }}<template v-if="reviewCategorySum"> · 已从合计扣除</template></template></span>
         <b>{{ moneyHero(reviewTotal) }}</b>
       </div>
       <div class="rs-facts">
@@ -117,12 +124,25 @@ function cellLabel(cell) {
         </button>
       </div>
       <p v-if="reviewMyShareNote" class="form-note">{{ reviewMyShareNote }}</p>
+      <!-- 收入与结余：此前整个回顾页只看得见支出（收入在 buildLedgerMonthReview 里
+           被 continue 掉），「这个月赚了多少、还剩多少」两个数一个都拿不到。
+           数据一直都在聚合里躺着，只是从没被渲染出来。 -->
+      <div v-if="monthlyReview.incomeTotal" class="rs-io">
+        <span>本月收入 <b>{{ moneyRow(monthlyReview.incomeTotal) }}</b></span>
+        <span>结余 <b :class="{ negative: monthlyReview.balance < 0 }">{{ moneyRow(monthlyReview.balance) }}</b></span>
+      </div>
+      <!-- 本月合计是按记录**原值**相加的（这是账本一贯的不折算约定）。
+           出现两种以上币种时那个数字没有意义，必须说清楚，不能让用户自己发现。 -->
+      <p v-if="monthlyReview.currencyCount > 1" class="form-note">
+        本月含 {{ monthlyReview.currencyCount }} 种币种，上方金额按记录原始数值直接相加，未做汇率折算；逐笔金额见账单明细。
+      </p>
     </section>
 
     <section class="review-cats card">
       <div class="rc-head">
         <h2 class="block-title">分类分布</h2>
-        <span class="rc-sum">共 {{ reviewCategoryRows.length }} 类 · {{ moneyRow(reviewCategorySum) }}</span>
+        <!-- 金额是**毛额**（退款是冲抵项、不进分类），与上方净额合计差的就是那笔退款。 -->
+        <span class="rc-sum">共 {{ reviewCategoryRows.length }} 类 · {{ moneyRow(reviewCategorySum) }}<template v-if="monthlyReview.refundTotal">（未扣退款）</template></span>
       </div>
       <!-- 每一行都是明细入口：点一下展开这个分类当月的每一笔，
            金额仍是「我承担」口径（与上方合计、下方月历同源，见 reviewCategoryRows）。 -->

@@ -56,7 +56,7 @@ import { templateToBillForm, useLedgerTemplateCommands } from '../composables/le
 import { buildSplit, hasSplit, mySpendCents, mySpendYuan, normalizeSplit, personalMonthCategoryTotals, personalSpendTotals, splitCentsEvenly } from '../composables/ledgerSplit.js'
 
 // 本轮新增：筛选、快速记账表单、记录详情、汇率预算页面态
-import { useLedgerFilters } from '../composables/ledgerView/useLedgerFilters.js'
+// const filters = useLedgerFilters()  // 不再需要，feed.js 已包含筛选逻辑
 import { useQuickEntryForm } from '../composables/ledgerView/useQuickEntryForm.js'
 import { useTransactionDetail } from '../composables/ledgerView/useTransactionDetail.js'
 import { useLedgerFxBudget } from '../composables/ledgerView/useLedgerFxBudget.js'
@@ -96,11 +96,16 @@ function showToast(message, { type = 'info', actionLabel = '', undoFn = null, vi
 const ledgerToday = () => appToday.value
 
 /* ================= 固定账单 ================= */
+// 账单周期。`once` 此前在 domain.ts 与 commands.js 里都被接受，但下拉里没有这一项，
+// 于是「一次性付款」永远选不到，`nextBillDate` 里 `cycle !== 'once'` 那条分支实际不可达。
+// `monthFactor` 是「一次付款折合多少个月的固定支出」；四个周期原本都定义了却全仓无人读取，
+// 所以「每月固定支出总额」这类汇总算不出来。`once` 折算为 0：它不构成每月固定开销。
 const CYCLES = {
   weekly: { label: '每周', short: '周', monthFactor: 52 / 12 },
   monthly: { label: '每月', short: '月', monthFactor: 1 },
   quarterly: { label: '每季度', short: '季度', monthFactor: 1 / 3 },
   yearly: { label: '每年', short: '年', monthFactor: 1 / 12 },
+  once: { label: '仅此一次', short: '单次', monthFactor: 0 },
 }
 
 /* 添加/编辑固定账单弹窗在 BillFormModal.vue：状态、校验、模板库、删除确认都在子组件里，
@@ -121,12 +126,6 @@ const {
 } = useLedgerBills({ domain, notify: showToast, ledgerToday })
 const ledgerNowHM = () => policyTimeKey(appNow.value)
 
-// 允许“今天”等聚合入口精确打开固定账单或回顾，不改变默认账本入口。
-watch(() => route.query.tab, (value) => {
-  tab.value = ledgerTabFromQuery(value)
-  closeSwipe()
-}, { immediate: true })
-
 // 把"实际生效的分区"写回 URL。两个方向共用它：
 //   - 路由参数变了 → 由下面的 query watcher 调用；
 //   - 用户点了/用键盘切了分区 → 由 tab watcher 调用。
@@ -141,8 +140,9 @@ function syncTabToQuery() {
   void router.replace({ path: route.path, query })
 }
 
-// 允许“今天”等聚合入口精确打开固定账单或回顾，不改变默认账本入口。
 // 读取侧：URL 决定分区。顺带把生效后的分区调和回 URL（含清掉看不懂的参数）。
+// 原来这里前后挂了两个一模一样的 watcher，第一个是纯粹的冗余（第二个包含它），
+// 每次 query 变化都要白跑一遍映射与收起手势。
 watch(() => route.query.tab, (value) => {
   tab.value = ledgerTabFromQuery(value)
   closeSwipe()
@@ -160,9 +160,11 @@ watch(tab, syncTabToQuery)
 
 /* ================= 账本首页 ================= */
 const feed = useLedgerFeed({
+  // 换筛选条件 ⇒ 收起滑动手势（「查看全部」由 feed 自己收起）。
+  // 这个回调以前是空的，于是筛选一变，正在展开的行会留在展开态。
   onFilterChange: () => {
-    // 换筛选条件 ⇒ 收起「查看全部」与滑动手势
-  }
+    closeSwipe()
+  },
 })
 const {
   q,
@@ -325,9 +327,6 @@ const { budget } = useLedgerBudget()
 // 基准币种口径的月度摘要：供 fxRateLine / budgetAlert / 导出共用
 const baseMonthSummary = computed(() => sumLedgerMonthInBase(expenses.value, fx.value, ledgerToday().slice(0, 7), { amountOf: mySpendYuan }))
 
-// 新增：筛选 composable - 已由 feed.js 提供，直接使用 feed 解构的值
-// const filters = useLedgerFilters()  // 不再需要，feed.js 已包含筛选逻辑
-
 // 新增：快速记账表单 composable
 const {
   showQuickRecord,
@@ -359,6 +358,13 @@ const {
   duplicateHit,
   openQuick: openQuickForm,
   closeQuick,
+  // 模板里 QuickEntryModal 的这四个事件直接绑到它们身上（见下方 @save / @select-category 等），
+  // 少解构任何一个，Vue 都会在渲染时警告"not defined on instance"，而点击时静默无反应——
+  // 也就是「记一笔」的保存按钮彻底失灵。必须与模板里的绑定一一对应。
+  saveExpense,
+  openQuickRecord,
+  onQuickRecordSaved,
+  selectQuickCategory,
 } = useQuickEntryForm({
   baseCurrency: computed(() => normalizeLedgerFx(fx.value).base),
   domain,
@@ -376,6 +382,31 @@ function openQuick(prefill = {}) {
   openQuickForm(prefill)
   showQuick.value = true
   editingId.value = prefill.id ?? null
+}
+
+// 关闭记一笔。
+//
+// 【为什么不能直接绑 composable 的 closeQuick】composable 里那个 closeQuick 只做
+// 表单收尾（keepAdding / savingExpense 复位），弹窗开关 showQuick 是页面持有的 ref。
+// 之前 `@close="closeQuick"` 绑的正是它，于是 ✕ / 点遮罩 / Esc 三条路径都只清了
+// 表单状态，showQuick 一直是 true —— 表现就是「点 × 完全没反应」。
+// 记一笔的开关与编辑态必须在这里一起收掉。
+function closeQuickModal() {
+  closeQuick()
+  showQuick.value = false
+  editingId.value = null
+}
+
+/**
+ * 「记下」/「保存并继续」的统一入口。
+ *
+ * keepOpen（保存并继续）时保持弹窗开着继续记，这是产品要的。
+ * 否则只有**确实存进去了**才收起弹窗：金额非法、重复待确认、分摊数据不合法
+ * 这几种「没存」的情况必须留在原地让用户改，一关掉就把用户刚填的东西全丢了。
+ */
+async function handleQuickSave(keepOpen) {
+  const saved = await saveExpense(keepOpen, editingId.value)
+  if (saved && !keepOpen) closeQuickModal()
 }
 
 // 新增：记录详情 composable
@@ -398,6 +429,7 @@ const {
   cancelDetailEdit,
   saveDetailEdit,
   againFromDetail,
+  fullEditFromDetail,
   undoBillPaymentFromDetail,
   deleteFromDetail,
   openRefund,
@@ -421,6 +453,7 @@ const {
   baseCurrency,
   fxRateLine,
   budgetAlert,
+  budgetPaceLine,
   showFxSettings,
   showBudgetSettings,
   fxAddableCurrencies,
@@ -432,7 +465,7 @@ const {
 
 /* ---------- 账单导出（按月，人类可读） ---------- */
 // 导出（CSV / xlsx）整段搬进 composables/ledgerView/export.js；月份来自回顾分区。
-const { exportLedgerCsv, exportLedgerXlsx } = useLedgerExport({
+const { exportLedgerCsv, exportLedgerXlsx, exportAllLedgerXlsx } = useLedgerExport({
   getMonth: () => reviewMonth.value,
   personalAmount,
   baseCurrency,
@@ -445,8 +478,16 @@ const accountOptions = computed(() => [...new Set(ledgerIndex.value.sortedExpens
 const categoryOverview = computed(() => {
   // 与 hero 的「本月承担」同源：分类条回答的也是「我的钱花到哪去了」，
   // 用全额分类合计会让同一屏上出现「本月承担 ¥40 / 其它 ¥200」这种自相矛盾。
-  const total = mySpendPeriodStats.value.month || 1
-  return [...personalMonthCategoryTotals(expenses.value, ledgerToday()).entries()]
+  //
+  // 分母必须用**分类合计之和**（毛额），不能直接用 hero 的净额：
+  // `personalMonthCategoryTotals` 刻意不把退款计入分类（退款是冲抵项，不是新消费），
+  // 所以分子是毛、分母若是净，有退款时 pct 会算出 >100%（回顾页早就修过这个问题，
+  // 首页这条路径当时漏了）。用分类自身求和做分母，三者恒等式恒成立：
+  // Σ(分类) === Σ(分类条)，且退款不再让每根条都撑满。
+  const entries = [...personalMonthCategoryTotals(expenses.value, ledgerToday()).entries()]
+  const grossTotal = entries.reduce((sum, [, value]) => sum + value, 0)
+  const total = grossTotal || 1
+  return entries
     .map(([key, value]) => ({ key, info: catInfo(key), value, pct: Math.round((value / total) * 100) }))
     .sort((a, b) => b.value - a.value)
     .slice(0, 5)
@@ -588,6 +629,7 @@ function moveCategory(cat, delta) {
         :month-compare="monthCompare"
         :fx-rate-line="fxRateLine"
         :budget-alert="budgetAlert"
+    :budget-pace-line="budgetPaceLine"
         :budget="budget"
         :pending-bills="pendingBills"
         :bill-amount-text="billAmountText"
@@ -696,6 +738,7 @@ function moveCategory(cat, delta) {
         :shift-month="shiftMonth"
         :export-ledger-csv="exportLedgerCsv"
         :export-ledger-xlsx="exportLedgerXlsx"
+        :export-all-ledger-xlsx="exportAllLedgerXlsx"
         :reveal-review-category="revealReviewCategory"
         :toggle-review-category="toggleReviewCategory"
         :open-detail="openDetail"
@@ -758,15 +801,19 @@ function moveCategory(cat, delta) {
       @update:cycle-suggest="cycleSuggest = $event"
       @update:category-input-manually-selected="categoryInputManuallySelected = $event"
       @update:suggested-category-input="suggestedCategoryInput = $event"
-      @save="saveExpense"
-      @close="closeQuick"
+      @save="handleQuickSave"
+      @close="closeQuickModal"
       @open-quick-record="openQuickRecord"
+      @open-bill-form="openBillForm"
       @quick-record-saved="onQuickRecordSaved"
       @select-category="selectQuickCategory"
       :show-quick-record="showQuickRecord"
     />
 
-    <!-- ================= 记录详情（拆出到 TransactionDetailModal.vue）============= -->
+    <!-- ================= 记录详情（拆出到 TransactionDetailModal.vue）=============
+         关闭事件绑 closeDetail() 而不是 `detailOpen = $event`：detailOpen 是只有
+         getter 的 computed，直接赋值在开发环境报 "computed value is readonly"、
+         在生产环境被静默丢弃，于是 ✕ / 点遮罩 / Esc 三条关闭路径全都失灵。 -->
     <TransactionDetailModal
       :open="detailOpen"
       :detail-expense="detailExpense"
@@ -782,7 +829,7 @@ function moveCategory(cat, delta) {
       :refund-note-input="refundNoteInput"
       :base-currency="baseCurrency"
       :splitDetailNote="splitDetailNote"
-      @update:open="detailOpen = $event"
+      @update:open="closeDetail()"
       @update:detail-edit="detailEdit = $event"
       @update:detail-amount-input="detailAmountInput = $event"
       @update:detail-category-input="detailCategoryInput = $event"
@@ -797,6 +844,7 @@ function moveCategory(cat, delta) {
       @save-detail-edit="saveDetailEdit"
       @cancel-detail-edit="cancelDetailEdit"
       @again-from-detail="openQuick($event); closeDetail()"
+      @full-edit-from-detail="openQuick(fullEditFromDetail())"
       @undo-bill-payment-from-detail="undoBillPaymentFromDetail"
       @delete-from-detail="deleteFromDetail"
       @open-refund="openRefund"

@@ -14,6 +14,7 @@
 import { touchStoredRef, useStoredRef } from './store/core.js'
 import { MAX_LEDGER_AMOUNT } from './ledger.js'
 import { dateText, moneyWithCurrency } from '../utils/formatters.js'
+import { policyDateKey } from './settingsPolicy.js'
 
 export const LEDGER_BUDGET_KEY = 'sl_ledger_budget'
 export const DEFAULT_LEDGER_BUDGET = { monthly: null, updatedAt: '' }
@@ -71,13 +72,14 @@ function minorOf(value) {
  * `level`：`over`（超出预算）/ `near`（≥80%）/ `ok`（在预算内）/ `none`（未设置预算）。
  * 比较全部在「分」上做，负的 spent（退款冲抵后为负）也会如实算出剩余额度。
  */
-export function budgetStatus({ spent = 0, budget = null, nearRatio = BUDGET_NEAR_RATIO } = {}) {
+export function budgetStatus({ spent = 0, budget = null, nearRatio = BUDGET_NEAR_RATIO, today = null } = {}) {
   const limit = normalizeMonthlyBudget(budget)
   const spentCents = minorOf(spent)
   if (limit === null) {
     return {
       set: false, level: 'none', budget: null, spent: spentCents / 100,
       spentCents, budgetCents: null, remaining: null, remainingCents: null, ratio: null, pct: 0,
+      pacing: null,
     }
   }
   const budgetCents = Math.round(limit * 100)
@@ -88,7 +90,66 @@ export function budgetStatus({ spent = 0, budget = null, nearRatio = BUDGET_NEAR
     set: true, level, budget: limit, spent: spentCents / 100,
     spentCents, budgetCents, remaining: remainingCents / 100, remainingCents,
     ratio, pct: Math.round(ratio * 100),
+    pacing: budgetPacing({ remainingCents, budgetCents, spentCents, today }),
   }
+}
+
+/**
+ * 预算节奏：「今天还能花多少」。
+ *
+ * 【为什么需要】预算此前只回答「还剩多少钱」，而这个数在月初毫无参考价值
+ * （每月 1 号总是显示「还剩 5000」）。用户真正要的是**按天摊**之后还能花多少。
+ * 这个除法是每个记账 App 首屏都有的一行字，而 `remaining` 早就在返回值里了。
+ *
+ * 口径：按当月真实天数摊，不是 1/30。
+ *   - `daysLeft`：含今天在内的剩余天数；
+ *   - `dailyAllowance`：`remaining / daysLeft`（还剩的钱平均到剩余每一天）；
+ *   - `dailySpent`：`spent / daysPassed`（已经花的日均，用于对比）；
+ *   - 超支时 dailyAllowance 为负 —— 那是真实含义（「今天已经超了 X」），不截断成 0。
+ *
+ * 月末（daysLeft = 1）时 dailyAllowance === remaining，行为自然退化成「还剩多少」，
+ * 所以任何时候展示都不会自相矛盾。
+ */
+function budgetPacing({ remainingCents, budgetCents, spentCents, today }) {
+  const date = today ? String(today).slice(0, 10) : policyDateKey()
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date)
+  if (!match) return null
+  const year = Number(match[1])
+  const month = Number(match[2])
+  const day = Number(match[3])
+  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate()
+  if (!daysInMonth) return null
+  const daysPassed = Math.min(Math.max(day, 1), daysInMonth)
+  const daysLeft = daysInMonth - daysPassed + 1
+  const dailyAllowanceCents = Math.round(remainingCents / daysLeft)
+  const dailySpentCents = Math.round(spentCents / daysPassed)
+  return {
+    daysPassed,
+    daysLeft,
+    daysInMonth,
+    dailyAllowance: dailyAllowanceCents / 100,
+    dailySpent: dailySpentCents / 100,
+    // 供文案判断是否值得提醒：当前日均已经超过「还能花」的额度时值得说。
+    overspending: dailySpentCents > dailyAllowanceCents && dailyAllowanceCents >= 0,
+    // 预算按天摊：已过去的这些天「本来应该花掉多少」，用来判断节奏是否超前。
+    expectedSpent: Math.round(budgetCents * daysPassed / daysInMonth) / 100,
+  }
+}
+
+/**
+ * 「今天还能花多少」的一行文案。
+ *
+ * 与 `budgetAlertText` 分工：那条讲**超支**（只在接近/超出时说话），
+ * 这条讲**节奏**（正常区间也给）。两句话的触发条件与位置都不同，不该合并成一条。
+ */
+export function budgetPaceText(status, { base = 'CNY' } = {}) {
+  if (!status || !status.set || !status.pacing || status.remaining <= 0) return ''
+  const { dailyAllowance, daysLeft, overspending } = status.pacing
+  const money = moneyWithCurrency(dailyAllowance, base)
+  const remain = moneyWithCurrency(status.remaining, base)
+  return overspending
+    ? `${remain}，按剩余 ${daysLeft} 天算每天可花 ${money}，但当前日均已经超了它`
+    : `${remain}，按剩余 ${daysLeft} 天算每天可花 ${money}`
 }
 
 /** 预警文案的唯一出处。未设预算返回空字符串；超支与接近预算必须是两句不同的话。 */

@@ -45,6 +45,9 @@ export function normalizeLedgerFx(value) {
     const number = Number(rawRate)
     // 基准币种恒为 1；非法、非正、NaN 一律丢弃而不是留下一个会静默算错的 0。
     if (!code || code === base || !Number.isFinite(number) || number <= 0) continue
+    // 超出安全区间的汇率直接丢弃（理由见 FX_RATE_MIN/MAX 的说明），
+    // 否则它会安静地把一个真实金额换算成 0 或 Infinity。
+    if (number < FX_RATE_MIN || number > FX_RATE_MAX) continue
     rates[code] = Math.round(number * 1e6) / 1e6
   }
   return {
@@ -52,6 +55,42 @@ export function normalizeLedgerFx(value) {
     rates,
     updatedAt: typeof source.updatedAt === 'string' ? source.updatedAt : '',
   }
+}
+
+/**
+ * 汇率的安全上下界。
+ *
+ * 【为什么必须有】`Math.round(cents * rate)` 在 rate 极端时会给出**看起来正常、
+ * 实际全错**的结果，而旧代码没有任何一道关：
+ *   - `rate = 1e-9`：一笔 ¥1,000 的日元支出换算成 `Math.round(100000 * 1e-9) = 0` 分，
+ *     于是这笔消费在本月花费与预算基数里**静默贡献 ¥0.00**，界面上毫无痕迹
+ *     （只有「缺汇率」会被 `excludedCount` 暴露，汇率太小不会）；
+ *   - `rate = 1e300`：`cents * rate = Infinity`，`Math.round(Infinity)` 得到
+ *     Infinity 而**不是 null**，于是这笔被计入 `expenseTotal`，整月合计变成 `Infinity`。
+ * 非汇率路径本来就有这道守卫（`ledgerAmountCents` 检查 `Number.isSafeInteger`），
+ * 汇率路径是唯一漏掉的一个。
+ *
+ * 1e-6 保留下界：1 单位该币种 = 1e-6 基准币种，任何真实存在的货币都远在此之上，
+ * 而低于它必然是把小数点写错了几个数量级。上界取 1e8 —— 1 单位 = 1 亿基准币种，
+ * 远大于任何真实汇率，但足以防止乘法溢出。
+ */
+const FX_RATE_MIN = 1e-6
+const FX_RATE_MAX = 1e8
+
+/**
+ * 表单币种 → 记录字段：基准币种一律落成空字符串（= 不写字段），
+ * 与「旧记录没有 currency 就是基准币种」的约定完全一致，不给数据添无意义的字段。
+ *
+ * 【为什么放在这里而不是各页面各写一份】记一笔（useQuickEntryForm）、记录详情
+ * （useTransactionDetail）、固定账单（BillFormModal）三个入口都要用它，
+ * 曾经各自 import 一个并不存在于本模块的 `currencyField`，结果是运行到
+ * 「保存」才抛 `currencyField is not a function`，整笔记不上——而且只在真实
+ * 点击时炸，纯函数测试一个都测不到。规则只有一条，必须只有一个出处。
+ */
+export function currencyField(code, fx) {
+  const normalized = normalizeCurrency(code)
+  const base = normalizeLedgerFx(fx).base
+  return normalized === base ? '' : normalized
 }
 
 /** 币种下拉的候选：基准币种永远第一，其余按字母序；`extra` 用于让「记录已有的币种」也能显示。 */
@@ -108,7 +147,13 @@ export function convertToBaseMinor(amountYuan, currency, fx) {
   if (cents === null) return { cents: null, currency: code || config.base, rate: null, reason: 'amount' }
   const rate = fxRateFor(code, config)
   if (rate === null) return { cents: null, currency: code, rate: null, reason: 'rate' }
-  return { cents: Math.round(cents * rate), currency: code || config.base, rate, reason: '' }
+  // 换算后必须仍然是「非负的安全整数分」，否则宁可返回 null 让调用方排除它，
+  // 也不能把 Infinity / 超精度整数当成一个金额累加进合计。
+  const converted = Math.round(cents * rate)
+  if (!Number.isSafeInteger(converted) || converted < 0) {
+    return { cents: null, currency: code, rate, reason: 'rate' }
+  }
+  return { cents: converted, currency: code || config.base, rate, reason: '' }
 }
 
 /** 简版换算：成功返回基准币种「分」，失败（金额非法或缺汇率）返回 null。 */

@@ -21,11 +21,13 @@ function source(path) {
 }
 
 // 提交期间会 disabled 的按钮所在的文件，以及各自期望的绑定数量。
+// SyncPairingModal 记 2 个：确认绑定（提交），以及打开摄像头
+// ——getUserMedia 要等用户权限弹窗，与提交同属「已经在等、不许连点」的状态。
 const BUTTONS = [
   ['components/QuickRecordPanel.vue', 4],
   ['components/AppearanceSettings.vue', 2],
   ['components/schedule/ImportConflictModal.vue', 2],
-  ['components/SyncPairingModal.vue', 1],
+  ['components/SyncPairingModal.vue', 2],
 ]
 
 describe('按钮加载态接线', () => {
@@ -41,8 +43,9 @@ describe('按钮加载态接线', () => {
       const bound = text.match(/:aria-busy="/g) || []
       expect(bound).toHaveLength(expected)
       // 每个 aria-busy 都必须和 :disabled 绑在同一个状态上，
-      // 否则会出现"按钮转圈但还能再点一次"。
-      expect(text).toMatch(/:disabled="\w+"\s+:aria-busy="\w+ \|\| undefined"/)
+      // 否则会出现"按钮转圈但还能再点一次"。disabled 可以额外带上别的条件
+      // （比如 `busy || cameraStarting`），这里只要求它提到 aria-busy 的那个状态。
+      expect(text).toMatch(/:disabled="[^"]*(\w+)[^"]*"\s+:aria-busy="\1 \|\| undefined"/)
       expect(text).not.toMatch(/:aria-busy="undefined"/)
     })
   }

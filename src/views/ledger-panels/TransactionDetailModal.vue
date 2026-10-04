@@ -56,6 +56,12 @@ const detailActions = computed(() => {
   if (!e) return []
   const actions = []
   if (!isBillPayment(e) && !isRefundTransaction(e)) actions.push({ label: '编辑', handler: 'edit-from-detail' })
+  // 「完整编辑」= 带着 id 回到完整的「记一笔」表单。
+  // 为什么不复用上面的「编辑」：那个是详情页内的 4 字段内联编辑（金额/分类/日期/币种），
+  // 改不了名称、账户、备注、收支方向、分摊。而 `again-from-detail`（再记一次）
+  // 刻意**不传 id**——它语义是「新建一笔相同的」，传了 id 就变成编辑，
+  // 会把「再记一次」变成隐式覆盖，风险太大。所以这里单开一个明确的动作。
+  if (!isRefundTransaction(e)) actions.push({ label: '完整编辑', handler: 'full-edit-from-detail' })
   if (!isRefundTransaction(e)) actions.push({ label: '再记一次', handler: 'again-from-detail' })
   if (!isRefundTransaction(e)) actions.push({ label: (freqPrefs.pinned ?? []).includes(e.name.trim()) ? '取消常记' : '设为常记', handler: 'toggle-pin-name' })
   if (!isRefundTransaction(e)) actions.push({ label: (freqPrefs.hidden ?? []).includes(e.name.trim()) ? '取消隐藏' : '从常记隐藏', handler: 'toggle-hide-name' })
@@ -83,7 +89,7 @@ const detailActions = computed(() => {
       </div>
     </template>
     <template v-else>
-      <div class="detail-amount" :class="{ income: detailExpense.direction === 'income', refund: detailExpense.direction === 'refund' }">{{ detailExpense.direction === 'income' || detailExpense.direction === 'refund' ? '+' : '-' }}{{ moneyRow(detailExpense.amount) }}</div>
+      <div class="detail-amount" :class="{ income: detailExpense.direction === 'income', refund: detailExpense.direction === 'refund' }">{{ detailExpense.direction === 'income' || detailExpense.direction === 'refund' ? '+' : '-' }}{{ moneyWithCurrency(detailExpense.amount, detailExpense.currency) }}</div>
       <div class="detail-meta">
         <span>{{ catInfo(detailExpense.cat).icon }} {{ catInfo(detailExpense.cat).name }}</span>
         <span>{{ detailExpense.date }} {{ detailExpense.time }}</span>

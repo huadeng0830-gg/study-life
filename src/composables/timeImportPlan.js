@@ -88,6 +88,16 @@ export async function confirmImportPlan() {
   if (!plan?.executable || importRunning.value) return
   const cfg = timeConfig.value
   const applied = plan.items.filter((item) => item.action !== 'skip')
+  // 守卫必须在置 importRunning 之前。
+  // 原来先置 true 再取快照、取不到就 `return` —— 于是 importRunning 永远停在 true：
+  // closeImportPlan() 第一行就是 `if (importRunning.value) return`，弹窗再也关不掉，
+  // 用户只能看着一个永远转不完的「正在导入作息」。只差一次动态 import 失败就会踩中。
+  const api = currentRecognitionApi()
+  const snapshot = api?.snapshotTimeConfig(cfg)
+  if (!snapshot) {
+    importError.value = '识别引擎未就绪，请重新识别后再导入。'
+    return
+  }
   importRunning.value = true
   importProgress.start({
     title: '正在导入作息',
@@ -101,8 +111,6 @@ export async function confirmImportPlan() {
       { id: 'save', label: '保存完成' },
     ],
   })
-  const snapshot = currentRecognitionApi()?.snapshotTimeConfig(cfg)
-  if (!snapshot) return
   try {
     importProgress.setStep('snapshot', 'running')
     await sleep(160)
@@ -113,7 +121,7 @@ export async function confirmImportPlan() {
     for (let index = 0; index < applied.length; index++) {
       importProgress.setStep(`apply-${index}`, 'running')
       await sleep(140)
-      currentRecognitionApi().applyImportItem(applied[index], cfg)
+      api.applyImportItem(applied[index], cfg)
       importProgress.setStep(`apply-${index}`, 'completed')
     }
     cfg.updatedAt = new Date().toISOString()

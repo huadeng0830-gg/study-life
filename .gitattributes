@@ -1,0 +1,32 @@
+# 换行符策略：文本在仓库里一律以 LF 存储，检出时按各平台的 git 配置决定。
+#
+# 为什么需要这个文件：scripts/source-signature.mjs 的发布签名是"对工作树文件内容
+# 求哈希"，而本机 core.autocrlf=true。没有 .gitattributes 时，同一份源码在
+# LF 工作区与 CRLF 工作区会算出两个不同的签名（实测 523a787271 vs 75c43dfdce），
+# 于是"把签名粘回 release.config.js"这个发布步骤在别的机器上必然失败。
+#
+# `text=auto` 让 git 自行判定文本/二进制，并把文本统一规范成 LF 存入索引；
+# 它不会强制改写工作区，所以不会让整个仓库突然显示为"已修改"。
+# 工作区那一份 CRLF/LF 差异由 source-signature.mjs 内部的换行归一化兜底。
+
+* text=auto
+
+# 明确声明二进制：禁止任何换行/文本转换，否则这些文件会被 git 损坏。
+*.png          binary
+*.jpg          binary
+*.jpeg         binary
+*.gif          binary
+*.webp         binary
+*.ico          binary
+*.svg          text eol=lf
+*.wasm         binary
+*.traineddata  binary
+*.woff         binary
+*.woff2        binary
+
+# Windows 批处理必须保留 CRLF，否则在 cmd 下无法执行。
+*.bat          text eol=crlf
+*.cmd          text eol=crlf
+
+# 锁文件交给 npm 维护，diff 噪音大且与本项目无关。
+package-lock.json linguist-generated=true -diff

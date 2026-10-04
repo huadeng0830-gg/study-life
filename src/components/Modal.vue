@@ -107,10 +107,17 @@ function keepFocusedControlVisible() {
   active.scrollIntoView({ block: 'nearest', inline: 'nearest' })
 }
 
+// 窄屏判定用的 MediaQueryList 建一次就够。
+// 原来每次同步都 new 一个 —— 键盘弹出/收起时 visualViewport 会连着滚几十次，
+// 等于每秒新建几十个 MediaQueryList，纯浪费。
+const narrowQuery = typeof window !== 'undefined' && window.matchMedia
+  ? window.matchMedia('(max-width: 520px)')
+  : null
+
 function syncViewportGeometry() {
   const overlay = overlayEl.value
   if (!overlay) return
-  if (window.matchMedia) isNarrow.value = window.matchMedia('(max-width: 520px)').matches
+  if (narrowQuery) isNarrow.value = narrowQuery.matches
   const viewport = window.visualViewport
   const top = Math.max(0, Number(viewport?.offsetTop) || 0)
   const height = Math.max(0, Number(viewport?.height) || window.innerHeight)
@@ -212,6 +219,21 @@ function onViewportResize() {
   snapSheetToState()
 }
 
+// visualViewport 在 iOS 键盘弹出/收起时是**连续**滚动的（不是一次性的 resize），
+// 原实现每个事件都跑一遍 syncViewportGeometry，而它内部是
+// 读 layout（offsetTop/height）→ 写样式（style.top/height）→ 再读 layout
+// （keepFocusedControlVisible 里的 getBoundingClientRect），
+// 于是每个事件都强制一次同步重排，正好卡在键盘动画最需要流畅的那几十毫秒里。
+// 这里合并到一帧一次：滚动事件只是标脏，真正的读写落到 rAF 里做。
+let viewportFrame = 0
+function scheduleViewportGeometry() {
+  if (viewportFrame) return
+  viewportFrame = window.requestAnimationFrame(() => {
+    viewportFrame = 0
+    syncViewportGeometry()
+  })
+}
+
 function attachViewportListeners() {
   if (viewportListening) return
   viewportListening = true
@@ -220,7 +242,8 @@ function attachViewportListeners() {
   if (viewport?.addEventListener) {
     viewportTarget = viewport
     viewport.addEventListener('resize', onViewportResize)
-    viewport.addEventListener('scroll', syncViewportGeometry)
+    // passive：这里只读不写滚动本身，不会阻塞滚动手势。
+    viewport.addEventListener('scroll', scheduleViewportGeometry, { passive: true })
   }
   syncViewportGeometry()
   snapSheetToState()
@@ -231,7 +254,13 @@ function detachViewportListeners() {
   viewportListening = false
   window.removeEventListener('resize', onViewportResize)
   viewportTarget?.removeEventListener?.('resize', onViewportResize)
-  viewportTarget?.removeEventListener?.('scroll', syncViewportGeometry)
+  viewportTarget?.removeEventListener?.('scroll', scheduleViewportGeometry)
+  // 卸载时必须撤掉已排队的帧：否则 rAF 会在弹窗关掉之后才回调，
+  // 那一次 syncViewportGeometry 写的是已经卸载的节点。
+  if (viewportFrame) {
+    window.cancelAnimationFrame(viewportFrame)
+    viewportFrame = 0
+  }
   viewportTarget = null
   overlayEl.value?.style.removeProperty('top')
   overlayEl.value?.style.removeProperty('bottom')

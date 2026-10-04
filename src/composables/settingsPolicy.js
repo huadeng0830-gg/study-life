@@ -68,8 +68,22 @@ export function defaultReminderMinutes(type, value) {
   return settingsPolicy.value.defaultReminders[type] ?? 0
 }
 
+// Intl.DateTimeFormat 的**构造**比 format 本身贵一个数量级（要建 ICU 格式器），
+// 而 policyDateKey / policyTimeKey / policyDateTime 是全站最热的三个函数：
+// 每个倒计时、每条账单状态、每个待办状态都要走一遍；ledger 的范围过滤更是逐条调用。
+// 原来每次都 new 一个，用完就丢 —— 几十条数据还好，几百条就是几百次 ICU 构造。
+// 时区与选项的组合数极小（一个时区 + 两三种 options），缓存住即可。
+// DateTimeFormat 本身是可复用的，按规范 format() 不持有内部状态。
+const formatterCache = new Map()
+
 function formatter(timezone, options) {
-  return new Intl.DateTimeFormat('en-CA', { timeZone: timezone === 'local' ? undefined : timezone, ...options })
+  const key = `${timezone}|${options.year ?? ''}|${options.month ?? ''}|${options.day ?? ''}|${options.hour ?? ''}|${options.minute ?? ''}|${options.second ?? ''}|${options.hourCycle ?? ''}`
+  let cached = formatterCache.get(key)
+  if (!cached) {
+    cached = new Intl.DateTimeFormat('en-CA', { timeZone: timezone === 'local' ? undefined : timezone, ...options })
+    formatterCache.set(key, cached)
+  }
+  return cached
 }
 
 function formattedParts(value, timezone = settingsPolicy.value.timezone) {

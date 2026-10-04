@@ -702,21 +702,14 @@ summary:focus:not(:focus-visible) {
    content-visibility: auto 让视口外的卡片跳过首屏绘制，
    滚动接近时才真正渲染；contain-intrinsic-size 保证滚动条高度不跳动。
    不支持的浏览器（旧 Safari）直接忽略，纯渐进增强。
-   目前只有考试卡片用了 .cvi-card。这里原本还有一个给更高面板用的
-   .cvi-auto（220px），一处都没用上，已删除：把 content-visibility 加在
-   含交互行的列表上会影响 scrollIntoView / 锚定，收益未经实测就不铺开。 */
+   目前只有考试卡片用了 .cvi-card。原先还有 .cvi-auto（220px）、
+   .cvi-section、.cvi-list-item 三处，一处都没被任何组件引用，已全部删除：
+   把 content-visibility 加在含交互行的列表上会影响 scrollIntoView / 锚定，
+   收益未经实测就不铺开，也别留着一批没人用的类当诱饵。 */
 @supports (content-visibility: auto) {
   .cvi-card {
     content-visibility: auto;
     contain-intrinsic-size: auto 150px;
-  }
-  .cvi-section {
-    content-visibility: auto;
-    contain-intrinsic-size: auto 200px;
-  }
-  .cvi-list-item {
-    content-visibility: auto;
-    contain-intrinsic-size: auto 80px;
   }
 }
 
@@ -813,10 +806,14 @@ summary:focus:not(:focus-visible) {
   animation: focus-target-pulse 2.4s ease;
 }
 
+/* 原来这圈光晕用 box-shadow 动画：box-shadow 是**绘制**属性，每一帧都要把
+   元素（含文字）重新画一遍。一个 2.4 秒的动画就是 140 多次重绘，而它出现的时机
+   恰恰是「用户点了列表项、页面正在滚动定位」的那一刻，最不该卡的地方。
+   改用 outline：同样是向外扩散的一圈，但 outline 不占布局、合成器可以直接处理。 */
 @keyframes focus-target-pulse {
-  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--primary) 35%, transparent); }
-  45% { box-shadow: 0 0 0 7px color-mix(in srgb, var(--primary) 16%, transparent); }
-  100% { box-shadow: 0 0 0 0 transparent; }
+  0% { outline-offset: 3px; outline-color: color-mix(in srgb, var(--primary) 60%, transparent); }
+  45% { outline-offset: 10px; outline-color: color-mix(in srgb, var(--primary) 16%, transparent); }
+  100% { outline-offset: 3px; outline-color: transparent; }
 }
 
 /* ---------- 打印：只留正文（第三十三轮） ----------

@@ -8,6 +8,7 @@ import { useDomainCommands } from '../composables/domain/commands.js'
 import { isArchived } from '../composables/domain/state.js'
 import { appToday, formatAppDate } from '../composables/timeContext.js'
 import { detectTaskEventConflicts, getConflictSummary } from '../composables/conflictDetection.js'
+import { useDebouncedRef } from '../composables/useDebouncedRef.js'
 
 
 const domain = useDomainCommands()
@@ -66,9 +67,13 @@ const emptyState = computed(() => query.value
   ? { title: '没有匹配的日程', description: '换个关键词试试。' }
   : { title: '还没有日程', description: '在首页使用「记录」快速录入，或粘贴群通知识别保存后，就会在这里集中显示。' })
 
+// 搜索词与查询解耦：输入框跟 query（即时反馈），整表过滤 + localeCompare 排序只跑在
+// debouncedQuery 上。每敲一个字都要过一遍全表并重排一次，日程多了就是可见的卡顿。
+const debouncedQuery = useDebouncedRef(query, 160)
+
 const visibleEvents = computed(() => {
   const today = appToday.value
-  const text = query.value.trim().toLowerCase()
+  const text = debouncedQuery.value.trim().toLowerCase()
   let list = domain.events.value.filter((event) => {
     if (!event || event.deletedAt || event.tombstone) return false
     const archived = isArchived(event)

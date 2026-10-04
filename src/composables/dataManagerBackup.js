@@ -140,6 +140,9 @@ function makeBackup() {
   return backup
 }
 
+// 校验和固定基于**紧凑** JSON：历史备份都是这么算的，改成缩进格式会让
+// 所有旧备份导入时校验失败。这里的两次序列化无法合并——文件体还要带上
+// checksum 本身，是 backup 的超集——所以保持原样，不做半吊子优化。
 async function backupChecksum(data) {
   const bytes = new TextEncoder().encode(JSON.stringify(data))
   const digest = await crypto.subtle.digest('SHA-256', bytes)

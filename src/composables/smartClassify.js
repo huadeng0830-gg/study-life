@@ -23,16 +23,41 @@ export function categoryFromTitle(title) {
   return ''
 }
 
-function courseInTitle(title, courses) {
+/**
+ * 课程名列表的预处理结果。
+ *
+ * 原来 courseInTitle 每被调用一次就把整张课程表 map+filter 成一个新字符串数组，
+ * 而 classifyTasks 是「每条待办 × 整张课表」地调它 —— 500 条待办 × 50 门课
+ * 就是 25000 次 String()+trim() 的纯浪费。这里把名称数组和重名集合提到循环外算一次。
+ */
+function courseNameIndex(courses) {
+  const list = Array.isArray(courses) ? courses : []
+  const names = []
+  const duplicated = new Set()
+  const seen = new Set()
+  for (const course of list) {
+    const name = String(course?.name ?? '').trim()
+    if (!name) continue
+    names.push(name)
+    if (seen.has(name)) duplicated.add(name)
+    else seen.add(name)
+  }
+  return { list, names, duplicated }
+}
+
+function courseInTitle(title, index) {
   const text = String(title ?? '')
-  const names = courses
-    .map((course) => String(course?.name ?? '').trim())
-    .filter(Boolean)
-  if (!text || !names.length) return null
-  const matched = names.filter((name) => text.includes(name))
-  if (matched.length !== 1) return null
+  if (!text || !index.names.length) return null
+  let matched = null
+  for (const name of index.names) {
+    if (!text.includes(name)) continue
+    // 命中第二个就停：重名时本来就不该自动关联，提前退出省掉剩下的扫描。
+    if (matched !== null) return null
+    matched = name
+  }
+  if (matched === null || index.duplicated.has(matched)) return null
   // 复用唯一匹配语义：重名时不自动关联，避免误导。
-  return findUniqueCourseByName(courses, matched[0])
+  return findUniqueCourseByName(index.list, matched)
 }
 
 function daysUntil(dateStr, now) {
@@ -54,14 +79,19 @@ export function resolvePriority(task, now = new Date()) {
   return task.priority || 'normal'
 }
 
-export function classifyTask(task, courses = [], now = new Date()) {
+/**
+ * 单条整理。courses 既可以传数组（内部现算索引），也可以传 courseNameIndex 的结果
+ * ——批量场景由 classifyTasks 预先算好一次，避免每条待办都重建课程名列表。
+ */
+export function classifyTask(task, courses = [], now = new Date(), index = null) {
   if (!task || typeof task !== 'object') return task
   const list = Array.isArray(courses) ? courses : []
+  const nameIndex = index ?? courseNameIndex(list)
   const next = { ...task }
 
   // 1) 课程匹配：已有课程名，或标题里出现唯一课程名 → 补 courseId。
   let matched = next.courseId ? null : findUniqueCourseByName(list, next.course)
-  if (!matched) matched = courseInTitle(next.title, list)
+  if (!matched) matched = courseInTitle(next.title, nameIndex)
   if (matched) {
     next.courseId = matched.id
     next.course = matched.name
@@ -89,11 +119,13 @@ function signatureKey(task) {
 // 批量整理：返回新数组与变化条数，供“一键智能整理”展示结果。
 export function classifyTasks(tasks, courses = [], now = new Date()) {
   const list = Array.isArray(tasks) ? tasks : []
+  const courseList = Array.isArray(courses) ? courses : []
+  // 课程名索引整批只算一次；signatureKey 也只对「确实可能被改动」的任务算。
+  const nameIndex = courseNameIndex(courseList)
   let changed = 0
   const result = list.map((task) => {
-    const before = signatureKey(task)
-    const after = classifyTask(task, courses, now)
-    if (after !== task && before !== signatureKey(after)) changed += 1
+    const after = classifyTask(task, courseList, now, nameIndex)
+    if (after !== task && signatureKey(task) !== signatureKey(after)) changed += 1
     return after
   })
   return { list: result, changed }

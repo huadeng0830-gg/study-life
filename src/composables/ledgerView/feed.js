@@ -21,11 +21,17 @@ import { mySpendCents, normalizeSplit } from '../ledgerSplit.js'
 import { transactionSwipeActions } from '../ledgerSwipe.js'
 import { moneyWithCurrency } from '../../utils/formatters.js'
 import { appToday } from '../timeContext.js'
+import { useDebouncedRef } from '../useDebouncedRef.js'
 
 const ledgerToday = () => appToday.value
 
 export function useLedgerFeed({ onFilterChange = () => {} } = {}) {
+  // 搜索词与查询解耦：输入框绑 q（打字立刻有反馈），真正的整表扫描只跑在
+  // debouncedQ 上。账本搜索一次要连过三遍（过滤 → 按日汇总 → 造列表项），
+  // 每敲一个字就跑一遍在流水变多之后是能看见的卡顿。
+  // 其余筛选都是点选而不是连续输入，所以照旧直接驱动。
   const q = ref('')
+  const debouncedQ = useDebouncedRef(q, 160)
   const showFilters = ref(false)
   const fRange = ref('all') // all | today | week | month | custom
   const fFrom = ref('')
@@ -43,7 +49,7 @@ export function useLedgerFeed({ onFilterChange = () => {} } = {}) {
 
   const filteredExpenses = computed(() => {
     return filterLedgerTransactions(ledgerIndex.value.sortedExpenses, {
-      query: q.value,
+      query: debouncedQ.value,
       category: fCat.value,
       account: fAccount.value,
       min: fMin.value,
@@ -144,9 +150,16 @@ export function useLedgerFeed({ onFilterChange = () => {} } = {}) {
   const canExpandFeed = computed(() => !showAllFeed.value && !q.value.trim() && !filtersActive.value && filteredExpenses.value.length > feedTransactions.value.length)
 
   // 换筛选条件 ⇒ 收起「查看全部」与滑动手势（原来写在页面里，随这段一起搬来）。
-  watch([q, fRange, fFrom, fTo, fCat, fAccount, fMin, fMax, fKind, fDirection], () => {
+  //
+  // 这里只能调 onFilterChange：closeSwipe 是页面级状态，本模块没有、也不该有它。
+  // 之前误写成 closeSwipe()，于是用户第一次搜索或改筛选就抛 ReferenceError，
+  // 被全局 errorHandler 兜成「页面遇到一个小问题 / 重新加载」，滑动菜单也永远收不起来。
+  //
+  // 监听 debouncedQ 而不是 q：与查询本身同一口径，否则会出现「结果还是旧的、
+  // 但手势已经收起来了」这种中间态。
+  watch([debouncedQ, fRange, fFrom, fTo, fCat, fAccount, fMin, fMax, fKind, fDirection], () => {
     showAllFeed.value = false
-    closeSwipe()
+    onFilterChange()
   })
 
   return {

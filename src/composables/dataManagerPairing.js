@@ -16,9 +16,9 @@ import {
   recalibrateSyncSpace,
   syncCalibrationRequired,
   syncPreview,
-  syncSpaceBootstrapPending,
   upgradeLegacySyncSpace,
 } from './cloudSync.js'
+import { syncSpaceBootstrapPending } from './syncSpace.js'
 import { recoveryText, syncSpaceSettings } from './syncSpace.js'
 import { resumeAutoSync, startAutoSyncCoordinator } from './autoSyncCoordinator.js'
 import { deviceProfile } from './deviceIdentity.js'

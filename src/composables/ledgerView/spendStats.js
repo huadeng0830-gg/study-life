@@ -35,11 +35,14 @@ function weekDateKeys(date) {
   return keys
 }
 
-// 退款的处理刻意与**改建前的全额口径逐条对齐**，避免顺手改掉与分摊无关的行为：
-//   - 今天/本周：只累加支出（旧的 `dayTotals` 本来就不含退款）；
-//   - 本月：支出 − 退款（旧的 `monthStats.total` 就是这么算的）。
+// 退款在任何周期里都**冲减支出**，三个口径因此完全一致：
+// 今天/本周/本月都是「支出 − 退款」。这不是新口径，而是把今天/本周对齐到
+// 本月已有的行为（`monthCents - monthRefundCents`）以及列表日期头的行为
+// （`feed.js` 的 `expenseCents -= cents`）。此前今天/本周不减，于是同一笔退款
+// 会让 hero 显示 ¥100、紧挨着的日期头显示 ¥70 —— 同屏两个互相矛盾的数字。
 function mySpendStats(list, { dateFilter = null } = {}) {
-  let todayCents = 0, weekCents = 0, monthCents = 0, monthRefundCents = 0
+  let todayCents = 0, weekCents = 0, monthCents = 0
+  let todayRefundCents = 0, weekRefundCents = 0, monthRefundCents = 0
   const today = ledgerToday()
   const monthKey = today.slice(0, 7)
   const weekKeys = weekDateKeys(today)
@@ -53,7 +56,10 @@ function mySpendStats(list, { dateFilter = null } = {}) {
     if (item.direction === 'income') continue
     const inMonth = String(item.date).slice(0, 7) === monthKey
     if (isRefundTransaction(item)) {
+      // 退款只冲减它自己落在的那个周期，不跨周期回冲（否则上月退款会改写本月数字）。
+      if (item.date === today) todayRefundCents += cents
       if (inMonth) monthRefundCents += cents
+      if (weekKeys.has(item.date)) weekRefundCents += cents
       continue
     }
     if (item.date === today) todayCents += cents
@@ -61,8 +67,8 @@ function mySpendStats(list, { dateFilter = null } = {}) {
     if (weekKeys.has(item.date)) weekCents += cents
   }
   return {
-    today: todayCents / 100,
-    week: weekCents / 100,
+    today: (todayCents - todayRefundCents) / 100,
+    week: (weekCents - weekRefundCents) / 100,
     month: (monthCents - monthRefundCents) / 100,
   }
 }

@@ -52,9 +52,15 @@ const hasDrafts = computed(() => mode.value === 'smart' && drafts.value.length >
 const categoryEditorId = ref('')
 const recentRecords = computed(() => {
   const items = [
-    ...transactions.value.filter((item) => item && !item.archivedAt && !item.deletedAt).map((item) => ({
-      id: item.id, type: item.direction === 'income' ? 'income' : 'expense', title: item.name || '日常支出', raw: item.name || '',
-      amount: item.amount, detail: `${item.direction === 'income' ? '+' : '-'}¥${Number(item.amount || 0).toFixed(2)}`, at: item.updatedAt || item.createdAt,
+    ...transactions.value.filter((item) => item && !item.archivedAt && !item.deletedAt && !item.tombstone).map((item) => ({
+      // 退款是**冲抵项**，不能显示成支出；此前一律映射成 'expense'，
+      // 于是下面「支出合计」会把退款**加进去**（¥200 支出 + ¥50 退款 → 显示 ¥250）。
+      id: item.id,
+      type: item.direction === 'income' ? 'income' : item.direction === 'refund' ? 'refund' : 'expense',
+      title: item.name || '日常支出', raw: item.name || '',
+      amount: item.amount,
+      detail: `${item.direction === 'income' || item.direction === 'refund' ? '+' : '-'}¥${Number(item.amount || 0).toFixed(2)}`,
+      at: item.updatedAt || item.createdAt,
     })),
     ...tasks.value.filter((item) => item && !item.archivedAt && !item.deletedAt).map((item) => ({
       id: item.id, type: item.kind === 'homework' ? 'homework' : 'todo', title: item.title || '待办', raw: item.sourceText || item.title || '',

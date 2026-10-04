@@ -77,7 +77,11 @@ export function moneyRow(v) {
   const raw = typeof v === 'string' ? v.trim().replace(/,/g, '').replace(/^[¥￥]\s*/, '') : v
   const number = Number(raw)
   const cents = Number.isFinite(number) ? Math.round(number * 100) : 0
-  const n = Number.isSafeInteger(cents) ? cents / 100 : 0
+  // 超出安全整数范围时**照原值显示**，不要静默变成 ¥0.00：
+  // `moneyHero` 用 Intl 直接格式化同一个数，能正确显示 ¥1,000,000,000,000,000.00，
+  // 两者一显示 0 一显示真实值，同一屏就会给出两个互相矛盾的金额。
+  // （这种量级实际只可能来自损坏数据，重点是别把「超范围」说成「零」。）
+  const n = Number.isSafeInteger(cents) ? cents / 100 : (Number.isFinite(number) ? number : 0)
   return `¥${moneyFormatter.format(n)}`
 }
 

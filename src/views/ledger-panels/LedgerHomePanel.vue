@@ -13,6 +13,7 @@ defineProps({
   monthCompare: { type: Object, default: null },
   fxRateLine: { type: String, default: '' },
   budgetAlert: { type: Object, default: null },
+  budgetPaceLine: { type: String, default: '' },
   budget: { type: Object, default: () => ({ monthly: null }) },
   pendingBills: { type: Array, default: () => [] },
   billAmountText: { type: Function, required: true },
@@ -98,12 +99,22 @@ defineEmits([
       {{ currentMonthPersonal.splitCount }} 笔分摊已按「我承担」计入（支出 ÷ 人数，余数归我），列表金额同样是份额。<a class="link-btn" @click="$emit('show-all-feed-change', true)">查看全部记录</a>
     </p>
     <span class="hero-sub">按自然周统计 · 只计算支出</span>
+    <!-- 本月收入与结余：收入数据一直在 personalSpendTotals 里算着，
+         此前三块数字全是支出，「这个月赚了多少、还剩多少」一个都看不到。
+         没有收入记录时整行不渲染，不会出现「收入 ¥0.00」这种噪声。 -->
+    <p v-if="currentMonthPersonal.incomeTotal" class="hero-sub income-line">
+      本月收入 {{ moneyRow(currentMonthPersonal.incomeTotal) }} · 结余
+      <b :class="{ negative: currentMonthPersonal.balance < 0 }">{{ moneyRow(currentMonthPersonal.balance) }}</b>
+    </p>
     <p v-if="monthCompare" class="hero-compare" :class="{ up: monthCompare.up, down: monthCompare.down }">较上月{{ monthCompare.diff > 0 ? '多' : monthCompare.diff < 0 ? '少' : '持平' }} {{ moneyRow(Math.abs(monthCompare.diff)) }}</p>
     <!-- 多币种折算行：只有真的存在非基准币种记录时才出现，缺汇率的笔数在文案里如实说明 -->
     <p v-if="fxRateLine" class="hero-sub" role="status">{{ fxRateLine }}</p>
     <!-- 预算提示：复用首页「待处理」的 .pending-block 形态，紧邻 hero-compare。
          未设预算时（budgetAlert === null）什么都不渲染，不会出现 0/0 这种假信息。 -->
     <p v-if="budgetAlert" class="pending-block" :class="{ over: budgetAlert.level === 'over' }" role="status">{{ budgetAlert.text }}</p>
+    <!-- 「今天还能花多少」：预算没超也要说，因为「还剩 5000」在月初无法指导今天怎么花。
+         只在设了预算且仍有余额时出现（没余额时上一行的超支提示已经说清楚了）。 -->
+    <p v-if="budgetPaceLine && !budgetAlert" class="hero-sub" role="status">{{ budgetPaceLine }}</p>
     <div class="hero-sub">
       <button class="link-btn" type="button" @click="$emit('open-fx-settings')">汇率设置</button>
       · <button class="link-btn" type="button" @click="$emit('open-budget-settings')">{{ budget.monthly === null ? '设置预算' : '预算设置' }}</button>

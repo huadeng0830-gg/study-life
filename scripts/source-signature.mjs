@@ -7,13 +7,22 @@ import { fileURLToPath } from 'node:url'
 
 export const PROJECT_ROOT = fileURLToPath(new URL('../', import.meta.url))
 
-export const RELEASE_INPUTS = ['src', 'functions', 'sync-coordinator', 'public', 'index.html', 'package.json', 'package-lock.json', 'vite.config.js', 'release.config.js', 'wrangler.jsonc']
+export const RELEASE_INPUTS = ['src', 'functions', 'sync-coordinator', 'public', 'index.html', 'package.json', 'package-lock.json', 'vite.config.js', 'release.config.js', 'wrangler.jsonc', 'sync-protocol.js']
 
 export function collectReleaseFiles(target) {
   if (!existsSync(target)) return []
   if (!statSync(target).isDirectory()) return [target]
   return readdirSync(target, { withFileTypes: true })
     .flatMap((entry) => collectReleaseFiles(resolve(target, entry.name)))
+}
+
+// 二进制判定沿用 git 的启发式：首块里出现 NUL 字节即视为二进制。
+// 这一步必须有，否则 png / wasm / traineddata 会被 utf8 解码成大量 U+FFFD，
+// 不同字节解码成同一个字符串 —— 换图标、换 OCR 模型都不会触发闸门。
+const BINARY_SNIFF_BYTES = 8000
+
+function normalizeEol(content) {
+  return content.replace(/\r\n/g, '\n')
 }
 
 // release.config.js 同时保存说明与签名；对签名字段归一化，避免哈希自引用，
@@ -38,14 +47,23 @@ export function computeSourceSignature({
   for (const file of files) {
     const relativePath = relative(projectRoot, file).replaceAll('\\', '/')
     hash.update(relativePath)
-    let content = readFileSync(file, 'utf8')
-    if (relativePath === 'release.config.js' && releaseConfigContent !== null) {
-      content = releaseConfigContent
-    }
+    const buffer = readFileSync(file)
     if (relativePath === 'release.config.js') {
+      // 这个文件永远按文本处理，并且换行先归一化。
+      let content = releaseConfigContent !== null ? releaseConfigContent : buffer.toString('utf8')
       content = normalizeReleaseConfig(content)
+      hash.update(normalizeEol(content), 'utf8')
+      continue
     }
-    hash.update(content)
+    const isBinary = buffer.subarray(0, BINARY_SNIFF_BYTES).includes(0)
+    if (isBinary) {
+      // 二进制按原始字节入哈希：任何比特变化都必须被看见。
+      hash.update(buffer)
+    } else {
+      // 文本统一 CRLF → LF。没有这一步，工作区是 LF 还是 CRLF 会算出两个签名，
+      // 而 core.autocrlf 是每台机器各自的本地配置 —— 签名因此无法跨机器复现。
+      hash.update(normalizeEol(buffer.toString('utf8')), 'utf8')
+    }
   }
   return hash.digest('hex').slice(0, 10)
 }

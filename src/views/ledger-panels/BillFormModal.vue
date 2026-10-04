@@ -160,6 +160,7 @@ const CYCLES = {
   monthly: { label: '每月', short: '月', monthFactor: 1 },
   quarterly: { label: '每季度', short: '季度', monthFactor: 1 / 3 },
   yearly: { label: '每年', short: '年', monthFactor: 1 / 12 },
+  once: { label: '仅此一次', short: '单次', monthFactor: 0 },
 }
 
 const props = defineProps({

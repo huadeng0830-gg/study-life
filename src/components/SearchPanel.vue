@@ -8,6 +8,7 @@ import { useStoredRef } from '../composables/store'
 import { isArchived } from '../composables/domain/state.js'
 import { focusLocation } from '../composables/focusNavigation.js'
 import { noteText } from '../composables/notes.js'
+import { useDebouncedRef } from '../composables/useDebouncedRef.js'
 
 const props = defineProps({ open: Boolean })
 const emit = defineEmits(['close'])
@@ -31,7 +32,9 @@ function matches(text, ...values) {
  */
 function highlightParts(text) {
   const source = String(text ?? '')
-  const needle = query.value.trim().toLowerCase()
+  // 高亮用的 needle 必须与 groups 用的是同一个值，否则会出现「结果里高亮了
+  // 一段并不在查询里的字」。
+  const needle = debouncedQuery.value.trim().toLowerCase()
   if (!needle) return [{ text: source, hit: false }]
   const haystack = source.toLowerCase()
   const parts = []
@@ -56,8 +59,13 @@ function heading(item) {
   return { id: item.id, title: item.title, meta: item.meta, archived: item.archived, to: item.to }
 }
 
+// 输入框跟 query（打字即时反馈），真正的 8 路整表扫描只跑在 debouncedQuery 上。
+// 原来每敲一个字都要把待办、日程、笔记、重要日期、账单、流水、课程与清单条目
+// 全扫一遍并 toLowerCase 一轮 —— 数据上千时每秒钟就是两万次字符串操作。
+const debouncedQuery = useDebouncedRef(query, 160)
+
 const groups = computed(() => {
-  const text = query.value.trim().toLowerCase()
+  const text = debouncedQuery.value.trim().toLowerCase()
   if (!text) return []
   const out = []
 

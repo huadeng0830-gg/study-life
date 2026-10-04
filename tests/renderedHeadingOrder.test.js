@@ -52,7 +52,18 @@ beforeEach(() => {
   warnings.length = 0
   // 捕获控制台警告：vue-router 与 Vue 的警告是"代码写错但界面还能看"的典型信号，
   // 本轮就靠它抓到了 router-view 被放进 Transition 的真实缺陷。
-  warnSpy = vi.spyOn(console, 'warn').mockImplementation((...args) => { warnings.push(args.map(String).join(' ')) })
+  // Vue 的告警参数里混着响应式 Proxy，直接 `args.map(String)` 会在 Proxy 上抛
+  // "Cannot convert object to primitive value"，那一声未处理的 rejection 会让 vitest
+  // 整体退出 1（用例即使全绿也算失败），还会连带把断言变成超时。这里改成安全序列化。
+  const safeText = (value) => {
+    if (typeof value === 'string') return value
+    try {
+      return JSON.stringify(value) ?? String(value)
+    } catch {
+      return '[无法序列化的参数]'
+    }
+  }
+  warnSpy = vi.spyOn(console, 'warn').mockImplementation((...args) => { warnings.push(args.map(safeText).join(' ')) })
 })
 
 afterEach(() => {

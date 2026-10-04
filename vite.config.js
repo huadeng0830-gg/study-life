@@ -91,13 +91,19 @@ export default defineConfig({
           // 预缓存全部页面与共享代码：安装后点击任意入口都直接进入，不再现场下载。
           'assets/*.{js,css}',
         ],
-        // 预缓存全部应用分包，只保留两个体积大、且仅特定功能才用到的供应商库按需加载：
-        // Excel 解析（课程表导入）+ OCR 引擎（图片识课）。
-        // 其余分包（数据管理、同步绑定、课程弹窗、二维码迁移等）全部预缓存，
+        // 预缓存全部应用分包，只保留体积大、且仅特定功能才用到的供应商库按需加载：
+        // Excel 解析（课程表导入）、OCR 引擎（图片识课）、二维码栈（迁移/绑定）。
+        // 其余分包（数据管理、同步绑定、课程弹窗等）全部预缓存，
         // 避免发版后这些懒加载入口因分包 hash 变更而打不开（PWA 缓存错位）。
+        //
+        // transfer-vendor（qrcode + jsqr）之前漏在这里，等于每次安装 PWA 都白下
+        // 一份二维码库，而应用别处（Sidebar 的预热注释、移动端不预载）都刻意
+        // 把它推迟到用户真的要用为止。下面那条 StaleWhileRevalidate 会在首次
+        // 真正用到时补上并缓存。
         globIgnores: [
           'assets/xlsx-*',
           'assets/ocr-vendor-*',
+          'assets/transfer-vendor-*',
         ],
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
         skipWaiting: true,
@@ -125,4 +131,14 @@ export default defineConfig({
       },
     }),
   ],
+  // 测试配置放在 vite.config.js 里，而不是另建 vitest.config.js：
+  // 用例中有 `vi.mock('virtual:pwa-register', ...)`，依赖 VitePWA 插件注册该虚拟模块。
+  // 一旦单独建 vitest.config.js，vite.config.js 会被整体忽略，虚拟模块随即解析失败。
+  test: {
+    // 这里刻意**不**设置 environment：140 个用例文件各自用 `// @vitest-environment`
+    // 注释声明环境，其余 37 个纯逻辑用例依赖 vitest 默认的 node 环境。
+    // 统一改成 happy-dom 会让 happy-dom 的 URL 接管 `new URL(相对, 基础)`，
+    // 把基准从 file:// 换成文档地址，导致读文件的用例报 "The URL must be of scheme file"。
+    setupFiles: ['./tests/helpers/webStorage.js'],
+  },
 })

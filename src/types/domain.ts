@@ -97,6 +97,19 @@ export interface QuickNote {
   organizedAt?: string
 }
 
+/** 分摊明细。`total` 是这一笔的总额，`mine` 是「我承担」的那一份。 */
+export interface TransactionSplitParticipant {
+  label: string
+  amount: number
+}
+
+/** 一笔支出的报销分摊。只记录「我实际承担多少」，不做多人账户与结算。 */
+export interface TransactionSplit {
+  total: number
+  mine: number
+  participants: TransactionSplitParticipant[]
+}
+
 export interface Transaction {
   id: string
   name: string
@@ -106,7 +119,14 @@ export interface Transaction {
   cat?: string
   note?: string
   account?: string
-  direction?: 'expense' | 'income'
+  /** `refund` 是冲抵项：从支出里扣减，不计入收入、也不进分类分布。 */
+  direction?: 'expense' | 'income' | 'refund'
+  /** ISO 4217 三位代码。**没有这个字段 = 基准币种**（旧记录即如此，故不做迁移）。 */
+  currency?: string
+  /** 可选。存在即表示这条记录做过报销分摊；缺失 = 未分摊。 */
+  split?: TransactionSplit
+  /** 退款指向原支出的 id。 */
+  refundOf?: string
   billId?: string
   billingPeriodKey?: string
   source?: string
@@ -116,6 +136,13 @@ export interface Transaction {
   createdAt?: string
   updatedAt?: string
   createdFrom?: string
+  /**
+   * 可见性标记。读侧（`isVisibleTransaction`）与同步完整性检查都会读这三个字段，
+   * 但它们只在**历史数据**与同步墓碑里出现，正常写入路径不会设值。
+   */
+  archivedAt?: string
+  deletedAt?: string
+  tombstone?: boolean
 }
 
 export interface Bill {
@@ -125,10 +152,13 @@ export interface Bill {
   cycle?: 'weekly' | 'monthly' | 'quarterly' | 'yearly' | 'once'
   nextDate: string
   remindDays?: number
+  /** `false` = 本期付完后不再自动推进到下一期（`nextBillDate` 会停住）。 */
   autoRenew?: boolean
   active?: boolean
   category?: string
   account?: string
+  /** 与交易同一个约定：缺失 = 基准币种。 */
+  currency?: string
   note?: string
   createdAt?: string
   updatedAt?: string

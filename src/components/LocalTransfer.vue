@@ -67,6 +67,8 @@ let scanController = null
 let importController = null
 let scanAnimation = null
 let lastScanAt = 0
+// 二维码解码的长边上限（px）。与 SyncPairingModal 用同一个值。
+const QR_DECODE_MAX_SIDE = 1000
 
 watch(() => props.open, (open) => {
   if (open) {
@@ -245,14 +247,31 @@ function scanImageData(context, width, height) {
   if (result?.data) processCode(result.data)
 }
 
+/**
+ * 按比例缩到 QR_DECODE_MAX_SIDE 以内再解码。
+ *
+ * jsQR 的耗时与像素数近似线性，而摄像头预览通常是 1920×1080、手机照片能到
+ * 4000×3000（1200 万像素 ≈ 48MB ImageData）。全分辨率解码会让界面卡住好几秒，
+ * 扫描过程每 120ms 就来一次。二维码的模块相对整张图足够大，缩到 1000px 不影响识别率。
+ */
+function fitForDecode(source, width, height) {
+  const scale = Math.min(1, QR_DECODE_MAX_SIDE / Math.max(width, height))
+  return {
+    width: Math.max(1, Math.round(width * scale)),
+    height: Math.max(1, Math.round(height * scale)),
+    scale,
+  }
+}
+
 function scanLoop() {
   if (!cameraRunning.value || !video.value || !scanCanvas.value) return
-  const width = video.value.videoWidth
-  const height = video.value.videoHeight
+  const fullWidth = video.value.videoWidth
+  const fullHeight = video.value.videoHeight
   const now = performance.now()
-  if (width && height && now - lastScanAt >= 120) {
+  if (fullWidth && fullHeight && now - lastScanAt >= 120) {
     lastScanAt = now
     const canvas = scanCanvas.value
+    const { width, height } = fitForDecode(video.value, fullWidth, fullHeight)
     canvas.width = width
     canvas.height = height
     const context = canvas.getContext('2d', { willReadFrequently: true })
@@ -316,11 +335,12 @@ async function scanFiles(event) {
         bitmap = await fileDrawable(file)
         if (controller.signal.aborted) break
         const canvas = scanCanvas.value
-        canvas.width = bitmap.width
-        canvas.height = bitmap.height
+        const { width, height } = fitForDecode(bitmap.drawable, bitmap.width, bitmap.height)
+        canvas.width = width
+        canvas.height = height
         const context = canvas.getContext('2d', { willReadFrequently: true })
-        context.drawImage(bitmap.drawable, 0, 0)
-        scanImageData(context, bitmap.width, bitmap.height)
+        context.drawImage(bitmap.drawable, 0, 0, width, height)
+        scanImageData(context, width, height)
       } catch {
         failures++
         scanError.value = `无法读取图片“${file.name}”`

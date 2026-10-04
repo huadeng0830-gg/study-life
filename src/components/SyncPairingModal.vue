@@ -25,6 +25,9 @@ const copied = ref(false)
 const remainingSeconds = ref(0)
 let animation = 0
 let lastScanAt = 0
+// 二维码解码用的长边上限（px）。jsQR 的开销与像素数近似线性，
+// 从 1920×1080 降到 1000px 长边，getImageData 的内存少 3 倍、解码时间少一个量级。
+const QR_DECODE_MAX_SIDE = 1000
 let manualFocusTimer = 0
 let expiryTimer = 0
 
@@ -118,10 +121,16 @@ function stopCamera() {
   cameraRunning.value = false
 }
 
+// 打开摄像头要等用户的权限弹窗，这段时间里 getUserMedia 还没 resolve。
+// 没有它，用户连点就会同时拉起多个摄像头请求（部分浏览器直接报错），
+// 按钮也看不出「已经在等了」。这是提交期间的同类状态，语义上就是 aria-busy。
+const cameraStarting = ref(false)
+
 async function startCamera() {
-  if (props.busy) return
+  if (props.busy || cameraStarting.value) return
   scanError.value = ''
   if (!navigator.mediaDevices?.getUserMedia) { scanError.value = '当前浏览器无法使用摄像头，请粘贴绑定内容或选择二维码图片'; return }
+  cameraStarting.value = true
   try {
     stream.value = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false })
     cameraRunning.value = true
@@ -132,16 +141,23 @@ async function startCamera() {
   } catch {
     scanError.value = '无法打开摄像头，请检查权限或粘贴绑定内容'
     stopCamera()
+  } finally {
+    cameraStarting.value = false
   }
 }
 
 function scanLoop() {
   if (!cameraRunning.value || !video.value || !canvas.value) return
-  const width = video.value.videoWidth
-  const height = video.value.videoHeight
+  const fullWidth = video.value.videoWidth
+  const fullHeight = video.value.videoHeight
   const now = performance.now()
-  if (width && height && now - lastScanAt > 150) {
+  if (fullWidth && fullHeight && now - lastScanAt > 150) {
     lastScanAt = now
+    // 同上：摄像头预览往往是 1920×1080，jsQR 按全分辨率解码要 30–80ms，
+    // 每 150ms 来一次就等于界面每隔一点五秒卡一下。降到 1000px 长边再解码。
+    const scale = Math.min(1, QR_DECODE_MAX_SIDE / Math.max(fullWidth, fullHeight))
+    const width = Math.max(1, Math.round(fullWidth * scale))
+    const height = Math.max(1, Math.round(fullHeight * scale))
     canvas.value.width = width
     canvas.value.height = height
     const context = canvas.value.getContext('2d', { willReadFrequently: true })
@@ -160,11 +176,17 @@ function readQrFile(event) {
   const image = new Image()
   image.onload = () => {
     try {
+      // 缩到 1000px 长边再解码。手机照片动辄 4000×3000 = 1200 万像素，
+      // 原分辨率 getImageData 一次就是 48MB 内存 + 多秒主线程卡死。
+      // 二维码的模块相对整张图大得多，1000px 完全够扫。
+      const scale = Math.min(1, QR_DECODE_MAX_SIDE / Math.max(image.naturalWidth, image.naturalHeight))
+      const width = Math.max(1, Math.round(image.naturalWidth * scale))
+      const height = Math.max(1, Math.round(image.naturalHeight * scale))
       const context = canvas.value.getContext('2d', { willReadFrequently: true })
-      canvas.value.width = image.naturalWidth
-      canvas.value.height = image.naturalHeight
-      context.drawImage(image, 0, 0)
-      const result = jsQR(context.getImageData(0, 0, canvas.value.width, canvas.value.height).data, canvas.value.width, canvas.value.height, { inversionAttempts: 'attemptBoth' })
+      canvas.value.width = width
+      canvas.value.height = height
+      context.drawImage(image, 0, 0, width, height)
+      const result = jsQR(context.getImageData(0, 0, width, height).data, width, height, { inversionAttempts: 'attemptBoth' })
       if (!result?.data) throw new Error('未识别到有效二维码')
       submitCode(result.data)
     } catch (reason) { scanError.value = reason instanceof Error ? reason.message : '二维码无法识别' }
@@ -176,6 +198,11 @@ function readQrFile(event) {
 
 onBeforeUnmount(() => {
   window.clearTimeout(manualFocusTimer)
+  // 有效期倒计时的 1s 定时器原来只在 close() 里清。这个弹窗是 defineAsyncComponent + v-if，
+  // 数据管理器整个关掉时它会带着 open===true 直接被卸载，close() 根本没机会跑 ——
+  // 定时器就每秒醒一次，直到标签页结束。卸载路径必须自己收尾。
+  window.clearInterval(expiryTimer)
+  expiryTimer = null
   stopCamera()
 })
 void renderQr()
@@ -206,7 +233,7 @@ void renderQr()
       <p v-if="error" class="error" role="alert">{{ error }}</p>
     </section>
     <section v-else class="pair-scan">
-      <div class="pair-actions"><button type="button" class="btn btn-primary" :disabled="busy" @click="cameraRunning ? stopCamera() : startCamera()">{{ cameraRunning ? '停止摄像头' : '打开摄像头' }}</button><label class="file-button" :class="{ disabled: busy }">选择二维码图片<input type="file" accept="image/*" :disabled="busy" @change="readQrFile" /></label></div>
+      <div class="pair-actions"><button type="button" class="btn btn-primary" :disabled="busy || cameraStarting" :aria-busy="cameraStarting || undefined" @click="cameraRunning ? stopCamera() : startCamera()">{{ cameraRunning ? '停止摄像头' : '打开摄像头' }}</button><label class="file-button" :class="{ disabled: busy }">选择二维码图片<input type="file" accept="image/*" :disabled="busy" @change="readQrFile" /></label></div>
       <label class="pair-manual"><b>粘贴完整绑定内容</b><small>请粘贴电脑端“复制绑定内容”得到的整段文本；同步空间编号不能用于添加设备。</small><textarea v-model="manualCode" rows="3" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="粘贴完整绑定内容" @focus="keepManualEntryVisible" /></label>
       <button type="button" class="btn btn-primary" :disabled="busy" :aria-busy="busy || undefined" @click="submitCode()">{{ busy ? '正在加入同步空间…' : '确认绑定' }}</button>
       <div v-if="cameraRunning" class="pair-camera"><video ref="video" playsinline muted></video></div>

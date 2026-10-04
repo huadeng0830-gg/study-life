@@ -368,23 +368,33 @@ function detectTableGrid(source) {
   const { data } = context.getImageData(0, 0, source.width, source.height)
   const vertical = []
   const horizontal = []
-  const darkAt = (x, y) => {
-    const offset = (y * source.width + x) * 4
-    return data[offset] < 145 && data[offset + 1] < 145 && data[offset + 2] < 145
-  }
-  const yStep = Math.max(1, Math.floor(source.height / 1400))
-  const xStep = Math.max(1, Math.floor(source.width / 1400))
-  for (let x = 0; x < source.width; x++) {
+  // 这里的两个循环是纯主线程扫描：一张 2000×2800 的课表照片会走约 560 万次取样。
+  // 原来每次取样都调用一个闭包 darkAt，闭包再去读 source.width（属性查找）并算偏移，
+  // 在这个量级下，光是函数调用与重复属性读取就占掉大半时间。
+  // 改成把 width / data 提到局部常量、偏移内联计算，判定结果逐像素等价，
+  // 只是常数因子小了一大截。（下采样确实能再快一个数量级，但那会改变检测出的
+  // 线条坐标，在没有 OCR 回归样本可对比之前不动。）
+  const width = source.width
+  const height = source.height
+  const yStep = Math.max(1, Math.floor(height / 1400))
+  const xStep = Math.max(1, Math.floor(width / 1400))
+  // 采样点数与循环次数无关，直接算出来，避免每个像素都自增一次计数器。
+  const sampledPerColumn = Math.ceil(height / yStep)
+  const sampledPerRow = Math.ceil(width / xStep)
+  for (let x = 0; x < width; x++) {
     let dark = 0
-    let sampled = 0
-    for (let y = 0; y < source.height; y += yStep) { sampled++; if (darkAt(x, y)) dark++ }
-    if (dark / sampled > 0.48) vertical.push(x)
+    for (let offset = x * 4; offset < width * height * 4; offset += yStep * width * 4) {
+      if (data[offset] < 145 && data[offset + 1] < 145 && data[offset + 2] < 145) dark++
+    }
+    if (dark / sampledPerColumn > 0.48) vertical.push(x)
   }
-  for (let y = 0; y < source.height; y++) {
+  for (let y = 0; y < height; y++) {
     let dark = 0
-    let sampled = 0
-    for (let x = 0; x < source.width; x += xStep) { sampled++; if (darkAt(x, y)) dark++ }
-    if (dark / sampled > 0.58) horizontal.push(y)
+    const rowBase = y * width * 4
+    for (let offset = rowBase; offset < rowBase + width * 4; offset += xStep * 4) {
+      if (data[offset] < 145 && data[offset + 1] < 145 && data[offset + 2] < 145) dark++
+    }
+    if (dark / sampledPerRow > 0.58) horizontal.push(y)
   }
   const xLines = consolidateLinePositions(vertical, source.width)
   const yLines = consolidateLinePositions(horizontal, source.height)

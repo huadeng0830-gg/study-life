@@ -4,7 +4,6 @@ import './style.css'
 import { initializeDataVault, redirectPreviewOrigin } from './composables/dataVault.js'
 // 副作用导入：高对比度开关必须在应用启动时就生效，而不是等用户打开外观设置才注册。
 import './composables/contrast.js'
-import { recoverInterruptedSync } from './composables/cloudSync.js'
 import { installGlobalErrorHandling } from './composables/globalError.js'
 import { clearPwaStartupRecovery, recoverPwaStartupResources } from './composables/pwaStartupRecovery.js'
 import { prepareDomainData } from './composables/startupData.js'
@@ -13,8 +12,16 @@ import { markStartupStep } from './composables/startupStatus.js'
 import { recallScroll, rememberScroll, resolveScrollPosition, scrollMemoryKey } from './composables/viewScrollMemory.js'
 import { animationsEnabled } from './composables/motion.js'
 import { enableLocalSafeMode } from './composables/localSafeMode.js'
-import { downloadEmergencyBackup } from './composables/emergencyExport.js'
 import { routes } from './router/routes.js'
+import { preloadRoute } from './router/routePreload.js'
+import { hasPendingSyncRecoveryMarker } from './composables/syncRecoveryMarker.js'
+import { configureStartupDiagnostics, recordStartupTiming, startupElapsedMs, startupNow } from './composables/startupDiagnostics.js'
+
+const startupDebugEnabled = import.meta.env.DEV
+  || new URLSearchParams(window.location.search).get('startupDebug') === '1'
+configureStartupDiagnostics(startupDebugEnabled)
+const startupTiming = recordStartupTiming
+startupTiming({ label: 'main-module-ready', durationMs: startupElapsedMs() })
 
 let startupRecoveryInFlight = false
 // 界面是否已经挂载成功。挂载之后的异常都发生在**可选预热**里（更新检查、预加载），
@@ -32,9 +39,13 @@ let appBooted = false
  * 再来一遍。桌面 Chrome 有这个 API，所以同一份代码在电脑上一直正常。
  * 没有该 API 时退化为 setTimeout：预热晚一点没关系，打不开才是事故。
  */
-function whenIdle(task, { timeout = 5000, fallbackDelay = 1200 } = {}) {
-  if (typeof window.requestIdleCallback === 'function') window.requestIdleCallback(task, { timeout })
-  else window.setTimeout(task, fallbackDelay)
+function whenIdle(task, { timeout = 5000, fallbackDelay = 1200, deferMs = 0 } = {}) {
+  const schedule = () => {
+    if (typeof window.requestIdleCallback === 'function') window.requestIdleCallback(task, { timeout })
+    else window.setTimeout(task, fallbackDelay)
+  }
+  if (deferMs > 0) window.setTimeout(schedule, deferMs)
+  else schedule()
 }
 
 function showStartupError() {
@@ -72,9 +83,10 @@ function showRecoveryRequired() {
     enableLocalSafeMode()
     void bootstrap({ skipGate: true })
   })
-  document.querySelector('#startup-export')?.addEventListener('click', () => {
+  document.querySelector('#startup-export')?.addEventListener('click', async () => {
     const status = document.querySelector('#startup-status')
     try {
+      const { downloadEmergencyBackup } = await import('./composables/emergencyExport.js')
       downloadEmergencyBackup()
       if (status) status.textContent = '本机数据备份已交给浏览器下载。'
     } catch {
@@ -108,15 +120,36 @@ window.addEventListener('vite:preloadError', (event) => {
 async function bootstrap({ skipGate = false } = {}) {
   if (redirectPreviewOrigin()) return
 
-  const startupTiming = import.meta.env.DEV
-    ? (entry) => console.debug('[Study Life startup]', entry.label, `${entry.durationMs}ms`)
-    : undefined
+  // 本地 Vault 与中断同步恢复完成前不能导入 App：App 的模块依赖会读取本地设置。
+  // 这两步完成后，App 外壳和首页分包就可以与业务数据迁移并行下载，避免手机端
+  // 先等存储准备结束、再串行请求 App、最后再请求首页的网络瀑布。
+  let appModulePromise = null
+  const loadAppModule = () => {
+    if (!appModulePromise) {
+      const appImportStarted = startupNow()
+      appModulePromise = import('./App.vue').then((module) => {
+        startupTiming({ label: 'app-import', durationMs: startupNow() - appImportStarted })
+        return module
+      })
+    }
+    return appModulePromise
+  }
 
   if (!skipGate) {
     const startup = await runStartupGate({
-      initializeVault: initializeDataVault,
-      recoverSync: recoverInterruptedSync,
-      prepareApp: prepareDomainData,
+      initializeVault: () => initializeDataVault({ onTiming: startupTiming }),
+      recoverSync: async () => {
+        if (!hasPendingSyncRecoveryMarker()) return { ok: true, recovered: false }
+        const { recoverInterruptedSync } = await import('./composables/cloudSync.js')
+        return recoverInterruptedSync()
+      },
+      prepareApp: async () => {
+        // 首页一定是本次会话的首个路由；先发起请求，让它和数据准备共用等待时间。
+        // routePreload 会吞掉预加载失败，真正导航时仍由路由自己的失败界面处理。
+        void preloadRoute('/')
+        const [prepared] = await Promise.all([prepareDomainData(), loadAppModule()])
+        return prepared
+      },
       onTiming: startupTiming,
       // 让 index.html 里的静态占位跟着真实阶段走，
       // 用户看到的是「现在做到哪一步」而不是一句不变的文案。
@@ -128,12 +161,11 @@ async function bootstrap({ skipGate = false } = {}) {
     }
   } else {
     // 初始化已完成但同步恢复失败时，安全模式仍需准备本机业务数据。
-    await prepareDomainData()
+    void preloadRoute('/')
+    await Promise.all([prepareDomainData(), loadAppModule()])
   }
 
-  const appImportStarted = typeof performance !== 'undefined' ? performance.now() : Date.now()
-  const { default: App } = await import('./App.vue')
-  startupTiming?.({ label: 'app-import', durationMs: Math.round(((typeof performance !== 'undefined' ? performance.now() : Date.now()) - appImportStarted) * 100) / 100 })
+  const { default: App } = await loadAppModule()
 
   const router = createRouter({
     history: createWebHashHistory(),
@@ -161,13 +193,16 @@ async function bootstrap({ skipGate = false } = {}) {
 
   const app = createApp(App)
   installGlobalErrorHandling(app)
-  const mountStartedAt = typeof performance !== 'undefined' ? performance.now() : Date.now()
+  const mountStartedAt = startupNow()
+  const routerStartedAt = startupNow()
   app.use(router).mount('#app')
   appBooted = true
-  startupTiming?.({ label: 'mount', durationMs: Math.round(((typeof performance !== 'undefined' ? performance.now() : Date.now()) - mountStartedAt) * 100) / 100 })
+  startupTiming({ label: 'mount', durationMs: startupNow() - mountStartedAt })
+  void router.isReady().then(() => {
+    startupTiming({ label: 'router-ready', durationMs: startupNow() - routerStartedAt })
+  })
   if (typeof window !== 'undefined') {
-    const interactiveStartedAt = typeof performance !== 'undefined' ? performance.now() : Date.now()
-    window.requestAnimationFrame?.(() => startupTiming?.({ label: 'interactive', durationMs: Math.round(((typeof performance !== 'undefined' ? performance.now() : Date.now()) - interactiveStartedAt) * 100) / 100 }))
+    window.requestAnimationFrame?.(() => startupTiming({ label: 'first-frame', durationMs: startupNow() - mountStartedAt }))
   }
   // 这里**故意不调用** clearPwaStartupRecovery()：挂载成功不等于资源都拿到了。
   // 分包 404 时 App 照样挂载（路由把失败兜成错误界面），若此时清空恢复预算，
@@ -191,55 +226,32 @@ async function bootstrap({ skipGate = false } = {}) {
 function startOptionalWarmup() {
   // 更新检查不再阻塞手机首屏；浏览器空闲后再注册更新服务。
   const startUpdater = () => void import('./composables/appUpdate.js')
-  whenIdle(startUpdater, { timeout: 3000, fallbackDelay: 1200 })
+  whenIdle(startUpdater, { timeout: 5000, fallbackDelay: 5000, deferMs: 1200 })
 
-  // 异步组件预加载策略：基于路由导航预加载
-  const preloadedRoutes = new Set()
-  function preloadRoute(routeName) {
-    if (preloadedRoutes.has(routeName)) return
-    preloadedRoutes.add(routeName)
-    // 定义路由到组件的映射
-    const routeComponentMap = {
-      'ScheduleView': () => import('./views/ScheduleView.vue'),
-      'TasksView': () => import('./views/TasksView.vue'),
-      'LedgerView': () => import('./views/LedgerView.vue'),
-      'ExamsView': () => import('./views/ExamsView.vue'),
-      'ListsView': () => import('./views/ListsView.vue'),
-      'NotesView': () => import('./views/NotesView.vue'),
-    }
-    const loader = routeComponentMap[routeName]
-    if (loader) void loader()
-  }
-
-  // 鼠标悬停导航项 200ms 后预加载目标页面
-  let hoverPreloadTimer = null
-  document.addEventListener('mouseover', (e) => {
-    const navLink = e.target.closest('[data-preload-route]')
-    if (!navLink) return
-    const routeName = navLink.dataset.preloadRoute
-    if (!routeName) return
-    hoverPreloadTimer = setTimeout(() => preloadRoute(routeName), 200)
-  })
-  document.addEventListener('mouseout', (e) => {
-    const navLink = e.target.closest('[data-preload-route]')
-    if (!navLink) return
-    clearTimeout(hoverPreloadTimer)
-  })
-
+  // 异步组件预加载：统一走 router/routePreload.js。
+  //
+  // 【为什么不再在这里另抄一份映射表】原来 main.js 按**路由名**自建了一份
+  // routeComponentMap，只列了 6 个页面，还漏掉了 /events 与 /review；
+  // 同时它绕过了 routePreload.js 里的 connectionAllowsPrefetch 检查，
+  // 于是「省流量模式 / 2G 网络」的用户照样会被后台下载课程表和账本 ——
+  // 恰好是那条检查当初要拦的代价最大的一笔。
+  // 现在统一由 routePreload.js 提供（按路径），省流量判断也只在一处。
+  // 侧栏的悬停/按下预热（Sidebar.vue warmRoute）本来就走它，两边口径终于一致。
+  //
   // 基于用户行为模式预测预加载（如每天早上打开课程表）
   const hour = new Date().getHours()
   if (hour >= 6 && hour <= 10) {
     // 早上预加载课程表和待办
     whenIdle(() => {
-      preloadRoute('ScheduleView')
-      preloadRoute('TasksView')
-    }, { timeout: 5000, fallbackDelay: 2200 })
+      preloadRoute('/schedule', { idleOnly: true })
+      preloadRoute('/tasks', { idleOnly: true })
+    }, { timeout: 8000, fallbackDelay: 5000, deferMs: 3000 })
   } else if (hour >= 18 && hour <= 22) {
     // 晚上预加载账本和复盘
     whenIdle(() => {
-      preloadRoute('LedgerView')
-      preloadRoute('ExamsView')
-    }, { timeout: 5000, fallbackDelay: 2200 })
+      preloadRoute('/bills', { idleOnly: true })
+      preloadRoute('/exams', { idleOnly: true })
+    }, { timeout: 8000, fallbackDelay: 5000, deferMs: 3000 })
   }
 }
 

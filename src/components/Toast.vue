@@ -2,7 +2,13 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { attachFloatingSlot, createFloatingSlot, detachFloatingSlot, useFloatingOffset } from '../composables/floatingStack.js'
 
-const emit = defineEmits(['close', 'action'])
+// update:open 必须登记：六个调用点全都写的是 `v-model:open="toast.open"`，
+// 而这个组件原本只 emit close/action，于是 v-model 展开出来的 onUpdate:open
+// 变成一个无人监听的穿透属性，每次自动消失都不会把 open 置回 false。
+// 现在各处之所以「看起来能用」，只是因为它们又额外补了一个 @close="toast.open = false"。
+// 少了 update:open 之后，v-model 本身就完整了（close 时两个通道都写 false，幂等），
+// 也不会再有新调用点忘记补 @close 就得到一条永远不消失的提示。
+const emit = defineEmits(['close', 'action', 'update:open'])
 
 const props = defineProps({
   open: Boolean,
@@ -23,12 +29,19 @@ let timer = null
 const slotId = createFloatingSlot()
 const stackOffset = useFloatingOffset(slotId, 56)
 
+// 关闭的两个通道一起发：close 给显式监听（@close），update:open 给 v-model:open。
+// 两者都写 open=false，幂等，重复发没有副作用。
+function closeToast() {
+  emit('update:open', false)
+  emit('close')
+}
+
 function show() {
   attachFloatingSlot(slotId)
   if (timer) window.clearTimeout(timer)
   if (props.duration > 0) {
     timer = window.setTimeout(() => {
-      emit('close')
+      closeToast()
     }, props.duration)
   }
 }
@@ -37,7 +50,7 @@ function hide() {
   detachFloatingSlot(slotId)
   if (timer) window.clearTimeout(timer)
   timer = null
-  emit('close')
+  closeToast()
 }
 
 function doAction() {

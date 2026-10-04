@@ -57,7 +57,9 @@ export function amountToCents(value) {
     if (!Number.isSafeInteger(cents) || cents < 0 || cents > MAX_LEDGER_AMOUNT * 100) return null
     // 允许计算机产生的极小尾差，但拒绝真正超过两位小数的金额。
     if (Math.abs(value - cents / 100) > 1e-8) return null
-    return cents
+    // -0 会通过上面所有判据（`-0 < 0` 为 false），但 `Intl` 保留它的符号，
+    // 于是界面上会出现「¥-0.00」。这里统一归一成 0，与字符串分支一致。
+    return cents === 0 ? 0 : cents
   }
 
   let text = String(value).trim().replace(/,/g, '')
@@ -91,6 +93,15 @@ export function sumLedgerAmounts(items = []) {
   let cents = 0
   for (const item of items) cents += amountToCents(item?.amount) ?? 0
   return cents / 100
+}
+
+// `normalizeCurrency` 住在 ledgerFx.js，而 ledgerFx.js 本身 import 了本模块，
+// 在这里 import 回去会形成循环依赖（模块求值期就会踩到 TDZ）。
+// 回顾页只需要「这三个字母是不是一个合法 ISO 代码」这一个判断，本地实现即可，
+// 与 ledgerFx.normalizeCurrency 的规则逐字一致。
+function reviewCurrencyCode(value) {
+  const code = String(value ?? '').trim().toUpperCase()
+  return /^[A-Z]{3}$/.test(code) ? code : ''
 }
 
 // 账本所有统计与筛选共用这个实现，避免回顾页把已删除、已归档或损坏的历史数据计入金额。
@@ -148,13 +159,14 @@ export function filterLedgerTransactions(list, {
   direction = 'all',
   dateFilter = null,
   categoryName = null,
+  amountOf = null,
 } = {}) {
   const keyword = String(query ?? '').trim().toLowerCase()
   const minAmountCents = min === '' ? null : amountToCents(min)
   const maxAmountCents = max === '' ? null : amountToCents(max)
   const source = Array.isArray(list) ? list : []
   return source.filter((item) => {
-    const cents = ledgerTransactionCents(item)
+    const cents = ledgerAmountCents(item, typeof amountOf === 'function' ? amountOf : null)
     if (cents === null) return false
     if (keyword) {
       const label = typeof categoryName === 'function' ? categoryName(item.cat) : item.cat
@@ -293,6 +305,10 @@ export function buildLedgerIndex(list) {
 
   for (const expense of source) {
     if (!expense || typeof expense !== 'object' || !isVisibleTransaction(expense)) continue
+    // 与 ledgerAmountCents 同判据：没有 id 的记录不进索引。
+    // 缺这一条时 monthStats / dayTotals / monthCategories / frequentEntries 会收进
+    // 一条在任何实时列表聚合里都不存在的记录，于是「索引合计」与「界面合计」对不上。
+    if (!String(expense.id ?? '').trim()) continue
     const cents = amountToCents(expense.amount)
     if (cents === null) continue
     const direction = expense.direction === 'income' ? 'income' : isRefundTransaction(expense) ? 'refund' : 'expense'
@@ -314,7 +330,9 @@ export function buildLedgerIndex(list) {
         monthCategories.set(month, categories)
       }
     }
-    if (direction !== 'refund') collectFrequentEntry(frequentByName, expense, cents)
+    // 常记（repeat last）只收**支出**：收入点一下会被 quick-entry 以 expense 方向落库，
+    // 凭空多出一笔支出，而「工资」甚至不在支出的分类下拉里。
+    if (direction === 'expense') collectFrequentEntry(frequentByName, expense, cents)
   }
 
   // 排序键只计算一次（decorate-sort-undecorate），避免比较器里反复构造日期时间字符串。
@@ -399,12 +417,21 @@ export function buildLedgerMonthReview(list, month, { amountOf = null } = {}) {
   const names = new Map()
   let totalCents = 0
   let refundCents = 0
+  let incomeCents = 0
   let maxSingle = null
   let maxSingleCents = -1
+  // 币种集合：回顾页的大数字按记录**原值**相加（这是本模块一贯约定，见文件头），
+  // 所以一个月里出现两种以上币种时那个合计是**没有意义的**——界面必须自己说清楚。
+  const currencyCodes = new Set()
 
   for (const item of Array.isArray(list) ? list : []) {
     const cents = ledgerAmountCents(item, amountOf)
-    if (cents === null || item.direction === 'income' || !validMonth || item.date.slice(0, 7) !== monthKey) continue
+    if (cents === null || !validMonth || item.date.slice(0, 7) !== monthKey) continue
+    const code = reviewCurrencyCode(item.currency)
+    if (code) currencyCodes.add(code)
+    // 收入此前被整个跳过，于是回顾页只看得见支出、看不见「这个月赚了多少」。
+    // 它不进分类/最高单笔/最常记录（那三项回答的是「钱花在哪」），但必须给出总额。
+    if (item.direction === 'income') { incomeCents += cents; continue }
     // 退款是冲抵项：单独累计并从总额中扣减，不进入分类/最高单笔/最常记录。
     if (isRefundTransaction(item)) { refundCents += cents; continue }
     const sortKey = transactionSortKey(item)
@@ -457,6 +484,13 @@ export function buildLedgerMonthReview(list, month, { amountOf = null } = {}) {
     expenses,
     total: (totalCents - refundCents) / 100,
     refundTotal: refundCents / 100,
+    incomeTotal: incomeCents / 100,
+    // 结余 = 收入 − 支出（支出已是净额，含退款冲抵）。「赚了多少 / 剩多少」
+    // 是记账最核心的两个数，此前一个都拿不到。
+    balance: (incomeCents - (totalCents - refundCents)) / 100,
+    // 本月出现过的非基准币种数量。>1 时上方的合计是原值直加，界面必须提示。
+    currencyCount: currencyCodes.size,
+    hasForeignCurrency: currencyCodes.size > 0,
     count: expenses.length,
     mostFrequent: mostFrequent ? { name: mostFrequent.name, count: mostFrequent.count } : null,
     topCategory: categoryTotals[0] ?? null,

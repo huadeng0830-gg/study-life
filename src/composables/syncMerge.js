@@ -3,6 +3,17 @@ import { validateAndRepairRelations } from './syncIntegrity.js'
 
 export const MERGE_STATUS = Object.freeze({ unchanged: 'unchanged', localOnly: 'local-only-change', remoteOnly: 'remote-only-change', autoMerged: 'auto-merged', deleted: 'deleted', conflict: 'conflict', deleteUpdateConflict: 'delete-update-conflict' })
 
+/** 把 id 问题按 key 归拢，合并时每个键只需一次 Map 查询。 */
+function groupIssuesByKey(issues) {
+  const grouped = new Map()
+  for (const issue of issues) {
+    const bucket = grouped.get(issue.key)
+    if (bucket) bucket.push(issue)
+    else grouped.set(issue.key, [issue])
+  }
+  return grouped
+}
+
 function idOf(key, item) { return stableEntityId(key, item) }
 function mapById(key, list = []) { return new Map(list.filter((item) => idOf(key, item)).map((item) => [idOf(key, item), item])) }
 function tombstoneMap(tombstones = []) { return new Map(tombstones.map((item) => [`${item.entityType}:${item.entityId}`, item])) }
@@ -126,14 +137,21 @@ export function mergeSyncPayload({ baseManifest = null, localValues = {}, remote
   const statuses = []
   const invalidLocalIds = validateStableEntityIds(localValues)
   const invalidRemoteIds = validateStableEntityIds(remoteValues)
+  // 按 key 分组一次，而不是在 key 循环里对整个 issue 数组做 .some()/.filter()。
+  // 原来每个 key 都要线性扫一遍 issues（坏数据多时 issues 长度接近实体总数），
+  // 于是「键数 × 问题数」的平方级开销；分组之后每个 key 只查一次 Map。
+  const invalidLocalByKey = groupIssuesByKey(invalidLocalIds)
+  const invalidRemoteByKey = groupIssuesByKey(invalidRemoteIds)
   for (const key of keys) {
     if (remoteValues[key] === undefined) continue
-    if (invalidLocalIds.some((issue) => issue.key === key)) {
-      conflicts.push({ key, status: MERGE_STATUS.conflict, reason: 'local-entity-id-invalid', issues: invalidLocalIds.filter((issue) => issue.key === key) })
+    const localIssues = invalidLocalByKey.get(key)
+    if (localIssues) {
+      conflicts.push({ key, status: MERGE_STATUS.conflict, reason: 'local-entity-id-invalid', issues: localIssues })
       continue
     }
-    if (invalidRemoteIds.some((issue) => issue.key === key)) {
-      conflicts.push({ key, status: MERGE_STATUS.conflict, reason: 'remote-entity-id-invalid', issues: invalidRemoteIds.filter((issue) => issue.key === key) })
+    const remoteIssues = invalidRemoteByKey.get(key)
+    if (remoteIssues) {
+      conflicts.push({ key, status: MERGE_STATUS.conflict, reason: 'remote-entity-id-invalid', issues: remoteIssues })
       continue
     }
     if (isEntityCollectionKey(key)) {

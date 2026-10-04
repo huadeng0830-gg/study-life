@@ -26,11 +26,34 @@ export function nextVersion(entries, now = new Date()) {
   return `${today}-版本1`
 }
 
+/**
+ * 把内容归一为 LF 进行结构匹配，并记住原文件用的换行符以便写回时还原。
+ *
+ * 【为什么需要】本文件的结构识别全部靠 '\n' 字面量与 /^  \{\n…$/gm 这类正则。
+ * Windows 上 core.autocrlf=true（且本仓库没有强制工作区换行的设置）会让检出的
+ * release.config.js 变成 CRLF，于是 header 的 indexOf 恒为 -1、条目正则恒不匹配。
+ * 后果不是报错而是**静默失效**：trimReleaseUpdates 原样返回（它本是用来防止
+ * 历史条目堆到 150 条 / 127KB 的），插入分支则"没插入却照样同步签名并打印成功"——
+ * 也就是发布说明被丢掉、构建却变绿，正是这道闸门本该拦住的事。
+ *
+ * @param {string} content
+ * @returns {{ lf: string, eol: string }} lf 为归一后的内容，eol 为原换行符
+ */
+export function normalizeForStructure(content) {
+  const text = String(content ?? '')
+  return { lf: text.replace(/\r\n/g, '\n'), eol: text.includes('\r\n') ? '\r\n' : '\n' }
+}
+
+/** 把按 LF 构造出来的新内容还原成目标文件原本的换行符。 */
+export function applyEol(content, eol) {
+  return eol === '\r\n' ? String(content).replace(/\n/g, '\r\n') : String(content)
+}
+
 /** 把说明数组渲染成 `notes: [` 里的若干行（转义规则只有这一处）。 */
 export function noteLines(notes) {
   return (Array.isArray(notes) ? notes : [])
     .filter(Boolean)
-    .map((note) => `      '${String(note).replace(/\\/g, '\\\\').replace(/'/g, "\\'")}',`)
+    .map((note) => `      '${String(note).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\r?\n/g, ' ')}',`)
     .join('\n')
 }
 
@@ -54,18 +77,18 @@ export const MAX_RELEASE_ENTRIES = 3
  * @returns {string} 裁剪后的内容；结构不符或未超限时原样返回
  */
 export function trimReleaseUpdates(content, max = MAX_RELEASE_ENTRIES) {
-  const text = String(content ?? '')
+  const { lf, eol } = normalizeForStructure(content)
   const header = 'export const RELEASE_UPDATES = Object.freeze([\n'
-  const start = text.indexOf(header)
-  if (start === -1) return text
+  const start = lf.indexOf(header)
+  if (start === -1) return String(content ?? '')
   const bodyStart = start + header.length
-  const end = text.indexOf('\n])', bodyStart)
-  if (end === -1) return text
-  const body = text.slice(bodyStart, end)
+  const end = lf.indexOf('\n])', bodyStart)
+  if (end === -1) return String(content ?? '')
+  const body = lf.slice(bodyStart, end)
   const matches = [...body.matchAll(/^  \{\n[\s\S]*?^  \},$/gm)]
-  if (matches.length <= max) return text
+  if (matches.length <= max) return String(content ?? '')
   const kept = matches.slice(0, max).map((match) => match[0]).join('\n')
-  return text.slice(0, bodyStart) + kept + text.slice(end)
+  return applyEol(lf.slice(0, bodyStart) + kept + lf.slice(end), eol)
 }
 
 /**
@@ -105,19 +128,19 @@ export function validateReleaseNotes(notes) {
  * @returns {string|null} 新内容；结构不符合预期时返回 null（调用方据此报错退出）
  */
 export function replaceCurrentNotes(content, notes) {
-  const text = String(content ?? '')
+  const { lf, eol } = normalizeForStructure(content)
   const header = 'RELEASE_UPDATES = Object.freeze([\n'
-  const headerAt = text.indexOf(header)
+  const headerAt = lf.indexOf(header)
   if (headerAt === -1) return null
   const entryStart = headerAt + header.length
-  const entryEnd = text.indexOf('\n  },\n', entryStart)
+  const entryEnd = lf.indexOf('\n  },\n', entryStart)
   if (entryEnd === -1) return null
-  const entry = text.slice(entryStart, entryEnd)
+  const entry = lf.slice(entryStart, entryEnd)
   const blockStart = entry.indexOf('notes: [')
   if (blockStart === -1) return null
   // 说明块的结尾是缩进 4 空格的 `],`；只认第一处，正是当前版本那条。
   const blockEnd = entry.indexOf('\n    ]', blockStart)
   if (blockEnd === -1) return null
   const replaced = `${entry.slice(0, blockStart)}notes: [\n${noteLines(notes)}\n    ]${entry.slice(blockEnd + '\n    ]'.length)}`
-  return text.slice(0, entryStart) + replaced + text.slice(entryEnd)
+  return applyEol(lf.slice(0, entryStart) + replaced + lf.slice(entryEnd), eol)
 }

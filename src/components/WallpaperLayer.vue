@@ -124,8 +124,10 @@ watch([sourceTarget, wallpaperRevision], scheduleImageLoad, { immediate: true })
 const blurVariantUrl = ref('')
 let blurVariantSequence = 0
 let blurVariantTimer = null
+// 预模糊变体不再只给移动端用：桌面端把实时 blur 上限压到 8px（见 layerStyle），
+// 所以超过 8 的模糊值一律走这张预先模糊好的图，避免全屏实时高斯模糊。
 const blurEligible = computed(() => {
-  if (reducedEffects.value || !mobileViewport.value) return false
+  if (reducedEffects.value) return false
   const settings = spec.value?.settings
   return Boolean(settings && Number(settings.blur || 0) > 0)
 })
@@ -184,7 +186,13 @@ const layerStyle = computed(() => {
   if (!settings || !imageUrl.value) return { display: 'none' }
   const requestedBlur = Math.max(0, Number(settings.blur) || 0)
   const useBlurVariant = Boolean(blurVariantUrl.value && blurEligible.value)
-  const blur = reducedEffects.value ? 0 : useBlurVariant ? 0 : mobileViewport.value ? Math.min(requestedBlur, 4) : requestedBlur
+  // 没有预模糊变体时，实时 blur 的代价是全屏重新栅格化：
+  // 桌面端一个 20px 高斯模糊覆盖整个视口，每次壁纸/主题变化都要整屏重画，
+  // 集显笔记本上是几十到上百毫秒。所以桌面端也把上限压到 8px —— 
+  // 大于 8 就走预模糊变体（getWallpaperBlurVariant 会按目标尺寸生成一张）。
+  // 移动端原先压到 4px，保留。
+  const liveBlurCap = mobileViewport.value ? 4 : 8
+  const blur = reducedEffects.value ? 0 : useBlurVariant ? 0 : Math.min(requestedBlur, liveBlurCap)
   return {
     '--wallpaper-image': `url("${useBlurVariant ? blurVariantUrl.value : imageUrl.value}")`,
     '--wallpaper-blur': `${blur}px`,

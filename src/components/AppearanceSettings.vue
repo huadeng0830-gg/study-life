@@ -649,7 +649,9 @@ const previewStyle = computed(() => ({
   background:var(--bg);
   color:var(--text);
   cursor:pointer;
-  transition:all var(--dur-fast) var(--ease-standard);
+  /* 写明具体属性，而不是 transition: all —— all 会让浏览器在每次样式变化时
+     逐个检查所有可动画属性，既多花重算，又容易过渡出没预期的效果。 */
+  transition:background var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard), border-color var(--dur-fast) var(--ease-standard);
   border:2px solid #0000;
   border-radius:var(--radius-12);
   flex-direction:column;
@@ -913,7 +915,8 @@ const previewStyle = computed(() => ({
   background:var(--bg);
   color:var(--text);
   cursor:pointer;
-  transition:all var(--dur-fast) var(--ease-standard);
+  /* 同上：写明属性，不写 transition: all。 */
+  transition:background var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard), border-color var(--dur-fast) var(--ease-standard);
   border:2px solid #0000;
   border-radius:var(--radius-10);
   flex-direction:column;

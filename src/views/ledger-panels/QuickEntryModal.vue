@@ -69,6 +69,10 @@ const emit = defineEmits([
   'open-quick-record',
   'quick-record-saved',
   'select-category',
+  // 「创建固定账单」按钮（在识别出周期建议时出现）要交给页面打开账单表单。
+  // 之前只在 createBillFromSuggest 里 emit 了它，却没登记进 defineEmits、页面也没监听，
+  // 结果点下去只把记一笔弹窗关掉，草稿直接丢了，用户什么反馈都收不到。
+  'open-bill-form',
 ])
 
 const { fx } = useLedgerFx()
@@ -163,7 +167,6 @@ async function saveExpense(keepOpen = false) {
 
 function closeQuick() {
   emit('update:keepAdding', false)
-  emit('update:savingExpense', false)
   emit('close')
 }
 
@@ -270,7 +273,11 @@ function createBillFromSuggest() {
 
     <div class="quick-actions">
       <button class="btn btn-primary save-btn" :disabled="savingExpense" @click="saveExpense(keepAdding)">{{ editingId ? '保存修改' : keepAdding ? '记下一笔' : '记下' }}</button>
-      <button v-if="!editingId" class="btn btn-ghost" :disabled="savingExpense" @click="saveExpense(true)">{{ keepAdding ? '完成' : '连续记' }}</button>
+      <!-- 连续记模式下这个按钮是「完成」，语义是**退出连续记账**，不是再存一笔。
+           原来无论哪种状态都调 saveExpense(true)：连点「完成」会去保存一张空表单
+           （金额为空 → 直接 focus 金额框返回），于是「完成」是个走不出去的死胡同，
+           用户只能去点遮罩或 ✕。按当前状态分派：连续中就收工，否则才开始连续记。 -->
+      <button v-if="!editingId" class="btn btn-ghost" :disabled="savingExpense" @click="keepAdding ? closeQuick() : saveExpense(true)">{{ keepAdding ? '完成' : '连续记' }}</button>
     </div>
   </div>
 </Modal>

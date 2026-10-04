@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref } from 'vue'
 import Modal from './Modal.vue'
 import { useStoredRef } from '../composables/store/index.js'
 import { useDomainCommands } from '../composables/domain/commands.js'
@@ -389,6 +389,25 @@ onBeforeUnmount(() => {
   window.clearTimeout(hideRecentTimer)
   window.clearTimeout(flashTimer)
   stopTicker()
+})
+
+// 本组件在 TodayView 里，而 TodayView 被 <KeepAlive :max="4"> 缓存着：
+// 切到别的标签页只是「停用」而不是卸载，onBeforeUnmount 不会触发。
+// 于是专注进行中离开首页后，这个 500ms 的定时器会一直每半秒写一次 now.value，
+// 让 display / clockText / restRemainingSeconds 全部反复失效 —— 页面看不见，CPU 照烧。
+// 与 VirtualList.vue 用的是同一套 onActivated / onDeactivated 约定。
+onDeactivated(() => {
+  stopTicker()
+  document.removeEventListener('visibilitychange', onVisibilityChange)
+  window.removeEventListener('focus', onPageShow)
+  window.removeEventListener('pageshow', onPageShow)
+})
+
+onActivated(() => {
+  syncTicker()
+  document.addEventListener('visibilitychange', onVisibilityChange)
+  window.addEventListener('focus', onPageShow)
+  window.addEventListener('pageshow', onPageShow)
 })
 </script>
 

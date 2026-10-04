@@ -7,6 +7,7 @@ import EmptyState from '../components/EmptyState.vue'
 import VirtualList from '../components/VirtualList.vue'
 import { useDomainCommands } from '../composables/domain/commands.js'
 import { filterNotes, noteText } from '../composables/notes.js'
+import { useDebouncedRef } from '../composables/useDebouncedRef.js'
 import { useQuickRecordAdapters } from '../composables/quickRecord/adapters.js'
 import { clearFocusFromRoute, focusLocation, readFocusQuery } from '../composables/focusNavigation.js'
 import { flushStoredWrites, persistenceState } from '../composables/store/core.js'
@@ -30,7 +31,10 @@ const contentInput = ref(null)
 const noteMessage = ref('')
 let focusHandled = ''
 
-const visibleNotes = computed(() => filterNotes(domain.notes.value, query.value, { includeArchived: includeArchived.value }))
+// filterNotes 内部是 filter + filter + sort(带 localeCompare)，每敲一个字都跑一遍
+// 在笔记变多后是能感觉到的卡顿。输入框照旧跟 query，只有真正过滤用防抖后的值。
+const debouncedQuery = useDebouncedRef(query, 160)
+const visibleNotes = computed(() => filterNotes(domain.notes.value, debouncedQuery.value, { includeArchived: includeArchived.value }))
 const selectedRelations = computed(() => {
   const id = selected.value?.id
   if (!id) return { tasks: [], events: [] }

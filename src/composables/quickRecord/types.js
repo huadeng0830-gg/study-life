@@ -4,6 +4,9 @@ export const RECORD_TYPES = Object.freeze({
   event: { label: '日程', icon: '📅' },
   expense: { label: '支出', icon: '💰' },
   income: { label: '收入', icon: '💵' },
+  // 退款是**冲抵项**而不是支出。快速记录的「最近记录」会列出账本里的退款条目，
+  // 不登记这一项就会落到 `unknown`（显示「❓ 不确定类型」），而它其实类型明确。
+  refund: { label: '退款', icon: '↩️' },
   bill: { label: '固定账单', icon: '🧾' },
   countdown: { label: '重要日期', icon: '⏳' },
   note: { label: '快速笔记', icon: '📝' },

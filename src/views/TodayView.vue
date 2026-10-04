@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   MAX_WEEK,
@@ -16,7 +16,7 @@ import {
 import {
   coursesForDates,
 } from '../composables/store/schedule.js'
-import { appearance, HOME_MODULES, homeModuleState } from '../composables/appearance.js'
+import { appearance, HOME_MODULES } from '../composables/appearance.js'
 import { festiveConfig, moodLog } from '../composables/atmosphereStore.js'
 import { festiveFor } from '../composables/festive.js'
 import { narrativeFor, narrativeLang } from '../composables/narrative.js'
@@ -31,11 +31,12 @@ import { selectTodayActionPanels, reminderAction } from '../composables/domain/s
 import { isArchived, isBillDueSoon, isTaskActionable, taskPlanningState, taskStatus } from '../composables/domain/state.js'
 import { weeklyPulse } from '../composables/experience.js'
 import { schedulePolicy } from '../composables/settingsPolicy.js'
-import { addAppDays, appCalendarDaysBetween, appDateTime, appNow, appToday, currentDayIndex, currentWeek, formatRelativeTime, getAppTime, formatAppDate } from '../composables/timeContext.js'
+import { addAppDays, appCalendarDaysBetween, appDateTime, appNow, appToday, currentDayIndex, currentWeek, getAppTime, formatAppDate } from '../composables/timeContext.js'
 import { courseTiming } from '../composables/courseTime.js'
 import { MOOD_OPTIONS, logMood, moodOf } from '../composables/mood.js'
 import { focusLocation } from '../composables/focusNavigation.js'
 import { clearFocusFromRoute, focusElementWhenReady, readFocusQuery } from '../composables/focusNavigation.js'
+import { recordStartupTiming, reportStartupAssetSummary, startupNow } from '../composables/startupDiagnostics.js'
 
 const domain = useDomainCommands()
 const { courses, tasks, milestones: exams, bills, events, notes: quickNotes } = domain
@@ -50,7 +51,6 @@ const quickRecord = useQuickRecordAdapters()
 const now = appNow
 const todayKey = () => appToday.value
 const activeSchedule = computed(() => schedulePolicy())
-const homeModuleVisible = (id) => homeModuleState(id).visible !== false
 // 首页模块按用户在个性化里拖拽后的顺序渲染；只保留可见且仍合法的模块 id。
 const visibleHomeModuleIds = computed(() =>
   appearance.value.homeModules
@@ -60,9 +60,6 @@ const visibleHomeModuleIds = computed(() =>
 )
 
 /* ---------- 氛围问候 + 心情记录（模块 A） ---------- */
-const todayISO = computed(() => {
-  return todayKey()
-})
 const showMemory = ref(false)
 const sessionQuoteIndex = Math.floor(Math.random() * 50)
 const weekNum = computed(() => Math.min(Math.max(currentWeek.value, 1), MAX_WEEK))
@@ -109,9 +106,23 @@ watch(
 // 避免首屏一次性挂载全部面板；桌面端维持原有即时渲染。
 const mobileEntry = typeof window !== 'undefined' && window.matchMedia('(max-width: 900px)').matches
 const entryReady = ref(!mobileEntry)
+const homeSetupStartedAt = startupNow()
+let homeContentTimingReported = false
+async function reportHomeContentReady() {
+  if (homeContentTimingReported) return
+  homeContentTimingReported = true
+  await nextTick()
+  recordStartupTiming({ label: 'home-content', durationMs: startupNow() - homeSetupStartedAt })
+  reportStartupAssetSummary()
+}
+
+if (!mobileEntry) onMounted(() => { void reportHomeContentReady() })
 if (mobileEntry && typeof window !== 'undefined') {
-  const finishEntry = () => { entryReady.value = true }
-  if ('requestIdleCallback' in window) window.requestIdleCallback(finishEntry, { timeout: 1600 })
+  const finishEntry = () => {
+    entryReady.value = true
+    void reportHomeContentReady()
+  }
+  if ('requestIdleCallback' in window) window.requestIdleCallback(finishEntry, { timeout: 500 })
   else window.setTimeout(finishEntry, 220)
 }
 

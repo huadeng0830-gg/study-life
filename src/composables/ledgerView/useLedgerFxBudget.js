@@ -7,9 +7,9 @@
 import { computed, ref } from 'vue'
 import { useLedgerFx } from '../ledgerFx.js'
 import { useLedgerBudget } from '../ledgerBudget.js'
-import { sumLedgerMonthInBase, COMMON_LEDGER_CURRENCIES, normalizeCurrency, normalizeLedgerFx, fxRateNote } from '../ledgerFx.js'
+import { sumLedgerMonthInBase, COMMON_LEDGER_CURRENCIES, normalizeCurrency, normalizeLedgerFx, fxRateNote, currencyField as currencyFieldFor } from '../ledgerFx.js'
 import { mySpendYuan } from '../ledgerSplit.js'
-import { budgetStatus, budgetAlertText } from '../ledgerBudget.js'
+import { budgetStatus, budgetAlertText, budgetPaceText } from '../ledgerBudget.js'
 import { moneyWithCurrency } from '../../utils/formatters.js'
 
 export function useLedgerFxBudget({ expenses, ledgerToday, baseMonthSummary }) {
@@ -19,13 +19,9 @@ export function useLedgerFxBudget({ expenses, ledgerToday, baseMonthSummary }) {
   const showFxSettings = ref(false)
   const showBudgetSettings = ref(false)
 
-  // 表单币种 → 记录字段：基准币种一律落成空字符串（= 不写字段），
-  // 与「旧记录没有 currency 就是基准币种」的约定完全一致，不给数据添无意义的字段。
-  function currencyField(code) {
-    const normalized = normalizeCurrency(code)
-    const base = normalizeLedgerFx(fx.value).base
-    return normalized === base ? '' : normalized
-  }
+  // 表单币种 → 记录字段的规则只有一条，实现在 ledgerFx.js/currencyField；
+  // 这里只把当前 fx 绑进去，让调用方继续写 currencyField(code)。
+  const currencyField = (code) => currencyFieldFor(code, fx.value)
 
   // 已经设了汇率的币种不再出现在「添加币种」候选里。
   const fxAddableCurrencies = computed(() => {
@@ -42,12 +38,21 @@ export function useLedgerFxBudget({ expenses, ledgerToday, baseMonthSummary }) {
 
   // 只做月度总额预算（见 ledgerBudget.js 的说明），落点是 hero-stat 里紧邻 hero-compare 的一行提示。
   const budgetAlert = computed(() => {
-    const status = budgetStatus({ spent: baseMonthSummary.value.expenseTotal, budget: budget.value.monthly })
+    const status = budgetStatus({ spent: baseMonthSummary.value.expenseTotal, budget: budget.value.monthly, today: ledgerToday() })
     if (!status.set) return null
     return {
       ...status,
       text: budgetAlertText(status, { base: baseMonthSummary.value.base, converted: baseMonthSummary.value.hasForeign }),
     }
+  })
+
+  // 「今天还能花多少」：与 budgetAlert 分开成一行，因为触发条件不同——
+  // 那条只在接近/超出预算时说话，这条在预算充裕时也有意义（月初「还剩 5000」不可参考，
+  // 「按 31 天算每天 161」才可参考）。两者同时存在也不矛盾。
+  const budgetPaceLine = computed(() => {
+    const status = budgetStatus({ spent: baseMonthSummary.value.expenseTotal, budget: budget.value.monthly, today: ledgerToday() })
+    const text = budgetPaceText(status, { base: baseMonthSummary.value.base })
+    return text ? `本月${text}` : ''
   })
 
   return {
@@ -59,6 +64,7 @@ export function useLedgerFxBudget({ expenses, ledgerToday, baseMonthSummary }) {
     fxRateLine,
     budget,
     budgetAlert,
+    budgetPaceLine,
     showFxSettings,
     showBudgetSettings,
   }

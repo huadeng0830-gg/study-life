@@ -117,9 +117,35 @@ function showToast(message, { type = 'info', actionLabel = '', undoFn = null, vi
 
 const sorted = computed(() => sortCountdowns(exams.value))
 
+// 卡片上这些派生值原来全部在模板里现算：tileOf / courseLabel 各调 2 次、
+// timelineOf 调 4 次，而 reviewSummary 每次都要**遍历整份待办表**（reviewTasksFor
+// 是个 filter）。也就是说每张卡片要重复做 O(待办数) 的活，一张卡片 2 次，
+// 16 张卡片就是 32 趟全表扫描 —— 而且 clock 每跳一次（60s）就重来一遍。
+//
+// 这里改成「先算好再渲染」：把待办按 sourceId 归成一张 Map（一次分组，O(待办数)），
+// 然后每个卡片只查一次 Map，装饰值随卡片一起预计算后交给模板直接取。
+const reviewTasksBySourceId = computed(() => {
+  const grouped = new Map()
+  for (const task of tasks.value) {
+    if (task.sourceType !== 'milestone-review' || !task.sourceId) continue
+    const bucket = grouped.get(task.sourceId)
+    if (bucket) bucket.push(task)
+    else grouped.set(task.sourceId, [task])
+  }
+  return grouped
+})
+
 const visibleItems = computed(() => {
   const source = showHistory.value ? sorted.value.filter((item) => isArchived(item)) : sorted.value.filter((item) => !isArchived(item))
-  return showHistory.value || showPast.value ? source : source.filter((item) => !item.countdown.isPast)
+  const filtered = showHistory.value || showPast.value ? source : source.filter((item) => !item.countdown.isPast)
+  const grouped = reviewTasksBySourceId.value
+  return filtered.map((item) => ({
+    ...item,
+    tile: tileOf(item),
+    course: courseLabel(item),
+    timeline: timelineOf(item),
+    review: reviewSummaryOf(item, grouped.get(item.id)),
+  }))
 })
 
 function createReviewTask(item, event) {
@@ -150,11 +176,12 @@ function reviewTasksFor(item) {
   return tasks.value.filter((task) => task.sourceType === 'milestone-review' && task.sourceId === item.id)
 }
 
-function reviewSummary(item) {
-  const reviewTasks = reviewTasksFor(item)
-  if (!reviewTasks.length) return ''
-  const completed = reviewTasks.filter((task) => taskStatus(task) === 'completed').length
-  return `复习任务 ${completed}/${reviewTasks.length}`
+/** 复习进度文案。批量渲染时 reviewTasks 由调用方按 sourceId 预先分组好传入。 */
+function reviewSummaryOf(item, reviewTasks) {
+  const list = reviewTasks ?? reviewTasksFor(item)
+  if (!list.length) return ''
+  const completed = list.filter((task) => taskStatus(task) === 'completed').length
+  return `复习任务 ${completed}/${list.length}`
 }
 
 // 窄屏（单列）下清单很长时做虚拟滚动；宽屏保持多列网格原样渲染。
@@ -446,14 +473,14 @@ onBeforeUnmount(() => {
         <!-- 主体：日期牌 + 事件 + 剩余天数 -->
         <div class="exam-main">
           <div class="date-tile" aria-hidden="true">
-            <small>{{ tileOf(item).month }}</small>
-            <b>{{ tileOf(item).day }}</b>
+            <small>{{ item.tile.month }}</small>
+            <b>{{ item.tile.day }}</b>
           </div>
           <div class="exam-info">
             <div class="name">{{ item.name }}</div>
             <div class="date">{{ shortDateOf(item) }}</div>
-            <div v-if="item.category === '学习' && courseLabel(item)" class="loc">{{ courseLabel(item) }} · 复习 {{ item.reviewProgress || 0 }}%</div>
-            <div v-if="reviewSummary(item)" class="loc">{{ reviewSummary(item) }}</div>
+            <div v-if="item.category === '学习' && item.course" class="loc">{{ item.course }} · 复习 {{ item.reviewProgress || 0 }}%</div>
+            <div v-if="item.review" class="loc">{{ item.review }}</div>
             <div v-if="item.location" class="loc">{{ item.location }}</div>
           </div>
           <div class="count" :class="item.countdown.cls">
@@ -467,11 +494,11 @@ onBeforeUnmount(() => {
         </div>
 
         <!-- 底部轻量时间轴 -->
-        <div v-if="timelineOf(item)" class="timeline" aria-hidden="true">
-          <span class="tl-label">{{ timelineOf(item).start }}</span>
+        <div v-if="item.timeline" class="timeline" aria-hidden="true">
+          <span class="tl-label">{{ item.timeline.start }}</span>
           <span class="tl-track"><i></i></span>
-          <span class="tl-label strong">{{ timelineOf(item).end }}</span>
-          <span class="tl-dot" :class="{ on: timelineOf(item).sameDay }"></span>
+          <span class="tl-label strong">{{ item.timeline.end }}</span>
+          <span class="tl-dot" :class="{ on: item.timeline.sameDay }"></span>
         </div>
         <button v-if="item.category === '学习' && !item.countdown.isPast" type="button" class="review-action" @click="createReviewTask(item, $event)">{{ reviewSummary(item) ? '再安排 25 分钟复习' : '安排 25 分钟复习' }}</button>
       </div>
