@@ -7,6 +7,20 @@
 // 3. 更早的版本逐条下移，最多保留 3 个版本，超出即删除。
 export const RELEASE_UPDATES = Object.freeze([
   {
+    version: '2026年10月04日-版本7',
+    signature: 'da824e26de',
+    notes: [
+      '新增微信 / 支付宝账单 CSV 导入：解析后进入预览与冲突确认，确认后才写入账本。零新增依赖',
+      'GBK / GB18030 是 WHATWG Encoding 规范强制要求浏览器原生支持的标签，所以支付宝账单的 GBK 编码用 TextDecoder(\'gbk\') 即可，不需要任何编解码库',
+      '表头行号会漂移（微信前若干行、支付宝前若干行都是官方说明文案，且随版本变化），所以扫到表头行为止而不是写死行号',
+      '修正三处按微信列名想当然导致的真实缺陷：支付宝没有「收/支」列（方向靠「资金状态」的已支出/已收入）、金额列是全角括号的「金额（元）」、时间列叫「交易创建时间」。之前这三处会让支付宝文件一律判成「不是账单文件」',
+      '中性交易与资金搬运（充值、提现、零钱通、信用卡还款、花呗、转账、理财）一律排除：它们不是消费，计入会污染月度预算与分类排行。转账判定优先于收支判定，因为微信「转账」类型无法仅凭收/支区分方向',
+      '退款映射成 direction:refund 而不是负数支出：金额恒为正，方向由 direction 表达，负数会让分类分布与月度合计算错',
+      '去重优先用交易单号，缺失时退化为日期+金额+方向+对方 的稳定指纹，同一份文件重复导入不会产生重复记录',
+      '新增 tests/ledgerBillImport.test.js 13 条用例：GBK 字节真的按 GBK 解出中文（常量由TextDecoder 反查得到，不靠猜）、表头行漂移、转账排除、退款方向、单双次导入不重复、损坏行跳过而不是整份失败',
+    ],
+  },
+  {
     version: '2026年10月04日-版本6',
     signature: '6ef588c623',
     notes: [
@@ -27,21 +41,13 @@ export const RELEASE_UPDATES = Object.freeze([
       '之前的\'浏览器已用 1.2MB / 8MB\'改名为\'浏览器已用（含缓存，仅参考）\'，避免把它误读成 localStorage 容量',
     ],
   },
-  {
-    version: '2026年10月04日-版本4',
-    signature: '4bb0b3522a',
-    notes: [
-      '「提醒」从此前只写不读的死数据变成真实功能。QuickRecordSettings 里的待办/日程/节点提醒分钟数此前只写进每条记录、从无消费者 —— 现在接入本地调度器：App 打开时按时触发 Notification，去重记录落盘（新键 sl_reminder_log，同步两台设备不会各响一次，刷新不会重复响）。设置面文案同步把能力边界说清楚：提醒只在 App 打开时可靠，后台/被系统回收时不触发',
-      '新键 sl_reminder_log 已登记到云同步默认值与模块分组、备份三处、应急导出、本地迁移含 ARRAY_KEYS；提醒 minutes 默认值语义修正：0 是\\',
-    ],
-  },
 ])
 
 // 对用户展示、version.txt 和更新检测统一使用此版本号；后续同日发布只递增“版本”序号。
 export const RELEASE_VERSION = RELEASE_UPDATES[0].version
 
 // 与第一条签名保持一致，交给 vite.config.js 校验源码一致性。
-export const RELEASE_SOURCE_SIGNATURE = '6ef588c623'
+export const RELEASE_SOURCE_SIGNATURE = 'da824e26de'
 
 // 兼容旧引用：当前版本的更新说明。
 export const RELEASE_NOTES = RELEASE_UPDATES[0].notes
