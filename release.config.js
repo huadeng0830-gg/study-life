@@ -7,6 +7,17 @@
 // 3. 更早的版本逐条下移，最多保留 3 个版本，超出即删除。
 export const RELEASE_UPDATES = Object.freeze([
   {
+    version: '2026年10月04日-版本11',
+    signature: 'd6e258c21d',
+    notes: [
+      '文档与工程化收口：HANDOVER §0 入口区块全面更新到当前基线（版本10/ 187 文件 / 1975 用例），并修正其中指向报告「一改就红的测试」表的行号指针（原位置已漂移约 687 行，改为给出行号加可搜索的定位词）',
+      'docs/archive/README.md 从 3 行扩为完整的导航：明确写出「本目录数字几乎都已过期」并指明当前基线该看哪三份文档，同时说明为什么不能删（它们是唯一解释反直觉设计的证据链，例子已列全）',
+      'README 补齐三处会导致误操作的遗漏：常用命令补上 release:bump 与 typecheck:ratchet 等 7 条并写明「改了 src/ 必须跑 release:bump」；部署小节明确警告只跑 pages deploy 连不上同步协调器、完整路径是 deploy:sync:production；项目结构补 scripts/、sync-protocol.js 与 release.config.js',
+      '锁定 Node 版本：新增 .nvmrc（22）与 package.json 的 engines。原因不是惯例——Node 22 起内置的实验性 Web Storage 会遮蔽 happy-dom 的 Storage，本项目踩过一次导致 552 条用例连带变红；而 CI 此前锁在 20，等于永远跑不到那条路径，那次修复在 CI 上得不到任何验证。CI 已同步升到 22',
+      'CI 加固：permissions 收到最小、timeout-minutes 20（此前默认 360 分钟，卡死的 job 能占配额一整天）、新增独立的 dependency-audit job',
+    ],
+  },
+  {
     version: '2026年10月04日-版本10',
     signature: 'ab5670154a',
     notes: [
@@ -27,23 +38,13 @@ export const RELEASE_UPDATES = Object.freeze([
       '守卫同文件内附行为侧证据：就地改字段确实不落盘、touch 之后才落盘。写这条时踩了两个坑，缺一个都会变成假绿——watcher 的安装是延迟的（requestIdleCallback），且 Vue 的 watch 回调是异步的，必须先 nextTick 再 flush',
     ],
   },
-  {
-    version: '2026年10月04日-版本8',
-    signature: '0ff1616c39',
-    notes: [
-      'cloudSync.js 改为按需动态加载：此前 App.vue 用静态 import 把它（约 50KB raw）拉进首屏闭包，导致 main.js 里的 await import 完全失效——模块早已在首屏，加载器只是取缓存。没绑定同步空间的用户白付这50KB 首屏成本',
-      'formatAppDate 改为复用 settingsPolicy 的 Intl.DateTimeFormat 缓存：此前每次调用都new 一个，而构造比 format 贵一个数量级，且它的调用点有 5 个在 v-for 列表行里',
-      '修复应急导出的静默失败：动态 import 失败此前被空 catch 完全吞掉，用户点「导出数据」什么都不会发生也没有任何提示。应急导出恰恰是最不能静默失败的场景（通常是发现数据异常后的最后手段），现在会记录错误并提示可能原因',
-      '删除死代码 src/composables/ledgerView/useLedgerFilters.js：LedgerView 早已改用 feed.js 的筛选逻辑并注释掉了这个调用。它与 feed.js 维护着两份同名的 filteredExpenses/filtersActive/clearFilters，且这一份的查询没有防抖——哪天有人把注释解开，会同时得到两个全表扫描',
-    ],
-  },
 ])
 
 // 对用户展示、version.txt 和更新检测统一使用此版本号；后续同日发布只递增“版本”序号。
 export const RELEASE_VERSION = RELEASE_UPDATES[0].version
 
 // 与第一条签名保持一致，交给 vite.config.js 校验源码一致性。
-export const RELEASE_SOURCE_SIGNATURE = 'ab5670154a'
+export const RELEASE_SOURCE_SIGNATURE = 'd6e258c21d'
 
 // 兼容旧引用：当前版本的更新说明。
 export const RELEASE_NOTES = RELEASE_UPDATES[0].notes

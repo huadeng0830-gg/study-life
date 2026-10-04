@@ -10,9 +10,15 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# 默认 permissions 偏宽，这里收到最小：CI 只需要读代码。
+permissions:
+  contents: read
+
 jobs:
   lint-test-build:
     runs-on: ubuntu-latest
+    # 不设的话默认 360 分钟，一个卡死的 job 能占配额一整天。
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -20,7 +26,10 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          # 刻意锁 22 而非 20：Node 22 起内置的实验性 Web Storage 会遮蔽
+          # happy-dom 的 Storage，本项目为此踩过一次（1865 条用例里 552 条连带变红）。
+          # 跑 20 就等于**跑不到**那条代码路径，那次修复得不到任何持续验证。
+          node-version: '22'
           cache: 'npm'
 
       - name: Install dependencies
@@ -44,3 +53,18 @@ jobs:
           name: dist
           path: dist
           retention-days: 7
+
+  # 依赖漏洞与过期提示。npm audit 放在独立 job：它是"信息"而非"门禁"，
+  # 单独跑失败不会把整个 PR 标红，但会在 job summary 里看得见。
+  dependency-audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - run: npm ci
+      - name: Audit
+        run: npm audit --audit-level=high || true

@@ -141,10 +141,13 @@ study-life/
 │  │  └─ store/              # 响应式本地存储、课表与作息配置
 │  ├─ types/                 # 领域类型定义
 │  └─ main.js                # 应用启动、路由和数据恢复
-├─ functions/api/            # Cloudflare Pages API：验证、推送、拉取
-├─ sync-coordinator/         # Durable Object 同步协调器
-├─ public/ocr/               # 本地 OCR 语言模型
+├─ functions/api/            # Cloudflare Pages API：空间创建/绑定/配对/推送/拉取/校验/撤销
+├─ sync-coordinator/         # Durable Object 同步协调器（独立 worker，需单独部署）
+├─ public/ocr/               # 本地 OCR 语言模型 + 引擎（自托管，断网也能识课）
+├─ scripts/                  # 发布、审计与质量门禁脚本（含 scripts/audit/ 四个自检）
 ├─ tests/                    # 解析、导入、同步、迁移和业务逻辑测试
+├─ release.config.js         # 更新说明与源码签名（构建闸门会校验）
+├─ sync-protocol.js          # 前后端共用的同步协议常量
 ├─ wrangler.jsonc            # Pages、KV 与 Durable Object 配置
 └─ .github/workflows/ci.yml  # main 分支的质量检查
 ```
@@ -158,16 +161,33 @@ npm install
 npm run dev
 ```
 
+> **需要 Node 22 或更高版本。** Node 22 起内置了实验性的 Web Storage 全局，
+> 会遮蔽测试环境里 happy-dom 的 `Storage`——这个项目踩过一次，导致约三分之一的
+> 用例连带变红。仓库根目录有 `.nvmrc`，CI 也锁在 22。
+> 注意 Node 20 与 22+ 的行为**不同**，所以 CI 特意不跑 20。
+
 常用命令：
 
 ```bash
-npm run lint       # ESLint
-npm run typecheck  # Vue/TypeScript 类型检查
-npm test           # Vitest
-npm run build      # 构建到 dist/
-npm run check      # lint + typecheck + test + build
-npm run preview    # 预览生产构建
+npm run lint              # ESLint
+npm run typecheck         # Vue/TypeScript 类型检查
+npm test                  # Vitest
+npm run build             # 构建到 dist/
+npm run check             # lint + typecheck + test + build（唯一的完整门禁）
+npm run preview           # 预览生产构建
+
+npm run release:bump      # 发布必需：改了 src/ 后执行，写更新说明并同步源码签名
+npm run typecheck:ratchet # 类型债务棘轮：TS2304 必须为 0，总数不许超基线
+npm run typecheck:report  # 类型错误的分布报告（按错误码 / 按文件）
+npm run audit:contrast    # 6 套调色板 × 144 组配色 → WCAG AA
+npm run sync:health       # 同步后端健康检查
+npm run deploy:sync:production  # 完整发布路径，见下
 ```
+
+> **改了 `src/` 之后必须跑 `npm run release:bump -- --notes "说明|说明"`**，
+> 否则生产构建会失败并提示新的源码签名。原因是发布闸门要求「源码变更」与
+> 「更新说明」在同一次提交里出现，`release:bump` 会替你把说明和签名一起写好。
+> 详见 `release.config.js` 顶部注释。
 
 ## ☁️ 部署到 Cloudflare Pages
 
@@ -179,7 +199,18 @@ npm run build
 npx wrangler pages deploy dist --project-name=study-life --branch=main
 ```
 
-仓库的 CI 会在 `main` 的提交和 Pull Request 上执行 lint、类型检查、测试和生产构建。
+> **⚠️ 上面这条命令只发布静态页面，云同步用不了。** 同步协调器是一个独立的
+> Durable Object worker，必须单独部署。下面这条才是**完整发布路径**：
+>
+> ```bash
+> npm run deploy:sync:production
+> ```
+>
+> 它依次执行 `npm run check`（完整门禁）→ 部署协调器 worker → 部署 Pages → `sync:health` 自检。
+> 只跑 `pages deploy` 的话，前端会连不上同步协调器（表现为绑定空间时一直失败）。
+
+仓库的 CI 会在 `main` 的提交和 Pull Request 上执行 lint、类型检查、测试、生产构建，
+以及类型债务棘轮（`npm run typecheck:ratchet`）。
 
 ## 🧪 发布自检（scripts/audit/）
 
