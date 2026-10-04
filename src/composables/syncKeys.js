@@ -42,6 +42,8 @@ export const SYNC_DEFAULTS = {
   sl_festive_lunar: [],
   sl_ui_language: 'zh',
   sl_mood_log: {},
+  // 提醒去重日志：同步它才能避免两台设备各响一次。
+  sl_reminder_log: [],
 }
 
 /**

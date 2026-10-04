@@ -29,6 +29,7 @@ const milestoneReminder = computed({ get: () => settingsPolicy.value.defaultRemi
         <label><span><b>日程提醒（分钟）</b></span><input v-model.number="eventReminder" type="number" min="0" step="5" /></label>
         <label><span><b>节点提醒（分钟）</b></span><input v-model.number="milestoneReminder" type="number" min="0" step="5" /></label>
       </div>
+      <p class="hint"><small>以上提醒在 App 打开时生效；切到后台 / 系统回收后不会触发。0 = 到点才提醒。需要通知权限，可在浏览器设置里允许。</small></p>
       <p>全局入口：手机底部「＋记录」；桌面侧栏按钮或 Ctrl/Cmd + K。</p>
     </div>
   </Modal>

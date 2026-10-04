@@ -13,7 +13,7 @@ const BACKUP_FIELDS = Object.freeze({
   sl_wallpaper_config: 'wallpaperConfig', sl_auto_wallpaper_color: 'autoWallpaperColor', sl_wallpaper_accent: 'wallpaperAccent',
   sl_performance_mode: 'performanceMode', sl_festive_config: 'festiveConfig', sl_festive_birthday_full: 'festiveBirthdayFull',
   sl_festive_lunar: 'festiveLunar', sl_ui_language: 'uiLanguage',
-  sl_mood_log: 'moodLog',
+  sl_mood_log: 'moodLog', sl_reminder_log: 'reminderLog',
 })
 
 function readLocalData() {

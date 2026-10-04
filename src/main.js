@@ -209,6 +209,14 @@ async function bootstrap({ skipGate = false } = {}) {
   // 就会「404 → 恢复重载 → 挂载成功 → 清预算 → 再 404」无限刷新（实测约 110ms 一轮）。
   // 预算只在用户显式点「重新加载」时清空（见 showStartupError）。
 
+  // 挂载成功后启动提醒调度器。这里不在首屏关键路径上 —— 提醒晚几十秒响没
+  // 关系，但主线程卡一下会让用户感觉"打开很慢"。
+  if (typeof window !== 'undefined') {
+    void import('./composables/reminderScheduler.js').then((mod) => {
+      try { mod.startReminderScheduler() } catch (error) { console.warn('[reminder] 启动调度失败', error) }
+    })
+  }
+
   // 从这里往下全部是**可选预热**：更新检查、悬停预加载、按时段预测预加载。
   // 整体兜一层异常——预热是投机行为，失败不该影响任何功能，更不该升级成「启动失败」
   // 去清 Service Worker 与缓存重载整页（今天的 requestIdleCallback 事故就是这样升级的）。

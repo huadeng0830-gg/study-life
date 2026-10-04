@@ -74,6 +74,7 @@ const STORAGE_KEYS = {
   festiveLunar: 'sl_festive_lunar',
   uiLanguage: 'sl_ui_language',
   moodLog: 'sl_mood_log',
+  reminderLog: 'sl_reminder_log',
 }
 
 function readStored(key, fallback) {

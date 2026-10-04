@@ -22,11 +22,12 @@ export const TRANSFER_MODULES = {
   wallpapers: { label: '壁纸图片（可选，二维码较多）', keys: ['sl_wallpaper_config', 'sl_auto_wallpaper_color', 'sl_wallpaper_accent'] },
   preferences: { label: '主题与显示偏好', keys: ['sl_theme', 'sl_custom_theme_color'] },
   atmosphere: { label: '节日、纪念日与心情', keys: ['sl_festive_config', 'sl_festive_birthday_full', 'sl_mood_log', 'sl_festive_lunar', 'sl_ui_language'] },
+  reminders: { label: '提醒去重', keys: ['sl_reminder_log'] },
 }
 
 const ARRAY_KEYS = new Set([
   'sl_courses', 'sl_course_templates', 'sl_schedule_exceptions', 'sl_course_checkins', 'sl_tasks', 'sl_events', 'sl_quick_notes', 'sl_focus_sessions', 'sl_exams', 'sl_checklists',
-  'sl_bills', 'sl_expenses', 'sl_ledger_templates', 'sl_festive_lunar',
+  'sl_bills', 'sl_expenses', 'sl_ledger_templates', 'sl_festive_lunar', 'sl_reminder_log',
 ])
 const KEYED_ARRAY_KEYS = new Map([['sl_ledger_categories', 'key']])
 const UNDO_KEY = 'sl_transfer_undo'

@@ -7,6 +7,14 @@
 // 3. 更早的版本逐条下移，最多保留 3 个版本，超出即删除。
 export const RELEASE_UPDATES = Object.freeze([
   {
+    version: '2026年10月04日-版本4',
+    signature: '4bb0b3522a',
+    notes: [
+      '「提醒」从此前只写不读的死数据变成真实功能。QuickRecordSettings 里的待办/日程/节点提醒分钟数此前只写进每条记录、从无消费者 —— 现在接入本地调度器：App 打开时按时触发 Notification，去重记录落盘（新键 sl_reminder_log，同步两台设备不会各响一次，刷新不会重复响）。设置面文案同步把能力边界说清楚：提醒只在 App 打开时可靠，后台/被系统回收时不触发',
+      '新键 sl_reminder_log 已登记到云同步默认值与模块分组、备份三处、应急导出、本地迁移含 ARRAY_KEYS；提醒 minutes 默认值语义修正：0 是\\',
+    ],
+  },
+  {
     version: '2026年10月04日-版本3',
     signature: '39ca66af58',
     notes: [
@@ -28,22 +36,13 @@ export const RELEASE_UPDATES = Object.freeze([
       '移除同步面板里已失效的 6 位访问码输入入口（后端恒返 410）；已连接的旧版用户仍保留升级与断开入口',
     ],
   },
-  {
-    version: '2026年10月04日-版本1',
-    signature: 'fe04eaa0e0',
-    notes: [
-      '修复发布签名闸门的三处根因：签名不再随工作区换行符变化（core.autocrlf + 无 .gitattributes 曾导致同一份源码算出三个不同签名）、二进制资源改为按原始字节入哈希（此前 png 与 OCR 语言包有近半数字节被 utf8 解码成 U+FFFD，换图标换模型都不触发闸门）、补上 sync-protocol.js 这个真正影响前后端产物的输入',
-      '新增 .gitattributes 统一换行；.gitignore 补齐 AGENTS.md 要求的 .env 与 .db/.sqlite*，并把交接草稿规则锚定到仓库根目录',
-      'bump 脚本与版本工具改为换行符无关，修复 CRLF 检出下说明被静默丢弃却仍打印成功的缺陷',
-    ],
-  },
 ])
 
 // 对用户展示、version.txt 和更新检测统一使用此版本号；后续同日发布只递增“版本”序号。
 export const RELEASE_VERSION = RELEASE_UPDATES[0].version
 
 // 与第一条签名保持一致，交给 vite.config.js 校验源码一致性。
-export const RELEASE_SOURCE_SIGNATURE = '39ca66af58'
+export const RELEASE_SOURCE_SIGNATURE = '4bb0b3522a'
 
 // 兼容旧引用：当前版本的更新说明。
 export const RELEASE_NOTES = RELEASE_UPDATES[0].notes
