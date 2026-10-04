@@ -76,14 +76,33 @@ export function defaultReminderMinutes(type, value) {
 // DateTimeFormat 本身是可复用的，按规范 format() 不持有内部状态。
 const formatterCache = new Map()
 
-function formatter(timezone, options) {
-  const key = `${timezone}|${options.year ?? ''}|${options.month ?? ''}|${options.day ?? ''}|${options.hour ?? ''}|${options.minute ?? ''}|${options.second ?? ''}|${options.hourCycle ?? ''}`
+/**
+ * 取一个缓存过的 Intl.DateTimeFormat。
+ *
+ * 【为什么导出】timeContext.js 的 formatAppDate 也做同样的事，此前是每次
+ * `new Intl.DateTimeFormat(...)` —— 同一份结论在仓库里漏了一处，而它的调用点
+ * 有 5 个在 v-for / 列表行里（bills、EventsView、TasksView、TodayView、
+ * dataManagerStatus），每次刷新都要重建几十个 ICU 格式器。
+ * 导出这个函数是为了让两处共用**同一个缓存**，而不是各自再写一份。
+ *
+ * @param {string} timezone 'local' 或某个 IANA 时区名
+ * @param {Intl.DateTimeFormatOptions} options
+ * @param {string} [locale='zh-CN'] 注意：政策日期键需要 en-CA（它给出
+ *   YYYY-MM-DD 形状），面向用户的文案要 zh-CN，两者不能混用。
+ */
+export function cachedDateFormatter(timezone, options, locale = 'zh-CN') {
+  const key = `${locale}|${timezone}|${options.weekday ?? ''}|${options.year ?? ''}|${options.month ?? ''}|${options.day ?? ''}|${options.hour ?? ''}|${options.minute ?? ''}|${options.second ?? ''}|${options.hourCycle ?? ''}`
   let cached = formatterCache.get(key)
   if (!cached) {
-    cached = new Intl.DateTimeFormat('en-CA', { timeZone: timezone === 'local' ? undefined : timezone, ...options })
+    cached = new Intl.DateTimeFormat(locale, { timeZone: timezone === 'local' ? undefined : timezone, ...options })
     formatterCache.set(key, cached)
   }
   return cached
+}
+
+function formatter(timezone, options) {
+  // 政策日期键依赖 en-CA 的 YYYY-MM-DD 输出形状，所以走同一个缓存但换locale。
+  return cachedDateFormatter(timezone, options, 'en-CA')
 }
 
 function formattedParts(value, timezone = settingsPolicy.value.timezone) {

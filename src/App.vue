@@ -24,7 +24,8 @@ import {
   reloadAfterError,
 } from './composables/globalError.js'
 import { isTaskActionable } from './composables/domain/state.js'
-import { connectSyncSpace } from './composables/cloudSync.js'
+// cloudSync.js **刻意不做静态导入**：它会把约 50KB 同步逻辑拉进首屏闭包，
+// 而绝大多数用户没有绑定同步空间。挂在 onMounted 里按需 import。
 import { isSyncSpaceBound, syncSpaceSettings } from './composables/syncSpace.js'
 import { autoSyncError, autoSyncState, startAutoSyncCoordinator, stopAutoSyncCoordinator } from './composables/autoSyncCoordinator.js'
 import { localSafeMode } from './composables/localSafeMode.js'
@@ -283,7 +284,13 @@ async function exportCurrentData() {
   try {
     const { downloadEmergencyBackup } = await import('./composables/emergencyExport.js')
     downloadEmergencyBackup()
-  } catch {}
+  } catch (error) {
+    // 此前这里是空 catch：动态 import 失败会被完全吞掉，用户点了「导出数据」
+    // 却什么都不会发生，也没有任何提示 —— 应急导出恰恰是最不能静默失败的场景
+    // （它通常是用户发现数据异常后的最后手段）。
+    console.error('[export] 应急导出失败', error)
+    announceAlertOnce('应急导出失败：数据文件没能生成。若浏览器处于无痕或禁用了下载，请换一个普通窗口再试。')
+  }
 }
 
 function openDataManager() {
@@ -342,7 +349,13 @@ onMounted(() => {
   // main.js 已完成 recovery gate 与业务 migration；mount 后只验证空间并启动生命周期。
   void (async () => {
     if (localSafeMode.value) return
-    if (isSyncSpaceBound.value) await connectSyncSpace({ ...syncSpaceSettings.value, persist: false })
+    // cloudSync.js 改成动态导入。此前 App.vue 用静态 import 把它（约 50KB raw）
+    // 拉进首屏闭包，于是 main.js:143 那处 `await import(...)` 完全失效 ——
+    // 模块早已在首屏，加载器只是取缓存。用户没绑定同步空间时这50KB 是白付的。
+    if (isSyncSpaceBound.value) {
+      const sync = await import('./composables/cloudSync.js')
+      await sync.connectSyncSpace({ ...syncSpaceSettings.value, persist: false })
+    }
     startAutoSyncCoordinator()
   })()
   tasks = useStoredRef('sl_tasks', [])

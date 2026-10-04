@@ -7,6 +7,16 @@
 // 3. 更早的版本逐条下移，最多保留 3 个版本，超出即删除。
 export const RELEASE_UPDATES = Object.freeze([
   {
+    version: '2026年10月04日-版本8',
+    signature: '0ff1616c39',
+    notes: [
+      'cloudSync.js 改为按需动态加载：此前 App.vue 用静态 import 把它（约 50KB raw）拉进首屏闭包，导致 main.js 里的 await import 完全失效——模块早已在首屏，加载器只是取缓存。没绑定同步空间的用户白付这50KB 首屏成本',
+      'formatAppDate 改为复用 settingsPolicy 的 Intl.DateTimeFormat 缓存：此前每次调用都new 一个，而构造比 format 贵一个数量级，且它的调用点有 5 个在 v-for 列表行里',
+      '修复应急导出的静默失败：动态 import 失败此前被空 catch 完全吞掉，用户点「导出数据」什么都不会发生也没有任何提示。应急导出恰恰是最不能静默失败的场景（通常是发现数据异常后的最后手段），现在会记录错误并提示可能原因',
+      '删除死代码 src/composables/ledgerView/useLedgerFilters.js：LedgerView 早已改用 feed.js 的筛选逻辑并注释掉了这个调用。它与 feed.js 维护着两份同名的 filteredExpenses/filtersActive/clearFilters，且这一份的查询没有防抖——哪天有人把注释解开，会同时得到两个全表扫描',
+    ],
+  },
+  {
     version: '2026年10月04日-版本7',
     signature: 'da824e26de',
     notes: [
@@ -33,21 +43,13 @@ export const RELEASE_UPDATES = Object.freeze([
       '新增 tests/icalExport.test.js 11 条用例，覆盖字节级折行不切断中文、UNTIL 必须 UTC、绝不出VTIMEZONE/TZID、单双周展开数、调休 EXDATE、VALARM、CRLF 行尾与结构配对',
     ],
   },
-  {
-    version: '2026年10月04日-版本5',
-    signature: '3ed0aa7cc3',
-    notes: [
-      '数据健康卡新增容量预警：本地数据达到 5MB 上限的 60% / 85% 时分别给出\'建议清理\'与\'必须导出备份\'两档提示。阈值基准说明写进代码注释 —— navigator.storage.estimate() 的 quota 自 Chrome M144 起变成随 usage 增长的估算值，usage/quota 比值已失去填充率含义，且统计的是 IDB+Cache+localStorage 合计，真正该盯的只有 dataHealth.bytes（refreshDataHealth 自己按键累加，口径是对的）',
-      '之前的\'浏览器已用 1.2MB / 8MB\'改名为\'浏览器已用（含缓存，仅参考）\'，避免把它误读成 localStorage 容量',
-    ],
-  },
 ])
 
 // 对用户展示、version.txt 和更新检测统一使用此版本号；后续同日发布只递增“版本”序号。
 export const RELEASE_VERSION = RELEASE_UPDATES[0].version
 
 // 与第一条签名保持一致，交给 vite.config.js 校验源码一致性。
-export const RELEASE_SOURCE_SIGNATURE = 'da824e26de'
+export const RELEASE_SOURCE_SIGNATURE = '0ff1616c39'
 
 // 兼容旧引用：当前版本的更新说明。
 export const RELEASE_NOTES = RELEASE_UPDATES[0].notes
