@@ -7,6 +7,19 @@
 // 3. 更早的版本逐条下移，最多保留 3 个版本，超出即删除。
 export const RELEASE_UPDATES = Object.freeze([
   {
+    version: '2026年10月04日-版本3',
+    signature: '39ca66af58',
+    notes: [
+      'OCR 引擎改为完全自托管：此前只给了 langPath，tesseract.js 会把 worker 与 WASM 引擎指向 cdn.jsdelivr.net，断网/墙内/CDN 故障时图片识课直接不可用，也与不接入外部网络服务的约束冲突',
+      '随包新增 tesseract-core-simd-lstm.wasm.js（wasm 以 base64 内嵌，单文件自包含，约 3.8MB）与 tesseract-worker.min.js；corePath 给具体文件而非目录，避开需要同时发布三个 SIMD 变体的约 19.7MB',
+      '新增 SIMD 能力探测：环境不支持时立刻给出可执行提示，且不再创建引擎、不再解码图片——此前要白等完一整轮预处理才失败',
+      'Service Worker 的 OCR 缓存规则原先只匹配 .traineddata，自托管引擎不走缓存、每会话重下 3.8MB；已扩展并把 maxEntries 提到 4',
+      '.gitattributes 把引擎文件声明为 binary，避免换行规范化破坏内嵌的 base64 wasm（已用 blob 哈希核对）',
+      'eslint 忽略 public/ocr 与 coverage 等产物目录：引擎文件内嵌 base64，对它跑规则只会产生上千条与本项目无关的报错',
+      '新增 tests/ocrEngineWiring.test.js：ocrPipeline.js 与 ocrService.js 此前零覆盖。断言引擎与 worker 必须同源且不得出现 CDN 主机名，并经变异验证（删掉 corePath/workerPath 即变红）',
+    ],
+  },
+  {
     version: '2026年10月04日-版本2',
     signature: 'db2c3f992b',
     notes: [
@@ -24,26 +37,13 @@ export const RELEASE_UPDATES = Object.freeze([
       'bump 脚本与版本工具改为换行符无关，修复 CRLF 检出下说明被静默丢弃却仍打印成功的缺陷',
     ],
   },
-  {
-    version: '2026年10月01日-版本1',
-    signature: '7e6d692345',
-    notes: [
-      '账本全面审核修复：详情改金额放大100倍',
-      '退款继承币种与分摊并按我承担口径计算',
-      '账单日期推进锚点修复不可逆漂移',
-      '修复收支口径不一致导致的同屏矛盾',
-      '导出范围与界面合计对齐并防CSV公式注入',
-      '新增完整编辑入口与收入结余展示',
-      '新增预算节奏与导出全部历史',
-    ],
-  },
 ])
 
 // 对用户展示、version.txt 和更新检测统一使用此版本号；后续同日发布只递增“版本”序号。
 export const RELEASE_VERSION = RELEASE_UPDATES[0].version
 
 // 与第一条签名保持一致，交给 vite.config.js 校验源码一致性。
-export const RELEASE_SOURCE_SIGNATURE = 'db2c3f992b'
+export const RELEASE_SOURCE_SIGNATURE = '39ca66af58'
 
 // 兼容旧引用：当前版本的更新说明。
 export const RELEASE_NOTES = RELEASE_UPDATES[0].notes

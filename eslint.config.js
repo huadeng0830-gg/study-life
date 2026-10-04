@@ -3,7 +3,20 @@ import pluginVue from 'eslint-plugin-vue'
 export default [
   {
     // 构建产物和历史产物不属于源代码检查范围；否则旧 bundle 会产生海量无关告警。
-    ignores: ['dist/**', 'dist-bak/**', 'node_modules/**', '.wrangler/**', 'dev-dist/**'],
+    // public/ocr 下是随包分发的第三方产物（tesseract 引擎与 worker，已压缩），
+    // 不是本仓库源码：tesseract-core-*.wasm.js 内嵌了 base64 的 wasm，
+    // 对它跑 no-var 之类的规则只会产出成百上千条与本项目无关的报错。
+    ignores: [
+      'dist/**',
+      'dist-bak/**',
+      'node_modules/**',
+      '.wrangler/**',
+      'dev-dist/**',
+      'public/ocr/**',
+      // 与 .gitignore 保持一致：这两个产物目录本地存在时也不该被 lint。
+      'coverage/**',
+      '.playwright-cli/**',
+    ],
   },
   ...pluginVue.configs['flat/essential'],
   {

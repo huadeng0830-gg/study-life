@@ -112,11 +112,15 @@ export default defineConfig({
         cleanupOutdatedCaches: false,
         runtimeCaching: [
           {
-            urlPattern: /\/ocr\/.*\.traineddata$/i,
+            // 语言模型、SIMD 引擎与 worker 都在 public/ocr 下，同属"首次识课后长期复用"。
+            // 原先只匹配 .traineddata，于是自托管的引擎与 worker 不走缓存，
+            // 每个会话都要重下 3.8MB。maxEntries 从 2 提到 4 以覆盖这 3 个文件
+            // （tesseract.js-core 的其他变体不会用到，不预留位置）。
+            urlPattern: /\/ocr\/.*\.(?:traineddata|wasm\.js|js)$/i,
             handler: 'CacheFirst',
             options: {
               cacheName: 'study-life-ocr-language-v1',
-              expiration: { maxEntries: 2, maxAgeSeconds: 365 * 24 * 60 * 60 },
+              expiration: { maxEntries: 4, maxAgeSeconds: 365 * 24 * 60 * 60 },
             },
           },
           {

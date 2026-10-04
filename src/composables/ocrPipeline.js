@@ -6,6 +6,44 @@ const INIT_TIMEOUT_MS = 45000
 const RECOGNIZE_TIMEOUT_MS = 120000
 const MAX_PIXELS = { fast: 6_500_000, auto: 8_500_000, accurate: 12_000_000 }
 
+// 本机自托管的 OCR 引擎。tesseract.js 的 corePath 若给目录，浏览器会按 SIMD
+// 能力在 relaxedsimd / simd / 无 SIMD 三个变体里挑，三个都得随包发（约 19.7MB）；
+// 给具体文件名则直接用它。这里只随包发 SIMD-LSTM 这一个变体（它把 wasm 以
+// base64 内嵌，单文件自包含，约 3.8MB），因此自己探测 SIMD。
+//
+// 【为什么必须自托管】只给 langPath 时，tesseract.js 的 worker 与 WASM 引擎会
+// 从 jsDelivr CDN 拉（见其 defaultOptions.js）。那意味着断网、墙内或 CDN 故障时
+// 图片识课直接不可用 —— 与"Local-first、不接入任何外部网络服务"冲突，
+// 也让"识别过程不出设备"的承诺只成立一半。
+const OCR_ASSET_BASE = 'ocr'
+const TESSERACT_CORE_FILE = 'tesseract-core-simd-lstm.wasm.js'
+const TESSERACT_WORKER_FILE = 'tesseract-worker.min.js'
+
+// 最小 SIMD 探测模块（字节码取自 wasm-feature-detect 的固定样本）。
+// 没有它，corePath 就只能指向 CDN —— 那会让"本机 OCR、不出设备"在断网时直接失效。
+const SIMD_PROBE = new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0, 1, 5, 1, 96, 0, 1, 123, 3, 2, 1, 0, 10, 10, 1, 8, 0, 65, 0, 253, 15, 253, 98, 11])
+
+let simdSupport = null
+
+function supportsSimd() {
+  if (simdSupport !== null) return simdSupport
+  try {
+    simdSupport = typeof WebAssembly?.validate === 'function' && WebAssembly.validate(SIMD_PROBE)
+  } catch {
+    simdSupport = false
+  }
+  return simdSupport
+}
+
+function ocrAssetUrl(file) {
+  return new URL(`${OCR_ASSET_BASE}/${file}`, document.baseURI).href
+}
+
+function assertSimdAvailable() {
+  if (supportsSimd()) return
+  throw new Error('当前浏览器不支持 WebAssembly SIMD，无法在本机运行图片识课。请更新浏览器，或改用 Excel / 文字方式导入课表。')
+}
+
 function maxPixelsFor(mode) {
   const requested = MAX_PIXELS[mode] || MAX_PIXELS.auto
   const memory = Number(navigator.deviceMemory)
@@ -73,10 +111,16 @@ async function ensureWorker(signal = null) {
     let interrupted = false
     const created = (async () => {
       ocrWorker.tesseractModule = await import('tesseract.js')
-      const langPath = new URL('ocr', document.baseURI).href.replace(/\/$/, '')
-      // chi_sim 同时覆盖中文、数字和常见拉丁字符；模型与图片均保持在本机。
+      const langPath = new URL(OCR_ASSET_BASE, document.baseURI).href.replace(/\/$/, '')
+      // chi_sim 同时覆盖中文、数字和常见拉丁字符；模型、引擎与图片均保持在本机。
+      // 这里是最终闸门；performOCR 开头已经先判过一次，避免白等预处理。
+      assertSimdAvailable()
       const instance = await ocrWorker.tesseractModule.createWorker('chi_sim', 1, {
         langPath,
+        // 引擎与 worker 都指向本站资源。不给这两项时 tesseract.js 会退到
+        // cdn.jsdelivr.net，离线即失败。
+        corePath: ocrAssetUrl(TESSERACT_CORE_FILE),
+        workerPath: ocrAssetUrl(TESSERACT_WORKER_FILE),
         gzip: false,
         logger: handleProgress,
         errorHandler: (error) => logError('worker error handler', error),
@@ -505,6 +549,9 @@ async function recognizeScheduleRows(instance, source, signal = null) {
 export async function performOCR(file, onProgress = null, options = {}) {
   if (ocrWorker.busy) throw new Error('OCR 正在进行中，请稍候')
   if (!file?.type?.startsWith('image/')) throw new Error('请选择图片文件')
+  // 先判环境再干活：不支持 SIMD 时若等到解码完一张 12MP 图片之后才提示，
+  // 用户已经白等了一整轮预处理。引擎起不来是"这台设备不行"，应当立刻说。
+  assertSimdAvailable()
   ocrWorker.busy = true
   ocrWorker.activeProgressCallback = onProgress
   ocrState.error = null
