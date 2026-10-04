@@ -1,6 +1,6 @@
 <script setup>
 import { lastBackupAt } from '../../composables/backupReminder.js'
-import { useDataManagerStatus } from '../../composables/dataManagerStatus.js'
+import { dataHealthFillRatio, dataHealthLevel, useDataManagerStatus } from '../../composables/dataManagerStatus.js'
 
 const { dataHealth, fmtTime, formatBytes, refreshDataHealth } = useDataManagerStatus()
 </script>
@@ -14,8 +14,14 @@ const { dataHealth, fmtTime, formatBytes, refreshDataHealth } = useDataManagerSt
         <span><small>数据模块</small><b>{{ dataHealth.keys }} 项</b></span>
         <span><small>本地数据</small><b>{{ formatBytes(dataHealth.bytes) }}</b></span>
         <span><small>最近备份</small><b>{{ fmtTime(lastBackupAt) }}</b></span>
-        <span v-if="dataHealth.quota"><small>浏览器已用</small><b>{{ formatBytes(dataHealth.usage) }} / {{ formatBytes(dataHealth.quota) }}</b></span>
+        <span v-if="dataHealth.quota"><small>浏览器已用（含缓存，仅参考）</small><b>{{ formatBytes(dataHealth.usage) }} / {{ formatBytes(dataHealth.quota) }}</b></span>
       </div>
+      <p v-if="dataHealthLevel !== 'ok'" class="health-warn" :data-level="dataHealthLevel">
+        <b>{{ dataHealthLevel === 'critical' ? '⚠ 本地数据接近上限' : '本地数据偏多' }}</b>
+        当前本地占用约 {{ Math.round(dataHealthFillRatio * 100) }}%（按 5MB 上限估算）。
+        <span v-if="dataHealthLevel === 'critical'">建议立即导出 JSON 备份，并考虑归档或删除旧记录，否则浏览器可能拒绝继续写入。</span>
+        <span v-else>建议定期导出 JSON 备份；专注记录与历史账单可优先清理。</span>
+      </p>
       <p v-if="dataHealth.largest.length" class="health-largest">占用较大：<span v-for="record in dataHealth.largest" :key="record.key">{{ record.key.replace('sl_', '') }} {{ formatBytes(record.bytes) }}</span></p>
     </div>
   </section>
@@ -38,6 +44,20 @@ const { dataHealth, fmtTime, formatBytes, refreshDataHealth } = useDataManagerSt
   align-items:flex-start;
   gap:7px;
   display:flex}
+.health-warn {
+  margin:2px 0 0;
+  padding:8px 10px;
+  border-radius:var(--radius-8);
+  font-size:var(--fs-12);
+  line-height:1.5;
+  background: color-mix(in srgb, var(--warning) 12%, var(--card));
+  color:var(--text);
+  flex-direction:column}
+.health-warn[data-level="critical"] {
+  background: color-mix(in srgb, var(--danger) 10%, var(--card))}
+.health-warn b {
+  display:block;
+  margin-bottom:2px}
 .section-copy h4 {
   font-size:var(--fs-14)}
 .section-copy p {

@@ -7,6 +7,14 @@
 // 3. 更早的版本逐条下移，最多保留 3 个版本，超出即删除。
 export const RELEASE_UPDATES = Object.freeze([
   {
+    version: '2026年10月04日-版本5',
+    signature: '3ed0aa7cc3',
+    notes: [
+      '数据健康卡新增容量预警：本地数据达到 5MB 上限的 60% / 85% 时分别给出\'建议清理\'与\'必须导出备份\'两档提示。阈值基准说明写进代码注释 —— navigator.storage.estimate() 的 quota 自 Chrome M144 起变成随 usage 增长的估算值，usage/quota 比值已失去填充率含义，且统计的是 IDB+Cache+localStorage 合计，真正该盯的只有 dataHealth.bytes（refreshDataHealth 自己按键累加，口径是对的）',
+      '之前的\'浏览器已用 1.2MB / 8MB\'改名为\'浏览器已用（含缓存，仅参考）\'，避免把它误读成 localStorage 容量',
+    ],
+  },
+  {
     version: '2026年10月04日-版本4',
     signature: '4bb0b3522a',
     notes: [
@@ -27,22 +35,13 @@ export const RELEASE_UPDATES = Object.freeze([
       '新增 tests/ocrEngineWiring.test.js：ocrPipeline.js 与 ocrService.js 此前零覆盖。断言引擎与 worker 必须同源且不得出现 CDN 主机名，并经变异验证（删掉 corePath/workerPath 即变红）',
     ],
   },
-  {
-    version: '2026年10月04日-版本2',
-    signature: 'db2c3f992b',
-    notes: [
-      '修复云同步限流可被完全绕过：限流键里含被猜的访问码哈希，换一个码就换一个桶，每个猜测值各自享有独立额度。新增不受请求体影响的粗粒度兜底层（额度为设备额度的 4 倍，容得下同一 NAT 下多台设备各自用满 burst）',
-      '旧版 6 位数字访问码鉴权改为显式开关 SYNC_LEGACY_CODE_AUTH 且默认关闭。该密钥空间只有 10^6 且服务端不校验正确性，留着等于公开一个可爆破的口子；注意 SYNC_LEGACY_MIGRATION 只管存储后端、从来不是鉴权开关',
-      '移除同步面板里已失效的 6 位访问码输入入口（后端恒返 410）；已连接的旧版用户仍保留升级与断开入口',
-    ],
-  },
 ])
 
 // 对用户展示、version.txt 和更新检测统一使用此版本号；后续同日发布只递增“版本”序号。
 export const RELEASE_VERSION = RELEASE_UPDATES[0].version
 
 // 与第一条签名保持一致，交给 vite.config.js 校验源码一致性。
-export const RELEASE_SOURCE_SIGNATURE = '4bb0b3522a'
+export const RELEASE_SOURCE_SIGNATURE = '3ed0aa7cc3'
 
 // 兼容旧引用：当前版本的更新说明。
 export const RELEASE_NOTES = RELEASE_UPDATES[0].notes

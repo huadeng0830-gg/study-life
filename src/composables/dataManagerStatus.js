@@ -26,6 +26,31 @@ const showAllDevices = ref(false)
 
 const dataHealth = ref({ keys: 0, bytes: 0, quota: null, usage: null, largest: [] })
 
+// localStorage 的写入上限按浏览器取。Chrome / Edge 是 5 MiB，Firefox 约 10 MB，
+// Safari 老版本 5 MB。这里取最保守的 5 MiB 做预警基准——超过它说明已经逼近
+// 一部分用户当前浏览器的上限，必须提醒用户清理或归档。
+export const LOCALSTORAGE_BUDGET_BYTES = 5 * 1024 * 1024
+
+// 数据健康卡上显示的"容量"不是 navigator.storage.estimate() 的 quota：
+// Chrome M144 起 estimate().quota 变成"随 usage 增长的估算值"（见 Chromium
+// 494350644，状态 Won't Fix），usage/quota 这个比值已失去"填充率"含义；
+// 且它统计的是 IDB + Cache + localStorage 合计，不是 localStorage 的 5 MiB。
+// 真正该盯的是 dataHealth.bytes（refreshDataHealth 自己按键累加，口径是对的）。
+export const dataHealthFillRatio = computed(() => {
+  const bytes = Number(dataHealth.value?.bytes) || 0
+  return bytes / LOCALSTORAGE_BUDGET_BYTES
+})
+
+// 预警等级：< 60% 不提示；60–85% 建议清理旧数据；> 85% 必须提醒导出备份。
+// 阈值给出用户至少一个月的缓冲期——localStorage 撞线表现为整个集合写不进去，
+// 不是"新记录失败"，界面与落盘会永久分叉。
+export const dataHealthLevel = computed(() => {
+  const ratio = dataHealthFillRatio.value
+  if (ratio >= 0.85) return 'critical'
+  if (ratio >= 0.60) return 'warning'
+  return 'ok'
+})
+
 const syncSummary = computed(() => {
   if (localSafeMode.value) {
     return { tone: 'danger', title: '本机安全模式', detail: '同步恢复完成前，自动同步、手动拉取和推送均已暂停；本机仍可读写和导出。' }
