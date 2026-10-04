@@ -23,10 +23,17 @@ const storedRefs = new Map()
 // 2. 视图只依赖 touchStoredRef 那一次通知 —— 集合内的键是 shallowRef，
 //    push/splice/就地改字段都不会自己通知（见 touchStoredRef 处的说明）。
 // 漏掉第 1 条 = 改了不存盘；漏掉第 2 条 = 存盘了但界面停在旧值（「删了不消失」）。
+// `sl_mood_log` 此前在本清单里，但全仓**没有任何一处** touchStoredRef('sl_mood_log')
+// —— 违反上面第 1 条前提。它之所以没出事，是因为所有写入都是整体替换引用
+// （TodayView 的 `moodLog.value = logMood(...)`），shallowRef 换引用会触发 watcher。
+// 但只要有人改成 `moodLog.value[day] = x`，就是静默丢数据。
+// 按自己的契约（前提 1 不成立就不该进清单）把它移出：它是个很小的
+// 日期→心情映射，deep watch 的开销可以忽略，反而换来"任何改法都存得下去"。
+// 守卫见 tests/explicitCommitContract.test.js。
 const EXPLICIT_COMMIT_KEY_LIST = Object.freeze([
   'sl_expenses', 'sl_tasks', 'sl_events', 'sl_exams', 'sl_bills', 'sl_focus_sessions',
   'sl_checklists', 'sl_courses', 'sl_course_templates', 'sl_ledger_fx', 'sl_ledger_budget',
-  'sl_ledger_templates', 'sl_schedule_exceptions', 'sl_mood_log',
+  'sl_ledger_templates', 'sl_schedule_exceptions',
 ])
 export { EXPLICIT_COMMIT_KEY_LIST }
 const EXPLICIT_COMMIT_KEYS = new Set(EXPLICIT_COMMIT_KEY_LIST)

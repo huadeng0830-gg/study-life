@@ -7,6 +7,15 @@
 // 3. 更早的版本逐条下移，最多保留 3 个版本，超出即删除。
 export const RELEASE_UPDATES = Object.freeze([
   {
+    version: '2026年10月04日-版本9',
+    signature: '32c7677665',
+    notes: [
+      '修复显式提交清单的一处契约破坏：sl_mood_log 此前在 EXPLICIT_COMMIT_KEY_LIST 里，但全仓没有任何一处 touchStoredRef(\'sl_mood_log\')，违反 core.js 自己写的第 1 条前提。它之所以一直没出事，是因为所有写入都是整体替换引用；只要有人改成就地改字段就是静默丢数据。按契约（前提 1 不成立就不该进清单）把它移出——它是很小的日期→心情映射，deep watch 开销可忽略，换来任何改法都存得下去',
+      '新增 tests/explicitCommitContract.test.js：断言清单里每个键都至少有一处 touchStoredRef 调用，并解析 const NAME = \'sl_...\' 的常量间接（ledger 三个键正是走常量，否则会被误判成孤儿）。守卫经变异验证：移除 checklists 的 touch 调用即变红',
+      '守卫同文件内附行为侧证据：就地改字段确实不落盘、touch 之后才落盘。写这条时踩了两个坑，缺一个都会变成假绿——watcher 的安装是延迟的（requestIdleCallback），且 Vue 的 watch 回调是异步的，必须先 nextTick 再 flush',
+    ],
+  },
+  {
     version: '2026年10月04日-版本8',
     signature: '0ff1616c39',
     notes: [
@@ -30,26 +39,13 @@ export const RELEASE_UPDATES = Object.freeze([
       '新增 tests/ledgerBillImport.test.js 13 条用例：GBK 字节真的按 GBK 解出中文（常量由TextDecoder 反查得到，不靠猜）、表头行漂移、转账排除、退款方向、单双次导入不重复、损坏行跳过而不是整份失败',
     ],
   },
-  {
-    version: '2026年10月04日-版本6',
-    signature: '6ef588c623',
-    notes: [
-      '新增日历导出：课程表、日程与重要日期可导出为标准 .ics 文件，导入 Apple / Google / Outlook 日历。零依赖，纯 RFC 5545 生成器',
-      '课表按学期重复（RRULE + UNTIL），调休停课写入 EXDATE；单双周课程按周次展开成各自的事件，而不是写成 INTERVAL=2（那是隔周不是单周）',
-      '日程的 reminderMinutes 一并导出为 VALARM，由系统在 App 关闭时也能提醒 —— 正好补上 Web Notification「只在App 打开时可靠」这个边界',
-      '支持按类别分开导出（课表 / 日程 / 重要日期），避免系统通知被课程提醒淹没',
-      '实现细节：一律用 UTC 而非 TZID（绕开手写 VTIMEZONE 这个最大错误源，且 UTC 锚定的重复规则在夏令时切换日不会平移一小时）；全天事件走 dateOnlyMs 而非 policyDateTime，避免东八区午夜换算后退到前一天',
-      '入口放在数据管理页，与备份、迁移、数据健康同级',
-      '新增 tests/icalExport.test.js 11 条用例，覆盖字节级折行不切断中文、UNTIL 必须 UTC、绝不出VTIMEZONE/TZID、单双周展开数、调休 EXDATE、VALARM、CRLF 行尾与结构配对',
-    ],
-  },
 ])
 
 // 对用户展示、version.txt 和更新检测统一使用此版本号；后续同日发布只递增“版本”序号。
 export const RELEASE_VERSION = RELEASE_UPDATES[0].version
 
 // 与第一条签名保持一致，交给 vite.config.js 校验源码一致性。
-export const RELEASE_SOURCE_SIGNATURE = '0ff1616c39'
+export const RELEASE_SOURCE_SIGNATURE = '32c7677665'
 
 // 兼容旧引用：当前版本的更新说明。
 export const RELEASE_NOTES = RELEASE_UPDATES[0].notes
