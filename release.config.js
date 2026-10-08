@@ -7,6 +7,13 @@
 // 3. 更早的版本逐条下移，最多保留 3 个版本，超出即删除。
 export const RELEASE_UPDATES = Object.freeze([
   {
+    version: '2026年10月08日-版本8',
+    signature: 'a8ca62573f',
+    notes: [
+      '修复 Windows 桌面版应用内自动检查、下载与安装更新',
+    ],
+  },
+  {
     version: '2026年10月08日-版本7',
     signature: '1fb16c5171',
     notes: [
@@ -23,21 +30,13 @@ export const RELEASE_UPDATES = Object.freeze([
       '加固账号数据隔离、备份验证与发布安全检查',
     ],
   },
-  {
-    version: '2026年10月08日-版本5',
-    signature: '5f5088cc3b',
-    notes: [
-      '移除笔记功能并清理旧笔记数据',
-      '改善移动端加载、触控体验和交互连贯性，修复日期与同步问题',
-    ],
-  },
 ])
 
 // 对用户展示、version.txt 和更新检测统一使用此版本号；后续同日发布只递增“版本”序号。
 export const RELEASE_VERSION = RELEASE_UPDATES[0].version
 
 // 与第一条签名保持一致，交给 vite.config.js 校验源码一致性。
-export const RELEASE_SOURCE_SIGNATURE = '1fb16c5171'
+export const RELEASE_SOURCE_SIGNATURE = 'dcc3c0bef4'
 
 // 兼容旧引用：当前版本的更新说明。
 export const RELEASE_NOTES = RELEASE_UPDATES[0].notes

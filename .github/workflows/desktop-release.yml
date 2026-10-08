@@ -27,6 +27,13 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Trust the personal signing certificate in the ephemeral runner
+        shell: pwsh
+        run: |
+          $certificatePath = Join-Path $env:GITHUB_WORKSPACE 'desktop/certificates/study-life-code-signing.cer'
+          Import-Certificate -FilePath $certificatePath -CertStoreLocation Cert:\CurrentUser\Root | Out-Null
+          Import-Certificate -FilePath $certificatePath -CertStoreLocation Cert:\CurrentUser\TrustedPublisher | Out-Null
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
@@ -76,3 +83,4 @@ jobs:
             release-desktop/study-life-desktop-setup-*.exe
             release-desktop/study-life-desktop-setup-*.exe.blockmap
             release-desktop/latest.yml
+            desktop/certificates/study-life-code-signing.cer

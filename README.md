@@ -9,11 +9,9 @@
 [🌐 在线体验](https://study-life.pages.dev/) · [📦 GitHub](https://github.com/huadeng0830-gg/study-life)
 
 <!-- RELEASE_STATUS:START -->
-> **当前源码版本**：网页 / PWA `2026年10月08日-版本7` · Windows 桌面版 `1.0.8`
+> **当前源码版本**：网页 / PWA `2026年10月08日-版本8` · Windows 桌面版 `1.0.9`
 > **最近更新**：
-> - 修复搜索、提醒、专注计时和账单周期边界问题
-> - 加固账号登出隔离、同步、笔记归档与云存储权限
-> - 改进无障碍、备份恢复、课程导入和大数据量存储
+> - 修复 Windows 桌面版应用内自动检查、下载与安装更新
 > [下载已发布的 Windows 安装包与版本说明](https://github.com/huadeng0830-gg/study-life/releases/latest)
 <!-- RELEASE_STATUS:END -->
 
