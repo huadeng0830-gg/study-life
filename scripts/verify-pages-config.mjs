@@ -26,7 +26,9 @@ const html = readFileSync(htmlPath, 'utf8')
 const inlineScripts = [...html.matchAll(/<script\b((?:(?!\bsrc\s*=)[^>])*)>([\s\S]*?)<\/script\s*>/gi)]
 for (const [, attributes, source] of inlineScripts) {
   if (/\btype\s*=\s*["']?module\b/i.test(attributes)) continue
-  const hash = createHash('sha256').update(source).digest('base64')
+  // HTML input preprocessing normalizes CRLF and CR to LF before the browser
+  // evaluates an inline script. Match that behavior across Windows checkouts.
+  const hash = createHash('sha256').update(source.replace(/\r\n?/g, '\n')).digest('base64')
   if (!declaredHashes.has(hash)) throw new Error('index.html 的内联启动脚本 SHA-256 与 CSP 不匹配。')
 }
 console.log('✓ Cloudflare Pages 输出目录与安全头配置已核验')
