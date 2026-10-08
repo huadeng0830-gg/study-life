@@ -7,6 +7,13 @@
 // 3. 更早的版本逐条下移，最多保留 3 个版本，超出即删除。
 export const RELEASE_UPDATES = Object.freeze([
   {
+    version: '2026年10月08日-版本9',
+    signature: '06e0da06c7',
+    notes: [
+      '优化首页空状态与专注模块布局',
+    ],
+  },
+  {
     version: '2026年10月08日-版本8',
     signature: 'a8ca62573f',
     notes: [
@@ -22,21 +29,13 @@ export const RELEASE_UPDATES = Object.freeze([
       '改进无障碍、备份恢复、课程导入和大数据量存储',
     ],
   },
-  {
-    version: '2026年10月08日-版本6',
-    signature: 'c3af18d0d4',
-    notes: [
-      '修复搜索、同步、专注计时、提醒和课程数据一致性问题',
-      '加固账号数据隔离、备份验证与发布安全检查',
-    ],
-  },
 ])
 
 // 对用户展示、version.txt 和更新检测统一使用此版本号；后续同日发布只递增“版本”序号。
 export const RELEASE_VERSION = RELEASE_UPDATES[0].version
 
 // 与第一条签名保持一致，交给 vite.config.js 校验源码一致性。
-export const RELEASE_SOURCE_SIGNATURE = '06ef6074da'
+export const RELEASE_SOURCE_SIGNATURE = '06e0da06c7'
 
 // 兼容旧引用：当前版本的更新说明。
 export const RELEASE_NOTES = RELEASE_UPDATES[0].notes

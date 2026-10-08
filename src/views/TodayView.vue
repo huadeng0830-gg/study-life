@@ -947,6 +947,15 @@ function countdownLabel(item) {
   display:grid}
 .today-page>.page-head,.today-page>.experience-message,.today-page>.home-productivity,.today-page>.next-panel,.today-page>.compact-link-row,.today-page>.today-mood-lower {
   grid-column:1/-1}
+.today-page>.quiet-empty {
+  grid-column:1/-1;
+  justify-self:start;
+  width:fit-content;
+  max-width:100%}
+.today-page>.focus-panel {
+  grid-column:1/-1;
+  justify-self:center;
+  width:min(100%,760px)}
 .today-page>.home-productivity {
   grid-template-columns:repeat(auto-fit,minmax(min(100%,430px),1fr));
   margin:0}

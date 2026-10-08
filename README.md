@@ -9,9 +9,9 @@
 [🌐 在线体验](https://study-life.pages.dev/) · [📦 GitHub](https://github.com/huadeng0830-gg/study-life)
 
 <!-- RELEASE_STATUS:START -->
-> **当前源码版本**：网页 / PWA `2026年10月08日-版本8` · Windows 桌面版 `1.0.9`
+> **当前源码版本**：网页 / PWA `2026年10月08日-版本9` · Windows 桌面版 `1.0.10`
 > **最近更新**：
-> - 修复 Windows 桌面版应用内自动检查、下载与安装更新
+> - 优化首页空状态与专注模块布局
 > [下载已发布的 Windows 安装包与版本说明](https://github.com/huadeng0830-gg/study-life/releases/latest)
 <!-- RELEASE_STATUS:END -->
 
