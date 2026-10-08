@@ -405,7 +405,7 @@ watch(
   background: var(--card);
 }
 .del-btn:hover {
-  background: #fff2f0;
+  background: var(--danger-soft);
 }
 
 /* 农历纪念日分区：与上面的公历纪念日同构，但多一列「闰月」与一行解析结果。 */

@@ -146,7 +146,7 @@ export function useScheduleImportReview({
       else { clearBatchInput(); batchError.value = ''; message.value = `导入完成：${summary}${draft.reviewCount ? `（${draft.reviewCount} 门建议确认）` : ''}` }
       showImportConflict.value = false
       importDraft.value = null
-    } catch (e) {
+    } catch {
       domain.replaceCourses(draft.snapshot)
       batchError.value = '写入失败，已自动恢复导入前课表'
     } finally { importCommitBusy.value = false }

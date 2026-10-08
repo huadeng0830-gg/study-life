@@ -43,11 +43,11 @@ let overlayHistoryActive = false
 let programmaticOverlayBack = false
 let overlayPopListenerInstalled = false
 
-function pushOverlayHistoryMarker(force = false) {
+function pushOverlayHistoryMarker() {
   if (!overlayHistoryAdapter || typeof window === 'undefined' || !window.history?.pushState) return false
   const current = window.history.state
-  // Do not make Back leave the app when an overlay opens on its first route.
-  if (!force && !current?.back) return false
+  // Even on the first route, opening an overlay must create a same-route history
+  // entry so the first Back dismisses the overlay instead of leaving the app.
   try {
     window.history.pushState({ ...(current && typeof current === 'object' ? current : {}), [OVERLAY_HISTORY_KEY]: true }, '', window.location.href)
     return true
@@ -62,7 +62,7 @@ function onOverlayPopState() {
   if (programmaticOverlayBack) {
     programmaticOverlayBack = false
     overlayHistoryActive = false
-    if (stack.length) overlayHistoryActive = pushOverlayHistoryMarker(true)
+    if (stack.length) overlayHistoryActive = pushOverlayHistoryMarker()
     return
   }
   const entry = stack.pop()
@@ -72,7 +72,7 @@ function onOverlayPopState() {
   }
   entry.backDismissed = true
   overlayStackRevision.value += 1
-  if (stack.length) overlayHistoryActive = pushOverlayHistoryMarker(true)
+  if (stack.length) overlayHistoryActive = pushOverlayHistoryMarker()
   else overlayHistoryActive = false
   entry.onBack?.()
 }

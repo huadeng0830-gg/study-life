@@ -78,6 +78,21 @@ describe('预算状态与阈值', () => {
     expect(over.level).toBe('over')
   })
 
+  it('缺汇率支出不显示为健康预算，并把已折算比例标成下限', () => {
+    const partial = budgetStatus({ spent: 20, budget: 100, excludedExpenseCount: 2, missingRates: ['USD'] })
+    expect(partial).toMatchObject({ level: 'unknown', pct: 20, partial: true, spentIsLowerBound: true, excludedCount: 2 })
+    expect(partial.pacing).toBeNull()
+    expect(partial.missingRates).toEqual(['USD'])
+  })
+
+  it('缺失退款时不把剩余预算或超支结论说成确定值', () => {
+    const partial = budgetStatus({ spent: 120, budget: 100, excludedRefundCount: 1 })
+    expect(partial.level).toBe('unknown')
+    expect(partial.spentIsLowerBound).toBe(false)
+    expect(partial.pacing).toBeNull()
+    expect(budgetStatus({ spent: 120, budget: 100, excludedExpenseCount: 1 }).level).toBe('over')
+  })
+
   it('退款多于支出（负的当月总额）也能正确算出剩余额度', () => {
     const status = budgetStatus({ spent: -30, budget: 100 })
     expect(status.set).toBe(true)

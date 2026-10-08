@@ -3,6 +3,31 @@ import { ACCOUNT_SWITCH_MARKER_KEY, randomToken, readAccountDataOwner, setAccoun
 // 锁名与引擎侧保持一致：这是**同一把**锁，不是两把各管各的。
 export const ACCOUNT_DATA_LOCK = 'study-life-account-data'
 const ACCOUNT_DATA_LOCK_KEY = 'study-life-account-data-lock'
+const RETIRED_NOTES_PURGE_KEY = 'study-life-retired-notes-purged-v1'
+const LOCAL_ACCOUNT_STATE_DEFAULTS = Object.freeze({
+  sl_focus_active: null,
+  sl_retro_year_notice: '',
+  sl_last_backup_at: '',
+  sl_domain_schema: 0,
+  sl_task_center_log: [],
+})
+
+function readLocalAccountState() {
+  const values = {}
+  for (const [key, fallback] of Object.entries(LOCAL_ACCOUNT_STATE_DEFAULTS)) {
+    try { values[key] = JSON.parse(localStorage.getItem(key)) ?? cloneValue(fallback) }
+    catch { values[key] = cloneValue(fallback) }
+  }
+  return values
+}
+
+function localAccountStateFromSnapshot(snapshot) {
+  const source = snapshot?.__localAccountState
+  return Object.fromEntries(Object.entries(LOCAL_ACCOUNT_STATE_DEFAULTS).map(([key, fallback]) => [
+    key,
+    source && Object.prototype.hasOwnProperty.call(source, key) ? source[key] : cloneValue(fallback),
+  ]))
+}
 import { SYNC_DEFAULTS } from './syncKeys.js'
 import { cloneValue, validateSyncPayload } from './accountSyncData.js'
 import { defaultTimeConfig } from './store/timeConfig.js'
@@ -64,6 +89,130 @@ async function openAccountVault() {
   }
 }
 
+export function mergeRetiredQuickNotes(...sources) {
+  const notesById = new Map()
+  for (const source of sources) {
+    if (!Array.isArray(source)) continue
+    for (const note of source) {
+      if (!note || typeof note !== 'object' || Array.isArray(note)) continue
+      const id = String(note.id || `${note.createdAt || ''}:${note.title || note.content || ''}`)
+      notesById.set(id, note)
+    }
+  }
+  return [...notesById.values()]
+}
+
+function clearRetiredNotesFromDomainValues(values) {
+  if (!values || typeof values !== 'object' || Array.isArray(values)) return false
+  let changed = false
+  if (Object.prototype.hasOwnProperty.call(values, 'sl_quick_notes')) {
+    const archived = mergeRetiredQuickNotes(values.sl_archived_quick_notes, values.sl_quick_notes)
+    if (JSON.stringify(archived) !== JSON.stringify(values.sl_archived_quick_notes || [])) {
+      values.sl_archived_quick_notes = archived
+    }
+    delete values.sl_quick_notes
+    changed = true
+  }
+  for (const key of ['sl_tasks', 'sl_events']) {
+    if (!Array.isArray(values[key])) continue
+    values[key] = values[key].map((item) => {
+      if (item?.sourceType !== 'note') return item
+      changed = true
+      return { ...item, sourceType: '', sourceId: '', relationId: '', updatedAt: new Date().toISOString() }
+    })
+  }
+  return changed
+}
+
+function clearRetiredNotesFromManifest(manifest) {
+  if (!manifest || typeof manifest !== 'object') return false
+  let changed = false
+  if (manifest.entities && typeof manifest.entities === 'object' && Object.prototype.hasOwnProperty.call(manifest.entities, 'sl_quick_notes')) {
+    delete manifest.entities.sl_quick_notes
+    changed = true
+  }
+  for (const field of ['tombstones', 'restoreMarkers']) {
+    if (!Array.isArray(manifest[field])) continue
+    const filtered = manifest[field].filter((item) => item?.entityType !== 'Note')
+    if (filtered.length !== manifest[field].length) { manifest[field] = filtered; changed = true }
+  }
+  return changed
+}
+
+export function clearRetiredNotesFromAccountRecord(record) {
+  let changed = false
+  const payload = record?.values
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return false
+  if (record.id?.startsWith('conflict:') && Array.isArray(payload.conflicts)) {
+    const retiredNoteConflicts = payload.conflicts.filter((item) => item?.entityType === 'Note' || item?.key === 'sl_quick_notes')
+    const conflictNotes = retiredNoteConflicts.flatMap((item) => ['local', 'remote', 'base'].flatMap((field) => {
+      const value = item?.[field]
+      return Array.isArray(value) ? value : value && typeof value === 'object' ? [value] : []
+    }))
+    if (conflictNotes.length) {
+      payload.sl_archived_quick_notes = mergeRetiredQuickNotes(payload.sl_archived_quick_notes, conflictNotes)
+      changed = true
+    }
+    const originalLength = payload.conflicts.length
+    payload.conflicts = payload.conflicts.filter((item) => item?.entityType !== 'Note' && item?.key !== 'sl_quick_notes')
+    if (payload.conflicts.length !== originalLength) {
+      changed = true
+    }
+    for (const conflict of payload.conflicts) {
+      for (const field of ['local', 'remote', 'base']) {
+        const value = conflict?.[field]
+        if (value?.sourceType !== 'note') continue
+        conflict[field] = { ...value, sourceType: '', sourceId: '', relationId: '', updatedAt: new Date().toISOString() }
+        changed = true
+      }
+    }
+    if (changed) {
+      payload.signature = ''
+    }
+  }
+  if (clearRetiredNotesFromDomainValues(payload)) changed = true
+  if (clearRetiredNotesFromDomainValues(payload.values)) changed = true
+  if (clearRetiredNotesFromManifest(payload)) changed = true
+  if (clearRetiredNotesFromManifest(payload.baseline)) changed = true
+  if (clearRetiredNotesFromManifest(payload.meta)) changed = true
+  if (clearRetiredNotesFromManifest(payload.meta?.baseline)) changed = true
+  return changed
+}
+
+/** Remove retired note data and relation metadata from every saved account snapshot. */
+export async function purgeRetiredNotesFromAccountData() {
+  try {
+    if (localStorage.getItem(RETIRED_NOTES_PURGE_KEY) === '1') return 0
+  } catch { /* Continue: storage may be unavailable while the account vault is readable. */ }
+  const db = await openAccountVault()
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction('accounts', 'readwrite')
+    const store = tx.objectStore('accounts')
+    const request = store.openCursor()
+    let changedRecords = 0
+    request.onsuccess = () => {
+      const cursor = request.result
+      if (!cursor) return
+      const record = cursor.value
+      if (clearRetiredNotesFromAccountRecord(record)) {
+        cursor.update(record)
+        changedRecords++
+      }
+      cursor.continue()
+    }
+    request.onerror = () => { try { tx.abort() } catch {} }
+    tx.oncomplete = () => {
+      db.close()
+      try { localStorage.setItem(RETIRED_NOTES_PURGE_KEY, '1') } catch { /* The completed IDB migration is still safe to repeat. */ }
+      resolve(changedRecords)
+    }
+    tx.onerror = tx.onabort = () => {
+      db.close()
+      reject(new Error('无法清理账号本机副本中的退役笔记数据。'))
+    }
+  })
+}
+
 export async function accountLocalSnapshot(id, values = undefined) {
   const db = await openAccountVault()
   try {
@@ -77,6 +226,20 @@ export async function accountLocalSnapshot(id, values = undefined) {
     })
   } finally { db.close() }
 }
+
+/** Remove all saved account values and conflict/rollback snapshots from this device. */
+export async function clearAccountLocalData() {
+  const db = await openAccountVault()
+  try {
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction('accounts', 'readwrite')
+      tx.objectStore('accounts').clear()
+      tx.oncomplete = resolve
+      tx.onerror = tx.onabort = () => reject(tx.error || new Error('无法清理账号本机副本。'))
+    })
+    return true
+  } finally { db.close() }
+}
 export async function recoverAccountDataSwitch() {
   const raw = localStorage.getItem(ACCOUNT_SWITCH_MARKER_KEY)
   if (!raw) return { ok: true, recovered: false }
@@ -87,7 +250,7 @@ export async function recoverAccountDataSwitch() {
       const values = await accountLocalSnapshot(marker.from)
       if (!values) throw new Error('找不到账号切换前的本机副本。')
       const { restoreStoredValues } = await import('./store/cloudAccess.js')
-      await restoreStoredValues(validateSyncPayload(values), { markChanged: false })
+      await restoreStoredValues({ ...validateSyncPayload(values), ...localAccountStateFromSnapshot(values) }, { markChanged: false })
       setAccountDataOwner(marker.from)
     }
     localStorage.removeItem(ACCOUNT_SWITCH_MARKER_KEY)
@@ -134,14 +297,14 @@ export async function prepareAccountLocalData(id, getCurrentValues, isCurrent = 
     const from = readAccountDataOwner()
     if (!from || from === id) { setAccountDataOwner(id); return true }
     // 必须先持久化旧账号离线改动，随后才载入目标账号；不能把旧账号记录推给新账号。
-    await accountLocalSnapshot(from, await getCurrentValues())
+    await accountLocalSnapshot(from, { ...(await getCurrentValues()), __localAccountState: readLocalAccountState() })
     const saved = await accountLocalSnapshot(id)
     const target = saved ? validateSyncPayload(saved) : accountDefaultValues()
     assertLock()
     if (!isCurrent()) return false
     localStorage.setItem(ACCOUNT_SWITCH_MARKER_KEY, JSON.stringify({ from, to: id }))
     const { restoreStoredValues } = await import('./store/cloudAccess.js')
-    await restoreStoredValues(target, { markChanged: false })
+    await restoreStoredValues({ ...target, ...localAccountStateFromSnapshot(saved) }, { markChanged: false })
     assertLock()
     setAccountDataOwner(id)
     localStorage.removeItem(ACCOUNT_SWITCH_MARKER_KEY)

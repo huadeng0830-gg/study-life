@@ -13,6 +13,7 @@ export const DEFAULT_FOCUS_SETTINGS = Object.freeze({
 const QUICK_TIMES_LIMIT = 4
 const MIN_FOCUS_MINUTES = 5
 const MAX_FOCUS_MINUTES = 180
+const STALE_FOCUS_GRACE_SECONDS = 60 * 60
 const MAX_RECENT_TEMPORARIES = 3
 
 function isFocusType(value) {
@@ -115,6 +116,21 @@ export function focusPlannedSeconds(session) {
   return active ? Math.max(1, active.plannedMinutes) * 60 : 0
 }
 
+/** A running focus timer left open over an hour beyond its plan is stale on re-entry. */
+export function isStaleActiveSession(session, now = Date.now()) {
+  const active = normalizeActiveSession(session)
+  if (!active || active.pausedAt) return false
+  return focusActualSeconds(active, now) > focusPlannedSeconds(active) + STALE_FOCUS_GRACE_SECONDS
+}
+
+export function finalizeStaleActiveSession(session, now = Date.now()) {
+  const active = normalizeActiveSession(session)
+  if (!active || !isStaleActiveSession(active, now)) return null
+  const startedAt = Date.parse(active.startedAt)
+  const endedAt = new Date(startedAt + focusPlannedSeconds(active) * 1000 + active.pausedDurationSeconds * 1000).toISOString()
+  return buildFocusSession(active, endedAt, 'completed')
+}
+
 export function focusRemainingSeconds(session, now = Date.now()) {
   return Math.max(0, focusPlannedSeconds(session) - focusActualSeconds(session, now))
 }
@@ -150,6 +166,9 @@ export function buildFocusSession(active, endedAt = new Date().toISOString(), st
   }
   const planned = normalized.plannedMinutes * 60
   const safeStatus = Number.isFinite(Number(status)) || !status ? (actual >= planned ? 'completed' : 'stopped') : status
+  // Keep deliberate overtime in the saved session. Stale overnight sessions are
+  // finalized at their planned end by finalizeStaleActiveSession before reaching here.
+  const recordedSeconds = actual
   return {
     id: normalized.sessionId,
     sessionId: normalized.sessionId,
@@ -158,7 +177,7 @@ export function buildFocusSession(active, endedAt = new Date().toISOString(), st
     todoId: normalized.todoId,
     courseId: normalized.courseId,
     plannedMinutes: normalized.plannedMinutes,
-    actualFocusSeconds: actual,
+    actualFocusSeconds: recordedSeconds,
     startedAt: normalized.startedAt,
     endedAt,
     pausedDuration: pausedDurationSeconds,

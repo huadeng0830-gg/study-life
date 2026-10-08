@@ -1,4 +1,4 @@
-// Todoist / Notion / Reminders CSV import. This shares the bill importer’s
+// Todoist / Notion / Reminders CSV import for tasks and events. This shares the bill importer’s
 // encoding, RFC 4180 parser, and bounded header scan so UTF-8/GBK exports and
 // preamble rows behave consistently across importers.
 import { decodeBillText, findHeader, parseCsv, splitDateTime } from './ledgerBillImport.js'
@@ -6,8 +6,8 @@ import { decodeBillText, findHeader, parseCsv, splitDateTime } from './ledgerBil
 const MAX_IMPORT_ROWS = 2000
 
 const ALIASES = {
-  id: ['id', 'task id', 'reminder id', 'event id', 'note id', 'uuid', '标识', '编号'],
-  title: ['task name', 'title', 'name', 'subject', 'event', 'event name', 'reminder', 'content', '事项', '待办', '任务', '标题', '名称', '日程', '活动', '笔记'],
+  id: ['id', 'task id', 'reminder id', 'event id', 'uuid', '标识', '编号'],
+  title: ['task name', 'title', 'name', 'subject', 'event', 'event name', 'reminder', 'content', '事项', '待办', '任务', '标题', '名称', '日程', '活动'],
   body: ['description', 'notes', 'note', 'body', 'text', 'content', 'details', 'memo', '正文', '内容', '文本', '备注', '说明'],
   date: ['due date', 'deadline', 'target date', 'scheduled date', 'date', 'start date', '日期', '截止日期', '到期日', '提醒日期', '开始日期'],
   time: ['due time', 'start time', 'time', '时间', '提醒时间'],
@@ -147,28 +147,13 @@ function parseRecord(kind, row, map) {
     }
   }
 
-  if (kind === 'notes') {
-    const content = body || titleValue
-    if (!content.trim()) return null
-    const inferredTitle = titleValue || content.split(/\r?\n/).map((line) => line.trim()).find(Boolean) || '未命名笔记'
-    return {
-      title: inferredTitle.slice(0, 42),
-      content,
-      courseName: course,
-      tags: cell(row, map, 'tags').split(/[;,，、]/).map((tag) => tag.trim()).filter(Boolean),
-      sourceText: content,
-      externalId,
-    }
-  }
   throw new Error('未知的 CSV 导入类型')
 }
 
 function stableRowKey(kind, row) {
-  const fields = kind === 'notes'
-    ? [row.title, row.content]
-    : kind === 'events'
-      ? [row.title, row.date, row.time, row.location, row.note]
-      : [row.title, row.dueDate, row.dueTime, row.note]
+  const fields = kind === 'events'
+    ? [row.title, row.date, row.time, row.location, row.note]
+    : [row.title, row.dueDate, row.dueTime, row.note]
   return `${kind}|${fields.map(normalizeKey).join('|')}`
 }
 
@@ -193,27 +178,28 @@ function existingKeys(kind, records) {
   const keys = new Set()
   for (const record of records || []) {
     if (record?.sourceType === 'domain-csv-import' && record.sourceId) keys.add(record.sourceId)
-    const row = kind === 'notes'
-      ? { title: record?.title, content: record?.content }
-      : kind === 'events'
-        ? { title: record?.title, date: record?.date, time: record?.time, location: record?.location, note: record?.note }
-        : { title: record?.title, dueDate: record?.dueDate, dueTime: record?.dueTime, note: record?.note }
+    const row = kind === 'events'
+      ? { title: record?.title, date: record?.date, time: record?.time, location: record?.location, note: record?.note }
+      : { title: record?.title, dueDate: record?.dueDate, dueTime: record?.dueTime, note: record?.note }
     if (row.title) keys.add(stableRowKey(kind, row))
   }
   return keys
 }
 
 /**
- * Decode, scan for a header within the first 40 rows, map common task/event/note
+ * Decode, scan for a header within the first 40 rows, map common task/event
  * exports, and suppress duplicates already in the app or repeated in the file.
  */
 export function parseDomainCsvFile(arrayBuffer, { kind = 'tasks', records = [], maxRows = MAX_IMPORT_ROWS } = {}) {
-  if (!['tasks', 'events', 'notes'].includes(kind)) throw new Error('请选择待办、日程或笔记导入类型')
-  const table = parseCsv(decodeBillText(arrayBuffer))
+  if (!['tasks', 'events'].includes(kind)) throw new Error('请选择待办或日程导入类型')
+  const rowLimit = Math.max(1, Math.min(MAX_IMPORT_ROWS, Number(maxRows) || MAX_IMPORT_ROWS))
+  // The header scanner accepts at most 40 preamble rows. Keep enough room for
+  // that preamble, the header, and the full import limit, while the shared CSV
+  // parser avoids constructing rows beyond this bound.
+  const table = parseCsv(decodeBillText(arrayBuffer), { maxRows: 40 + rowLimit })
   const normalizedTable = table.map((row) => row.map(normalizeHeader))
   const titleAliases = HEADER_ALIASES.title
-  const bodyAliases = HEADER_ALIASES.body
-  const header = findHeader(normalizedTable, [kind === 'notes' ? [...titleAliases, ...bodyAliases] : titleAliases])
+  const header = findHeader(normalizedTable, [titleAliases])
   if (!header) {
     return { rows: [], total: 0, headerRow: -1, truncated: false, skipped: { invalid: 0, duplicates: 0 }, error: '前 40 行中没有找到可识别的标题/内容表头。' }
   }
@@ -222,7 +208,6 @@ export function parseDomainCsvFile(arrayBuffer, { kind = 'tasks', records = [], 
   const rows = []
   const seen = new Set(known)
   const skipped = { invalid: 0, duplicates: 0 }
-  const rowLimit = Math.max(1, Math.min(MAX_IMPORT_ROWS, Number(maxRows) || MAX_IMPORT_ROWS))
   let nonEmptyRows = 0
 
   for (let index = header.index + 1; index < table.length; index += 1) {
@@ -242,7 +227,7 @@ export function parseDomainCsvFile(arrayBuffer, { kind = 'tasks', records = [], 
     seen.add(contentKey)
     seen.add(sourceId)
     if (externalKey) seen.add(externalKey)
-    const { externalId, ...data } = parsed
+    const { externalId: _externalId, ...data } = parsed
     rows.push({ ...data, createdFrom: 'csv-import', sourceType: 'domain-csv-import', sourceId })
   }
 
@@ -250,7 +235,7 @@ export function parseDomainCsvFile(arrayBuffer, { kind = 'tasks', records = [], 
     rows,
     total: rows.length,
     headerRow: header.index,
-    truncated: nonEmptyRows > rowLimit,
+    truncated: table.truncated || nonEmptyRows > rowLimit,
     skipped,
   }
 }

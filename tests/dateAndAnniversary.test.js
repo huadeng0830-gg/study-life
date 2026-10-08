@@ -2,7 +2,6 @@
 import { describe, expect, it } from 'vitest'
 import { createdDateKey, timestampOf } from '../src/composables/settingsPolicy.js'
 import { buildLedgerIndex, computeFrequentFromIndex, ledgerMonthCategoryTotalsFromIndex, ledgerMonthIncomeFromIndex, ledgerPeriodStatsFromIndex, ledgerWeekTotalFromIndex } from '../src/composables/ledger.js'
-import { daySnapshot } from '../src/composables/retrospective.js'
 import { builtInFestivalTable, festiveFor, normalizeFestiveConfig } from '../src/composables/festive.js'
 import { monthMoodSummary, weatherOfMood } from '../src/composables/mood.js'
 
@@ -87,23 +86,6 @@ describe('账本「常记」的时间加权', () => {
     ])
     const [entry] = computeFrequentFromIndex(index, { pinned: [], hidden: [] }, 6, NOW)
     expect(entry.last).toBe(Date.parse('2026-08-28T08:00:00'))
-  })
-})
-
-describe('回顾里的笔记日期', () => {
-  it('数字型 createdAt 的笔记会算进正确的那一天', () => {
-    const stamp = Date.parse('2026-03-02T20:30:00.000Z')
-    const data = { notes: [{ id: 'x', title: '一段想法', createdAt: stamp }] }
-    const day = createdDateKey(stamp)
-    expect(day).not.toBe('')
-    expect(daySnapshot(day, data).notes).toHaveLength(1)
-  })
-
-  it('数字型 createdAt 不再让笔记从所有日期里消失', () => {
-    const data = { notes: [{ id: 'x', createdAt: 1756000000000 }] }
-    // 旧实现下 slice(0,10) 取的是 "1756000000"，任何一天都匹配不到。
-    expect(daySnapshot('1970-01-01', data).notes).toHaveLength(0)
-    expect(daySnapshot(createdDateKey(1756000000000), data).notes).toHaveLength(1)
   })
 })
 

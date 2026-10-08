@@ -355,8 +355,8 @@ async function onCellKeydown(event, day, periodIndex) {
 }
 .tt-head.today { background: var(--primary-soft); color: var(--primary); }
 .today-tag { margin-left: 4px; font-size: var(--fs-11); background: var(--primary); color: var(--on-primary, #fff); padding: 1px 6px; border-radius: var(--radius-pill); vertical-align: 2px; }
-.exception-tag { display: block; width: fit-content; margin: 3px auto 0; padding: 1px 5px; color: #b13f3f; font-size: var(--fs-9); font-weight: var(--fw-800); border-radius: var(--radius-5); background: #feecec; }
-.exception-tag.makeup { color: #6b3fd4; background: #f1ebff; }
+.exception-tag { display: block; width: fit-content; margin: 3px auto 0; padding: 1px 5px; color: var(--danger); font-size: var(--fs-9); font-weight: var(--fw-800); border-radius: var(--radius-5); background: var(--danger-soft); }
+.exception-tag.makeup { color: var(--primary); background: var(--primary-soft); }
 .tt-period {
   display: flex;
   flex-direction: column;
@@ -378,7 +378,7 @@ async function onCellKeydown(event, day, periodIndex) {
   transition: background var(--dur-fast) var(--ease-standard);
 }
 .tt-cell:hover { background: var(--primary-soft); }
-.tt-cell.isToday { background: #f6f9ff; }
+.tt-cell.isToday { background: color-mix(in srgb, var(--primary) 6%, var(--bg-tint)); }
 .course {
   z-index: 2;
   margin: 2px;
@@ -420,9 +420,9 @@ async function onCellKeydown(event, day, periodIndex) {
 .skin-timeline .course { margin: 4px 2px; border-left-width: 3px; border-radius: var(--radius-6); }
 
 .warn-banner {
-  background: #fef3c7;
-  border: 1px solid #fcd34d;
-  color: #92400e;
+  background: color-mix(in srgb, var(--warning) 10%, var(--card));
+  border: 1px solid color-mix(in srgb, var(--warning) 35%, var(--card));
+  color: var(--warning);
   border-radius: var(--radius-10);
   padding: 10px 16px;
   font-size: var(--fs-14);

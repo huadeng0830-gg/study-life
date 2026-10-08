@@ -17,12 +17,6 @@ function toDate(value) {
   return Number.isNaN(date.getTime()) ? null : date
 }
 
-function monthDayOf(value) {
-  const date = toDate(value)
-  if (!date) return ''
-  return `${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`
-}
-
 function fullDateOf(value) {
   const date = toDate(value)
   if (!date) return ''

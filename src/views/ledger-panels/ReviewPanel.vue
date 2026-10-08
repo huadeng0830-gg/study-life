@@ -4,6 +4,7 @@ import EmptyState from '../../components/EmptyState.vue'
 import { catInfo } from '../../composables/ledger.js'
 import { buildMonthlyTrendScale, monthlyTrendBarGeometry } from '../../composables/monthlyTrendChart.js'
 import { moneyHero, moneyRow, moneyWithCurrency } from '../../utils/formatters.js'
+import { formatNumber } from '../../composables/intlFormatters.js'
 
 const props = defineProps({
   reviewLabel: { type: String, default: '' },
@@ -86,7 +87,7 @@ function compactTrendTick(value) {
   const unit = divisor === 100_000_000 ? '亿' : divisor === 10_000 ? '万' : ''
   const scaled = value / divisor
   const digits = Math.abs(scaled) < 10 ? 1 : 0
-  const formatted = new Intl.NumberFormat('zh-CN', { maximumFractionDigits: digits }).format(scaled)
+  const formatted = formatNumber(scaled, { maximumFractionDigits: digits })
   return `${prefix}${formatted}${unit}`
 }
 
@@ -593,12 +594,12 @@ function cellLabel(cell) {
 .cal-cell.blank {
   cursor:default}
 .cal-cell i {
-  background:#c9d4f2;
+  background:color-mix(in srgb, var(--primary) 30%, var(--card));
   border-radius:var(--radius-circle);
   width:6px;
   height:6px}
 .cal-cell.l2 i {
-  background:#8ea6e8;
+  background:color-mix(in srgb, var(--primary) 60%, var(--card));
   width:7px;
   height:7px}
 .cal-cell.l3 i {

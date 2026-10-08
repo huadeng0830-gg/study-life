@@ -18,6 +18,7 @@ import {
   MATCH_RANKS,
   focusSearchDate,
   focusSearchMeta,
+  focusSearchTarget,
   focusSearchTitle,
   matchRank,
   matchesText,
@@ -202,7 +203,6 @@ afterEach(() => {
 const EMPTY_SEED = {
   sl_tasks: [],
   sl_events: [],
-  sl_quick_notes: [],
   sl_exams: [],
   sl_bills: [],
   sl_expenses: [],
@@ -316,6 +316,11 @@ const FOCUS_SEED = {
 }
 
 describe('功能 34：专注记录能被搜到', () => {
+  it('用任务 ID 索引选择专注记录落点，关联待办不存在时回首页', () => {
+    expect(focusSearchTarget({ todoId: 't1' }, new Set(['t1']))).toEqual({ path: '/tasks', query: { focus: 't1' } })
+    expect(focusSearchTarget({ todoId: 'missing' }, new Set(['t1']))).toEqual({ path: '/' })
+  })
+
   it('按标题搜得到，出现在「专注记录」分组里', async () => {
     const { settle } = await mountPanel(FOCUS_SEED)
     await typeSearch('高数习题', settle)
@@ -447,7 +452,7 @@ describe('功能 32：按类型筛选', () => {
     // 隔壁那条同样点「待办」的用例就先 typeSearch，这里对齐。
     await typeSearch('高数', settle)
     const all = chips()
-    expect(all.length, '芯片数应当是「全部」+ 九个类型').toBe(10)
+    expect(all.length, '芯片数应当是「全部」+ 八个类型').toBe(9)
     expect(all.every((el) => el.tagName === 'BUTTON')).toBe(true)
     expect(all.every((el) => el.getAttribute('aria-pressed') !== null)).toBe(true)
     expect(chipOf('全部').getAttribute('aria-pressed')).toBe('true')

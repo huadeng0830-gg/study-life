@@ -7,34 +7,28 @@
 // 3. 更早的版本逐条下移，最多保留 3 个版本，超出即删除。
 export const RELEASE_UPDATES = Object.freeze([
   {
-    version: '2026年10月08日-版本4',
-    signature: 'd205050f3f',
+    version: '2026年10月08日-版本7',
+    signature: '1fb16c5171',
     notes: [
-      '修复网页、手机与 Windows 桌面版账号配置漏打包，并在构建和发布阶段增加校验',
-      '根据首页实际内容宽度调整‘今天’页面布局，避免桌面窄窗口下挤压',
+      '修复搜索、提醒、专注计时和账单周期边界问题',
+      '加固账号登出隔离、同步、笔记归档与云存储权限',
+      '改进无障碍、备份恢复、课程导入和大数据量存储',
     ],
   },
   {
-    version: '2026年10月08日-版本3',
-    signature: 'df8e00dddf',
+    version: '2026年10月08日-版本6',
+    signature: 'c3af18d0d4',
     notes: [
-      'Windows 更新器随包校验，缓存与临时文件跟随可选安装目录',
-      'v* 标签自动构建 Windows 安装包并发布应用内更新元数据',
-      '桌面版本号和 README 版本区块随发布说明自动同步',
-      '齐行项目协作支持成员邀请、任务分配、成果评审、里程碑与会议',
-      '已安装 1.0.3 的用户需手动安装 1.0.4 一次，之后可在应用内更新',
-      '好友协作页完善确认、错误播报、标签切换与窄屏适配',
+      '修复搜索、同步、专注计时、提醒和课程数据一致性问题',
+      '加固账号数据隔离、备份验证与发布安全检查',
     ],
   },
   {
-    version: '2026年10月08日-版本2',
-    signature: 'f90cc289e2',
+    version: '2026年10月08日-版本5',
+    signature: '5f5088cc3b',
     notes: [
-      '调整本地备份快照、校验与恢复范围处理，保留旧版备份兼容',
-      '集中首页模块顺序与显示状态规则，保留用户已有布局偏好',
-      '拆出农历纪念日编辑模型，继续保持存储结构、同步标识和无效日期提示一致',
-      '集中专注设置草稿、时长校验与保存组装，保留通知权限交互',
-      '统一快速记账分摊预览的计算与展示，避免表单口径出现两套结果',
+      '移除笔记功能并清理旧笔记数据',
+      '改善移动端加载、触控体验和交互连贯性，修复日期与同步问题',
     ],
   },
 ])
@@ -43,7 +37,7 @@ export const RELEASE_UPDATES = Object.freeze([
 export const RELEASE_VERSION = RELEASE_UPDATES[0].version
 
 // 与第一条签名保持一致，交给 vite.config.js 校验源码一致性。
-export const RELEASE_SOURCE_SIGNATURE = 'd205050f3f'
+export const RELEASE_SOURCE_SIGNATURE = '1fb16c5171'
 
 // 兼容旧引用：当前版本的更新说明。
 export const RELEASE_NOTES = RELEASE_UPDATES[0].notes

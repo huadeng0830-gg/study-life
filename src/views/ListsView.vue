@@ -19,7 +19,7 @@ const editingListId = ref(null)
 const listName = ref('')
 const listType = ref('general')
 const listError = ref('')
-// 两个弹窗各只有一个必填字段（清单名称 / 物品名称），所以不需要 EventsView / NotesView 那种
+// 两个弹窗各只有一个必填字段（清单名称 / 物品名称），所以不需要 EventsView 那种
 // errorField 状态：aria-invalid 直接跟着错误字符串走，不存在「错误出在 A 字段却标了 B」的空间。
 // 但 role="alert" 与「把焦点移回去」是必需的——否则读屏用户点保存后什么都听不到。
 const listNameInput = ref(null)
@@ -70,11 +70,6 @@ const listSummaryById = computed(() => new Map(lists.value.map((list) => [list.i
 
 function listProgress(list) {
   return listSummaryById.value.get(list?.id) ?? { count: 0, done: 0, percent: 0 }
-}
-
-function listUpdatedText(list) {
-  if (!list.items?.length) return '还没有条目'
-  return `${listProgress(list).done} / ${listProgress(list).count} 已完成`
 }
 
 function updatedAgoText(list) {
@@ -365,7 +360,7 @@ function showToast(message, { type = 'info', actionLabel = '', undoFn = null, vi
         <!-- 行内快速添加没有可见 label（只有 placeholder），加 label 会改变布局，所以用 aria-label 给名称。 -->
         <form class="quick-add" @submit.prevent="addQuickItem">
           <input v-model="quickName" aria-label="快速添加一项" placeholder="快速添加一项，例如：带充电器" />
-          <button class="btn btn-primary" :disabled="!quickName.trim()">添加</button>
+          <button class="btn btn-primary" type="submit" :disabled="!quickName.trim()">添加</button>
           <button type="button" class="btn btn-ghost" @click="openAddItem">详细添加</button>
         </form>
 
@@ -403,6 +398,7 @@ function showToast(message, { type = 'info', actionLabel = '', undoFn = null, vi
                 class="item-check"
                 :class="{ checked: item.done }"
                 :aria-label="item.done ? '标记为未完成' : '标记为已完成'"
+                :aria-pressed="item.done"
                 @click="toggleItem($event, item.id)"
               >{{ item.done ? '✓' : '' }}</button>
             </article>
@@ -471,7 +467,7 @@ function showToast(message, { type = 'info', actionLabel = '', undoFn = null, vi
 .tab-icon { font-style: normal; font-size: var(--fs-14); }
 .list-tab b { overflow: hidden; font-size: var(--fs-13-5); font-weight: var(--fw-700); text-overflow: ellipsis; white-space: nowrap; }
 .list-tab small { color: var(--ink-soft); font-size: var(--fs-11); font-variant-numeric: tabular-nums; }
-.tab-progress { width: 100%; height: 4px; border-radius: var(--radius-pill); background: #eef1f6; overflow: hidden; }
+.tab-progress { width: 100%; height: 4px; border-radius: var(--radius-pill); background: var(--bg-tint); overflow: hidden; }
 .tab-progress i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--primary), var(--brand-grad-b)); transition: width var(--dur-slow) var(--ease-standard); }
 .list-tab.active { color: var(--primary); border-color: var(--primary); box-shadow: inset 0 0 0 1px var(--primary), var(--shadow-sm); background: var(--primary-soft); }
 .shopping-card { padding: 0; overflow: hidden; }
@@ -531,6 +527,7 @@ function showToast(message, { type = 'info', actionLabel = '', undoFn = null, vi
 .actions .btn-danger { margin-right: auto; }
 @media (max-width: 900px) {
   .list-sidebar { position: static; }
+  .item-check { width: 44px; height: 44px; flex-basis: 44px; }
 }
 @media (max-width: 760px) {
   .page-head { align-items: flex-start; flex-direction: column; }

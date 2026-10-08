@@ -13,6 +13,7 @@
  */
 import { nextTick, ref } from 'vue'
 import { TASK_BOARD_COLUMNS } from '../../composables/taskViews.js'
+import VirtualList from '../VirtualList.vue'
 
 const props = defineProps({
   /** `{ pending: [], in_progress: [], completed: [] }`——由 taskViews.js 的 buildTaskBoard 产出。 */
@@ -30,8 +31,13 @@ const props = defineProps({
 const emit = defineEmits(['open', 'toggle', 'archive', 'remove', 'set-status'])
 
 const root = ref(null)
+const listRefs = new Map()
 
 const listOf = (columnKey) => (Array.isArray(props.columns?.[columnKey]) ? props.columns[columnKey] : [])
+function bindListRef(columnKey, instance) {
+  if (instance) listRefs.set(columnKey, instance)
+  else listRefs.delete(columnKey)
+}
 
 /** 焦点坐标（列序号 + 列内序号）。方向键在**列内**上下、在**列间**左右，和看板的空间感一致。 */
 function keyOf(columnIndex, itemIndex) {
@@ -39,11 +45,20 @@ function keyOf(columnIndex, itemIndex) {
 }
 
 /** 把焦点移到目标卡片的主按钮；越界（空列 / 首尾）就地不动。 */
-function focusCard(columnIndex, itemIndex) {
-  const list = listOf(TASK_BOARD_COLUMNS[columnIndex]?.key)
+async function focusCard(columnIndex, itemIndex) {
+  const columnKey = TASK_BOARD_COLUMNS[columnIndex]?.key
+  const list = listOf(columnKey)
   if (!list.length) return false
   const clamped = Math.min(Math.max(itemIndex, 0), list.length - 1)
-  const target = root.value?.querySelector(`[data-board-key="${keyOf(columnIndex, clamped)}"]`)
+  const selector = `[data-board-key="${keyOf(columnIndex, clamped)}"]`
+  let target = root.value?.querySelector(selector)
+  if (!target) {
+    listRefs.get(columnKey)?.scrollToIndex(clamped, 'auto')
+    // 虚拟列表先滚到目标行，再挂载它；等这一帧和 Vue 更新后再聚焦。
+    await new Promise((resolve) => requestAnimationFrame(resolve))
+    await nextTick()
+    target = root.value?.querySelector(selector)
+  }
   if (!target) return false
   target.focus()
   return true
@@ -70,8 +85,9 @@ function onKeydown(event) {
     target = delta[0] > 0 ? nextColumn + 1 : nextColumn - 1
     if (target < 0 || target >= TASK_BOARD_COLUMNS.length) return
   }
-  if (!focusCard(target, itemIndex + delta[1])) return
+  if (!listOf(TASK_BOARD_COLUMNS[target].key).length) return
   event.preventDefault()
+  void focusCard(target, itemIndex + delta[1])
 }
 
 function toggleLabel(task) {
@@ -102,13 +118,23 @@ async function setTaskStatus(task, status) {
 
       <p v-if="!listOf(column.key).length" class="board-col-empty">这一列还没有待办</p>
 
-      <article
-        v-for="(task, itemIndex) in listOf(column.key)"
-        :key="task.id"
-        class="board-card card"
-        :class="{ done: statusOf(task) === 'completed', urgent: task.priority === 'high' }"
-        :data-focus-id="task.id"
+      <VirtualList
+        v-else
+        :ref="(instance) => bindListRef(column.key, instance)"
+        :items="listOf(column.key)"
+        class="board-task-list"
+        :estimated-height="142"
+        :gap="8"
+        :threshold="18"
+        :overscan="3"
       >
+        <template #default="{ item: task, index: itemIndex }">
+          <article
+            :key="task.id"
+            class="board-card card"
+            :class="{ done: statusOf(task) === 'completed', urgent: task.priority === 'high' }"
+            :data-focus-id="task.id"
+          >
         <span v-if="task.priority === 'high'" class="board-urgent" aria-hidden="true"></span>
         <!-- 卡片主体是**真按钮**而不是 role="button" 的 div：div 里再放「完成 / 编辑 / 删除」
              这些真按钮，按 ARIA 规范后代语义会被 presentational 吃掉（键盘可达性守卫的第十九条）。 -->
@@ -153,7 +179,9 @@ async function setTaskStatus(task, status) {
           <button type="button" class="link-btn" aria-label="编辑待办" title="编辑待办" @click="emit('open', task)">✎</button>
           <button type="button" class="link-btn danger" aria-label="删除待办" title="删除待办" @click="emit('remove', task)">🗑</button>
         </div>
-      </article>
+          </article>
+        </template>
+      </VirtualList>
     </section>
   </div>
 </template>
@@ -197,6 +225,11 @@ async function setTaskStatus(task, status) {
   padding: 6px 2px;
   color: var(--ink-faint);
   font-size: var(--fs-11-5);
+}
+:deep(.board-task-list) {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 .board-card {
   position: relative;

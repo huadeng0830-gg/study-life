@@ -2,10 +2,12 @@ import { describe, expect, it } from 'vitest'
 import {
   DEFAULT_FOCUS_SETTINGS,
   buildFocusSession,
+  finalizeStaleActiveSession,
   focusActualSeconds,
   focusDisplayState,
   focusOvertimeSeconds,
   focusRemainingSeconds,
+  isStaleActiveSession,
   normalizeActiveSession,
   normalizeFocusSession,
   normalizeFocusSettings,
@@ -88,6 +90,32 @@ describe('focusTimer 计时', () => {
     expect(state.hasCompletedPlan).toBe(true)
     expect(state.overtimeSeconds).toBe(180)
     expect(state.remainingSeconds).toBe(0)
+  })
+
+  it('运行中的隔夜会话按计划时长收尾，暂停会话不会误判为陈旧', () => {
+    const session = {
+      sessionId: 'overnight', focusType: 'free', plannedMinutes: 25,
+      startedAt: '2026-08-30T10:00:00.000Z', segmentStartedAt: '2026-08-30T10:00:00.000Z',
+      elapsedSeconds: 0, pausedAt: null, pausedDurationSeconds: 0,
+    }
+    expect(isStaleActiveSession(session, '2026-08-30T21:00:00.000Z')).toBe(true)
+    expect(isStaleActiveSession({ ...session, pausedAt: '2026-08-30T10:25:00.000Z', elapsedSeconds: 1500 }, '2026-08-30T21:00:00.000Z')).toBe(false)
+    expect(buildFocusSession(session, '2026-08-30T21:00:00.000Z').actualFocusSeconds).toBe(39600)
+    expect(finalizeStaleActiveSession(session, '2026-08-30T21:00:00.000Z')).toMatchObject({
+      actualFocusSeconds: 1500,
+      endedAt: '2026-08-30T10:25:00.000Z',
+      status: 'completed',
+    })
+    expect(finalizeStaleActiveSession({ ...session, pausedAt: '2026-08-30T10:25:00.000Z' }, '2026-08-30T21:00:00.000Z')).toBeNull()
+  })
+
+  it('正常保存的专注会保留计划时长之外的主动加班', () => {
+    const session = normalizeActiveSession({
+      sessionId: 'overtime', focusType: 'free', plannedMinutes: 25,
+      startedAt: '2026-08-30T20:00:00.000Z', segmentStartedAt: '2026-08-30T20:00:00.000Z',
+      elapsedSeconds: 0, status: 'running',
+    })
+    expect(buildFocusSession(session, '2026-08-30T20:50:00.000Z').actualFocusSeconds).toBe(3000)
   })
 
   it('兼容旧版 active 结构并自动判断 focusType', () => {

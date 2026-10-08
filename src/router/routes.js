@@ -25,7 +25,6 @@ export const ROUTE_COMPONENT_NAMES = Object.freeze({
   '/lists': 'ListsView',
   '/bills': 'LedgerView',
   '/review': 'WeeklyReviewView',
-  '/notes': 'NotesView',
   '/together': 'TogetherView',
   '/projects': 'ProjectsView',
 })
@@ -68,7 +67,8 @@ export const routes = [
   { path: '/lists', name: 'lists', meta: { title: '清单' }, component: asyncRoute('/lists') },
   { path: '/bills', name: 'bills', meta: { title: '账本' }, component: asyncRoute('/bills') },
   { path: '/review', name: 'review', meta: { title: '回顾' }, component: asyncRoute('/review') },
-  { path: '/notes', name: 'notes', meta: { title: '笔记' }, component: asyncRoute('/notes') },
+  // Keep old bookmarks usable after the standalone Notes page was retired.
+  { path: '/notes', redirect: '/' },
   { path: '/together', name: 'together', meta: { title: '一起约' }, component: asyncRoute('/together') },
   { path: '/projects', name: 'projects', meta: { title: '齐行' }, component: asyncRoute('/projects') },
   { path: '/:pathMatch(.*)*', name: 'not-found', meta: { title: '页面不存在' }, component: NotFoundView },

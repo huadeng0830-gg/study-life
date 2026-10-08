@@ -7,7 +7,6 @@ export const BACKUP_STORAGE_KEYS = Object.freeze({
   countdowns: 'sl_exams',
   tasks: 'sl_tasks',
   events: 'sl_events',
-  quickNotes: 'sl_quick_notes',
   quickRecordSettings: 'sl_quick_record_settings',
   captureEnabled: 'sl_capture_enabled',
   focusSessions: 'sl_focus_sessions',
@@ -42,13 +41,16 @@ export const BACKUP_STORAGE_KEYS = Object.freeze({
   uiLanguage: 'sl_ui_language',
   moodLog: 'sl_mood_log',
   reminderLog: 'sl_reminder_log',
+  activeFocus: 'sl_focus_active',
+  taskCenterLog: 'sl_task_center_log',
+  archivedQuickNotes: 'sl_archived_quick_notes',
 })
 
 /** 备份恢复预览分类；与账号同步协议解耦，范围由备份文件实际携带的字段决定。 */
 export const BACKUP_MODULES = Object.freeze([
   { key: 'courses', label: '课程与课表', keys: ['sl_courses', 'sl_course_templates', 'sl_timecfg', 'sl_semester', 'sl_schedule_exceptions', 'sl_schedule_note', 'sl_ocr_vocabulary', 'sl_course_checkins'] },
-  { key: 'tasks', label: '待办与快速记录', keys: ['sl_tasks', 'sl_events', 'sl_quick_notes', 'sl_quick_record_settings', 'sl_capture_enabled'] },
-  { key: 'focus', label: '专注记录', keys: ['sl_focus_sessions', 'sl_focus_settings'] },
+  { key: 'tasks', label: '待办与快速记录', keys: ['sl_tasks', 'sl_events', 'sl_quick_record_settings', 'sl_capture_enabled', 'sl_task_center_log', 'sl_archived_quick_notes'] },
+  { key: 'focus', label: '专注记录', keys: ['sl_focus_sessions', 'sl_focus_settings', 'sl_focus_active'] },
   { key: 'countdown', label: '重要日期', keys: ['sl_exams', 'sl_countdown_show_past'] },
   { key: 'checklists', label: '清单', keys: ['sl_checklists'] },
   { key: 'ledger', label: '账本', keys: ['sl_bills', 'sl_expenses', 'sl_ledger_categories', 'sl_ledger_freq', 'sl_ledger_fx', 'sl_ledger_budget', 'sl_ledger_templates'] },
@@ -59,9 +61,11 @@ export const BACKUP_MODULES = Object.freeze([
 
 function readStored(storage, key, fallback) {
   try {
-    return JSON.parse(storage.getItem(key)) ?? fallback
-  } catch {
-    return fallback
+    const raw = storage?.getItem(key)
+    if (raw === null || raw === undefined) return fallback
+    return JSON.parse(raw) ?? fallback
+  } catch (error) {
+    throw new Error(`无法备份本机数据 ${key}：JSON 内容损坏，已停止导出以保留原始数据。`, { cause: error })
   }
 }
 
@@ -77,7 +81,7 @@ function browserStorage() {
 export function createBackupSnapshot(storage = browserStorage()) {
   return {
     app: 'study-life',
-    version: 10,
+    version: 11,
     schema: 'study-life.backup/v1',
     exportedAt: new Date().toISOString(),
     data: {
@@ -85,7 +89,6 @@ export function createBackupSnapshot(storage = browserStorage()) {
       countdowns: readStored(storage, BACKUP_STORAGE_KEYS.countdowns, []),
       tasks: readStored(storage, BACKUP_STORAGE_KEYS.tasks, []),
       events: readStored(storage, BACKUP_STORAGE_KEYS.events, []),
-      quickNotes: readStored(storage, BACKUP_STORAGE_KEYS.quickNotes, []),
       quickRecordSettings: readStored(storage, BACKUP_STORAGE_KEYS.quickRecordSettings, { clipboardHint: true, recentTypes: [] }),
       captureEnabled: readStored(storage, BACKUP_STORAGE_KEYS.captureEnabled, true),
       focusSessions: readStored(storage, BACKUP_STORAGE_KEYS.focusSessions, []),
@@ -120,20 +123,43 @@ export function createBackupSnapshot(storage = browserStorage()) {
       uiLanguage: readStored(storage, BACKUP_STORAGE_KEYS.uiLanguage, 'zh'),
       moodLog: readStored(storage, BACKUP_STORAGE_KEYS.moodLog, {}),
       reminderLog: readStored(storage, BACKUP_STORAGE_KEYS.reminderLog, []),
+      activeFocus: readStored(storage, BACKUP_STORAGE_KEYS.activeFocus, null),
+      taskCenterLog: readStored(storage, BACKUP_STORAGE_KEYS.taskCenterLog, []),
+      archivedQuickNotes: readStored(storage, BACKUP_STORAGE_KEYS.archivedQuickNotes, []),
     },
   }
 }
 
 // 校验和固定基于紧凑 JSON：历史备份都是这么算的，改成缩进格式会让旧备份校验失败。
-async function backupChecksum(data) {
-  const bytes = new TextEncoder().encode(JSON.stringify(data))
+async function checksumSerializedJson(serialized) {
+  const bytes = new TextEncoder().encode(serialized)
   const digest = await crypto.subtle.digest('SHA-256', bytes)
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')
+}
+
+async function backupChecksum(data) {
+  return checksumSerializedJson(JSON.stringify(data))
 }
 
 /** 在导出可选附件后封存快照；返回新对象，不修改传入的快照。 */
 export async function completeBackupArchive(snapshot) {
   return { ...snapshot, checksum: await backupChecksum(snapshot.data) }
+}
+
+/**
+ * 给下载直接提供 Blob 分片：数据只序列化一次，避免「校验和 JSON + 完整归档 JSON」
+ * 同时在内存里保留两份大文本。返回数组可直接传给 Blob，无需先 join。
+ */
+export async function createBackupArchiveParts(snapshot) {
+  const serializedData = JSON.stringify(snapshot.data)
+  const checksum = await checksumSerializedJson(serializedData)
+  const { data: _data, checksum: _oldChecksum, ...metadata } = snapshot
+  const metadataJson = JSON.stringify(metadata)
+  return [
+    `${metadataJson.slice(0, -1)},"data":`,
+    serializedData,
+    `,"checksum":${JSON.stringify(checksum)}}`,
+  ]
 }
 
 function sanitizeWallpaperImages(value) {
@@ -146,7 +172,7 @@ function sanitizeWallpaperImages(value) {
 
 /** 校验并归一化导入内容，同时保留原文件实际携带的字段供恢复流程使用。 */
 export async function parseBackupArchive(value) {
-  if (!value || value.app !== 'study-life' || ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10].includes(value.version) || !value.data) {
+  if (!value || value.app !== 'study-life' || ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].includes(value.version) || !value.data) {
     throw new Error('这不是有效的控制台备份文件')
   }
   if (value.version >= 7 && value.schema !== 'study-life.backup/v1') {
@@ -172,7 +198,6 @@ export async function parseBackupArchive(value) {
       countdowns: data.countdowns,
       tasks: Array.isArray(data.tasks) ? data.tasks : [],
       events: Array.isArray(data.events) ? data.events : [],
-      quickNotes: Array.isArray(data.quickNotes) ? data.quickNotes : [],
       quickRecordSettings: data.quickRecordSettings && typeof data.quickRecordSettings === 'object' ? data.quickRecordSettings : { clipboardHint: true, recentTypes: [] },
       captureEnabled: typeof data.captureEnabled === 'boolean' ? data.captureEnabled : true,
       focusSessions: Array.isArray(data.focusSessions) ? data.focusSessions : [],
@@ -207,6 +232,9 @@ export async function parseBackupArchive(value) {
       uiLanguage: typeof data.uiLanguage === 'string' ? data.uiLanguage : 'zh',
       moodLog: data.moodLog && typeof data.moodLog === 'object' ? data.moodLog : {},
       reminderLog: Array.isArray(data.reminderLog) ? data.reminderLog : [],
+      activeFocus: data.activeFocus && typeof data.activeFocus === 'object' ? data.activeFocus : null,
+      taskCenterLog: Array.isArray(data.taskCenterLog) ? data.taskCenterLog : [],
+      archivedQuickNotes: Array.isArray(data.archivedQuickNotes) ? data.archivedQuickNotes : [],
       __wallpaper_images: sanitizeWallpaperImages(data.__wallpaper_images),
     },
   }

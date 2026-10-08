@@ -42,7 +42,6 @@ const SL_KEYS = [
   { key: 'sl_course_checkins', default: [] },
   { key: 'sl_tasks', default: [] },
   { key: 'sl_events', default: [] },
-  { key: 'sl_quick_notes', default: [] },
   { key: 'sl_quick_record_settings', default: { clipboardHint: true, recentTypes: [] } },
   { key: 'sl_capture_enabled', default: true },
   { key: 'sl_focus_sessions', default: [] },

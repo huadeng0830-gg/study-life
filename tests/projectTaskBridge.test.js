@@ -1,4 +1,4 @@
-import { ref } from 'vue'
+import { shallowRef, triggerRef } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const projectRequest = vi.hoisted(() => vi.fn())
@@ -13,16 +13,18 @@ import {
 } from '../src/composables/projectTaskBridge.js'
 
 function createDomain(initialTasks = []) {
-  const domain = { tasks: ref(initialTasks), createTask: vi.fn(), updateTask: vi.fn() }
+  const domain = { tasks: shallowRef(initialTasks), createTask: vi.fn(), updateTask: vi.fn() }
   domain.createTask.mockImplementation((data) => {
     const task = { id: `local-${domain.tasks.value.length + 1}`, done: false, status: 'pending', ...data }
     domain.tasks.value.push(task)
+    triggerRef(domain.tasks)
     return task
   })
   domain.updateTask.mockImplementation((id, data) => {
     const task = domain.tasks.value.find((item) => item.id === id)
     if (!task) return null
     Object.assign(task, data)
+    triggerRef(domain.tasks)
     return task
   })
   return domain

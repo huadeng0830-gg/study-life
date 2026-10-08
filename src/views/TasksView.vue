@@ -38,7 +38,6 @@ const sortKey = ref('due')
 const rescheduleTarget = ref(null)
 const rescheduleDate = ref('')
 const toast = ref({ open: false, message: '', type: 'info', actionLabel: '', undoFn: null, viewFn: null, duration: 3200 })
-const undoTimer = 0
 const openSwipeItemId = ref('')
 
 const {
@@ -59,6 +58,14 @@ const {
   confirmConflictSave,
   remove,
 } = useTaskEditor({ domain, tasks, courses, events: domain.events })
+
+watch(() => route.query.new, (value) => {
+  if (value !== '1') return
+  openAdd()
+  const query = { ...route.query }
+  delete query.new
+  void router.replace({ query })
+}, { immediate: true })
 
 // 一键智能整理：只改字段（补课程、分优先级），不删任何数据。
 const organizeMessage = ref('')
@@ -195,10 +202,6 @@ function onNoticeCommit(payload) {
   } else if (payload.type === 'event') {
     payload.items.forEach((item) => domain.createEvent({ ...withCourse(item), courseName: item.course || '', createdFrom: 'clipboard', sourceType: 'notice' }))
     showNoticeMessage(payload.items.length > 1 ? `已加入 ${payload.items.length} 项日程` : `已加入日程“${payload.items[0].title}”`)
-  } else if (payload.type === 'note') {
-    const data = withCourse(firstData)
-    domain.createNote({ ...data, title: payload.title, content: firstData.content || firstData.rawText, courseName: data.course, createdFrom: 'clipboard', sourceType: 'notice' })
-    showNoticeMessage('已保存通知，未创建待办')
   } else {
     const items = payload.items?.length ? payload.items : [firstData]
     items.forEach((item) => domain.createTask({ ...withCourse(item), kind: payload.kind || 'todo', createdFrom: 'clipboard', sourceType: 'notice' }))
@@ -222,7 +225,6 @@ function showToast(message, { type = 'info', actionLabel = '', undoFn = null, vi
 
 onBeforeUnmount(() => {
   window.clearTimeout(noticeMessageTimer)
-  window.clearTimeout(undoTimer)
   window.clearTimeout(organizeTimer)
   window.clearTimeout(focusWaitTimer)
 })
@@ -423,6 +425,7 @@ watch(
 )
 
 const courseNames = computed(() => [...new Set(courses.value.map((course) => course.name).filter(Boolean))])
+const coursesById = computed(() => new Map(courses.value.map((course) => [course.id, course])))
 
 function linkCourseFromName() {
   const course = findUniqueCourseByName(courses.value, form.value.course)
@@ -430,7 +433,7 @@ function linkCourseFromName() {
 }
 
 function taskCourseName(task) {
-  return courses.value.find((course) => course.id === task.courseId)?.name ?? task.course
+  return coursesById.value.get(task.courseId)?.name ?? task.course
 }
 
 function taskFocusSummary(task) {
@@ -550,6 +553,7 @@ function taskFocusSummary(task) {
             class="check"
             :class="{ checked: taskStatus(task) === 'completed' }"
             :aria-label="taskStatus(task) === 'completed' ? '标记为未完成' : '标记为已完成'"
+            :aria-pressed="taskStatus(task) === 'completed'"
             @click="toggleDone($event, task.id)"
           >
             {{ taskStatus(task) === 'completed' ? '✓' : '' }}
@@ -685,11 +689,11 @@ function taskFocusSummary(task) {
 .repeat-hint { margin-top: -3px; color: var(--ink-faint); font-size: var(--fs-11); line-height: 1.5; }
 .notice-success {
   padding: 8px 12px;
-  color: #087a58;
+  color: var(--success);
   font-size: var(--fs-12-5);
-  border: 1px solid #b9e6d5;
+  border: 1px solid color-mix(in srgb, var(--success) 32%, var(--border));
   border-radius: var(--radius-9);
-  background: #effaf6;
+  background: color-mix(in srgb, var(--success) 8%, var(--card));
 }
 .task-list {
   display: flex;
@@ -797,20 +801,20 @@ function taskFocusSummary(task) {
   background: var(--primary-soft);
 }
 .priority.low {
-  color: #5a6a7e;
-  background: #eef1f5;
+  color: var(--ink-soft);
+  background: var(--bg-tint);
 }
 .course-tag {
   max-width: 150px;
   overflow: hidden;
-  color: #6a45c4;
+  color: var(--primary);
   text-overflow: ellipsis;
   white-space: nowrap;
-  background: #f1ebff;
+  background: var(--primary-soft);
 }
 .course-tag.focus-tag {
-  color: #087a58;
-  background: #e7f8f1;
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 10%, var(--card));
 }
 .task-main p {
   overflow: hidden;
@@ -832,10 +836,10 @@ function taskFocusSummary(task) {
 .due.today,
 .due.soon {
   padding: 4px 8px;
-  color: #9a560c;
+  color: var(--warning);
   font-weight: var(--fw-800);
   border-radius: var(--radius-6);
-  background: #fff5df;
+  background: color-mix(in srgb, var(--warning) 12%, var(--card));
 }
 .due.overdue {
   padding: 4px 8px;
@@ -957,6 +961,13 @@ function taskFocusSummary(task) {
     width: 100%;
     max-width: 1160px;
     align-self: center;
+  }
+}
+@media (max-width: 900px) {
+  .check {
+    width: 44px;
+    height: 44px;
+    flex-basis: 44px;
   }
 }
 </style>

@@ -111,11 +111,10 @@ it('语序变化不影响支出识别：买/花了/五元/五块钱', () => {
     expect(draft.note).toBe('牛肉面五')
   })
 
-  it('选择快速笔记后不进行意图分类', () => {
-    const [draft] = parseQuickRecord('明天下午三点交作业', { forcedType: 'note' })
-    expect(draft.type).toBe('note')
-    expect(draft.note).toBe('明天下午三点交作业')
-    expect(draft.date).toBe('')
+  it('旧的自由笔记类型不会再创建笔记草稿', () => {
+    const [draft] = parseQuickRecord('明天下午三点交作业', { forcedType: 'note', now: new Date('2026-08-29T10:00:00') })
+    expect(draft.type).toBe('homework')
+    expect(draft.date).toBe('2026-08-30')
   })
 it('识别日程实体：组会/上课/实验室会议', () => {
     const now = new Date('2026-08-29T10:00:00')
@@ -130,14 +129,6 @@ it('识别日程实体：组会/上课/实验室会议', () => {
       expect(draft.date).toBe(expected.date)
       expect(draft.time).toBe(expected.time)
     }
-  })
-
-  it('自由笔记模式下不提取日期和任务字段', () => {
-    const [draft] = parseQuickRecord('明天下午三点交作业', { forcedType: 'note' })
-    expect(draft.type).toBe('note')
-    expect(draft.date).toBe('')
-    expect(draft.time).toBe('')
-    expect(draft.note).toBe('明天下午三点交作业')
   })
 
   it('一句话包含支出和后续待办时拆成两个业务动作', () => {
@@ -159,7 +150,7 @@ it('识别日程实体：组会/上课/实验室会议', () => {
     expect(parseQuickRecord('收到奖学金1000', { now })[0]).toMatchObject({ type: 'income', amount: 1000 })
     expect(parseQuickRecord('明天交实验报告', { now })[0].type).toBe('homework')
     expect(parseQuickRecord('后天下午三点班会', { now })[0]).toMatchObject({ type: 'event', time: '15:00' })
-    expect(parseQuickRecord('今天实验挺顺利', { now })[0].type).toBe('note')
+    expect(parseQuickRecord('今天实验挺顺利', { now })[0].type).toBe('todo')
     expect(parseQuickRecord('明天去食堂花5分钟取东西', { now })[0].type).not.toBe('expense')
   })
 })

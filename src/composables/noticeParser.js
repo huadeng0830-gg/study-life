@@ -357,8 +357,8 @@ function refineTitle(title, type, text) {
 function recommendationFor(type) {
   if (type === '会议' || type === '考试') return { key: 'event', label: '加入日程', reason: '这是一个有明确发生时间的事项。' }
   if (type === '作业') return { key: 'homework', label: '添加作业', reason: '保留课程作业语义，并按截止时间管理。' }
-  if (type === '课程') return { key: 'note', label: '保存课程通知', reason: '当前先保存调课信息，不直接改动课表。' }
-  if (type === '通知') return { key: 'note', label: '仅保存通知', reason: '这条内容没有明确需要你完成的动作。' }
+  if (type === '课程') return { key: 'task', label: '创建待办', reason: '先把课程调整作为待确认事项跟进，确认后再更新课表。' }
+  if (type === '通知') return { key: 'task', label: '创建待办', reason: '可先作为待办保存，确认后再安排后续处理。' }
   return { key: 'task', label: '创建待办', reason: '这条内容包含需要完成或处理的动作。' }
 }
 

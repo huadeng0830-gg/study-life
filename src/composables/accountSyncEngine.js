@@ -1,7 +1,7 @@
 // 账号同步独立运行；仅复用纯数据校验/合并规则和可回滚的本机存储接口。
 import { accountUser } from './accountAuth.js'
 import { localSafeMode } from './localSafeMode.js'
-import { accountDataOwner, accountSyncActive, randomToken, readAccountDataOwner } from './accountSyncIdentity.js'
+import { accountSyncActive, randomToken, readAccountDataOwner } from './accountSyncIdentity.js'
 import { accountSyncViaAccount } from './accountSyncMode.js'
 import { accountDefaultValues, accountLocalSnapshot, ACCOUNT_DATA_LOCK } from './accountLocalData.js'
 import { accountConflictKey, accountSyncConflicts, accountSyncError, accountSyncLastSyncedAt, accountSyncStatus } from './accountSyncState.js'
@@ -24,6 +24,7 @@ const BACKOFF = [5000, 15000, 30000, 60000, 300000]
 // 醒一次，既耗电又没有任何进展可能。用户要的是"别再烦我"，不是"一直重试"。
 const FAILURE_GIVE_UP_AFTER = 8
 const FAILURE_IDLE_MS = 20 * 60 * 1000
+const AUTO_RESUME_BLOCKED_STATES = new Set(['error', 'conflict', 'paused', 'disabled', 'signed-out'])
 // 云端单条快照上限（见 supabase/migrations 的 account_snapshot_format 约束）。
 // 推送之前自己先量一次：超了就是本地数据问题，云端每次都会用同样的 400 拒回来。
 const ACCOUNT_PAYLOAD_LIMIT = 16 * 1024 * 1024
@@ -36,6 +37,7 @@ let controller = null
 let failureCount = 0
 let localSequence = 0
 let pendingSignature = ''
+let lastSuccessfulSync = null
 let unbind = null
 /** 本轮是否发现云端 manifest 与它的值对不上（版本错位）。用来强制回写一次修好的 manifest。 */
 let manifestDrifted = false
@@ -193,7 +195,18 @@ async function cycle(id, revision, choices) {
     setState('checking')
     const meta = await loadMeta(id)
     assertCurrent(id, revision)
-    const remote = await provider('pull', {}, id, revision)
+    const probe = await provider('probe', {}, id, revision)
+    // An unchanged local mutation sequence and unchanged remote revision prove
+    // that the last validated/merged payload is still current. Probe metadata
+    // only, so a 60-second poll does not download or parse a multi-megabyte snapshot.
+    if (!choices && probe.exists && lastSuccessfulSync?.owner === id
+      && lastSuccessfulSync.revision === probe.revision
+      && lastSuccessfulSync.localSequence === localSequence
+      && !pendingSignature) {
+      setState('synced')
+      return true
+    }
+    const remote = probe.exists ? await provider('pull', {}, id, revision) : probe
     const local = await localValues()
     assertCurrent(id, revision)
     const sequence = localSequence
@@ -203,6 +216,10 @@ async function cycle(id, revision, choices) {
     let markers = meta.restoreMarkers
     if (remote.exists) {
       if (remote.data?.format !== 'study-life-sync' || remote.data.version !== 3 || !remote.data.manifest) throw new Error('云端同步数据格式异常，本机记录已保留。')
+      const remoteSchemaVersion = Number(remote.data.manifest.schemaVersion) || 1
+      if (remoteSchemaVersion > ACCOUNT_SYNC_DATA_SCHEMA_VERSION) {
+        throw new Error('云端数据由更新版本的应用写入。请先更新应用，再继续同步；本机数据已保留。')
+      }
       // manifest 校验原始传输值；规范化之后的合法兼容转换可能改变旧设置的指纹。
       assertValidSyncPayload(remote.data.values)
       const manifestIssues = validateSyncManifest(remote.data.values, remote.data.manifest)
@@ -317,6 +334,7 @@ async function cycle(id, revision, choices) {
     accountSyncLastSyncedAt.value = nextMeta.lastSyncedAt
     accountSyncConflicts.value = []
     pendingSignature = ''
+    lastSuccessfulSync = { owner: id, revision: acknowledged.revision, localSequence: sequence }
     await clearPendingConflicts(id)
     failureCount = 0
     setState('synced')
@@ -465,26 +483,62 @@ export async function startAccountSync(id) {
     accountSyncConflicts.value = pending.conflicts
     setState('conflict', '')
   }
-  const dirty = () => { localSequence++; if (accountSyncStatus.value !== 'conflict') { setState(online() ? 'pending' : 'offline'); schedule(ACCOUNT_SYNC_DEBOUNCE_MS) } }
+  // A store mutation must invalidate a snapshot before its debounced local write
+  // finishes. The later sync-dirty event still schedules the actual upload after
+  // persistence has completed.
+  const mutation = () => { localSequence++ }
+  const dirty = () => {
+    localSequence++
+    if (AUTO_RESUME_BLOCKED_STATES.has(accountSyncStatus.value)) return
+    setState(online() ? 'pending' : 'offline')
+    schedule(ACCOUNT_SYNC_DEBOUNCE_MS)
+  }
   const storage = (event) => { if (SYNC_KEYS.includes(event.key)) dirty() }
-  const resume = () => { if (!document.hidden) void runAccountSync() }
+  const resume = () => {
+    if (document.hidden || AUTO_RESUME_BLOCKED_STATES.has(accountSyncStatus.value)) return
+    // An offline poll is only a fallback. Once connectivity/focus returns, wake
+    // immediately; error backoff is protected above by its distinct error state.
+    if (timer !== null) {
+      if (accountSyncStatus.value !== 'offline') return
+      window.clearTimeout(timer)
+      timer = null
+    }
+    void runAccountSync()
+  }
+  // A connectivity event is only a wake-up hint. If a retry is already queued,
+  // keep its backoff deadline instead of turning every reconnect into an attempt.
+  const resumeOnline = () => {
+    resume()
+  }
   // 【不要 clearTimeout(timer)】原来离线事件会把正在排队的退避重试直接丢掉。
   // 手机上从 Wi-Fi 切到蜂窝时 WebKit 常常不触发 online，而切换过程本身又会
   // 触发一次 offline —— 于是"排好的那次重试"被自己取消，横幅就永远停在
   // 「账号同步等待联网」。改成保留重试、只是把状态说清楚。
-  const offline = () => { setState('offline'); schedule(ACCOUNT_SYNC_POLL_MS) }
+  const offline = () => {
+    if (AUTO_RESUME_BLOCKED_STATES.has(accountSyncStatus.value)) return
+    setState('offline')
+    // Keep any queued retry intact. If there is no retry yet, one slow wake-up
+    // is enough while offline; focus/online clears that fallback and resumes.
+    if (timer === null) schedule(ACCOUNT_SYNC_POLL_MS)
+  }
+  window.addEventListener('study-life:sync-mutation', mutation)
   window.addEventListener('study-life:sync-dirty', dirty)
   window.addEventListener('storage', storage)
-  window.addEventListener('online', resume)
+  window.addEventListener('online', resumeOnline)
   window.addEventListener('offline', offline)
   window.addEventListener('focus', resume)
   document.addEventListener('visibilitychange', resume)
   unbind = () => {
+    window.removeEventListener('study-life:sync-mutation', mutation)
     window.removeEventListener('study-life:sync-dirty', dirty); window.removeEventListener('storage', storage)
-    window.removeEventListener('online', resume); window.removeEventListener('offline', offline)
+    window.removeEventListener('online', resumeOnline); window.removeEventListener('offline', offline)
     window.removeEventListener('focus', resume); document.removeEventListener('visibilitychange', resume)
   }
-  poll = window.setInterval(() => { if (!document.hidden && accountSyncStatus.value !== 'conflict') void runAccountSync() }, ACCOUNT_SYNC_POLL_MS)
+  // Poll only while healthy to discover remote edits. Errors use scheduleFailure's
+  // backoff/give-up timer; an unconditional poll here would bypass both policies.
+  poll = window.setInterval(() => {
+    if (!document.hidden && accountSyncStatus.value === 'synced') void runAccountSync()
+  }, ACCOUNT_SYNC_POLL_MS)
   void runAccountSync()
 }
 export async function stopAccountSync() {
@@ -502,6 +556,10 @@ export async function stopAccountSync() {
   // 用户看到的是「登录后自动同步」而同步其实正在跑，已经选好的冲突被静默丢掉。
   // 所以只有当自己仍是最新一代时才收尾。
   if (generation !== stoppedAt) return
+  // A stopped or logged-out session must never reuse the previous session's
+  // unchanged-revision shortcut (the local stores may have been cleared/reset).
+  lastSuccessfulSync = null
+  localSequence++
   accountSyncLastSyncedAt.value = ''
   accountSyncConflicts.value = []
   pendingSignature = ''

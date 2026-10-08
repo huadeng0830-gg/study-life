@@ -109,22 +109,6 @@ describe('QuickRecordPanel 保存交互', () => {
     expect(events.map((event) => event.type)).toEqual(['saved', 'close'])
   })
 
-  it('快速笔记普通保存成功后也关闭当前窗口', async () => {
-    const events = mountPanel()
-    buttonWithText('📝 快速笔记').click()
-    await nextTick()
-
-    const note = document.body.querySelector('.note-body')
-    note.value = '记一条临时笔记'
-    note.dispatchEvent(new Event('input', { bubbles: true }))
-    await nextTick()
-
-    buttonWithText('保存').click()
-    await nextTick()
-
-    expect(events.map((event) => event.type)).toEqual(['saved', 'close'])
-  })
-
   it('普通保存后再次打开是干净的新状态', async () => {
     const { events, reopen } = mountControlledPanel()
     await enterSmartText('午饭18元')

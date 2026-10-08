@@ -33,7 +33,13 @@ function periodToMinutes(period) {
   if (index < 0) return { start: 0, end: 0 }
   const row = currentTimes()[index]
   if (!row) return { start: 0, end: 0 }
-  return { start: Number(row.start) || 0, end: Number(row.end) || 0 }
+  const toMinutes = (value) => {
+    const match = String(value || '').match(/^(\d{1,2}):(\d{2})$/)
+    if (!match) return 0
+    const hours = Number(match[1]); const minutes = Number(match[2])
+    return hours <= 23 && minutes <= 59 ? hours * 60 + minutes : 0
+  }
+  return { start: toMinutes(row.start), end: toMinutes(row.end) }
 }
 
 /**
@@ -87,7 +93,7 @@ function weekMatches(course, week) {
  * @returns {CourseConflict[]}
  */
 export function detectCourseConflicts(newCourse, existingCourses = [], targetWeek = null) {
-  if (!newCourse?.day || !newCourse?.startPeriod || !newCourse?.endPeriod) return []
+  if (!newCourse || newCourse.day === undefined || newCourse.day === null || !newCourse.start || !newCourse.end) return []
   const conflicts = []
   const checkWeek = targetWeek ?? 1
 
@@ -186,7 +192,7 @@ function timeToMinutes(value) {
  * @returns {Conflict[]}
  */
 export function detectAllConflicts(newItem, allData = {}, options = {}) {
-  const { courses = [], tasks = [], events = [], milestones = [] } = allData
+  const { courses = [], tasks = [], events = [] } = allData
   const conflicts = []
 
   if (newItem.type === 'course' || options.checkCourses) {

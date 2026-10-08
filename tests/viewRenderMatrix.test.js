@@ -40,7 +40,6 @@ const ROUTES = [
   { path: '/lists', name: '清单', mustInclude: ['本周采购'] },
   { path: '/bills', name: '账本', mustInclude: ['午饭'] },
   { path: '/review', name: '本周回顾', mustInclude: ['本周回顾'] },
-  { path: '/notes', name: '笔记', mustInclude: ['复习提纲'] },
 ]
 
 function day(offset) {
@@ -52,8 +51,8 @@ function day(offset) {
 /**
  * 播种数据。
  *
- * 【形状必须与 domain/commands.js 的 create* 对齐】键名同样要对：笔记是 `sl_quick_notes`
- * （不是 `sl_notes`）、账目是 `sl_expenses`（不是 `sl_ledger`）。写错键不会报错，
+ * 【形状必须与 domain/commands.js 的 create* 对齐】键名同样要对，账目是 `sl_expenses`
+ * （不是 `sl_ledger`）。写错键不会报错，
  * 只会让这一页"什么都没有"，于是第 3 条判据静默失效 —— 那正是假绿。
  */
 function seedStorage() {
@@ -74,9 +73,6 @@ function seedStorage() {
   ])
   set('sl_events', [
     { id: 'v1', title: '小组会议', date: day(0), time: '19:00', endTime: '20:30', note: '讨论选题', createdAt: now, updatedAt: now },
-  ])
-  set('sl_quick_notes', [
-    { id: 'n1', title: '复习提纲', content: '第一章：极限与连续。第二章：导数。', tags: ['数学'], createdAt: now, updatedAt: now },
   ])
   set('sl_checklists', [
     {

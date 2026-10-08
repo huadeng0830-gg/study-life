@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const fake = vi.hoisted(() => ({ records: new Map(), values: {}, failWrites: false, restore: vi.fn() }))
 vi.mock('../src/composables/store/cloudAccess.js', () => ({ restoreStoredValues: (...args) => fake.restore(...args) }))
-import { accountDefaultValues, prepareAccountLocalData, recoverAccountDataSwitch } from '../src/composables/accountLocalData.js'
+import { accountDefaultValues, clearRetiredNotesFromAccountRecord, mergeRetiredQuickNotes, prepareAccountLocalData, recoverAccountDataSwitch } from '../src/composables/accountLocalData.js'
 import { ACCOUNT_SWITCH_MARKER_KEY, readAccountDataOwner, setAccountDataOwner } from '../src/composables/accountSyncIdentity.js'
 function fakeIndexedDB() {
   let initialized = false
@@ -33,6 +33,31 @@ beforeEach(() => {
 })
 afterEach(() => { setAccountDataOwner(''); vi.unstubAllGlobals() })
 describe('本机账号切换隔离和持久化保护', () => {
+  it('退役笔记和待处理 Note 冲突会保留到独立归档集合', () => {
+    const notes = [
+      { id: 'note-local', title: '本机笔记', content: '本机正文' },
+      { id: 'note-remote', title: '云端笔记', content: '云端正文' },
+    ]
+    expect(mergeRetiredQuickNotes(notes, [{ ...notes[0], content: '本机新版正文' }])).toEqual([
+      { ...notes[0], content: '本机新版正文' },
+      notes[1],
+    ])
+    const record = {
+      id: 'conflict:notes',
+      values: {
+        sl_quick_notes: [notes[0]],
+        conflicts: [{ key: 'sl_quick_notes', local: [notes[0]], remote: [notes[1]], base: [] }],
+        signature: 'old-signature',
+      },
+    }
+
+    expect(clearRetiredNotesFromAccountRecord(record)).toBe(true)
+    expect(record.values.sl_archived_quick_notes).toEqual(notes)
+    expect(record.values).not.toHaveProperty('sl_quick_notes')
+    expect(record.values.conflicts).toEqual([])
+    expect(record.values.signature).toBe('')
+  })
+
   it('第一次登录接管本机访客记录，不清空内容', async () => {
     expect(await prepareAccountLocalData('fictional-a', () => fake.values)).toBe(true)
     expect(readAccountDataOwner()).toBe('fictional-a')

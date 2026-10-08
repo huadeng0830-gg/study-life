@@ -81,18 +81,27 @@ function nextWeekday(date) {
 }
 
 /**
- * 按月推进，并把不存在的日期夹到当月最后一天（1 月 31 日 → 2 月 28 日）。
- *
- * 【为什么用 `setDate(0)` 而不是手写月份表】`setMonth` 在目标月没有该日时会**溢出**
- * （1 月 31 日 +1 个月得到的是 3 月 3 日）。溢出量等于「基准日 − 目标月天数」，
- * 所以溢出后的 `getDate()` 一定不等于基准日 —— 据此判断并用 `setDate(0)`
- * 退回「上个月最后一天」，也就是目标月的最后一天。天数完全交给原生 `Date` 算，
- * 闰年与大小月都不用手写，也就不会出现「2 月永远按 28 天算」这类过期表。
+ * 按原始日号推进，并把目标月不存在的日期夹到月末（31 号 → 2 月末 → 下个月 31 号）。
+ * 没有传锚点的单次调用沿用当前日号；重复待办会把 `repeatAnchorDay` 传给每一期，
+ * 避免把临时夹短的 28/29/30 号当成长期新基准。
  */
-function addMonthsClamped(date) {
-  const anchorDay = date.getDate()
-  date.setMonth(date.getMonth() + 1)
-  if (date.getDate() !== anchorDay) date.setDate(0)
+function validAnchorDay(value) {
+  if (value === null || value === undefined || value === '' || typeof value === 'boolean') return null
+  const day = Number(value)
+  return Number.isInteger(day) && day >= 1 && day <= 31 ? day : null
+}
+
+function addMonthsClamped(date, requestedAnchorDay) {
+  const anchorDay = validAnchorDay(requestedAnchorDay) ?? date.getDate()
+  const targetMonth = date.getMonth() + 1
+  const lastDayDate = new Date(date.getTime())
+  lastDayDate.setDate(1)
+  lastDayDate.setMonth(targetMonth + 1)
+  lastDayDate.setDate(0)
+  const lastDay = lastDayDate.getDate()
+  date.setDate(1)
+  date.setMonth(targetMonth)
+  date.setDate(Math.min(anchorDay, lastDay))
   return date
 }
 
@@ -110,9 +119,9 @@ function repeatEndKey(value) {
  *
  * @param {string} dueDate 本期截止日期 `YYYY-MM-DD`
  * @param {string} repeat 重复规则；不认识的值按 `none` 处理并返回空串
- * @param {{ until?: string }} [options] `until` 为重复截止日期（含当天），空/非法 = 一直重复
+ * @param {{ until?: string, anchorDay?: number }} [options] `until` 为重复截止日期（含当天），`anchorDay` 为每月锚点；空/非法 `until` = 一直重复
  */
-export function nextRepeatDueDate(dueDate, repeat, { until = '' } = {}) {
+export function nextRepeatDueDate(dueDate, repeat, { until = '', anchorDay } = {}) {
   const rule = normalizeTaskRepeat(repeat)
   if (rule === 'none') return ''
   const date = parseDueDate(dueDate)
@@ -121,7 +130,7 @@ export function nextRepeatDueDate(dueDate, repeat, { until = '' } = {}) {
   else if (rule === 'weekdays') nextWeekday(date)
   else if (rule === 'weekly') date.setDate(date.getDate() + 7)
   else if (rule === 'biweekly') date.setDate(date.getDate() + 14)
-  else addMonthsClamped(date)
+  else addMonthsClamped(date, anchorDay)
   const next = dateText(date)
   const end = repeatEndKey(until)
   // `YYYY-MM-DD` 的字典序与时间序一致，可以直接比字符串。
@@ -133,9 +142,17 @@ export function nextRepeatDueDate(dueDate, repeat, { until = '' } = {}) {
  */
 export function createNextRepeatingTask(task, now = new Date()) {
   if (!repeatsTask(task) || !task?.dueDate) return null
-  const dueDate = nextRepeatDueDate(task.dueDate, task.repeat, { until: task.repeatEndDate })
+  const rule = normalizeTaskRepeat(task.repeat)
+  const parsedDate = parseDueDate(task.dueDate)
+  const repeatAnchorDay = rule === 'monthly'
+    ? validAnchorDay(task.repeatAnchorDay) ?? parsedDate?.getDate()
+    : null
+  const dueDate = nextRepeatDueDate(task.dueDate, rule, {
+    until: task.repeatEndDate,
+    anchorDay: repeatAnchorDay,
+  })
   if (!dueDate) return null
-  return {
+  const next = {
     ...task,
     // 只用毫秒时间戳当 id 时，同一毫秒内完成的两个重复任务会拿到同一个 id，
     // 在同步合并与 tombstone 里互相覆盖。补一段随机后缀消除碰撞。
@@ -146,6 +163,9 @@ export function createNextRepeatingTask(task, now = new Date()) {
     dueDate,
     createdAt: now.toISOString(),
   }
+  if (repeatAnchorDay) next.repeatAnchorDay = repeatAnchorDay
+  else delete next.repeatAnchorDay
+  return next
 }
 
 /**

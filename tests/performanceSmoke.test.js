@@ -1,10 +1,9 @@
 // @vitest-environment happy-dom
 import { describe, expect, it } from 'vitest'
-import { filterNotes } from '../src/composables/notes.js'
 import { filterLedgerTransactions } from '../src/composables/ledger.js'
 
 describe('高数据量轻量 smoke', () => {
-  it('按目标规模覆盖任务、交易和笔记的筛选输入', () => {
+  it('按目标规模覆盖任务和交易的筛选输入', () => {
     const measure = (label, size, work) => {
       const startedAt = performance.now()
       const result = work()
@@ -25,9 +24,5 @@ describe('高数据量轻量 smoke', () => {
       expect(measure('transactions-filter', size, () => filterLedgerTransactions(transactions, { query: `交易 ${size - 1}` }))).toHaveLength(1)
     }
 
-    for (const size of [100, 500, 1000]) {
-      const notes = Array.from({ length: size }, (_, id) => ({ id: `note-${id}`, title: `笔记 ${id}`, content: `笔记 ${id}` }))
-      expect(measure('notes-filter', size, () => filterNotes(notes, `笔记 ${size - 1}`))).toHaveLength(1)
-    }
   })
 })

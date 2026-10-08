@@ -336,7 +336,6 @@ const MIGRATED_FILES = [
   'components/DataManager.vue',
   'components/schedule/TimeSettingsModal.vue',
   'views/EventsView.vue',
-  'views/NotesView.vue',
   'views/ScheduleView.vue',
 ]
 
@@ -509,40 +508,25 @@ function expectConfirmAbove(label, lowerSelector) {
 const FUTURE = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
 
 describe('行为层：确认与取消都要真的分叉', () => {
-  it('笔记删除：点取消笔记还在，点确认才真的删掉', async () => {
-    localStorage.setItem('sl_quick_notes', JSON.stringify([
+  it('旧笔记路由回到首页并清除退役笔记数据', async () => {
+    const legacyNotes = [
       { id: 'n1', title: '买书', content: '记得买线性代数', createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z' },
-    ]))
+    ]
+    localStorage.setItem('sl_quick_notes', JSON.stringify(legacyNotes))
+    localStorage.setItem('study_life_sync_space', JSON.stringify({ id: 'legacy-space' }))
+    localStorage.setItem('study_life_sync_metadata:user-1', JSON.stringify({ revision: 4 }))
+    sessionStorage.setItem('study_life_sync_session_code', '123456')
     const { main, settle } = await boot('/notes')
-    expect(main.textContent, '笔记应先在列表里').toContain('买书')
-
-    buttonByText(main, '删除').click()
     await settle()
-    let keys = dialogButtons()
-    expect(keys, '点删除应当打开应用内确认框（原生 confirm 已不存在）').toBeTruthy()
-    expect(topOverlay().textContent).toContain('确定删除“买书”吗？')
-    expect([keys[0].textContent.trim(), keys[1].textContent.trim()], '默认取消文案与删除键语气').toEqual(['取消', '删除'])
-    expect(keys[1].className, '删除仍是危险键').toContain('btn-danger')
-
-    // 取消：数据不变
-    keys[0].click()
-    await settle()
-    expect(topOverlay(), '取消后确认框应关闭').toBeNull()
     await flushWrites()
-    expect(readStored('sl_quick_notes').map((note) => note.title), '取消不该删笔记').toEqual(['买书'])
-    expect(main.textContent, '取消后列表里仍应有这条笔记').toContain('买书')
 
-    // 确认：真的删掉
-    buttonByText(main, '删除').click()
-    await settle()
-    keys = dialogButtons()
-    expect(keys).toBeTruthy()
-    keys[1].click()
-    await settle()
-    expect(topOverlay()).toBeNull()
-    await flushWrites()
-    expect(readStored('sl_quick_notes'), '确认后必须真的删除').toEqual([])
-    expect(main.textContent, '删掉后列表里不该再有它').not.toContain('买书')
+    expect(main.textContent).toContain('今天')
+    expect(main.textContent).not.toContain('买书')
+    expect(localStorage.getItem('sl_quick_notes')).toBeNull()
+    expect(JSON.parse(localStorage.getItem('sl_archived_quick_notes'))).toEqual(legacyNotes)
+    expect(localStorage.getItem('study_life_sync_space')).toBeNull()
+    expect(localStorage.getItem('study_life_sync_metadata:user-1')).toBeNull()
+    expect(sessionStorage.getItem('study_life_sync_session_code')).toBeNull()
   })
 
   it('日程删除：点取消日程还在，点确认才真的删掉', async () => {
@@ -783,7 +767,7 @@ describe('ConfirmDialog：新增的 tone / cancelLabel 不改变默认观感', (
 
 describe('改造涉及的组件都能编译', () => {
   it('静态 import 成功即证明模板/脚本语法成立（含没有行为用例的几个文件）', async () => {
-    // 行为用例只挂载得到 NotesView / EventsView / TasksView；其余 4 个（外观设置、
+    // 行为用例只挂载得到 EventsView / TasksView；其余 4 个（外观设置、
     // 数据管理、作息设置、ScheduleView 的课程相关确认）在 happy-dom 里
     // 要么依赖 IndexedDB / 摄像头 / 网络，要么需要层层浮层配合，这里至少保证它们能被
     // Vue 编译：模板里少一个引号、v-if 写错，都会在这里直接抛出来。

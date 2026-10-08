@@ -39,34 +39,8 @@ export function useQuickRecordAdapters() {
       const event = domain.createEvent({ ...base, courseName: draft.course })
       return savedResult(`已添加日程「${draft.title}」`, () => domain.deleteEvent(event.id), 'event', event.id)
     }
-    // 笔记与“识别不清”的输入都落到自由笔记，确保用户输入不丢失。
-    const note = domain.createNote({ ...base, content: draft.note || draft.title || draft.raw || '', courseName: draft.course })
-    return savedResult('已保存快速笔记', () => domain.deleteNote(note.id), 'note', note.id)
+    throw new Error('无法识别记录类型，请先选择待办、日程、账目或重要日期。')
   }
 
-  function convertNote(noteId, targetType) {
-    const note = domain.notes.value.find((item) => item.id === noteId)
-    if (!note) return { ok: false, error: '笔记不存在或已被删除' }
-    const content = String(note.content || note.title || '').trim()
-    const title = (note.title || content || '').replace(/\s+/g, ' ').slice(0, 60)
-    if (!title) return { ok: false, error: '笔记内容为空，无法转换' }
-
-    if (targetType === 'todo') {
-      const existing = domain.tasks.value.find((item) => item.sourceType === 'note' && item.sourceId === noteId)
-      if (existing) return { ok: true, duplicate: true, entityType: 'task', entityId: existing.id, message: `已存在待办「${existing.title}」` }
-      const task = domain.createTask({ title, note: content, sourceText: content, sourceId: noteId, sourceType: 'note', createdFrom: 'note-organize' })
-      domain.updateNote(noteId, { inboxStatus: 'organized', organizedAt: new Date().toISOString() })
-      return { ok: true, entityType: 'task', entityId: task.id, message: `已转为待办「${task.title}」` }
-    }
-    if (targetType === 'event') {
-      const existing = domain.events.value.find((item) => item.sourceType === 'note' && item.sourceId === noteId)
-      if (existing) return { ok: true, duplicate: true, entityType: 'event', entityId: existing.id, message: `已存在日程「${existing.title}」` }
-      const event = domain.createEvent({ title, note: content, sourceId: noteId, sourceType: 'note', createdFrom: 'note-organize' })
-      domain.updateNote(noteId, { inboxStatus: 'organized', organizedAt: new Date().toISOString() })
-      return { ok: true, entityType: 'event', entityId: event.id, message: `已转为日程「${event.title}」` }
-    }
-    return { ok: false, error: '暂不支持这个转换类型' }
-  }
-
-  return { courses, save, convertNote }
+  return { courses, save }
 }

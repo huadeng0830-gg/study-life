@@ -26,12 +26,17 @@ export const batchPreview = computed(() => {
   for (let i = batchFrom.value; i <= batchTo.value && i < draft.value.length; i++) {
     const row = draft.value[i]
     if (!row?.start || !row?.end) continue
-    rows.push({
-      index: i,
-      label: timeConfig.value.periods[i].label,
-      from: `${row.start}–${row.end}`,
-      to: `${toHHMM(toMinutes(row.start) + delta)}–${toHHMM(toMinutes(row.end) + delta)}`,
-    })
+    try {
+      rows.push({
+        index: i,
+        label: timeConfig.value.periods[i].label,
+        from: `${row.start}–${row.end}`,
+        to: `${toHHMM(toMinutes(row.start) + delta)}–${toHHMM(toMinutes(row.end) + delta)}`,
+      })
+    } catch (error) {
+      if (!(error instanceof RangeError)) throw error
+      return { delta, rows: [], error: '平移后的时间超出 23:59，请减小调整幅度' }
+    }
   }
   return rows.length ? { delta, rows } : null
 })
@@ -49,7 +54,7 @@ export function openTimeShift() {
 
 export function applyBatch() {
   const preview = batchPreview.value
-  if (!preview) return
+  if (!preview || preview.error) return
   for (const row of preview.rows) {
     const [s, e] = row.to.split('–')
     draft.value[row.index] = { start: s, end: e }

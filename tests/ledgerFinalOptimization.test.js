@@ -27,11 +27,13 @@ const domain = useDomainCommands()
 beforeEach(() => {
   domain.transactions.value = []
   domain.bills.value = []
+  domain.tasks.value = []
 })
 
 afterEach(() => {
   domain.transactions.value = []
   domain.bills.value = []
+  domain.tasks.value = []
 })
 
 describe('账本最终金额边界与索引', () => {
@@ -143,6 +145,7 @@ describe('账本领域命令与固定账单', () => {
     expect(first).toMatchObject({ duplicate: false, transaction: { amount: 39, billingPeriodKey: '2099-01-31', billId: bill.id } })
     expect(sumLedgerAmounts(domain.transactions.value)).toBe(39)
     expect(bill.nextDate).toBe('2099-02-28')
+    expect(bill.anchorDay).toBe(31)
 
     bill.nextDate = '2099-01-31'
     const duplicate = domain.payBill(bill.id)
@@ -151,6 +154,74 @@ describe('账本领域命令与固定账单', () => {
 
     domain.updateBill(bill.id, { amount: 99 })
     expect(domain.transactions.value[0].amount).toBe(39)
+  })
+
+  it('跨调用支付仍使用原始月末锚点；手动改账单日期时重设锚点', () => {
+    const bill = domain.createBill({
+      id: 'bill-anchor', name: '房租', amount: 800, cycle: 'monthly',
+      nextDate: '2099-01-31', autoRenew: false,
+    })
+    domain.payBill(bill.id)
+    expect(bill.nextDate).toBe('2099-02-28')
+    domain.payBill(bill.id)
+    expect(bill.nextDate).toBe('2099-03-31')
+    domain.updateBill(bill.id, { amount: 900 })
+    expect(bill.anchorDay).toBe(31)
+
+    domain.updateBill(bill.id, { nextDate: '2099-03-15' })
+    expect(bill.anchorDay).toBe(15)
+    domain.skipBill(bill.id)
+    expect(bill.nextDate).toBe('2099-04-15')
+  })
+
+  it('旧账单只有完整支付周期链能恢复锚点；证据不足时保留原记录并兼容推进', () => {
+    const bill = {
+      id: 'bill-legacy-anchor', name: '房租', amount: 800,
+      cycle: 'monthly', nextDate: '2026-03-28', autoRenew: false,
+    }
+    domain.bills.value.push(bill)
+    domain.transactions.value.push(
+      { id: 'legacy-jan', billId: bill.id, billingPeriodKey: '2026-01-31' },
+      { id: 'legacy-feb', billId: bill.id, billingPeriodKey: '2026-02-28' },
+    )
+    domain.skipBill(bill.id)
+    expect(bill.anchorDay).toBe(31)
+    // Skip advances the currently due March period; the recovered day-31 anchor
+    // applies to the following period, which is April 30 (April has 30 days).
+    expect(bill.nextDate).toBe('2026-04-30')
+
+    const uncertain = {
+      id: 'bill-legacy-uncertain', name: '旧订阅', amount: 20,
+      cycle: 'monthly', nextDate: '2026-02-28', autoRenew: false,
+    }
+    domain.bills.value.push(uncertain)
+    domain.skipBill(uncertain.id)
+    expect(uncertain.nextDate).toBe('2026-03-28')
+    expect(Object.hasOwn(uncertain, 'anchorDay')).toBe(false)
+  })
+
+  it('旧版生成来源链可找回待办的月末锚点', () => {
+    const original = domain.createTask({ id: 'task-jan31', title: '月末作业', dueDate: '2026-01-31', repeat: 'monthly' })
+    domain.toggleTask(original.id)
+    const february = domain.tasks.value.find((task) => task.sourceType === 'task-repeat' && task.sourceId === original.id)
+    expect(february?.dueDate).toBe('2026-02-28')
+    delete february.repeatAnchorDay // 模拟旧版存下来的生成任务
+
+    domain.toggleTask(february.id)
+    const march = domain.tasks.value.find((task) => task.sourceType === 'task-repeat' && task.sourceId === february.id)
+    expect(march?.dueDate).toBe('2026-03-31')
+    expect(march?.repeatAnchorDay).toBe(31)
+  })
+
+  it('手动调整月重复待办截止日时，把新日期设为锚点', () => {
+    const task = domain.createTask({ id: 'task-anchor-edit', title: '月末作业', dueDate: '2026-01-31', repeat: 'monthly' })
+    domain.toggleTask(task.id)
+    const february = domain.tasks.value.find((entry) => entry.sourceId === task.id)
+    domain.updateTask(february.id, { dueDate: '2026-02-15' })
+    expect(february.repeatAnchorDay).toBe(15)
+    domain.toggleTask(february.id)
+    const march = domain.tasks.value.find((entry) => entry.sourceId === february.id)
+    expect(march?.dueDate).toBe('2026-03-15')
   })
 
   it('撤销固定账单只能处理没有后续支付的最新账期', () => {

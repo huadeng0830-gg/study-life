@@ -467,7 +467,7 @@ function daysLabel(day) {
   cursor: pointer;
 }
 .batch-image-upload .crop-button{display:inline-flex;align-items:center;justify-content:center;padding:8px 12px;color:var(--primary);font-size:var(--fs-12);font-weight:var(--fw-700);border:1px solid var(--primary);border-radius:var(--radius-8);background:var(--primary-soft);cursor:pointer}.batch-image-upload .crop-button.busy{opacity:.55;cursor:not-allowed}
-.batch-image-upload .excel-button{display:inline-flex;align-items:center;justify-content:center;padding:8px 12px;color:#2268ba;font-size:var(--fs-12);font-weight:var(--fw-700);border:1px solid #8bb7ec;border-radius:var(--radius-8);background:#f1f7ff;cursor:pointer}.batch-image-upload .excel-button.busy{opacity:.55;cursor:not-allowed}
+.batch-image-upload .excel-button{display:inline-flex;align-items:center;justify-content:center;padding:8px 12px;color:var(--primary);font-size:var(--fs-12);font-weight:var(--fw-700);border:1px solid var(--primary);border-radius:var(--radius-8);background:var(--primary-soft);cursor:pointer}.batch-image-upload .excel-button.busy{opacity:.55;cursor:not-allowed}
 .file-button.busy {
   pointer-events: none;
   opacity: 0.7;
@@ -627,7 +627,7 @@ function daysLabel(day) {
     border-radius: var(--radius-10);
     background: var(--card);
   }
-  .batch-mobile-card.invalid { border-color: #f3b7b7; background: #fff7f7; }
+  .batch-mobile-card.invalid { border-color: color-mix(in srgb, var(--danger) 35%, var(--card)); background: var(--danger-soft); }
   /* 主预览行（tr.needsReview）已经改成令牌混色，移动端卡片是同一份「需确认」语义，
      不一起改的话窄屏下仍是白卡配浅字。卡内的 dt/span 是 var(--muted)，所以取 6%。
      invalid（红）不在本次范围。 */

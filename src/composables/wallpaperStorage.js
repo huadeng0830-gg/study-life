@@ -4,7 +4,8 @@ import { throwIfAborted } from './asyncTask.js'
 const DB_NAME = 'study-life-wallpapers'
 const STORE_NAME = 'images'
 const UNDO_STORE = 'undo-images'
-const DB_VERSION = 2
+const IMPORT_STORE = 'import-staging'
+const DB_VERSION = 3
 
 export const wallpaperRevision = ref(0)
 
@@ -14,6 +15,7 @@ function openDb() {
     request.onupgradeneeded = () => {
       if (!request.result.objectStoreNames.contains(STORE_NAME)) request.result.createObjectStore(STORE_NAME)
       if (!request.result.objectStoreNames.contains(UNDO_STORE)) request.result.createObjectStore(UNDO_STORE)
+      if (!request.result.objectStoreNames.contains(IMPORT_STORE)) request.result.createObjectStore(IMPORT_STORE)
     }
     request.onsuccess = () => resolve(request.result)
     request.onerror = () => reject(request.error)
@@ -82,6 +84,15 @@ export async function listWallpapers() {
     const valueRequest = store.getAll()
     const [keys, values] = await Promise.all([requestResult(keyRequest), requestResult(valueRequest)])
     return Object.fromEntries(keys.map((key, index) => [key, values[index]]))
+  } finally {
+    db.close()
+  }
+}
+
+async function listWallpaperTargets() {
+  const db = await openDb()
+  try {
+    return await requestResult(db.transaction(STORE_NAME, 'readonly').objectStore(STORE_NAME).getAllKeys())
   } finally {
     db.close()
   }
@@ -226,33 +237,55 @@ export async function exportWallpapersForTransfer({ signal = null, onProgress = 
 }
 
 export async function importWallpapersFromTransfer(images, mode = 'merge', { signal = null, onProgress = null } = {}) {
-  const existing = await listWallpapers()
+  // 只取键名，避免为了判断 merge 再把所有本地图片 Blob 读进内存。
+  const existing = new Set(await listWallpaperTargets())
   const sourceEntries = Object.entries(images ?? {}).filter(([target, dataUrl]) => (
-    /^data:image\//.test(dataUrl) && !(mode === 'merge' && existing[target])
+    typeof dataUrl === 'string' && /^data:image\//.test(dataUrl) && !(mode === 'merge' && existing.has(target))
   ))
-  const decoded = []
-  for (const [index, [target, dataUrl]] of sourceEntries.entries()) {
-    throwIfAborted(signal)
-    onProgress?.({ current: index, total: sourceEntries.length, target, stage: 'decoding' })
-    if (!/^data:image\//.test(dataUrl)) continue
-    const blob = await (await fetch(dataUrl, { signal })).blob()
-    decoded.push([target, blob])
-    onProgress?.({ current: index + 1, total: sourceEntries.length, target, stage: 'decoded' })
-  }
-  throwIfAborted(signal)
-
   const db = await openDb()
   try {
-    const transaction = db.transaction(STORE_NAME, 'readwrite')
-    const store = transaction.objectStore(STORE_NAME)
-    if (mode === 'replace') store.clear()
-    for (const [target, blob] of decoded) store.put(blob, target)
+    const clearStaging = db.transaction(IMPORT_STORE, 'readwrite')
+    clearStaging.objectStore(IMPORT_STORE).clear()
+    await transactionDone(clearStaging)
+
+    // 解码一张就写入临时对象仓库，避免把所有解码后的 Blob 同时留在 JS 堆里。
+    // 原壁纸只在最后一个原子事务里替换；解码或存储失败时不会留下半份新壁纸。
+    for (const [index, [target, dataUrl]] of sourceEntries.entries()) {
+      throwIfAborted(signal)
+      onProgress?.({ current: index, total: sourceEntries.length, target, stage: 'decoding' })
+      const blob = await (await fetch(dataUrl, { signal })).blob()
+      const storeTransaction = db.transaction(IMPORT_STORE, 'readwrite')
+      storeTransaction.objectStore(IMPORT_STORE).put(blob, target)
+      await transactionDone(storeTransaction)
+      onProgress?.({ current: index + 1, total: sourceEntries.length, target, stage: 'decoded' })
+    }
+    throwIfAborted(signal)
+
+    const transaction = db.transaction([STORE_NAME, IMPORT_STORE], 'readwrite')
+    const imagesStore = transaction.objectStore(STORE_NAME)
+    const stagingStore = transaction.objectStore(IMPORT_STORE)
+    if (mode === 'replace') imagesStore.clear()
+    const cursorRequest = stagingStore.openCursor()
+    cursorRequest.onsuccess = () => {
+      const cursor = cursorRequest.result
+      if (cursor) {
+        imagesStore.put(cursor.value, cursor.key)
+        cursor.continue()
+      } else stagingStore.clear()
+    }
     await transactionDone(transaction)
+  } catch (error) {
+    try {
+      const cleanup = db.transaction(IMPORT_STORE, 'readwrite')
+      cleanup.objectStore(IMPORT_STORE).clear()
+      await transactionDone(cleanup)
+    } catch { /* 保留原始导入错误；下次导入会先清理临时对象仓库。 */ }
+    throw error
   } finally {
     db.close()
   }
   wallpaperRevision.value++
-  onProgress?.({ current: decoded.length, total: sourceEntries.length, stage: 'committed' })
+  onProgress?.({ current: sourceEntries.length, total: sourceEntries.length, stage: 'committed' })
 }
 
 async function storeEntries(db, storeName) {

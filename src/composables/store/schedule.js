@@ -1,10 +1,4 @@
 import { clock, touchStoredRef, useStoredRef } from './core.js'
-import {
-  currentTimes,
-  periodIndex,
-  currentCampusId,
-  currentSeasonId,
-} from './timeConfig.js'
 import { todayStr, MAX_WEEK, dateString } from './utils.js'
 
 export const semester = useStoredRef('sl_semester', {

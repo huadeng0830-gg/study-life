@@ -1,4 +1,4 @@
-import { TASK_PLAN_STATE, billStatus, isActiveEntity, isArchived, isTaskActionable, taskStatus } from './state.js'
+import { TASK_PLAN_STATE, billStatus, isActiveEntity, isArchived, taskStatus } from './state.js'
 import { countdownState } from '../store/countdown.js'
 import { policyDateKey, policyDateTime } from '../settingsPolicy.js'
 import { clock } from '../store/core.js'
@@ -137,38 +137,4 @@ export function reminderAction(item) {
   if (item?.sourceType === 'milestone') return { action: 'view', targetType: 'milestone', targetId: item.sourceId }
   if (item?.sourceType === 'event') return { action: 'view', targetType: 'event', targetId: item.sourceId }
   return { action: 'view', targetType: item?.sourceType || '', targetId: item?.sourceId || '' }
-}
-
-// 首页的“今日行动清单”同样只是一层投影：课程、待办、日程、节点和账单仍由各自模块拥有。
-export function selectDayAgenda({ courses = [], tasks = [], bills = [], milestones = [], events = [] } = {}, now = clock.value, { limit = 8, excludeTypes = [], excludeKeys = [] } = {}) {
-  const today = dateText(now)
-  const results = []
-  const excludedTypes = new Set(excludeTypes)
-  const excludedKeys = new Set(excludeKeys)
-  const add = (item) => {
-    if (!excludedTypes.has(item.sourceType) && !excludedKeys.has(item.key)) results.push(item)
-  }
-  for (const course of courses) {
-    if (!isActiveEntity(course)) continue
-    add({ key: ref('course', course), sourceType: 'course', sourceId: course.id, kind: 'course', title: course.name, time: course.time || '', meta: course.room || '', dueAt: dateTime(today, course.time || '23:59'), entity: course })
-  }
-  for (const task of tasks) {
-    if (!isActiveEntity(task) || !isTaskActionable(task, now) || !task.dueDate) continue
-    const status = taskStatus(task, now)
-    if (status === 'overdue' || task.dueDate === today) add({ key: ref('task', task), sourceType: 'task', sourceId: task.id, kind: status, title: task.title, time: task.dueTime || '', meta: task.course || '', dueAt: dateTime(task.dueDate, task.dueTime), entity: task })
-  }
-  for (const event of events) {
-    if (!isActiveEntity(event)) continue
-    if (event.date === today) add({ key: ref('event', event), sourceType: 'event', sourceId: event.id, kind: 'event', title: event.title, time: event.time || '', meta: event.courseName || '', dueAt: dateTime(today, event.time || '23:59'), entity: event })
-  }
-  for (const milestone of milestones) {
-    if (!isActiveEntity(milestone)) continue
-    if (milestone.date === today) add({ key: ref('milestone', milestone), sourceType: 'milestone', sourceId: milestone.id, kind: 'milestone', title: milestone.name, time: '', meta: '今天到期', dueAt: dateTime(today), entity: milestone })
-  }
-  for (const bill of bills) {
-    if (!isActiveEntity(bill)) continue
-    const status = billStatus(bill, now)
-    if (status === 'due' || status === 'overdue') add({ key: ref('bill', bill), sourceType: 'bill', sourceId: bill.id, kind: status, title: bill.name, time: '', meta: `¥${Number(bill.amount || 0).toFixed(2)}`, dueAt: dateTime(bill.nextDate || today), entity: bill })
-  }
-  return results.sort((a, b) => (a.kind === 'overdue' ? -1 : b.kind === 'overdue' ? 1 : a.dueAt - b.dueAt || a.title.localeCompare(b.title, 'zh-CN'))).slice(0, limit)
 }

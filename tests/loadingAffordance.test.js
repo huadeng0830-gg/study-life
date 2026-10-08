@@ -22,7 +22,7 @@ function source(path) {
 
 // 提交期间会 disabled 的按钮所在的文件，以及各自期望的绑定数量。
 const BUTTONS = [
-  ['components/QuickRecordPanel.vue', 4],
+  ['components/QuickRecordPanel.vue', 2],
   ['components/AppearanceSettings.vue', 2],
   ['components/schedule/ImportConflictModal.vue', 2],
 ]

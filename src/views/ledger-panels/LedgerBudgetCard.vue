@@ -1,4 +1,5 @@
 <script setup>
+import { computed } from 'vue'
 import { moneyWithCurrency } from '../../utils/formatters.js'
 
 const props = defineProps({
@@ -8,6 +9,22 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['open-budget-settings'])
+
+const remainingMetric = computed(() => {
+  const alert = props.budgetAlert
+  if (!alert) return null
+  if (alert.partial && !alert.spentIsLowerBound) {
+    return { label: '已折算净额', amount: alert.remaining, over: false }
+  }
+  if (alert.partial) {
+    return alert.remaining < 0
+      ? { label: '至少已超出', amount: Math.abs(alert.remaining), over: true }
+      : { label: '最多剩余预算', amount: alert.remaining, over: false }
+  }
+  return alert.remaining < 0
+    ? { label: '本月已超出', amount: Math.abs(alert.remaining), over: true }
+    : { label: '本月剩余预算', amount: alert.remaining, over: false }
+})
 </script>
 
 <template>
@@ -15,7 +32,7 @@ const emit = defineEmits(['open-budget-settings'])
     <div class="budget-card-head">
       <div class="budget-card-title">
         <span>本月预算</span>
-        <b v-if="props.budgetAlert">{{ Math.max(0, props.budgetAlert.pct) }}% <small>已用</small></b>
+        <b v-if="props.budgetAlert">{{ props.budgetAlert.spentIsLowerBound ? '至少 ' : '' }}{{ Math.max(0, props.budgetAlert.pct) }}% <small>已用</small></b>
         <small v-else>尚未设置</small>
       </div>
       <button class="link-btn" type="button" @click="emit('open-budget-settings')">{{ props.budget.monthly === null ? '设置预算' : '预算设置' }}</button>
@@ -28,14 +45,14 @@ const emit = defineEmits(['open-budget-settings'])
       aria-valuemin="0"
       :aria-valuemax="props.budgetAlert.budget"
       :aria-valuenow="Math.max(0, Math.min(props.budgetAlert.budget, props.budgetAlert.spent))"
-      :aria-valuetext="`${Math.max(0, props.budgetAlert.pct)}% 已用`"
+      :aria-valuetext="`${props.budgetAlert.spentIsLowerBound ? '至少 ' : ''}${Math.max(0, props.budgetAlert.pct)}% 已用${props.budgetAlert.partial ? '，还有记录缺少汇率' : ''}`"
     >
       <i :style="{ width: `${Math.max(0, Math.min(100, props.budgetAlert.pct))}%` }"></i>
     </div>
     <div v-if="props.budgetAlert" class="budget-card-foot">
-      <span class="budget-metric budget-remaining" :class="{ over: props.budgetAlert.remaining < 0 }">
-        <small>{{ props.budgetAlert.remaining < 0 ? '本月已超出' : '本月剩余预算' }}</small>
-        <b>{{ moneyWithCurrency(Math.abs(props.budgetAlert.remaining), props.budgetBaseCurrency) }}</b>
+      <span class="budget-metric budget-remaining" :class="{ over: remainingMetric.over }">
+        <small>{{ remainingMetric.label }}</small>
+        <b>{{ moneyWithCurrency(remainingMetric.amount, props.budgetBaseCurrency) }}</b>
       </span>
       <span v-if="props.budgetAlert.pacing" class="budget-metric budget-daily" role="status">
         <small>后续每天可用</small>
@@ -59,6 +76,10 @@ const emit = defineEmits(['open-budget-settings'])
         <small>今日固定 {{ moneyWithCurrency(props.budgetAlert.pacing.todayAllowance, props.budgetBaseCurrency) }}</small>
       </span>
     </div>
+    <p v-if="props.budgetAlert?.partial" class="budget-pacing-note" role="status">
+      {{ props.budgetAlert.spentIsLowerBound ? '当前比例只计入已折算的支出，实际使用至少达到该比例。' : '有未折算的外币记录，当前预算金额与剩余额度尚不完整。' }}
+      缺少汇率：{{ props.budgetAlert.missingRates.join('、') || '未知币种' }}（{{ props.budgetAlert.excludedCount }} 笔）。
+    </p>
     <p v-if="props.budgetAlert?.pacing?.daysAfterToday > 0" class="budget-pacing-note">
       今日消费先扣今日固定额度；未超过今日固定额度时，后续每天可用保持不变，超出部分才会降低后续额度。
     </p>
@@ -116,6 +137,7 @@ const emit = defineEmits(['open-budget-settings'])
   display:block}
 .budget-card.is-near .budget-meter i { background:var(--warning) }
 .budget-card.is-over .budget-meter i { background:var(--danger) }
+.budget-card.is-unknown .budget-meter i { background:var(--warning) }
 .budget-card-foot {
   grid-template-columns:repeat(3,minmax(0,1fr));
   align-items:stretch;

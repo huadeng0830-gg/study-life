@@ -30,33 +30,47 @@ export const genAfterOptions = computed(() => timeConfig.value.periods)
 
 export function previewGenerate() {
   settingError.value = ''
+  genPreview.value = null
   const cfg = timeConfig.value
   const periods = cfg.periods
   const startIdx = periodIndex(gen.startId ?? periods[1]?.id ?? periods[0]?.id)
   if (startIdx < 0) { settingError.value = '请选择起始节次'; return }
-  const lunchIdx = gen.lunchMin > 0 ? gen.lunchAfterIdx : -1
-  const dinnerIdx = gen.dinnerMin > 0 ? gen.dinnerAfterIdx : -1
-  if (lunchIdx < startIdx || lunchIdx >= periods.length - 1) {
+  const lunchEnabled = Number(gen.lunchMin) > 0
+  const dinnerEnabled = Number(gen.dinnerMin) > 0
+  const lunchIdx = lunchEnabled ? Number(gen.lunchAfterIdx) : -1
+  const dinnerIdx = dinnerEnabled ? Number(gen.dinnerAfterIdx) : -1
+  if (lunchEnabled && (!Number.isInteger(lunchIdx) || lunchIdx < startIdx || lunchIdx >= periods.length - 1)) {
     settingError.value = '午休位置无效（需在起始节次之后、且后面还有节次）'
     return
   }
-  if (gen.dinnerMin > 0 && (dinnerIdx < startIdx || dinnerIdx >= periods.length - 1)) {
+  if (dinnerEnabled && (!Number.isInteger(dinnerIdx) || dinnerIdx < startIdx || dinnerIdx >= periods.length - 1)) {
     settingError.value = '晚休位置无效（需在起始节次之后、且后面还有节次）'
     return
   }
   let cursor = toMinutes(gen.startTime)
-  const generated = periods.map((_, i) => {
-    if (i < startIdx) return null
-    if (i > startIdx) {
-      const prev = i - 1
-      if (prev === lunchIdx) cursor += gen.lunchMin
-      else if (prev === dinnerIdx) cursor += gen.dinnerMin
-      else cursor += gen.breakMin
-    }
-    const start = toHHMM(cursor)
-    cursor += Number(gen.duration) || 45
-    return { start, end: toHHMM(cursor) }
-  })
+  if (!Number.isFinite(cursor)) {
+    settingError.value = '请输入有效的上课开始时间'
+    return
+  }
+  let generated
+  try {
+    generated = periods.map((_, i) => {
+      if (i < startIdx) return null
+      if (i > startIdx) {
+        const prev = i - 1
+        if (prev === lunchIdx) cursor += gen.lunchMin
+        else if (prev === dinnerIdx) cursor += gen.dinnerMin
+        else cursor += gen.breakMin
+      }
+      const start = toHHMM(cursor)
+      cursor += Number(gen.duration) || 45
+      return { start, end: toHHMM(cursor) }
+    })
+  } catch (error) {
+    if (!(error instanceof RangeError)) throw error
+    settingError.value = '生成时间超出 23:59，请调整上课时间或节长/休息时长'
+    return
+  }
   const rows = []
   for (let i = startIdx; i < periods.length; i++) {
     if (!generated[i]) continue

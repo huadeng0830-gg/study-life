@@ -2,19 +2,19 @@ const BACKUP_SCHEMA = 'study-life.backup/v1'
 
 const BACKUP_FIELDS = Object.freeze({
   sl_courses: 'courses', sl_exams: 'countdowns', sl_tasks: 'tasks', sl_events: 'events',
-  sl_quick_notes: 'quickNotes', sl_quick_record_settings: 'quickRecordSettings', sl_capture_enabled: 'captureEnabled',
+  sl_quick_record_settings: 'quickRecordSettings', sl_capture_enabled: 'captureEnabled',
   sl_focus_sessions: 'focusSessions', sl_focus_settings: 'focusSettings', sl_course_checkins: 'courseCheckins',
   sl_course_templates: 'courseTemplates', sl_checklists: 'checklists', sl_bills: 'bills', sl_expenses: 'expenses',
   sl_ledger_categories: 'ledgerCategories', sl_ledger_freq: 'ledgerFreq', sl_ledger_fx: 'ledgerFx',
   sl_ledger_budget: 'ledgerBudget', sl_ledger_templates: 'ledgerTemplates', sl_timecfg: 'timeConfig', sl_semester: 'semester',
   sl_schedule_exceptions: 'scheduleExceptions', sl_schedule_note: 'scheduleNote', sl_theme: 'theme', sl_custom_theme_color: 'customThemeColor',
   sl_high_contrast: 'highContrast',
-  sl_countdown_show_past: 'countdownShowPast', sl_food_places: 'foodPlaces', sl_food_history: 'foodHistory',
-  sl_food_filters: 'foodFilters', sl_ocr_vocabulary: 'ocrVocabulary', sl_appearance: 'appearance',
+  sl_countdown_show_past: 'countdownShowPast', sl_ocr_vocabulary: 'ocrVocabulary', sl_appearance: 'appearance',
   sl_wallpaper_config: 'wallpaperConfig', sl_auto_wallpaper_color: 'autoWallpaperColor', sl_wallpaper_accent: 'wallpaperAccent',
   sl_performance_mode: 'performanceMode', sl_festive_config: 'festiveConfig', sl_festive_birthday_full: 'festiveBirthdayFull',
   sl_festive_lunar: 'festiveLunar', sl_ui_language: 'uiLanguage',
   sl_mood_log: 'moodLog', sl_reminder_log: 'reminderLog',
+  sl_focus_active: 'activeFocus', sl_task_center_log: 'taskCenterLog', sl_archived_quick_notes: 'archivedQuickNotes',
 })
 
 function readLocalData() {

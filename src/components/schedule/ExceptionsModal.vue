@@ -28,7 +28,7 @@ const endDateInput = ref(null)
 const editingId = ref(null)
 
 // 单一入口，保证 error 与 errorField 不会各自漂移
-//（与 NotesView / LedgerView / EventsView 同一套约定）。
+//（与 LedgerView / EventsView 同一套约定）。
 // field 非空表示这是字段校验错误：控件标 aria-invalid，并把焦点移回去。
 // 此前「请选择日期 / 结束日期不能早于开始日期」只渲染在表单底部的 <p class="error">，
 // 既不关联那两个日期输入框、也没有 role="alert"——读屏用户点保存后完全不知道哪里没过。
@@ -311,13 +311,13 @@ function exceptionDetail(item) {
 .exception-item b { font-size: var(--fs-12); }
 .exception-item span {
   padding: 3px 6px;
-  color: #b13f3f;
+  color: var(--danger);
   font-size: var(--fs-9);
   font-weight: var(--fw-800);
   border-radius: var(--radius-5);
-  background: #feecec;
+  background: var(--danger-soft);
 }
-.exception-item span.makeup { color: #6b3fd4; background: #f1ebff; }
+.exception-item span.makeup { color: var(--primary); background: var(--primary-soft); }
 .exception-item small { width: 100%; color: var(--muted); font-size: var(--fs-10); }
 .exception-item.editing { border-color: var(--primary); background: var(--primary-soft); }
 .exception-actions { display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto; }

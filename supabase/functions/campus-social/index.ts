@@ -13,10 +13,18 @@ const supabaseUrl = Deno.env.get('SUPABASE_URL') || ''
 const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || ''
 const admin = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false, autoRefreshToken: false } })
 const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, apikey, content-type, x-client-info, x-supabase-api-version',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 }
+const allowedOrigins = new Set([
+  'https://study-life.pages.dev',
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+  'http://localhost:4173',
+  'http://127.0.0.1:4173',
+  'app://study-life',
+  ...(Deno.env.get('CAMPUS_SOCIAL_ALLOWED_ORIGINS') || '').split(',').map((origin) => origin.trim()).filter(Boolean),
+])
 const SAFE_PROFILE_FIELDS = 'user_id,nickname,school,email_discoverable,timezone,schedule_complete_through,semester_end,availability_preferences,updated_at'
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
@@ -29,6 +37,15 @@ class ApiError extends Error {
 
 function response(body: Record<string, unknown>, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } })
+}
+
+function withCors(request: Request, result: Response) {
+  const headers = new Headers(result.headers)
+  const origin = request.headers.get('origin') || ''
+  if (allowedOrigins.has(origin)) headers.set('Access-Control-Allow-Origin', origin)
+  else headers.delete('Access-Control-Allow-Origin')
+  headers.append('Vary', 'Origin')
+  return new Response(result.body, { status: result.status, statusText: result.statusText, headers })
 }
 
 function cleanText(value: unknown, max: number, label: string, required = false) {
@@ -805,9 +822,9 @@ async function handle(user: any, action: string, payload: any) {
 }
 
 Deno.serve(async (request: Request) => {
-  if (request.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
-  if (request.method !== 'POST') return response({ error: '仅支持 POST。', code: 'method_not_allowed' }, 405)
-  if (!supabaseUrl || !serviceKey) return response({ error: '好友协作服务尚未配置。', code: 'service_unavailable' }, 503)
+  if (request.method === 'OPTIONS') return withCors(request, new Response('ok', { headers: corsHeaders }))
+  if (request.method !== 'POST') return withCors(request, response({ error: '仅支持 POST。', code: 'method_not_allowed' }, 405))
+  if (!supabaseUrl || !serviceKey) return withCors(request, response({ error: '好友协作服务尚未配置。', code: 'service_unavailable' }, 503))
   try {
     const length = Number(request.headers.get('content-length') || 0)
     if (length > 32_768) throw new ApiError('invalid_input', '请求内容过大。', 413)
@@ -818,10 +835,10 @@ Deno.serve(async (request: Request) => {
     if (!body || typeof body.action !== 'string') throw new ApiError('invalid_input', '请求内容无效。')
     const user = await authenticate(request)
     const data = await handle(user, body.action, body.payload || {})
-    return response({ data })
+    return withCors(request, response({ data }))
   } catch (error) {
-    if (error instanceof ApiError) return response({ error: error.message, code: error.code }, error.status)
+    if (error instanceof ApiError) return withCors(request, response({ error: error.message, code: error.code }, error.status))
     console.error('[campus-social] unexpected failure', error instanceof Error ? error.name : 'unknown')
-    return response({ error: '服务暂时不可用，请稍后重试。', code: 'service_unavailable' }, 503)
+    return withCors(request, response({ error: '服务暂时不可用，请稍后重试。', code: 'service_unavailable' }, 503))
   }
 })

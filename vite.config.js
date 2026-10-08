@@ -52,8 +52,9 @@ export default defineConfig(({ mode }) => {
           codeSplitting: {
             groups: [
               { name: 'vue-vendor', test: /[\\/]node_modules[\\/](@vue|vue|vue-router)[\\/]/ },
+              // The account SDK is dynamically imported on demand; keep it out of the app shell cache.
+              { name: 'supabase-vendor', test: /[\\/]node_modules[\\/](@supabase)[\\/]/ },
               { name: 'ocr-vendor', test: /[\\/]node_modules[\\/]tesseract\.js[\\/]/ },
-              { name: 'transfer-vendor', test: /[\\/]node_modules[\\/](qrcode|jsqr)[\\/]/ },
             ],
         },
       },
@@ -84,7 +85,7 @@ export default defineConfig(({ mode }) => {
         scope: '/',
         display: 'standalone',
         orientation: 'portrait',
-        theme_color: '#4f7cff',
+        theme_color: '#456fe8',
         background_color: '#f4f6fa',
         icons: [
           {
@@ -111,25 +112,22 @@ export default defineConfig(({ mode }) => {
           'assets/*.{js,css}',
         ],
         // 预缓存全部应用分包，只保留体积大、且仅特定功能才用到的供应商库按需加载：
-        // Excel 解析（课程表导入）、OCR 引擎（图片识课）、二维码栈（迁移/绑定）。
+        // Excel 解析（课程表导入）、OCR 引擎（图片识课）和账号 SDK 按需加载。
         // 其余分包（数据管理、同步绑定、课程弹窗等）全部预缓存，
         // 避免发版后这些懒加载入口因分包 hash 变更而打不开（PWA 缓存错位）。
         //
-        // transfer-vendor（qrcode + jsqr）之前漏在这里，等于每次安装 PWA 都白下
-        // 一份二维码库，而应用别处（Sidebar 的预热注释、移动端不预载）都刻意
-        // 把它推迟到用户真的要用为止。下面那条 StaleWhileRevalidate 会在首次
-        // 真正用到时补上并缓存。
+        // Supabase client 与 OCR 引擎只在用户触发相应功能后下载。
         globIgnores: [
           'assets/xlsx-*',
           'assets/ocr-vendor-*',
-          'assets/transfer-vendor-*',
+          'assets/supabase-vendor-*',
         ],
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
         navigateFallbackDenylist: [/^\/desktop-auth-return(?:\/|$)/],
         skipWaiting: true,
         clientsClaim: true,
-        // 旧懒加载资源保留一个发布周期，用户点击旧页面链接时仍有机会离线回退。
-        cleanupOutdatedCaches: false,
+        // Remove old Workbox cache buckets so obsolete release chunks do not accumulate.
+        cleanupOutdatedCaches: true,
         runtimeCaching: [
           {
             // 语言模型、SIMD 引擎与 worker 都在 public/ocr 下，同属"首次识课后长期复用"。

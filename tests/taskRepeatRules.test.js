@@ -112,23 +112,24 @@ describe('每月：跨月夹到月末', () => {
     expect(nextRepeatDueDate('2026-01-30', 'monthly')).not.toBe('2026-03-02')
   })
 
-  it('29/30/31 号各自夹到自己的月末；跨年 12 月照常推进', () => {
+  it('单次推进夹到目标月末；显式锚点可在月末后恢复原日号', () => {
     expect(nextRepeatDueDate('2026-03-31', 'monthly')).toBe('2026-04-30')
     expect(nextRepeatDueDate('2026-04-30', 'monthly')).toBe('2026-05-30')
     expect(nextRepeatDueDate('2026-12-31', 'monthly')).toBe('2027-01-31')
+    // 单步纯函数没有重复链上下文时，以当前日期为兼容锚点。
     expect(nextRepeatDueDate('2026-02-28', 'monthly')).toBe('2026-03-28')
+    expect(nextRepeatDueDate('2026-02-28', 'monthly', { anchorDay: 31 })).toBe('2026-03-31')
   })
 
-  it('逐月推下去时不会漂移：31 号 → 28 号 → 31 号（而不是 28 号一路拖下去）', () => {
-    let date = '2026-01-31'
+  it('生成下一期时保留月末锚点：31 号 → 28 号 → 31 号 → 30 号', () => {
+    let task = taskOf('2026-01-31', { repeat: 'monthly' })
     const chain = []
     for (let i = 0; i < 3; i += 1) {
-      date = nextRepeatDueDate(date, 'monthly')
-      chain.push(date)
+      task = createNextRepeatingTask(task, NOW)
+      chain.push(task.dueDate)
     }
-    // 每次生成的都是**上一期的下一期**，所以缩短只影响当月，不会像朴素实现那样
-    // 把「被夹短的 28 号」当成新基准一路滚下去（那是 bills 的 addMonthsKeyAnchored 修过的坑）
-    expect(chain).toEqual(['2026-02-28', '2026-03-28', '2026-04-28'])
+    expect(chain).toEqual(['2026-02-28', '2026-03-31', '2026-04-30'])
+    expect(task.repeatAnchorDay).toBe(31)
   })
 })
 

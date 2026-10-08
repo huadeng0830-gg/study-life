@@ -1,4 +1,4 @@
-import { RETIRED_COURIER_KEYS } from './retiredData.js'
+import { RETIRED_DATA_KEYS } from './retiredData.js'
 
 const DB_NAME = 'study-life-local-vault'
 const STORE_NAME = 'records'
@@ -10,7 +10,7 @@ function managedKey(key) {
   return typeof key === 'string' && key.startsWith('sl_') && key !== 'sl_transfer_undo'
 }
 
-const RETIRED_COURIER_KEY_SET = new Set(RETIRED_COURIER_KEYS)
+const RETIRED_DATA_KEY_SET = new Set(RETIRED_DATA_KEYS)
 
 // 应用生命周期内复用同一个连接，避免高频保存时反复开关数据库。
 let vaultPromise = null
@@ -23,6 +23,7 @@ let mirrorTimingHandler = null
 // → 立即重排下一次 flush」会变成一个每 240ms 转一圈的死循环，在隐私模式等
 // IndexedDB 永久不可用的环境下持续敲 openVault 并刷错误回调。
 let mirrorFailureCount = 0
+let mirrorGeneration = 0
 const MIRROR_BASE_DELAY_MS = 240
 const MIRROR_MAX_DELAY_MS = 30000
 let mirrorLifecycleBound = false
@@ -219,7 +220,7 @@ export async function initializeDataVault({ onTiming } = {}) {
       // IndexedDB 不存在时没有可恢复的 Vault；仍精确清掉已删除功能的本机键。
       // 若 IndexedDB 只是暂时打开失败，则保留键，下一次启动继续尝试清理。
       if (typeof indexedDB === 'undefined') {
-        for (const key of RETIRED_COURIER_KEYS) localStorage.removeItem(key)
+        for (const key of RETIRED_DATA_KEYS) localStorage.removeItem(key)
       }
       return []
     }
@@ -230,7 +231,7 @@ export async function initializeDataVault({ onTiming } = {}) {
     // 删除已退休键只需要知道键是否存在，不必把对应的大段业务值读进内存。
     // 先清 Vault，再清 localStorage；任一步失败都会保留本机业务数据。
     const retiredKeys = []
-    for (const key of RETIRED_COURIER_KEYS) {
+    for (const key of RETIRED_DATA_KEYS) {
       const localValue = localStorage.getItem(key)
       if (localValue !== null || backupKeys.includes(key)) retiredKeys.push(key)
     }
@@ -242,9 +243,9 @@ export async function initializeDataVault({ onTiming } = {}) {
     }
 
     // 通常启动时 localStorage 已完整：先列出副本键，只读取本机确实缺失的记录。
-    // 以前 getAll() 会在每次启动时克隆所有大型任务、账单和笔记，即使它们完全相同。
+    // 以前 getAll() 会在每次启动时克隆所有大型任务和账单，即使它们完全相同。
     let missingBackupKeys = backupKeys.filter((key) =>
-      !RETIRED_COURIER_KEY_SET.has(key) && localStorage.getItem(key) === null
+      !RETIRED_DATA_KEY_SET.has(key) && localStorage.getItem(key) === null
     )
     phaseStartedAt = timingNow()
     const missingBackups = new Map()
@@ -256,7 +257,7 @@ export async function initializeDataVault({ onTiming } = {}) {
       // Another open tab may remove a local key while IndexedDB is answering.
       // Recheck once per key so that this startup still restores the latest missing values.
       missingBackupKeys = backupKeys.filter((key) =>
-        !RETIRED_COURIER_KEY_SET.has(key)
+        !RETIRED_DATA_KEY_SET.has(key)
         && !attemptedBackupReads.has(key)
         && localStorage.getItem(key) === null
       )
@@ -269,7 +270,7 @@ export async function initializeDataVault({ onTiming } = {}) {
     phaseStartedAt = timingNow()
 
     for (const key of candidateKeys) {
-      if (!managedKey(key) || RETIRED_COURIER_KEY_SET.has(key)) continue
+      if (!managedKey(key) || RETIRED_DATA_KEY_SET.has(key)) continue
       const localValue = localStorage.getItem(key)
       const backup = missingBackups.get(key)
       if (localValue === null && backup?.value !== undefined) {
@@ -298,6 +299,7 @@ async function flushMirrorWrites() {
     return
   }
   flushingMirrors = true
+  const generation = mirrorGeneration
   const startedAt = timingNow()
   const entries = [...pendingMirrorWrites.entries()]
   pendingMirrorWrites.clear()
@@ -310,9 +312,16 @@ async function flushMirrorWrites() {
       mirrorErrorHandler?.(new Error('IndexedDB 不可用，无法更新本地安全副本'), entries.map(([key]) => key))
       return
     }
-    const previous = await readRecords(db, entries.map(([key]) => key))
+    // Normal store commits are authoritative (including explicit empty arrays), so
+    // do not read and clone the old multi-megabyte value before replacing it.
+    // Startup mirrors use allowEmpty=false and still read the old value to avoid
+    // replacing a recoverable non-empty backup with an empty local default.
+    const guardedKeys = entries.filter(([, value]) => !value.allowEmpty).map(([key]) => key)
+    const previous = await readRecords(db, guardedKeys)
+    if (generation !== mirrorGeneration) return
     const safeEntries = entries
       .filter(([key, value]) => {
+        if (value.allowEmpty) return true
         const backup = previous.get(key)
         return backup?.value !== value.raw && shouldMirrorValue(value.raw, backup?.value, value)
       })
@@ -341,6 +350,23 @@ async function flushMirrorWrites() {
     flushingMirrors = false
     if (pendingMirrorWrites.size) scheduleMirrorFlush(mirrorDelayFor(mirrorFailureCount))
   }
+}
+
+/** Clear every managed-data shadow copy after an explicit local-data purge. */
+export async function clearDataVault() {
+  mirrorGeneration += 1
+  pendingMirrorWrites.clear()
+  if (mirrorTimer) window.clearTimeout(mirrorTimer)
+  mirrorTimer = null
+  const db = await openVault()
+  if (!db) return false
+  await new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_NAME, 'readwrite')
+    tx.objectStore(STORE_NAME).clear()
+    tx.oncomplete = resolve
+    tx.onerror = tx.onabort = () => reject(tx.error || new Error('无法清理本机安全副本。'))
+  })
+  return true
 }
 
 // 失败重试的间隔：240ms 起，逐次翻倍到 30s 封顶。

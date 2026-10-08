@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { detachCourseLinks, findUniqueCourseByName } from '../src/composables/courseLinks.js'
+import { findUniqueCourseByName } from '../src/composables/courseLinks.js'
+import { detachCourseRelations } from '../src/composables/domain/relations.js'
 import { ledgerTabFromQuery } from '../src/composables/routeState.js'
 import { createNextWeeklyTask } from '../src/composables/taskRecurrence.js'
 
@@ -8,7 +9,7 @@ describe('关联边界与深链接', () => {
     const course = { id: 'c1', name: '高等数学' }
     const tasks = [{ id: 't1', courseId: 'c1', course: '' }, { id: 't2', courseId: 'c2', course: '英语' }]
     const countdowns = [{ id: 'e1', courseId: 'c1', courseName: '' }, { id: 'e2', courseId: 'c2' }]
-    expect(detachCourseLinks(course, tasks, countdowns)).toEqual({ tasks: 1, countdowns: 1 })
+    expect(detachCourseRelations(course, { tasks, milestones: countdowns })).toEqual({ tasks: 1, milestones: 1, events: 0 })
     expect(tasks[0]).toMatchObject({ courseId: '', course: '高等数学' })
     expect(countdowns[0]).toMatchObject({ courseId: '', courseName: '高等数学' })
     expect(tasks[1].courseId).toBe('c2')

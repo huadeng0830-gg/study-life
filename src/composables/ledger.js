@@ -12,8 +12,6 @@ import {
   COMMON_EXPENSE_CATEGORY_KEYS,
   COMMON_INCOME_CATEGORY_KEYS,
   DEFAULT_CATEGORIES,
-  DEFAULT_EXPENSE_CATEGORIES,
-  DEFAULT_INCOME_CATEGORIES,
   classifyText,
   normalizeCategoryKey,
   normalizeLedgerCategories,
@@ -102,11 +100,6 @@ export function sumLedgerAmounts(items = []) {
 function reviewCurrencyCode(value) {
   const code = String(value ?? '').trim().toUpperCase()
   return /^[A-Z]{3}$/.test(code) ? code : ''
-}
-
-// 账本所有统计与筛选共用这个实现，避免回顾页把已删除、已归档或损坏的历史数据计入金额。
-function ledgerTransactionCents(item) {
-  return ledgerAmountCents(item)
 }
 
 /**

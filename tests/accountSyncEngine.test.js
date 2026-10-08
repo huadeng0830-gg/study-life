@@ -44,6 +44,7 @@ beforeEach(async () => {
   remote = null; remoteRevision = 0; onPush = null
   await restoreStoredValues(accountDefaultValues(), { markChanged: false })
   fake.request.mockImplementation(async (operation, body) => {
+    if (operation === 'probe') return response({ exists: Boolean(remote), revision: remote ? remoteRevision : null })
     if (operation === 'pull') return response({ exists: Boolean(remote), revision: remote ? remoteRevision : null, data: remote && clone(remote) })
     if (onPush) { const callback = onPush; onPush = null; await callback(body) }
     if ((body.expectedRevision ?? 0) !== remoteRevision) return response({ conflict: true, exists: Boolean(remote), revision: remoteRevision }, 409)
@@ -88,11 +89,30 @@ describe('按账号自动同步与内容保护', () => {
     expect(tasks().value.map(item => item.id).sort()).toEqual(['local', 'remote'])
     expect(remote.values.sl_tasks.map(item => item.id).sort()).toEqual(['local', 'remote'])
   })
-  it('重复检查无变化不会制造新版本', async () => {
+  it('重复检查无变化会跳过本机全量签名与重新发布版本', async () => {
+    const metadata = await import('../src/composables/syncMetadata.js')
+    const hashSpy = vi.spyOn(metadata, 'hashSyncValue')
     expect(await boot(), accountSyncError.value).toBe(true)
     const revision = remoteRevision
+    const hashesAfterFirstSync = hashSpy.mock.calls.length
     expect(await runAccountSync(), accountSyncError.value).toBe(true)
     expect(remoteRevision).toBe(revision)
+    expect(hashSpy).toHaveBeenCalledTimes(hashesAfterFirstSync)
+    expect(fake.request.mock.calls.at(-1)[0]).toBe('probe')
+  })
+  it('同一账号重新登录后强制重新读取本机与云端状态', async () => {
+    tasks().value = [task('before-logout', '登出前记录')]
+    expect(await boot(), accountSyncError.value).toBe(true)
+    expect(remote.values.sl_tasks.map(item => item.id)).toEqual(['before-logout'])
+    await stopAccountSync()
+    fake.snapshots.clear()
+    setAccountDataOwner('')
+    await restoreStoredValues(accountDefaultValues(), { markChanged: false })
+    expect(tasks().value).toEqual([])
+    setAccountDataOwner(user.id)
+    await startAccountSync(user.id)
+    expect(await runAccountSync(), accountSyncError.value).toBe(true)
+    expect(tasks().value.map((item) => item.id)).toEqual(['before-logout'])
   })
   it('CAS 拒绝后重新读取和合并，不覆盖其他设备的新改动', async () => {
     tasks().value = [task('local', '本机新增')]

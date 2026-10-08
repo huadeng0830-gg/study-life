@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { migrateDomainData } from '../src/composables/domain/migrations.js'
 import { detachCourseRelations } from '../src/composables/domain/relations.js'
-import { reminderAction, selectActionCenter, selectDayAgenda, selectReminders, selectTaskView } from '../src/composables/domain/selectors.js'
+import { reminderAction, selectActionCenter, selectReminders, selectTaskView, selectTodayActionPanels } from '../src/composables/domain/selectors.js'
 import { isBillDueSoon, taskPlanningState, taskStatus } from '../src/composables/domain/state.js'
 
 describe('domain state and projections', () => {
@@ -19,11 +19,11 @@ describe('domain state and projections', () => {
     expect(taskPlanningState({ id: 'done', title: '已完成', status: 'completed', dueDate: '2026-08-28' }, now)).toBe('completed')
   })
 
-  it('uses the same task status when projecting agenda and reminders', () => {
+  it('uses the same task status in the live Today action panels and reminders', () => {
     const completed = { id: 'done', title: '已完成', done: false, status: 'completed', dueDate: '2026-08-29' }
     const overdue = { id: 'late', title: '已逾期', done: false, status: 'pending', dueDate: '2026-08-28' }
     const now = new Date('2026-08-29T10:00:00')
-    expect(selectDayAgenda({ tasks: [completed, overdue] }, now).map((item) => item.sourceId)).toEqual(['late'])
+    expect(selectTodayActionPanels({ tasks: [completed, overdue] }, now).risk.map((item) => item.sourceId)).toEqual(['late'])
     expect(selectReminders({ tasks: [completed, overdue] }, now).map((item) => item.sourceId)).toEqual(['late'])
   })
 
@@ -59,29 +59,10 @@ describe('domain state and projections', () => {
     expect(reminders.map((item) => item.sourceType).sort()).toEqual(['bill', 'event', 'milestone', 'task'])
   })
 
-  it('projects today courses and actionable records into one time-ordered agenda', () => {
-    const agenda = selectDayAgenda({
-      courses: [{ id: 'c1', name: '高数', time: '08:00', room: 'A101' }],
-      tasks: [{ id: 't1', title: '交作业', dueDate: '2026-08-29', dueTime: '10:00' }],
-      events: [{ id: 'e1', title: '组会', date: '2026-08-29', time: '14:00' }],
-    }, new Date('2026-08-29T09:00:00'))
-    expect(agenda.map((item) => item.sourceType)).toEqual(['course', 'task', 'event'])
-    expect(agenda[0]).toMatchObject({ title: '高数', meta: 'A101' })
-  })
-
-  it('can reserve a source type for its dedicated home projection', () => {
-    const agenda = selectDayAgenda({
-      courses: [{ id: 'c1', name: '高数', time: '08:00' }],
-      tasks: [{ id: 't1', title: '交作业', dueDate: '2026-08-29', dueTime: '10:00' }],
-      events: [{ id: 'e1', title: '组会', date: '2026-08-29', time: '14:00' }],
-    }, new Date('2026-08-29T09:00:00'), { excludeTypes: ['course', 'task'] })
-    expect(agenda.map((item) => item.sourceType)).toEqual(['event'])
-  })
-
   it('keeps unscheduled tasks out of Today until the user assigns a date', () => {
     const task = { id: 'inbox', title: '买洗衣液', status: 'pending', dueDate: '' }
     expect(taskPlanningState(task, new Date('2026-08-29T09:00:00'))).toBe('unplanned')
-    expect(selectDayAgenda({ tasks: [task] }, new Date('2026-08-29T09:00:00'))).toEqual([])
+    expect(selectTodayActionPanels({ tasks: [task] }, new Date('2026-08-29T09:00:00'))).toEqual({ risk: [], actions: [] })
     expect(task.dueDate).toBe('')
   })
 
@@ -144,8 +125,7 @@ describe('domain compatibility and relations', () => {
     const tasks = [{ courseId: 'c1', course: '' }]
     const milestones = [{ courseId: 'c1', courseName: '' }]
     const events = [{ courseId: 'c1', courseName: '' }]
-    const notes = [{ courseId: 'c1', courseName: '' }]
-    expect(detachCourseRelations({ id: 'c1', name: '高数' }, { tasks, milestones, events, notes })).toEqual({ tasks: 1, milestones: 1, events: 1, notes: 1 })
-    expect([tasks[0].course, milestones[0].courseName, events[0].courseName, notes[0].courseName]).toEqual(['高数', '高数', '高数', '高数'])
+    expect(detachCourseRelations({ id: 'c1', name: '高数' }, { tasks, milestones, events })).toEqual({ tasks: 1, milestones: 1, events: 1 })
+    expect([tasks[0].course, milestones[0].courseName, events[0].courseName]).toEqual(['高数', '高数', '高数'])
   })
 })

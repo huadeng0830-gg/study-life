@@ -26,6 +26,7 @@ const events = useStoredRef('sl_events', [])
 const milestones = useStoredRef('sl_exams', [])
 
 export const REMINDER_LOG_KEY = 'sl_reminder_log'
+const reminderLog = useStoredRef(REMINDER_LOG_KEY, [])
 
 // 一次性回看窗口：App 打开时如果某条提醒的触发点就在最近这段时间内（页面
 // 被关掉又打开、或系统把标签页丢弃了），也应当补一次响。超过这个窗口就不补，
@@ -40,24 +41,31 @@ let logEntries = []
 let timer = null
 let started = false
 let lastSeenSignature = ''
+let reminderLogInitialized = false
 
 function readLog() {
-  try {
-    const raw = localStorage.getItem(REMINDER_LOG_KEY)
-    const parsed = raw ? JSON.parse(raw) : []
-    return Array.isArray(parsed) ? parsed.filter((item) => item && typeof item.key === 'string') : []
-  } catch {
-    // 损坏的日志不该阻断提醒本身，清掉重新开始。
-    return []
+  if (!reminderLogInitialized) {
+    reminderLogInitialized = true
+    // The stored ref normally hydrates this once at module initialization. Keep
+    // a one-time fallback for tests or older callers that populate localStorage
+    // after importing this module; never re-read it after that, because it may
+    // lag a newer in-memory value awaiting the shared persistence debounce.
+    try {
+      const raw = localStorage.getItem(REMINDER_LOG_KEY)
+      if (raw) reminderLog.value = JSON.parse(raw)
+    } catch {}
   }
+
+  const cached = reminderLog.value
+  return Array.isArray(cached)
+    ? cached.filter((item) => item && typeof item.key === 'string')
+    : []
 }
 
 function writeLog() {
-  try {
-    localStorage.setItem(REMINDER_LOG_KEY, JSON.stringify(logEntries))
-  } catch {
-    // 写不进去（配额/隐私模式）时仍然要能提醒，只是刷新后可能重复。
-  }
+  // Use the shared stored ref so persistence and account sync observe the same
+  // value; writing localStorage directly left the sync engine's cached ref stale.
+  reminderLog.value = logEntries
 }
 
 // 日志只保留最近一天，且同一个 key 只记一次 —— 它是去重集合，不是流水账。
@@ -137,13 +145,15 @@ export function collectDueReminders(nowMs = Date.now()) {
   }
 
   for (const task of tasks.value || []) {
-    if (task?.done || task?.status === 'done') continue
+    if (task?.done || task?.status === 'done' || task?.status === 'completed' || task?.archivedAt || task?.active === false) continue
     push('task', task, task?.dueDate, task?.dueTime, task?.reminderMinutes ?? policy.task)
   }
   for (const item of events.value || []) {
+    if (item?.archivedAt || item?.active === false) continue
     push('event', item, item?.date, item?.time, item?.reminderMinutes ?? policy.event)
   }
   for (const item of milestones.value || []) {
+    if (item?.archivedAt || item?.active === false) continue
     push('milestone', item, item?.date, item?.time, item?.reminderMinutes ?? policy.milestone)
   }
 
@@ -151,14 +161,19 @@ export function collectDueReminders(nowMs = Date.now()) {
 }
 
 function fire(entry) {
-  // 先落盘再去弹：万一抛了也不能重复提醒。
-  markFired(entry.key, Date.now())
+  // Re-read the shared value at firing time so a reminder log received from
+  // another tab/device can suppress a duplicate before the next scheduler tick.
+  logEntries = readLog()
+  pruneLog(Date.now())
+  if (logEntries.some((item) => item.key === entry.key)) return false
   if (notifyPermission() !== 'granted') return false
   try {
     const notification = new Notification(`三两事 · ${entry.kind === 'task' ? '待办' : entry.kind === 'event' ? '日程' : '重要节点'}提醒`, {
       body: entry.body,
       tag: entry.key,
     })
+    // Only consume the catch-up window after the browser accepted the notification.
+    markFired(entry.key, Date.now())
     try { notification.onclick = () => { try { window.focus() } catch {}; notification.close() } } catch {}
     return true
   } catch {
@@ -194,6 +209,8 @@ export function startReminderScheduler() {
   logEntries = readLog()
   const tick = () => {
     const nowMs = clock.value?.getTime?.() || Date.now()
+    logEntries = readLog()
+    pruneLog(nowMs)
     for (const entry of collectDueReminders(nowMs)) {
       // 已过去的（含刚打开页面时的补响）立即触发。
       if (entry.fireAt <= nowMs) fire(entry)
@@ -221,6 +238,8 @@ export function isReminderSchedulerRunning() {
  * 很贵），只看去重键与触发时刻的组合。
  */
 export function notifyReminderDataChanged() {
+  logEntries = readLog()
+  pruneLog(Date.now())
   const signature = JSON.stringify(collectDueReminders(Date.now()).map((item) => `${item.key}@${item.fireAt}`))
   if (signature === lastSeenSignature) return
   lastSeenSignature = signature
@@ -235,5 +254,5 @@ export function notifyReminderDataChanged() {
 export function resetReminderLogForTest() {
   logEntries = []
   lastSeenSignature = ''
-  try { localStorage.removeItem(REMINDER_LOG_KEY) } catch {}
+  writeLog()
 }

@@ -6,10 +6,10 @@ import EmptyState from './EmptyState.vue'
 import { useDomainCommands } from '../composables/domain/commands.js'
 import { useStoredRef } from '../composables/store'
 import { isArchived } from '../composables/domain/state.js'
-import { focusLocation } from '../composables/focusNavigation.js'
-import { noteText } from '../composables/notes.js'
 import { useDebouncedRef } from '../composables/useDebouncedRef.js'
-import { focusSearchDate, focusSearchMeta, focusSearchTitle, matchesText, pickHits } from '../composables/searchRelevance.js'
+import { focusLocation } from '../composables/focusNavigation.js'
+import { focusSearchDate, focusSearchMeta, focusSearchTarget, focusSearchTitle, matchesText, pickHits } from '../composables/searchRelevance.js'
+import { announce } from '../composables/liveRegion.js'
 
 const props = defineProps({ open: Boolean })
 const emit = defineEmits(['close'])
@@ -22,7 +22,7 @@ const focusSessions = useStoredRef('sl_focus_sessions', [])
 
 const query = ref('')
 const LIMIT_PER_GROUP = 6
-// 专注记录是唯一会**无上界**增长的分组（一次专注就是一条），而且它是九组里
+// 专注记录是唯一会**无上界**增长的分组（一次专注就是一条），而且它是八组里
 // 唯一没有详情页可跳的（落点只是首页专注面板或那条待办）。所以上限更小、排在最后：
 // 宁可少给几条，也不要让它把有真实落点的结果挤出可视区。
 const LIMIT_FOCUS_GROUP = 4
@@ -36,7 +36,6 @@ const SEARCH_TYPES = Object.freeze([
   { key: 'all', label: '全部' },
   { key: 'task', label: '待办', icon: '✅' },
   { key: 'event', label: '日程', icon: '🗓️' },
-  { key: 'note', label: '笔记', icon: '📝' },
   { key: 'milestone', label: '重要日期', icon: '⏳' },
   { key: 'bill', label: '固定账单', icon: '📒' },
   { key: 'transaction', label: '账本记录', icon: '💳' },
@@ -54,7 +53,7 @@ function typeOf(key) {
 /**
  * 把标题切成「命中 / 未命中」的片段，模板里用 <mark> 包住命中段。
  *
- * 刻意不做 v-html：标题来自用户数据（笔记标题、账单名），
+ * 刻意不做 v-html：标题来自用户数据（待办标题、账单名），
  * 里面完全可能有尖括号，拼 HTML 会引入注入面。这里只用 slice 切字符串，
  * 由 Vue 负责转义。
  */
@@ -135,16 +134,8 @@ function group(key, text, candidates, limit = LIMIT_PER_GROUP) {
  * 否则回首页——专注面板就在那儿。刻意**不挂** `focus` 查询参数：
  * `TodayView` 只消费 `section=event`，挂一个没人读的 `?focus=` 只会让地址栏留垃圾。
  */
-function focusTarget(session) {
-  const todoId = String(session?.todoId || '')
-  if (todoId && domain.tasks.value.some((task) => task.id === todoId)) {
-    return focusLocation('/tasks', todoId)
-  }
-  return { path: '/' }
-}
-
-// 输入框跟 query（打字即时反馈），真正的 9 路整表扫描只跑在 debouncedQuery 上。
-// 原来每敲一个字都要把待办、日程、笔记、重要日期、账单、流水、课程与清单条目
+// 输入框跟 query（打字即时反馈），真正的 8 路整表扫描只跑在 debouncedQuery 上。
+// 原来每敲一个字都要把待办、日程、重要日期、账单、流水、课程与清单条目
 // 全扫一遍并 toLowerCase 一轮 —— 数据上千时每秒钟就是两万次字符串操作。
 const debouncedQuery = useDebouncedRef(query, 160)
 
@@ -153,6 +144,8 @@ const allGroups = computed(() => {
   const text = debouncedQuery.value.trim().toLowerCase()
   if (!text) return []
   const out = []
+  // 用一次 O(tasks) 建索引，避免每条专注记录都对任务数组重新 some() 扫描。
+  const taskIds = new Set(domain.tasks.value.map((task) => String(task?.id ?? '')))
 
   const tasks = group('task', text, collect(domain.tasks.value, text, (item) => hit({
     id: item.id,
@@ -175,18 +168,6 @@ const allGroups = computed(() => {
     to: focusLocation('/', item.id, { section: 'event' }),
   })))
   if (events) out.push(events)
-
-  const notes = group('note', text, collect(domain.notes.value, text, (item) => hit({
-    id: item.id,
-    // 无标题笔记用正文首行顶上（与笔记列表同口径），顺带让正文里的词也能排到高位。
-    title: item.title || noteText(item),
-    contents: [noteText(item), (item.tags || []).join(' ')],
-    updatedAt: item.updatedAt,
-    meta: '',
-    archived: isArchived(item),
-    to: focusLocation('/notes', item.id),
-  })))
-  if (notes) out.push(notes)
 
   const milestones = group('milestone', text, collect(domain.milestones.value, text, (item) => hit({
     id: item.id,
@@ -265,7 +246,7 @@ const allGroups = computed(() => {
     updatedAt: item.endedAt || item.startedAt || '',
     meta: focusSearchMeta(item),
     archived: false,
-    to: focusTarget(item),
+    to: focusSearchTarget(item, taskIds),
   }), (item) => live(item) && Boolean(item.sessionId || item.id)), LIMIT_FOCUS_GROUP)
   if (focus) out.push(focus)
 
@@ -306,6 +287,10 @@ const summaryText = computed(() => (
     : `在「${typeOf(typeFilter.value).label}」里找到 ${total.value} 条`
 ))
 
+watch([() => props.open, debouncedQuery, summaryText], ([open, term, summary]) => {
+  if (open && String(term || '').trim()) announce(summary, { clearAfter: 5000 })
+})
+
 function navigate(result) {
   emit('close')
   router.push(result.to)
@@ -319,7 +304,7 @@ watch(() => props.open, (open) => {
     // 而 Modal 打开时也会自动聚焦（优先 `[autofocus]` 元素，否则第一个可聚焦元素）。
     // 两套机制抢同一个焦点，实测赢的是 Modal 的关闭按钮——
     // 于是"按 / 打开搜索、直接打字"根本不成立。现在只留一处：
-    // 输入框上带 `autofocus`（与 NotesView 的正文框同一写法），交给 Modal 聚焦。
+    // 输入框上带 `autofocus`，由 Modal 负责聚焦。
     query.value = ''
     // 防抖值也要立刻归位：只清 query 的话，真正驱动分组的那份还要再等 160ms，
     // 于是重开面板的头一瞬是"输入框空着、上一轮的结果还挂着"。
@@ -336,7 +321,7 @@ watch(() => props.open, (open) => {
     <div class="search-panel">
       <label class="search-input">
         <span class="sr-only">搜索内容</span>
-        <input autofocus v-model="query" type="search" placeholder="搜索待办、日程、笔记、账单、课程…" />
+        <input autofocus v-model="query" type="search" placeholder="搜索待办、日程、账单、课程…" />
       </label>
 
       <!-- 普通按钮 + aria-pressed，不用 tab 语义：这里没有与 tab 一一对应的面板容器，
@@ -353,7 +338,7 @@ watch(() => props.open, (open) => {
         >{{ chipLabel(item) }}</button>
       </div>
 
-      <p v-if="query && total" class="search-summary" role="status">{{ summaryText }}</p>
+      <p v-if="query && total" class="search-summary">{{ summaryText }}</p>
 
       <div v-if="groups.length" class="search-groups">
         <section v-for="group in groups" :key="group.key" class="search-group">
@@ -375,7 +360,7 @@ watch(() => props.open, (open) => {
         :description="narrowed ? '换个类型，或把关键词改短一点。' : '试试更短的关键词，或换个说法。'"
       />
 
-      <p v-else class="search-hint">输入关键词，一次性搜索课程、待办、日程、笔记、账单、清单和专注记录。</p>
+      <p v-else class="search-hint">输入关键词，一次性搜索课程、待办、日程、账单、清单和专注记录。</p>
     </div>
   </Modal>
 </template>

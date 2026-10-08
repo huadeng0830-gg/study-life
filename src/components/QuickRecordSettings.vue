@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import Modal from './Modal.vue'
 import { settings, settingsPolicy, TIMEZONE_OPTIONS } from '../composables/settingsPolicy.js'
-const props = defineProps({ open: Boolean })
+defineProps({ open: Boolean })
 const emit = defineEmits(['close'])
 
 function updateSettings(patch) {

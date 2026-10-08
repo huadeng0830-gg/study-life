@@ -18,6 +18,8 @@ jobs:
     env:
       VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
       VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.VITE_SUPABASE_PUBLISHABLE_KEY }}
+      WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+      WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
     timeout-minutes: 45
     steps:
       - name: Checkout
@@ -53,15 +55,13 @@ jobs:
         run: npm run supabase:verify-config -- desktop
 
       - name: Run release quality gates
-        run: |
-          npm run check
-          npm run typecheck:ratchet
+        run: npm run check
 
       - name: Verify packaged updater before publishing
         run: |
           npm run build:desktop
-          npx electron-builder --config electron-builder.yml --win nsis --x64 --publish never
-          npm run desktop:verify
+          npm exec --offline -- electron-builder --config electron-builder.release.yml --win nsis --x64 --publish never
+          node scripts/verify-desktop-package.mjs --require-signature
 
       - name: Publish one Windows Release with installer and updater metadata
         uses: softprops/action-gh-release@v3

@@ -188,7 +188,7 @@ defineProps({
   border-color:var(--border-strong);
   box-shadow:var(--shadow-sm)}
 .bill-row.over {
-  border-color:#f3c2c2}
+  border-color:color-mix(in srgb, var(--danger) 40%, var(--border))}
 .b-main {
   flex-direction:column;
   gap:2px;

@@ -40,8 +40,12 @@ export function toMinutes(hhmm) {
 }
 
 export function toHHMM(minutes) {
-  const total = Math.max(0, Math.round(minutes))
-  const h = Math.floor(total / 60) % 24
+  const rounded = Math.round(Number(minutes))
+  if (!Number.isFinite(rounded)) throw new RangeError('分钟数必须是有限数字')
+  // 保留旧行为：负数按 00:00 处理；24:00 及之后必须由调用方显式拒绝，不能回绕到次日。
+  const total = Math.max(0, rounded)
+  if (total >= 24 * 60) throw new RangeError('时间必须在 00:00 至 23:59 之间')
+  const h = Math.floor(total / 60)
   const m = total % 60
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
 }

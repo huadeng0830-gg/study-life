@@ -123,7 +123,8 @@
 button:focus-visible,.text-button:focus-visible,.icon-button:focus-visible { outline:2px solid var(--focus-solid); outline-offset:2px; }
 
 @media (max-width:900px) {
-  .together-page { padding:18px 14px calc(100px + env(safe-area-inset-bottom)); }
+  /* App.vue already reserves the mobile bottom navigation + safe-area inset. */
+  .together-page { padding:18px 14px 24px; }
   .together-layout { grid-template-columns:minmax(0,1fr); }
   .friend-picker { position:static; padding:15px; }
   .friend-list { flex-direction:row; overflow-x:auto; margin-right:-15px; padding:2px 15px 5px 0; scroll-snap-type:x proximity; }
@@ -134,7 +135,7 @@ button:focus-visible,.text-button:focus-visible,.icon-button:focus-visible { out
   .invitation-toolbar { align-items:flex-start; }
 }
 @media (max-width:520px) {
-  .together-page { padding:15px 11px calc(98px + env(safe-area-inset-bottom)); }
+  .together-page { padding:15px 11px 20px; }
   .together-header { align-items:center; margin-bottom:13px; }
   .together-header .page-intro { max-width:275px; font-size:var(--fs-11); }
   .together-header .btn { min-height:34px; padding:5px 10px; }

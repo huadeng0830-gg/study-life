@@ -196,10 +196,12 @@ export function retryScheduleOCR() {
 
 export function continueScheduleResults() {
   scheduleOcrProgress.reset()
+  lastScheduleImage.value = null
 }
 
 /** KeepAlive 离开页面不会卸载组件；主动取消 OCR 避免占用 CPU。 */
 export function stopScheduleOcr() {
   if (scheduleOcrProgress.state.status === 'running') void scheduleOcrProgress.cancel()
   else scheduleOcrController?.abort()
+  lastScheduleImage.value = null
 }

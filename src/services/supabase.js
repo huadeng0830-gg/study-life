@@ -21,21 +21,28 @@ export function getSupabaseConfig(env = import.meta.env) {
 
 let clientPromise = null
 
+export function supabaseClientOptions(isDesktop = typeof window !== 'undefined' && window.studyLifeDesktop?.isDesktop === true) {
+  return {
+    auth: {
+      storageKey: ACCOUNT_STORAGE_KEY,
+      persistSession: true,
+      autoRefreshToken: true,
+      // Callback URLs are consumed explicitly before the Hash Router starts.
+      detectSessionInUrl: false,
+      // Web email confirmation uses a one-time PKCE code. The desktop confirmation
+      // page intentionally stays on implicit tokens because it opens in an external browser.
+      flowType: isDesktop ? 'implicit' : 'pkce',
+    },
+  }
+}
+
 // 账号 SDK 按需加载；会话键不使用 sl_ 前缀，避免进入业务备份、设备副本或云同步。
 export async function getSupabaseClient() {
   const config = getSupabaseConfig()
   if (!config) throw new Error('account_unavailable')
   if (!clientPromise) {
     clientPromise = import('@supabase/supabase-js')
-      .then(({ createClient }) => createClient(config.url, config.key, {
-        auth: {
-          storageKey: ACCOUNT_STORAGE_KEY,
-          persistSession: true,
-          autoRefreshToken: true,
-          detectSessionInUrl: true,
-          flowType: 'implicit',
-        },
-      }))
+      .then(({ createClient }) => createClient(config.url, config.key, supabaseClientOptions()))
       .catch((error) => {
         clientPromise = null
         throw error

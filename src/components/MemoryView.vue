@@ -17,7 +17,6 @@ const exams = useStoredRef('sl_exams', [])
 const bills = useStoredRef('sl_bills', [])
 const expenses = useStoredRef('sl_expenses', [], { deep: false })
 const events = useStoredRef('sl_events', [])
-const notes = useStoredRef('sl_quick_notes', [])
 
 // 年度报告“年末首次打开”一次性提示：仅在 12 月打开时提示一次，year 已提示的年份不再提示。
 const yearNotice = useStoredRef('sl_retro_year_notice', '')
@@ -44,13 +43,12 @@ const dataset = computed(() => ({
   bills: bills.value,
   expenses: expenses.value,
   events: events.value,
-  notes: notes.value,
   moodLog: moodLog.value,
 }))
 
 const years = computed(() => {
   const set = new Set([appToday.value.slice(0, 4)])
-  for (const list of [tasks.value, exams.value, bills.value, expenses.value, events.value, notes.value]) {
+  for (const list of [tasks.value, exams.value, bills.value, expenses.value, events.value]) {
     for (const item of list) {
       const pre = String(item?.date ?? item?.dueDate ?? item?.nextDate ?? '').slice(0, 4)
       if (/^\d{4}$/.test(pre)) set.add(pre)
@@ -68,7 +66,7 @@ const report = computed(() => {
 const hasContent = computed(() => {
   if (tab.value === 'day') {
     const s = daySnapshot(day.value, dataset.value).stats
-    return s.courses + s.tasks + s.exams + s.bills + s.expensesCount + s.events + s.notes > 0
+    return s.courses + s.tasks + s.exams + s.bills + s.expensesCount + s.events > 0
   }
   const pre = tab.value === 'month' ? month.value : year.value
   const startsWith = (value) => String(value ?? '').startsWith(pre)
@@ -77,7 +75,6 @@ const hasContent = computed(() => {
     || exams.value.some((e) => (e.repeat === 'yearly' ? Boolean(e.date) : startsWith(e.date)))
     || bills.value.some((b) => startsWith(b.nextDate))
     || events.value.some((item) => startsWith(item.date))
-    || notes.value.some((item) => startsWith(item.createdAt))
     || (tab.value === 'month' && Object.keys(moodLog.value).some((key) => key.startsWith(pre)))
 })
 

@@ -100,6 +100,16 @@ describe('账单导入', () => {
     expect(rows[1][1]).toBe('含"引号')
   })
 
+  it('可选行数上限在解析时停止构建超额行，默认仍解析完整文件', () => {
+    const csv = 'id,title\n1,one\n2,two\n3,three\n'
+    const limited = parseCsv(csv, { maxRows: 3 })
+
+    expect(limited).toHaveLength(3)
+    expect(limited.truncated).toBe(true)
+    expect(parseCsv(csv)).toHaveLength(4)
+    expect(parseCsv('id,title\n1,one', { maxRows: 3 }).truncated).toBe(false)
+  })
+
   it('金额解析容忍货币符号与千分位', () => {
     expect(parseAmount('¥18.50')).toBe(18.5)
     expect(parseAmount('1,234.56')).toBe(1234.56)

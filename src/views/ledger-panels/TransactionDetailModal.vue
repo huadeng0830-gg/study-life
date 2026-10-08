@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import Modal from '../../components/Modal.vue'
 import { catInfo, isRefundTransaction, freqPrefs } from '../../composables/ledger.js'
-import { moneyRow, moneyWithCurrency } from '../../utils/formatters.js'
+import { moneyWithCurrency } from '../../utils/formatters.js'
 import { isBillPayment } from '../../composables/ledgerRelations.js'
 import { currencyChoices, useLedgerFx } from '../../composables/ledgerFx.js'
 import { activeCategories } from '../../composables/ledger.js'
@@ -26,7 +26,7 @@ const props = defineProps({
   splitDetailNote: { type: Function, default: () => '' },
 })
 
-const emit = defineEmits([
+defineEmits([
   'update:open',
   'update:detailEdit',
   'update:detailAmountInput',

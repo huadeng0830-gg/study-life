@@ -34,9 +34,6 @@ export const accountSyncPreparationError = ref('')
 export const accountSyncActive = computed(() => Boolean(accountUser.value?.id
   && accountUser.value.id === accountDataOwner.value
   && !accountSyncPreparing.value && !accountSyncPreparationError.value))
-export function accountScopedKey(key) {
-  return accountDataOwner.value ? key + ':account:' + encodeURIComponent(accountDataOwner.value) : null
-}
 export function setAccountDataOwner(id) {
   // 与 readAccountDataOwner 的 try/catch 对称：iOS 上配额耗尽时 setItem 会抛，
   // 而这个调用发生在准备账号数据的链路上，抛出去就是那个没有重试的死胡同。

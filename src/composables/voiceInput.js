@@ -7,7 +7,7 @@
 // 不支持（Firefox 桌面版 / 非 HTTPS / 无 API）时 isSupported() 返回 false、transcribe() 返回 null，
 // UI 应隐藏或禁用语音按钮并给出一次性友好提示，保持可用不报错。
 // 语音状态机：idle → listening → transcribing → done / error。
-// 快速笔记模式不需要“理解中”状态，由调用方自行决定是否展示 transcribing 之后的流程。
+// 当前快速记录流程统一展示转写状态，由调用方决定转写后如何预览和保存。
 
 export const VOICE_STATES = Object.freeze({
   idle: 'idle',

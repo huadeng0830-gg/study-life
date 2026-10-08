@@ -85,30 +85,6 @@ describe('useStoredRef 延迟持久化', () => {
     ])
   })
 
-  it('笔记领域命令在浅层监听模式下仍会显式提交', async () => {
-    const key = 'sl_quick_notes'
-    localStorage.setItem(key, '[]')
-    const { flushStoredWrites, useStoredRef } = await import('../src/composables/store')
-    useStoredRef(key, [], { deep: false })
-    const { useDomainCommands } = await import('../src/composables/domain/commands.js')
-    const domain = useDomainCommands()
-    await vi.advanceTimersByTimeAsync(500)
-
-    const note = domain.createNote({ content: '显式提交笔记' })
-    await nextTick()
-    flushStoredWrites()
-    expect(JSON.parse(localStorage.getItem(key))).toEqual([
-      expect.objectContaining({ id: note.id, content: '显式提交笔记' }),
-    ])
-
-    domain.updateNote(note.id, { tags: ['性能'] })
-    await nextTick()
-    flushStoredWrites()
-    expect(JSON.parse(localStorage.getItem(key))).toEqual([
-      expect.objectContaining({ id: note.id, content: '显式提交笔记', tags: ['性能'] }),
-    ])
-  })
-
   it('日程领域命令在浅层监听模式下仍会显式提交', async () => {
     const key = 'sl_events'
     localStorage.setItem(key, '[]')

@@ -165,10 +165,9 @@ describe('P2-B.5 isolated sync sandbox', () => {
     expect(a.tombstones).toHaveLength(0)
   })
 
-  it('preserves related facts while clearing deleted Course, Note, Milestone, and Bill references', () => {
+  it('preserves related facts while clearing deleted Course, Milestone, Bill, and retired note references', () => {
     const initial = {
       sl_courses: [{ id: 'c1', name: '课程', updatedAt: '2026-09-01T00:00:00.000Z' }],
-      sl_quick_notes: [{ id: 'n1', title: '笔记', content: '内容', updatedAt: '2026-09-01T00:00:00.000Z' }],
       sl_exams: [{ id: 'm1', name: '复习', date: '2026-09-10', updatedAt: '2026-09-01T00:00:00.000Z' }],
       sl_bills: [{ id: 'b1', name: '账单', amount: 39, updatedAt: '2026-09-01T00:00:00.000Z' }],
       sl_tasks: [task('t-course', '课程任务', '2026-09-01T00:00:00.000Z', { courseId: 'c1', course: '课程' }), task('t-note', '笔记任务', '2026-09-01T00:00:00.000Z', { sourceType: 'note', sourceId: 'n1', relationId: 'note:n1' }), task('t-milestone', '复习任务', '2026-09-01T00:00:00.000Z', { sourceType: 'milestone-review', sourceId: 'm1', relationId: 'milestone:m1' })],
@@ -180,14 +179,12 @@ describe('P2-B.5 isolated sync sandbox', () => {
     const a = sandbox.device('Device A')
     const b = sandbox.device('Device B')
     sandbox.deleteEntity(a, 'sl_courses', 'Course', 'c1')
-    sandbox.deleteEntity(a, 'sl_quick_notes', 'Note', 'n1')
     sandbox.deleteEntity(a, 'sl_exams', 'Milestone', 'm1')
     sandbox.deleteEntity(a, 'sl_bills', 'Bill', 'b1')
     expect(sandbox.tryPush(a).ok).toBe(true)
     const pull = sandbox.pull(b)
     expect(pull.ok).toBe(true)
     expect(b.local.sl_courses).toHaveLength(0)
-    expect(b.local.sl_quick_notes).toHaveLength(0)
     expect(b.local.sl_exams).toHaveLength(0)
     expect(b.local.sl_bills).toHaveLength(0)
     expect(b.local.sl_tasks).toEqual(expect.arrayContaining([
@@ -299,7 +296,6 @@ describe('P2-B.5 isolated sync sandbox', () => {
   it('keeps repeated pulls idempotent, validates preview counts, and maintains stable IDs at scale', () => {
     const values = {
       sl_tasks: Array.from({ length: 100 }, (_, index) => task(`task-${index}`, `任务 ${index}`)),
-      sl_quick_notes: Array.from({ length: 20 }, (_, index) => ({ id: `note-${index}`, title: `笔记 ${index}`, content: '内容' })),
       sl_events: Array.from({ length: 20 }, (_, index) => ({ id: `event-${index}`, title: `日程 ${index}` })),
       sl_bills: Array.from({ length: 10 }, (_, index) => ({ id: `bill-${index}`, name: `账单 ${index}`, amount: index + 1, nextDate: '2026-09-15' })),
       sl_expenses: Array.from({ length: 100 }, (_, index) => ({ id: `tx-${index}`, name: `交易 ${index}`, amount: index + 1 })),

@@ -29,6 +29,7 @@ import {
   taskRatePercent,
 } from '../src/composables/reviewCharts.js'
 import { weekRange } from '../src/composables/domain/weeklySelectors.js'
+import { policyDateTime } from '../src/composables/settingsPolicy.js'
 
 /** 2026-03-11 是周三；它所在周的周一是 2026-03-09。 */
 const NOW = new Date('2026-03-11T10:00:00')
@@ -101,6 +102,28 @@ describe('功能 15：16 周热力图', () => {
     expect(buildRhythmWeeks({}, NOW, { weeks: -5 }).weeks).toHaveLength(RHYTHM_WEEKS)
     expect(buildRhythmWeeks({}, NOW, { weeks: 999 }).weeks).toHaveLength(52)
     expect(buildRhythmWeeks({}, NOW, { weeks: NaN }).weeks).toHaveLength(RHYTHM_WEEKS)
+  })
+
+  it('asOf 只影响逾期截断时点，不改变当前周的日期范围', () => {
+    const dueDate = thisWeek.startDate
+    const dueAt = policyDateTime(dueDate, '09:00')
+    const data = { tasks: [task({ dueDate, dueTime: '09:00' })] }
+    const before = buildRhythmWeeks(data, NOW, { asOf: dueAt }).weeks.at(-1)
+    const after = buildRhythmWeeks(data, NOW, { asOf: dueAt + 1 }).weeks.at(-1)
+
+    expect(before.startDate).toBe(thisWeek.startDate)
+    expect(before.missed).toBe(0)
+    expect(after.missed).toBe(1)
+  })
+
+  it('完成趋势可复用同一组热力图周数据', () => {
+    const data = { tasks: [task({ dueDate: thisWeek.startDate })] }
+    const options = { asOf: NOW.getTime() }
+    const rhythmWeeks = buildRhythmWeeks(data, NOW, options).weeks
+
+    expect(buildCompletionTrend(data, NOW, options)).toEqual(
+      buildCompletionTrend(data, NOW, { ...options, rhythmWeeks }),
+    )
   })
 
   it('空数据：全部是空周，rate 为 0 而不是 NaN，recorded 为 0', () => {

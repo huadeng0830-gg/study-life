@@ -150,8 +150,9 @@ export async function settle() {
  * @returns {Promise<HTMLElement | null>} 渲染完成后的 `#main-content`
  */
 export async function gotoRoute(app, path) {
-  // 已经在目标页面时不必要求"视图换过"（否则原地导航会一直等到超时）。
-  const alreadyThere = app.router.currentRoute.value.path === path
+  // 已经在目标页面或目标路由重定向回当前页面时，不必要求视图根节点换过。
+  const beforeRoute = app.router.currentRoute.value
+  const alreadyThere = beforeRoute.path === path
   // ⚠ 必须**在 push 之前**抓旧视图的根节点。模块已被缓存时（同一测试文件里第二次
   // 导入同一个视图），视图会在 push 期间就同步换好；若在 push 之后才抓，
   // 抓到的"旧节点"其实已经是新视图，于是"根节点必须变过"永远不成立 →
@@ -159,12 +160,14 @@ export async function gotoRoute(app, path) {
   // 取的是 viewRootOf（最后一个子节点）而不是 firstElementChild，理由见该函数注释。
   const before = viewRootOf(document.querySelector('#main-content'))
   await app.router.push(path)
+  const routeChanged = app.router.currentRoute.value !== beforeRoute
+  const samePathAfterNavigation = app.router.currentRoute.value.path === beforeRoute.path
 
   for (let i = 0; i < 400; i++) {
     await settle()
     const main = document.querySelector('#main-content')
     const root = viewRootOf(main)
-    if (isViewReady(main) && (alreadyThere || root !== before)) break
+    if (isViewReady(main) && (alreadyThere || samePathAfterNavigation || routeChanged || root !== before)) break
     await new Promise((resolveWait) => setTimeout(resolveWait, 10))
   }
   await settle()

@@ -26,6 +26,8 @@ beforeEach(async () => {
       signUp: vi.fn().mockResolvedValue({ data: { user, session: null }, error: null }),
       signInWithPassword: vi.fn().mockResolvedValue({ data: { user, session }, error: null }),
       signOut: vi.fn().mockResolvedValue({ error: null }),
+      exchangeCodeForSession: vi.fn().mockResolvedValue({ data: { session }, error: null }),
+      setSession: vi.fn().mockResolvedValue({ data: { session }, error: null }),
       resend: vi.fn().mockResolvedValue({ data: {}, error: null }),
     },
   }
@@ -98,15 +100,23 @@ describe('邮箱注册与账号生命周期', () => {
     expect(account.accountUser.value).toBeNull()
   })
 
-  it('退出仅影响当前设备会话，保留所有业务数据', async () => {
+  it('退出当前设备会话并清理本机业务数据与账号归属标记', async () => {
     localStorage.setItem('sl_courses', '[{"id":"demo-course","name":"虚构课程"}]')
     localStorage.setItem('sl_notes', 'fictional note')
     await account.loginAccount({ email: user.email, password: 'Example123!' })
     expect((await account.logoutAccount()).ok).toBe(true)
     expect(client.auth.signOut).toHaveBeenCalledWith({ scope: 'local' })
     expect(account.accountUser.value).toBeNull()
-    expect(localStorage.getItem('sl_courses')).toContain('demo-course')
-    expect(localStorage.getItem('sl_notes')).toBe('fictional note')
+    expect(localStorage.getItem('sl_courses')).toBeNull()
+    expect(localStorage.getItem('sl_notes')).toBeNull()
+    expect(localStorage.getItem('study-life-data-owner')).toBeNull()
+  })
+
+  it('全设备退出请求会撤销其它设备会话', async () => {
+    await account.loginAccount({ email: user.email, password: 'Example123!' })
+    expect((await account.logoutAccount({ scope: 'global' })).ok).toBe(true)
+    expect(client.auth.signOut).toHaveBeenCalledWith({ scope: 'global' })
+    expect(account.accountUser.value).toBeNull()
   })
 
   it('重发邮件使用同一个安全回跳地址', async () => {
@@ -178,6 +188,24 @@ describe('邮箱回调和 Hash Router', () => {
     expect(window.location.href).not.toContain('fictional-access')
     expect(account.accountUser.value).toEqual(user)
     expect(account.accountOpen.value).toBe(true)
+    expect(client.auth.setSession).toHaveBeenCalledWith({ access_token: 'fictional-access', refresh_token: 'fictional-refresh' })
+  })
+
+  it('网页 PKCE 邮件回跳先交换 code，再清理地址栏', async () => {
+    window.history.replaceState(null, '', '/?keep=demo&code=fictional-code')
+    client.auth.getSession.mockImplementation(async () => {
+      expect(window.location.search).toContain('code=fictional-code')
+      return { data: { session: null }, error: null }
+    })
+    client.auth.exchangeCodeForSession.mockImplementation(async (code) => {
+      expect(window.location.search).toContain('code=fictional-code')
+      return { data: { session }, error: null }
+    })
+    expect(await account.prepareAccountCallback()).toBe(true)
+    expect(client.auth.exchangeCodeForSession).toHaveBeenCalledWith('fictional-code')
+    expect(window.location.search).toBe('?keep=demo')
+    expect(window.location.hash).toBe('#/')
+    expect(account.accountUser.value).toEqual(user)
   })
 
   it('过期链接显示重发提示，不泄漏服务端错误详情', async () => {
@@ -201,7 +229,7 @@ describe('邮箱回调和 Hash Router', () => {
 
 describe('前端配置的密钥边界', () => {
   it('只接受公开密钥，拒绝 secret/service_role 以及非本机 HTTP 地址', async () => {
-    const { getSupabaseConfig, ACCOUNT_STORAGE_KEY } = await vi.importActual('../src/services/supabase.js')
+    const { getSupabaseConfig, supabaseClientOptions, ACCOUNT_STORAGE_KEY } = await vi.importActual('../src/services/supabase.js')
     const url = 'https://example.supabase.co'
     const key = 'sb_publishable_example'
     expect(getSupabaseConfig({ VITE_SUPABASE_URL: url, VITE_SUPABASE_PUBLISHABLE_KEY: key })).toEqual({ url, key })
@@ -212,5 +240,7 @@ describe('前端配置的密钥边界', () => {
     expect(getSupabaseConfig({ VITE_SUPABASE_URL: 'http://example.test', VITE_SUPABASE_PUBLISHABLE_KEY: key })).toBeNull()
     expect(getSupabaseConfig({ VITE_SUPABASE_URL: 'http://localhost:54321', VITE_SUPABASE_PUBLISHABLE_KEY: key })).not.toBeNull()
     expect(ACCOUNT_STORAGE_KEY.startsWith('sl_')).toBe(false)
+    expect(supabaseClientOptions(false).auth).toMatchObject({ flowType: 'pkce', detectSessionInUrl: false })
+    expect(supabaseClientOptions(true).auth).toMatchObject({ flowType: 'implicit', detectSessionInUrl: false })
   })
 })

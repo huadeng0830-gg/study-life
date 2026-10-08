@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, ref, onBeforeUnmount, watch } from 'vue'
+import { computed, nextTick, ref, onActivated, onBeforeUnmount, onDeactivated, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import EmptyState from '../components/EmptyState.vue'
 import Modal from '../components/Modal.vue'
@@ -187,17 +187,33 @@ function reviewSummaryOf(item, reviewTasks) {
 // 窄屏（单列）下清单很长时做虚拟滚动；宽屏保持多列网格原样渲染。
 // 入场动画只对少量卡片有意义，长列表直接禁用，避免一次挂载几十个动画。
 const EXAM_LIST_THRESHOLD = 16
-const isNarrow = ref(typeof window !== 'undefined' && window.matchMedia('(max-width: 760px)').matches)
-let narrowMql = null
-let narrowMqlHandler = null
-if (typeof window !== 'undefined') {
-  narrowMql = window.matchMedia('(max-width: 760px)')
-  narrowMqlHandler = (event) => { isNarrow.value = event.matches }
-  narrowMql.addEventListener('change', narrowMqlHandler)
+const narrowQuery = '(max-width: 760px)'
+const narrowMql = typeof window !== 'undefined' ? window.matchMedia(narrowQuery) : null
+const isNarrow = ref(narrowMql?.matches ?? false)
+const narrowMqlHandler = (event) => { isNarrow.value = event.matches }
+let viewListenersActive = false
+
+function activateViewListeners() {
+  if (viewListenersActive) return
+  viewListenersActive = true
+  if (narrowMql) {
+    isNarrow.value = narrowMql.matches
+    narrowMql.addEventListener('change', narrowMqlHandler)
+  }
+  if (typeof document !== 'undefined') document.addEventListener('click', closeMenu)
 }
-onBeforeUnmount(() => {
-  if (narrowMql && narrowMqlHandler) narrowMql.removeEventListener('change', narrowMqlHandler)
-})
+
+function deactivateViewListeners() {
+  if (!viewListenersActive) return
+  viewListenersActive = false
+  narrowMql?.removeEventListener('change', narrowMqlHandler)
+  if (typeof document !== 'undefined') document.removeEventListener('click', closeMenu)
+}
+
+onMounted(activateViewListeners)
+onActivated(activateViewListeners)
+onDeactivated(deactivateViewListeners)
+onBeforeUnmount(deactivateViewListeners)
 
 // ---------- 卡片展示辅助：日期牌 / 短日期 / 时间轴 ----------
 const WEEKDAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
@@ -381,12 +397,6 @@ function courseLabel(item) {
   return courses.value.find((course) => course.id === item.courseId)?.name ?? item.courseName ?? ''
 }
 
-if (typeof document !== 'undefined') {
-  document.addEventListener('click', closeMenu)
-}
-onBeforeUnmount(() => {
-  if (typeof document !== 'undefined') document.removeEventListener('click', closeMenu)
-})
 </script>
 
 <template>
@@ -657,7 +667,7 @@ onBeforeUnmount(() => {
   background: var(--bg-tint);
 }
 .category { color: var(--primary); background: var(--primary-soft); }
-.repeat-tag { color: #5f3dc4; background: #f3eeff; }
+.repeat-tag { color: var(--primary); background: var(--primary-soft); }
 .menu-btn {
   display: grid;
   place-items: center;
@@ -720,12 +730,10 @@ onBeforeUnmount(() => {
   height: 68px;
   flex: 0 0 60px;
   border-radius: var(--radius-16);
-  background: linear-gradient(160deg, #eef2ff 0%, #f4f0ff 100%);
+  background: var(--primary-soft);
 }
-/* 渐变底取 #eef2ff→#f4f0ff 的中间值 #f1f1ff 作对比度基准；
-   #3d4ec0 在其上 6.15:1（AA 正文 4.5 余量充足）。原 #8a94d8 只有 2.57:1。 */
-.date-tile small { color: #3d4ec0; font-size: var(--fs-11); font-weight: var(--fw-700); line-height: 1.2; }
-.date-tile b { color: #3d4ec0; font-size: var(--fs-23); font-weight: var(--fw-900); line-height: 1.15; letter-spacing: 0.01em; }
+.date-tile small { color: var(--primary); font-size: var(--fs-11); font-weight: var(--fw-700); line-height: 1.2; }
+.date-tile b { color: var(--primary); font-size: var(--fs-23); font-weight: var(--fw-900); line-height: 1.15; letter-spacing: 0.01em; }
 .exam-info { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .name {
   overflow: hidden;
@@ -779,10 +787,10 @@ onBeforeUnmount(() => {
   flex: 1;
   height: 3px;
   border-radius: var(--radius-pill);
-  background: #e7ecf6;
+  background: var(--bg-tint);
 }
-.tl-track i { position: absolute; inset: 0; border-radius: inherit; background: linear-gradient(90deg, rgba(69,111,232,.32), rgba(120,100,220,.32)); }
-.exam.finished .tl-track i { background: #eef1f6; }
+.tl-track i { position: absolute; inset: 0; border-radius: inherit; background: linear-gradient(90deg, color-mix(in srgb, var(--brand-grad-a) 32%, var(--bg-tint)), color-mix(in srgb, var(--brand-grad-b) 32%, var(--bg-tint))); }
+.exam.finished .tl-track i { background: color-mix(in srgb, var(--ink-faint) 45%, var(--bg-tint)); }
 .tl-dot {
   width: 7px;
   height: 7px;
@@ -790,9 +798,9 @@ onBeforeUnmount(() => {
   margin-left: -12px;
   border-radius: var(--radius-circle);
   background: var(--primary);
-  box-shadow: 0 0 0 3px rgba(69, 111, 232, 0.14);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 14%, transparent);
 }
-.tl-dot.on { background: var(--danger); box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.15); }
+.tl-dot.on { background: var(--danger); box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 15%, transparent); }
 .form {
   display: flex;
   flex-direction: column;

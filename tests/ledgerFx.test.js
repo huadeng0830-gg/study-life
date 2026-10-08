@@ -128,6 +128,8 @@ describe('按基准币种折算求和（月/区间）', () => {
     expect(summary.convertedForeignCount).toBe(1)
     expect(summary.missingRates).toEqual(['EUR'])
     expect(summary.excludedCount).toBe(1)
+    expect(summary.excludedExpenseCount).toBe(1)
+    expect(summary.excludedRefundCount).toBe(0)
     expect(summary.hasMissing).toBe(true)
   })
 
@@ -178,6 +180,8 @@ describe('判别力自证：缺汇率不会被当成 1:1 静默相加', () => {
     expect(summary.expenseTotal).toBe(0)
     expect(summary.count).toBe(0)
     expect(summary.excludedCount).toBe(1)
+    expect(summary.excludedExpenseCount).toBe(1)
+    expect(summary.excludedRefundCount).toBe(0)
     expect(summary.missingRates).toEqual(['USD'])
 
     // 这条是「有牙齿」的部分：一个按 1:1 硬算的实现会得到 100（既有 sumLedgerAmounts 的结果），
@@ -185,6 +189,18 @@ describe('判别力自证：缺汇率不会被当成 1:1 静默相加', () => {
     const naiveOneToOne = sumLedgerAmounts(only)
     expect(naiveOneToOne).toBe(100)
     expect(summary.expenseTotal).not.toBe(naiveOneToOne)
+  })
+
+  it('将缺汇率退款与支出分开计数，预算可以判断净额方向是否确定', () => {
+    const summary = summarizeLedgerInBase([
+      record({ id: 'known-expense', amount: 10 }),
+      record({ id: 'missing-refund', amount: 4, currency: 'EUR', direction: 'refund' }),
+      record({ id: 'missing-expense', amount: 8, currency: 'EUR' }),
+    ], noRates)
+    expect(summary.expenseTotal).toBe(10)
+    expect(summary.excludedCount).toBe(2)
+    expect(summary.excludedExpenseCount).toBe(1)
+    expect(summary.excludedRefundCount).toBe(1)
   })
 
   it('同一个输入，补上汇率后必须变成 720 —— 证明 0 不是「永远算成 0」', () => {

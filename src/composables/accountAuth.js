@@ -1,5 +1,5 @@
 import { computed, ref, shallowRef } from 'vue'
-import { getSupabaseClient, getSupabaseConfig } from '../services/supabase.js'
+import { ACCOUNT_STORAGE_KEY, getSupabaseClient, getSupabaseConfig } from '../services/supabase.js'
 
 export const accountOpen = ref(false)
 export const accountUser = shallowRef(/** @type {import('@supabase/supabase-js').User | null} */ (null))
@@ -8,6 +8,10 @@ export const accountBusy = ref(false)
 export const accountAuthError = ref('')
 export const accountCallbackError = ref('')
 export const accountAvailable = computed(() => Boolean(getSupabaseConfig()))
+
+export function hasPersistedAccountSession() {
+  try { return Boolean(localStorage.getItem(ACCOUNT_STORAGE_KEY)) } catch { return false }
+}
 
 export function normalizeAccountEmail(email) {
   return String(email || '').trim().toLowerCase()
@@ -168,33 +172,74 @@ export async function resendAccountConfirmation(email) {
   }))
 }
 
-export async function logoutAccount() {
-  const result = await accountAction((auth) => auth.signOut({ scope: 'local' }))
-  if (result.ok) acceptSession(null)
-  return result
+export async function logoutAccount({ scope = 'local' } = {}) {
+  if (accountBusy.value) return { ok: false, message: '账号操作正在进行，请稍候。' }
+  if (scope === 'global' && typeof navigator !== 'undefined' && navigator.onLine === false) {
+    return { ok: false, message: '退出所有设备需要联网；当前设备数据尚未清除。' }
+  }
+  accountBusy.value = true
+  let lifecycle = null
+  try {
+    const client = await getSupabaseClient()
+    lifecycle = await import('./accountSyncLifecycle.js')
+    lifecycle.stopAccountSyncLifecycle()
+    const { error } = await client.auth.signOut({ scope })
+    if (error) {
+      lifecycle.startAccountSyncLifecycle()
+      return { ok: false, message: accountErrorMessage(error) }
+    }
+    acceptSession(null)
+    const cleanupErrors = []
+    try {
+      const { clearSignedOutAccountData } = await import('./accountLogoutCleanup.js')
+      await clearSignedOutAccountData()
+    } catch (error) {
+      cleanupErrors.push(error)
+    }
+    return cleanupErrors.length
+      ? { ok: true, warning: '账号已退出，但浏览器未能确认清空全部本机副本。请关闭其他标签页后，在数据管理中重试清理。' }
+      : { ok: true }
+  } catch (error) {
+    lifecycle?.startAccountSyncLifecycle?.()
+    return { ok: false, message: accountErrorMessage(error) }
+  } finally {
+    accountBusy.value = false
+  }
 }
 
 const CALLBACK_PARAMS = ['access_token', 'refresh_token', 'expires_in', 'expires_at', 'token_type', 'type', 'error', 'error_code', 'error_description', 'code']
 
 export function hasAccountCallback(href) {
   const url = new URL(href)
+  const query = new URLSearchParams(url.search)
+  if (query.has('code') || query.has('error') || query.has('error_code')) return true
   if (url.hash.startsWith('#/')) return false
   const hash = new URLSearchParams(url.hash.slice(1))
   return (hash.has('access_token') && hash.has('refresh_token')) || hash.has('error')
 }
 
-// Supabase 的隐式回调使用 URL fragment，必须在 Hash Router 创建前完成消费与清理。
+// Auth 回调必须在 Hash Router 创建前完成交换与清理；兼容旧邮件中的隐式令牌。
 export async function prepareAccountCallback() {
   if (!hasAccountCallback(window.location.href)) return false
   const url = new URL(window.location.href)
-  const params = new URLSearchParams(url.hash.slice(1))
+  const query = new URLSearchParams(url.search)
+  const params = url.hash.startsWith('#/') ? new URLSearchParams() : new URLSearchParams(url.hash.slice(1))
   accountOpen.value = true
   try {
-    if (params.has('error')) {
-      accountCallbackError.value = accountErrorMessage({ code: params.get('error_code') || params.get('error') })
+    const errorCode = query.get('error_code') || query.get('error') || params.get('error_code') || params.get('error')
+    if (errorCode) {
+      accountCallbackError.value = accountErrorMessage({ code: errorCode })
     } else {
       const result = await initializeAccountAuth()
       if (!result.ok) accountCallbackError.value = result.message
+      else {
+        const client = await getSupabaseClient()
+        const exchange = query.has('code')
+          ? await client.auth.exchangeCodeForSession(query.get('code'))
+          : await client.auth.setSession({ access_token: params.get('access_token'), refresh_token: params.get('refresh_token') })
+        if (exchange.error) throw exchange.error
+        acceptSession(exchange.data?.session || null)
+      }
     }
   } catch (error) {
     accountCallbackError.value = accountErrorMessage(error)

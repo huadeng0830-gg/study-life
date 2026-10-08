@@ -310,8 +310,8 @@ describe('语音模式：只按分句断，且复用同一套保守规则', () =
 })
 
 describe('处理方式选项', () => {
-  it('四个选项与单条流程一致，且 key 互不重复', () => {
-    expect(SEGMENT_PROCESS_OPTIONS.map((option) => option.key)).toEqual(['task', 'homework', 'event', 'note'])
+  it('三个结构化选项与单条流程一致，且 key 互不重复', () => {
+    expect(SEGMENT_PROCESS_OPTIONS.map((option) => option.key)).toEqual(['task', 'homework', 'event'])
     expect(SEGMENT_PROCESS_OPTIONS.every((option) => option.label)).toBe(true)
   })
 })

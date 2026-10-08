@@ -1,13 +1,14 @@
 import { computed, ref } from 'vue'
 import {
   BACKUP_STORAGE_KEYS,
-  completeBackupArchive,
+  createBackupArchiveParts,
   createBackupSnapshot,
   parseBackupArchive,
   restoreBackupModuleLabels,
 } from './backupArchive.js'
 import { markBackedUp } from './backupReminder.js'
 import { buildBackupRestoreValues } from './backupRestore.js'
+import { detachRetiredNoteRelations } from './domain/migrations.js'
 import {
   backupWallpapersForUndo,
   discardWallpaperUndo,
@@ -15,7 +16,7 @@ import {
   importWallpapersFromTransfer,
   restoreWallpaperUndo,
 } from './wallpaperStorage.js'
-import { restoreStoredValues } from './store'
+import { flushStoredWrites, restoreStoredValues } from './store'
 import { getAppToday } from './timeContext.js'
 import { useTaskProgress } from './taskProgress.js'
 import { backupError, backupMessage, restoreError } from './dataManagerFeedback.js'
@@ -33,7 +34,14 @@ const includeWallpapers = ref(false)
 async function exportBackup() {
   backupError.value = ''
   backupMessage.value = ''
-  const backup = createBackupSnapshot()
+  flushStoredWrites()
+  let backup
+  try {
+    backup = createBackupSnapshot()
+  } catch (error) {
+    backupError.value = error?.message || '本机数据无法安全读取，备份已停止。'
+    return
+  }
   const includeImages = includeWallpapers.value
   const controller = new AbortController()
   backupController = controller
@@ -69,8 +77,8 @@ async function exportBackup() {
     backupProgress.setStep('wallpapers', 'warning', '壁纸处理失败，将导出文字数据')
   }
   if (includeImages) backupProgress.setStep('file', 'running', '正在生成 JSON 备份文件')
-  const archive = await completeBackupArchive(backup)
-  const blob = new Blob([JSON.stringify(archive, null, 2)], { type: 'application/json' })
+  const archiveParts = await createBackupArchiveParts(backup)
+  const blob = new Blob(archiveParts, { type: 'application/json' })
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
   const date = getAppToday()
@@ -132,7 +140,7 @@ const restoreBackupTarget = ref(null)
  * 【为什么必须算、不能写死】确认框原来写死的是"课程、重要日期和待办数据"，
  * 而 `applyRestoreBackup` 走的是 `buildBackupRestoreValues(data, providedFields, BACKUP_STORAGE_KEYS)`——
  * 按**备份携带的字段**恢复存储键：日程、专注记录、课程打卡、
- * 账本（账单/消费/分类/汇率/预算/模板）、清单、笔记、外观、壁纸、心情、氛围与提醒去重全都在内。
+ * 账本（账单/消费/分类/汇率/预算/模板）、清单、外观、壁纸、心情、氛围与提醒去重全都在内。
  * 写死的清单一定会随存储映射漂移，所以范围计算从三个真源反推：
  * `providedFields`（备份实际有哪些字段）× `BACKUP_STORAGE_KEYS`（字段→存储键）× `BACKUP_MODULES`（键→人话标签）。
  * 落在 `BACKUP_MODULES` 之外、但确实会被写回的键，统一归为「其它本机设置」，而不是假装没有。
@@ -165,6 +173,10 @@ async function applyRestoreBackup() {
   // 校验层会为旧备份补齐显示用默认值；恢复时只能写入原文件实际携带的字段，
   // 避免用空默认值覆盖当前版本后来新增的模块。
   const restoredValues = buildBackupRestoreValues(data, backup.providedFields, BACKUP_STORAGE_KEYS)
+  for (const key of ['sl_tasks', 'sl_events']) {
+    const records = restoredValues[key]
+    if (Array.isArray(records)) detachRetiredNoteRelations({ [key === 'sl_tasks' ? 'tasks' : 'events']: records })
+  }
   const previous = Object.fromEntries(
     Object.keys(restoredValues).map((key) => [key, localStorage.getItem(key)])
   )

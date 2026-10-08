@@ -10,7 +10,7 @@ import { buildEntityManifest } from '../src/composables/syncMetadata.js'
 const projectRoot = resolve(import.meta.dirname, '..')
 const source = (file) => readFileSync(resolve(projectRoot, file), 'utf8')
 
-describe('Courier absence regression', () => {
+describe('Retired feature data absence', () => {
   beforeEach(() => localStorage.clear())
 
   it('removes the route, preload, navigation, cache name and active data registrations', () => {
@@ -20,6 +20,7 @@ describe('Courier absence regression', () => {
     expect(source('src/App.vue')).not.toMatch(/courier/i)
     expect(source('vite.config.js')).not.toMatch(/CourierView/i)
     expect(SYNC_KEYS).not.toContain('sl_courier_bookmarks')
+    expect(SYNC_KEYS).not.toContain('sl_quick_notes')
     expect(buildEntityManifest({ sl_courier_bookmarks: [{ id: 'legacy' }] }).entities.sl_courier_bookmarks).toBeUndefined()
   })
 
@@ -27,6 +28,7 @@ describe('Courier absence regression', () => {
     const payload = sanitizeSyncPayload({
       sl_courier_bookmarks: [{ id: 'legacy' }],
       sl_courier_recent_carriers: ['sf'],
+      sl_quick_notes: [{ id: 'old-note', content: 'retired' }],
       sl_tasks: [],
     })
     expect(payload.values).toEqual({ sl_tasks: [] })
@@ -34,21 +36,24 @@ describe('Courier absence regression', () => {
     localStorage.setItem('sl_courier_bookmarks', JSON.stringify([{ id: 'legacy' }]))
     localStorage.setItem('sl_courier_recent_carriers', JSON.stringify(['sf']))
     localStorage.setItem('sl_courier_local_meta', JSON.stringify({ legacy: true }))
+    localStorage.setItem('sl_quick_notes', JSON.stringify([{ id: 'old-note', content: 'retired' }]))
     expect(createEmergencyBackup().data).not.toHaveProperty('courierBookmarks')
     expect(createEmergencyBackup().data).not.toHaveProperty('courierRecentCarriers')
     expect(createEmergencyBackup().data).not.toHaveProperty('courierLocalMeta')
+    expect(createEmergencyBackup().data).not.toHaveProperty('quickNotes')
   })
 
   it('cleans exact legacy local keys when no Vault exists', async () => {
     const previousIndexedDb = globalThis.indexedDB
     Object.defineProperty(globalThis, 'indexedDB', { configurable: true, value: undefined })
-    for (const key of ['sl_courier_bookmarks', 'sl_courier_recent_carriers', 'sl_courier_local_meta']) {
+    for (const key of ['sl_courier_bookmarks', 'sl_courier_recent_carriers', 'sl_courier_local_meta', 'sl_quick_notes']) {
       localStorage.setItem(key, JSON.stringify({ legacy: true }))
     }
     await initializeDataVault()
     expect(localStorage.getItem('sl_courier_bookmarks')).toBeNull()
     expect(localStorage.getItem('sl_courier_recent_carriers')).toBeNull()
     expect(localStorage.getItem('sl_courier_local_meta')).toBeNull()
+    expect(localStorage.getItem('sl_quick_notes')).toBeNull()
     if (previousIndexedDb === undefined) delete globalThis.indexedDB
     else Object.defineProperty(globalThis, 'indexedDB', { configurable: true, value: previousIndexedDb })
   })

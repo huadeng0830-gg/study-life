@@ -139,7 +139,9 @@ export function startProjectTaskBridge() {
   started = true
   const domain = useDomainCommands()
   seedLocalTaskStatus(domain.tasks.value)
-  stopTaskWatch = watch(domain.tasks, (tasks) => inspectLocalTasks(tasks), { deep: true, flush: 'post' })
+  // tasks 使用 shallowRef，并通过 touchStoredRef 显式提交。浅监听只在提交时
+  // 检查一次，避免 Vue 每次遍历整份待办树来做 deep watch。
+  stopTaskWatch = watch(domain.tasks, (tasks) => inspectLocalTasks(tasks), { flush: 'post' })
   stopUserWatch = watch(accountUser, (user) => {
     seedLocalTaskStatus(domain.tasks.value)
     if (user?.id) {

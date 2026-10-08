@@ -105,5 +105,5 @@ const stateText = computed(() => ({
 .is-warning{border-color:color-mix(in srgb, var(--warning) 35%, var(--card));background:color-mix(in srgb, var(--warning) 10%, var(--card))}
 .is-completed .task-progress-head span,.is-completed .task-activity span,
 .is-warning .task-progress-head span,.is-warning .task-activity span{color:var(--ink-soft)}
-.is-failed{border-color:#f0caca;background:#fff8f8}@keyframes pulse{50%{opacity:.35}}@media(max-width:520px){.task-progress{padding:12px}.task-steps{grid-template-columns:1fr}.task-progress-head{align-items:flex-start}.task-actions .btn{min-height:40px;flex:1}}
+.is-failed{border-color:color-mix(in srgb,var(--danger) 35%,var(--card));background:color-mix(in srgb,var(--danger) 10%,var(--card))}@keyframes pulse{50%{opacity:.35}}@media(max-width:520px){.task-progress{padding:12px}.task-steps{grid-template-columns:1fr}.task-progress-head{align-items:flex-start}.task-actions .btn{min-height:40px;flex:1}}
 </style>

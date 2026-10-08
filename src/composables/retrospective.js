@@ -5,7 +5,6 @@ import { fmtDate } from './store/utils.js'
 import { monthMoodSummary } from './mood.js'
 import { summarizeLedgerTransactions } from './ledger.js'
 import { mySpendCents } from './ledgerSplit.js'
-import { createdDateKey } from './settingsPolicy.js'
 import { taskRatePercent } from './reviewCharts.js'
 
 const number = (value) => {
@@ -21,7 +20,6 @@ function collect(data) {
     bills: Array.isArray(data?.bills) ? data.bills : [],
     expenses: Array.isArray(data?.expenses) ? data.expenses : [],
     events: Array.isArray(data?.events) ? data.events : [],
-    notes: Array.isArray(data?.notes) ? data.notes : [],
     moodLog: data?.moodLog ?? {},
   }
 }
@@ -52,7 +50,6 @@ export function daySnapshot(dateStr, data) {
   const ledger = summarizeLedgerTransactions(d.expenses, { dateFilter: (date) => date === dateStr, amountOf: mySpendCents })
   const expenses = ledger.items
   const events = d.events.filter((item) => item.date === dateStr)
-  const notes = d.notes.filter((item) => createdDateKey(item.createdAt) === dateStr)
   const total = tasks.length
   return {
     courses,
@@ -61,7 +58,6 @@ export function daySnapshot(dateStr, data) {
     bills,
     expenses,
     events,
-    notes,
     stats: {
       courses: courses.length,
       tasks: total,
@@ -73,7 +69,6 @@ export function daySnapshot(dateStr, data) {
       expensesTotal: ledger.expenseTotal,
       incomeTotal: ledger.incomeTotal,
       events: events.length,
-      notes: notes.length,
       focusMinutes: tasks.reduce((sum, task) => sum + number(task.estimateMinutes), 0),
     },
   }
@@ -84,7 +79,7 @@ export function dayStory(dateStr, data) {
   const s = snap.stats
   const blocks = []
 
-  const active = s.courses + s.tasks + s.exams + s.bills + s.expensesCount + s.events + s.notes
+  const active = s.courses + s.tasks + s.exams + s.bills + s.expensesCount + s.events
   blocks.push({
     type: 'p',
     text: active
@@ -105,7 +100,6 @@ export function dayStory(dateStr, data) {
   if (snap.bills.length) blocks.push({ type: 'list', title: '到期账单', items: snap.bills.map((bill) => `${bill.name} · ¥${number(bill.amount).toFixed(2)}`) })
   if (snap.expenses.length) blocks.push({ type: 'list', title: '当日消费', items: snap.expenses.map((expense) => `${expense.name} ¥${number(expense.amount).toFixed(2)}`) })
   if (snap.events.length) blocks.push({ type: 'list', title: '当日日程', items: snap.events.map((item) => `${item.title}${item.time ? ` · ${item.time}` : ''}`) })
-  if (snap.notes.length) blocks.push({ type: 'list', title: '当天笔记', items: snap.notes.map((item) => item.title) })
 
   blocks.push({
     type: 'p',
@@ -125,13 +119,11 @@ export function monthReport(month, data) {
   const tasks = d.tasks.filter((task) => String(task.dueDate ?? '').startsWith(prefix))
   const doneTasks = tasks.filter((task) => task.done)
   const ledger = summarizeLedgerTransactions(d.expenses, { dateFilter: (date) => date.startsWith(prefix), amountOf: mySpendCents })
-  const expenses = ledger.items
   const exams = d.exams.filter((item) => (
     item.repeat === 'yearly' ? String(item.date ?? '').slice(5) === prefix.slice(5) : String(item.date ?? '').startsWith(prefix)
   ))
   const bills = d.bills.filter((bill) => String(bill.nextDate ?? '').startsWith(prefix))
   const events = d.events.filter((item) => String(item.date ?? '').startsWith(prefix))
-  const notes = d.notes.filter((item) => createdDateKey(item.createdAt).startsWith(prefix))
   const mood = monthMoodSummary(prefix, d.moodLog)
   const total = tasks.length
 
@@ -150,7 +142,6 @@ export function monthReport(month, data) {
     moodDays: mood.sunny + mood.cloudy + mood.rain,
     moodDominant: mood.dominant,
     events: events.length,
-    notes: notes.length,
   }
 
   const blocks = []
@@ -174,7 +165,6 @@ export function monthReport(month, data) {
   if (exams.length) blocks.push({ type: 'list', title: '月度重要节点', items: exams.slice(0, 12).map((item) => item.name) })
   if (stats.bills) blocks.push({ type: 'list', title: '月度账单', items: bills.slice(0, 12).map((bill) => `${bill.name} · ¥${number(bill.amount).toFixed(2)}`) })
   if (stats.events) blocks.push({ type: 'list', title: '本月日程', items: events.slice(0, 12).map((item) => item.title) })
-  if (stats.notes) blocks.push({ type: 'list', title: '本月笔记', items: notes.slice(0, 12).map((item) => item.title) })
 
   return { title: `${prefix.slice(0, 4)}年${Number(prefix.slice(5, 7))}月 · 月度回顾`, blocks }
 }
@@ -191,7 +181,6 @@ export function yearReport(year, data) {
   ))
   const bills = d.bills.filter((bill) => String(bill.nextDate ?? '').startsWith(prefix))
   const events = d.events.filter((item) => String(item.date ?? '').startsWith(prefix))
-  const notes = d.notes.filter((item) => createdDateKey(item.createdAt).startsWith(prefix))
   const total = tasks.length
 
   const stats = {
@@ -208,7 +197,6 @@ export function yearReport(year, data) {
       ...tasks.map((task) => task.dueDate),
       ...expenses.map((expense) => expense.date),
       ...events.map((item) => item.date),
-      ...notes.map((item) => createdDateKey(item.createdAt)),
     ].filter(Boolean)).size,
   }
 
@@ -228,7 +216,6 @@ export function yearReport(year, data) {
   if (stats.taskRate) blocks.push({ type: 'p', text: `待办完成率 ${stats.taskRate}%，坚持记录本身就是一种了不起。` })
   if (stats.exams) blocks.push({ type: 'list', title: '年度重要节点', items: exams.slice(0, 12).map((item) => item.name) })
   if (events.length) blocks.push({ type: 'list', title: '年度日程', items: events.slice(0, 12).map((item) => item.title) })
-  if (notes.length) blocks.push({ type: 'list', title: '年度笔记', items: notes.slice(0, 12).map((item) => item.title) })
 
   blocks.push({
     type: 'p',

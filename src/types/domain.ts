@@ -85,21 +85,6 @@ export interface QuickEvent {
   sourceId?: string
 }
 
-export interface QuickNote {
-  id: string
-  title: string
-  content: string
-  createdAt?: string
-  updatedAt?: string
-  courseId?: string
-  courseName?: string
-  createdFrom?: string
-  sourceType?: string
-  sourceId?: string
-  inboxStatus?: 'inbox' | 'organized' | 'archived'
-  organizedAt?: string
-}
-
 /** 分摊明细。`total` 是这一笔的总额，`mine` 是「我承担」的那一份。 */
 export interface TransactionSplitParticipant {
   label: string

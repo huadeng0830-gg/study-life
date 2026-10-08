@@ -1,7 +1,5 @@
 <script setup>
-import { ref } from 'vue'
 import Modal from '../Modal.vue'
-import { MAX_WEEK } from '../../composables/store/utils.js'
 import { periodLabelById } from '../../composables/store/timeConfig.js'
 import { weekLabel } from '../../composables/store/schedule.js'
 import { createdDateKey } from '../../composables/settingsPolicy.js'

@@ -10,8 +10,9 @@ export const RETIRED_FOOD_KEYS = Object.freeze([
 ])
 
 export const RETIRED_PACKAGE_KEYS = Object.freeze(['sl_packages'])
-// 仅用于读取并丢弃旧版本传输/同步包中的已删除物流字段；不进入现行业务、备份或同步 schema。
-export const RETIRED_COURIER_KEYS = Object.freeze([
+// 这些键只用于启动时从本机影子副本中彻底清除已删除功能的数据。
+export const RETIRED_DATA_KEYS = Object.freeze([
+  'sl_quick_notes',
   'sl_courier_bookmarks',
   'sl_courier_recent_carriers',
   'sl_courier_local_meta',

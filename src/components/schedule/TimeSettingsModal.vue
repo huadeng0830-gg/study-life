@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue'
+import { onBeforeUnmount, ref, watch } from 'vue'
 import Modal from '../Modal.vue'
 import ConfirmDialog from '../ConfirmDialog.vue'
 import TaskProgress from '../TaskProgress.vue'
@@ -7,7 +7,6 @@ import TimeBaseSettings from './TimeBaseSettings.vue'
 import RecognitionSchemeDetailModal from './RecognitionSchemeDetailModal.vue'
 import TimeGeneratePanel from './TimeGeneratePanel.vue'
 import TimeImportPlanModal from './TimeImportPlanModal.vue'
-import { useTaskProgress } from '../../composables/taskProgress.js'
 import {
   timeConfig,
   campusName,
@@ -257,6 +256,7 @@ defineExpose({ stopBackgroundWork })
       </div>
       <p class="settings-hint">{{ tabHints[settingsTab] }}</p>
       <p v-if="settingError" class="error" role="alert">{{ settingError }}</p>
+      <p v-if="batchPreview?.error" class="error" role="alert">{{ batchPreview.error }}</p>
       <Transition name="toast">
         <!-- 成功提示同样要能被读屏播报（类名已并入 errorAnnouncement 的成功类名集合） -->
         <p v-if="settingsToast" class="settings-toast" role="status">✓ {{ settingsToast }}</p>
@@ -373,7 +373,7 @@ defineExpose({ stopBackgroundWork })
               placeholder="±分钟"
             />
           </div>
-          <div v-if="batchPreview" class="diff-list">
+          <div v-if="batchPreview && !batchPreview.error" class="diff-list">
             <div v-for="row in batchPreview.rows" :key="row.index" class="diff-row">
               <span class="diff-label">{{ row.label }}</span>
               <s>{{ row.from }}</s>
@@ -758,7 +758,7 @@ defineExpose({ stopBackgroundWork })
   border-radius: var(--radius-10);
 }
 .plan-row:nth-child(odd) { background: var(--bg-tint); }
-.plan-row.has-error { background: #fff7f0; box-shadow: inset 2px 0 0 var(--danger); }
+.plan-row.has-error { background: var(--danger-soft); box-shadow: inset 2px 0 0 var(--danger); }
 .plan-row-label { overflow: hidden; font-size: var(--fs-13); font-weight: var(--fw-600); white-space: nowrap; text-overflow: ellipsis; }
 .plan-row-times { display: flex; align-items: center; gap: 6px; justify-content: flex-end; }
 .plan-row-times input[type='time'] { width: 104px; padding: 6px 7px; font-size: var(--fs-13); border-radius: var(--radius-8); }

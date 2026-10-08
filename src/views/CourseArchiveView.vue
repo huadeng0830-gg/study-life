@@ -6,7 +6,6 @@ import VirtualList from '../components/VirtualList.vue'
 import { useDomainCommands } from '../composables/domain/commands.js'
 import { isArchived } from '../composables/domain/state.js'
 import { clearFocusFromRoute, focusElementWhenReady, focusLocation, readFocusQuery } from '../composables/focusNavigation.js'
-import { noteText } from '../composables/notes.js'
 import { formatFocusDuration } from '../composables/focusTimer.js'
 import { weekLabel } from '../composables/store/schedule.js'
 import { periodLabelById } from '../composables/store/timeConfig.js'
@@ -59,14 +58,6 @@ const timeline = computed(() => {
       summary: [event.location, event.note].filter(Boolean).join(' · '), status: '', archived: isArchived(event), path: '/',
     })
   }
-  for (const note of domain.notes.value) {
-    if (!belongsToCourse(note, id, name) || note.deletedAt || note.tombstone) continue
-    rows.push({
-      id: String(note.id), type: 'note', kind: '笔记', title: note.title || '未命名笔记',
-      date: dateKey(note.updatedAt) || dateKey(note.createdAt), time: '', summary: noteText(note),
-      status: '', archived: isArchived(note), path: '/notes',
-    })
-  }
   for (const exam of domain.milestones.value) {
     if (!belongsToCourse(exam, id, name) || exam.deletedAt || exam.tombstone) continue
     rows.push({
@@ -91,10 +82,9 @@ const timeline = computed(() => {
 })
 
 const stats = computed(() => {
-  const result = { tasks: 0, notes: 0, focus: 0, milestones: 0 }
+  const result = { tasks: 0, focus: 0, milestones: 0 }
   for (const row of timeline.value) {
     if (row.type === 'task') result.tasks += 1
-    else if (row.type === 'note') result.notes += 1
     else if (row.type === 'focus') result.focus += 1
     else if (row.type === 'milestone') result.milestones += 1
   }
@@ -158,7 +148,6 @@ function rowLocation(row) {
         <RouterLink class="profile-schedule-link" :to="focusLocation('/schedule', course.id)">在课程表中定位 →</RouterLink>
         <div class="course-profile-stats">
           <div><b>{{ stats.tasks }}</b><span>作业与待办</span></div>
-          <div><b>{{ stats.notes }}</b><span>笔记</span></div>
           <div><b>{{ stats.focus }}</b><span>专注记录</span></div>
           <div><b>{{ stats.milestones }}</b><span>考试节点</span></div>
         </div>
@@ -190,7 +179,7 @@ function rowLocation(row) {
             </div>
           </article>
         </VirtualList>
-        <EmptyState v-else :level="2" title="还没有课程记录" description="关联到这门课的作业、笔记、专注记录和考试节点会汇总在这里。" />
+        <EmptyState v-else :level="2" title="还没有课程记录" description="关联到这门课的作业、日程、专注记录和考试节点会汇总在这里。" />
       </section>
     </template>
     <EmptyState v-else :level="2" title="找不到这门课程" :description="routeMessage" />
@@ -206,7 +195,7 @@ function rowLocation(row) {
 .course-mark { width: 14px; height: 42px; flex: 0 0 14px; border-radius: var(--radius-pill); }
 .profile-schedule-link { display: inline-flex; margin-top: 15px; color: var(--primary); font-size: var(--fs-12); font-weight: var(--fw-750); text-decoration: none; }
 .profile-schedule-link:hover, .timeline-title:hover { text-decoration: underline; }
-.course-profile-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin-top: 18px; }
+.course-profile-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 18px; }
 .course-profile-stats div { display: grid; gap: 3px; padding: 11px; border-radius: var(--radius-9); background: var(--bg-tint); }
 .course-profile-stats b { font-size: var(--fs-18); }
 .course-profile-stats span { color: var(--ink-soft); font-size: var(--fs-11); }
@@ -219,7 +208,6 @@ function rowLocation(row) {
 .timeline-item:not(:last-child)::after { position: absolute; top: 28px; bottom: -12px; left: 5px; width: 2px; background: var(--border); content: ''; }
 .timeline-dot { z-index: 1; width: 10px; height: 10px; margin-top: 4px; border: 2px solid var(--primary); border-radius: 50%; background: var(--card); }
 .timeline-dot.kind-focus { border-color: var(--success); }
-.timeline-dot.kind-note { border-color: var(--warning); }
 .timeline-dot.kind-milestone { border-color: var(--danger); }
 .timeline-date { display: flex; flex-direction: column; gap: 3px; color: var(--ink-soft); font-size: var(--fs-11); }
 .timeline-date b { color: var(--text); font-weight: var(--fw-700); }

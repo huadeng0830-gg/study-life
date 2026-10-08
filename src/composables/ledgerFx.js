@@ -196,6 +196,8 @@ function createLedgerBaseAccumulator() {
     foreignCount: 0,
     convertedForeignCount: 0,
     excludedCount: 0,
+    excludedExpenseCount: 0,
+    excludedRefundCount: 0,
     missingRates: new Set(),
   }
 }
@@ -209,6 +211,10 @@ function addLedgerBaseItem(totals, item, config, amountOf) {
   if (converted.cents === null) {
     if (converted.reason === 'rate') {
       totals.excludedCount += 1
+      if (item.direction !== 'income') {
+        if (isRefundTransaction(item)) totals.excludedRefundCount += 1
+        else totals.excludedExpenseCount += 1
+      }
       totals.missingRates.add(code || '未知币种')
     }
     return
@@ -231,6 +237,8 @@ function addLedgerBaseItem(totals, item, config, amountOf) {
  * @property {number} foreignCount
  * @property {number} convertedForeignCount
  * @property {number} excludedCount
+ * @property {number} excludedExpenseCount
+ * @property {number} excludedRefundCount
  * @property {string[]} missingRates
  * @property {boolean} hasForeign
  * @property {boolean} hasMissing
@@ -248,6 +256,8 @@ function finishLedgerBaseSummary(totals, config) {
     foreignCount: totals.foreignCount,
     convertedForeignCount: totals.convertedForeignCount,
     excludedCount: totals.excludedCount,
+    excludedExpenseCount: totals.excludedExpenseCount,
+    excludedRefundCount: totals.excludedRefundCount,
     missingRates: [...totals.missingRates].sort((a, b) => a.localeCompare(b)),
     hasForeign: totals.foreignCount > 0,
     hasMissing: totals.excludedCount > 0,

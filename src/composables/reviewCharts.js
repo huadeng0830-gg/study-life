@@ -140,7 +140,9 @@ export function buildRhythmWeeks(data = {}, now = clock.value, options = {}) {
     const offset = index - (count - 1)
     const range = weekRange(now, { ...options, weekOffset: offset })
     const summary = selectWeeklyTaskSummary(data, now, { ...options, range })
-    const nowTimestamp = now instanceof Date ? now.getTime() : timestampOf(now)
+    const nowTimestamp = options.asOf === undefined
+      ? (now instanceof Date ? now.getTime() : timestampOf(now))
+      : timestampOf(options.asOf)
     // 【missed 的截断点是"现在"，不是那一周的周末】
     // 口径是「本周到期、且**至今**仍未完成」：上周到期、本周才补完的那一条，
     // 补完之后就不该再算成上一周的欠账。原来越是 min(week.endAt, now)，
@@ -189,9 +191,13 @@ export function buildRhythmWeeks(data = {}, now = clock.value, options = {}) {
  * @returns {{ points: object[], recordedWeeks: number, totalMissed: number, currentBacklog: number }}
  */
 export function buildCompletionTrend(data = {}, now = clock.value, options = {}) {
-  const { weeks } = buildRhythmWeeks(data, now, options)
+  const weeks = Array.isArray(options.rhythmWeeks)
+    ? options.rhythmWeeks
+    : buildRhythmWeeks(data, now, options).weeks
   const tasks = tasksOf(data)
-  const nowTimestamp = now instanceof Date ? now.getTime() : timestampOf(now)
+  const nowTimestamp = options.asOf === undefined
+    ? (now instanceof Date ? now.getTime() : timestampOf(now))
+    : timestampOf(options.asOf)
   let cumulative = 0
   const firstRange = weeks.length
     ? weekRange(now, { ...options, weekOffset: weeks[0].offset })

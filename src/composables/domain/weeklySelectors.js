@@ -154,15 +154,6 @@ export function selectWeeklyMoodSummary({ moodLog = {} } = {}, now = clock.value
   return { ...counts, days: counts.sunny + counts.cloudy + counts.rain, dominant: dominant?.[1] ? dominant[0] : '' }
 }
 
-export function selectWeeklyNoteSummary({ notes = [] } = {}, now = clock.value, options = {}) {
-  const range = resolveRange(now, options)
-  let created = 0
-  for (const note of Array.isArray(notes) ? notes : []) {
-    if (timestampInRange(note.createdAt, range)) created += 1
-  }
-  return { created }
-}
-
 function highlight(type, item, date, time = '') {
   return { key: `${type}:${item.id}`, sourceType: type, sourceId: item.id, title: item.title || item.name, date, time, entity: item }
 }
@@ -188,7 +179,6 @@ export function selectWeeklyReview(data = {}, now = clock.value, options = {}) {
     finance: selectWeeklyFinanceSummary(data, now, sharedOptions),
     bills: selectWeeklyBillSummary(data, now, sharedOptions),
     mood: selectWeeklyMoodSummary(data, now, sharedOptions),
-    notes: selectWeeklyNoteSummary(data, now, sharedOptions),
     nextWeek: selectNextWeekHighlights(data, now, sharedOptions),
   }
 }

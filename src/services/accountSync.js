@@ -20,7 +20,7 @@ function providerError(error, status) {
 // 将账号传输适配为现有同步协议，复用数据校验和合并规则，支持账号独立的版本提交与事务恢复。
 // 用户归属由数据库 auth.uid() 和 RLS 决定，客户端不传 owner 给写入函数。
 export async function requestAccountSync(operation, body, signal) {
-  if (operation !== 'pull' && operation !== 'push') return response({ error: '未知账号同步操作。' }, 400)
+  if (operation !== 'pull' && operation !== 'probe' && operation !== 'push') return response({ error: '未知账号同步操作。' }, 400)
   const userId = body.accountUserId
   if (!stillSignedIn(userId)) return response({ error: '登录已变更，本次同步已取消。' }, 401)
   const client = await getSupabaseClient()
@@ -42,10 +42,11 @@ export async function requestAccountSync(operation, body, signal) {
     if (!stillSignedIn(userId)) return response({ error: '登录已变更，本次同步已取消。' }, 401)
     return response(data, data?.conflict ? 409 : 200)
   }
+  const columns = operation === 'probe' ? 'revision,updated_at,device_name' : 'revision,updated_at,device_name,payload'
   const { data, error, status } = await client.from('account_sync_snapshots')
-    .select('revision,updated_at,device_name,payload')
+    .select(columns)
     .eq('user_id', userId).setHeader('Authorization', authorization).abortSignal(signal).maybeSingle()
   if (error) return providerError(error, status)
   if (!stillSignedIn(userId)) return response({ error: '登录已变更，本次同步已取消。' }, 401)
-  return response({ ...metadata(data), data: data?.payload ?? null })
+  return response(operation === 'probe' ? metadata(data) : { ...metadata(data), data: data?.payload ?? null })
 }

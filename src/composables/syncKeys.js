@@ -13,7 +13,6 @@ export const SYNC_DEFAULTS = {
   sl_schedule_note: '',
   sl_tasks: [],
   sl_events: [],
-  sl_quick_notes: [],
   sl_quick_record_settings: { clipboardHint: true, recentTypes: [] },
   sl_capture_enabled: true,
   sl_focus_sessions: [],
@@ -37,6 +36,7 @@ export const SYNC_DEFAULTS = {
   sl_appearance: {},
   sl_wallpaper_config: {},
   sl_performance_mode: 'auto',
+  sl_high_contrast: false,
   sl_festive_config: { enabled: true, birthday: '', installDate: '', anniversaries: [] },
   sl_festive_birthday_full: '',
   sl_festive_lunar: [],
@@ -44,6 +44,8 @@ export const SYNC_DEFAULTS = {
   sl_mood_log: {},
   // 提醒去重日志：同步它才能避免两台设备各响一次。
   sl_reminder_log: [],
+  // 已退役的独立笔记只作为归档数据保留，避免旧云快照在升级时丢失正文。
+  sl_archived_quick_notes: [],
 }
 
 /**

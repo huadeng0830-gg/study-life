@@ -139,25 +139,15 @@ describe('表单校验的无障碍接线', () => {
     expect(errors).toEqual([])
   })
 
-  it('笔记视图的正文框同样接线（源码级：需要选中笔记才能进编辑态）', () => {
-    const source = readFileSync(resolve(projectRoot, 'src/views/NotesView.vue'), 'utf8')
-    expect(source).toContain(':aria-invalid="noteErrorField === \'content\' || undefined"')
-    expect(source).toContain(':aria-describedby="noteError ? \'note-edit-error\' : undefined"')
-    expect(source).toMatch(/<p v-if="noteError" id="note-edit-error"/)
-    // 保存失败（笔记已删除 / 落盘失败）不得把输入框标成无效。
-    expect(source).toMatch(/setNoteError\('这条笔记可能已删除或已移动。'\)/)
-    expect(source).toMatch(/setNoteError\(persistenceState\.value\.message[^)]*\)/)
-  })
-
   it('错误文案的 id 在整个文档里唯一，且都带 role=alert', () => {
     // 账单表单随固定账单弹窗拆进了子组件（BillFormModal.vue），id 唯一性照样全仓看。
-    const files = ['src/views/NotesView.vue', 'src/views/ledger-panels/BillFormModal.vue', 'src/views/EventsView.vue']
+    const files = ['src/views/ledger-panels/BillFormModal.vue', 'src/views/EventsView.vue']
     const ids = []
     for (const file of files) {
       const source = readFileSync(resolve(projectRoot, file), 'utf8')
       for (const match of source.matchAll(/<p v-if="[^"]*Error" id="([^"]+)"[^>]*role="alert"/g)) ids.push(match[1])
     }
-    expect(ids).toEqual(['note-edit-error', 'bill-form-error', 'event-form-error'])
+    expect(ids).toEqual(['bill-form-error', 'event-form-error'])
     expect(new Set(ids).size).toBe(ids.length)
   })
 })

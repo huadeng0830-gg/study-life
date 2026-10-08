@@ -1,6 +1,6 @@
-import { effectScope, ref, triggerRef, watch, shallowRef, isRef } from 'vue'
+import { effectScope, nextTick, ref, triggerRef, watch, shallowRef } from 'vue'
 import { isSyncKey } from '../syncKeys.js'
-import { mirrorLocalValue, mirrorLocalValues, setMirrorErrorHandler, setMirrorTimingHandler } from '../dataVault.js'
+import { clearDataVault, mirrorLocalValue, mirrorLocalValues, setMirrorErrorHandler, setMirrorTimingHandler } from '../dataVault.js'
 import { recordSilentError } from '../globalError.js'
 
 // 存储层只发出本机数据变更信号；账号同步监听同一个事件，不反向耦合存储实现。
@@ -10,7 +10,38 @@ function notifyLocalChanged(key = '', rawValue = undefined) {
   }
 }
 
+const queuedMutationNotifications = new Set()
+const installedPersistenceRefs = new WeakSet()
+const suppressedRestoreRefs = new WeakSet()
+
+// Cloud sync must see an in-memory edit before its debounced localStorage write.
+// Coalesce each key within the current microtask so a single operation does not
+// invalidate the same sync cycle several times.
+function notifyLocalMutation(key) {
+  if (!isSyncKey(key) || queuedMutationNotifications.has(key)) return
+  queuedMutationNotifications.add(key)
+  const release = () => queuedMutationNotifications.delete(key)
+  if (typeof queueMicrotask === 'function') queueMicrotask(release)
+  else Promise.resolve().then(release)
+  if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function' && typeof CustomEvent === 'function') {
+    window.dispatchEvent(new CustomEvent('study-life:sync-mutation', { detail: { key } }))
+  }
+}
+
 const storedRefs = new Map()
+const storedDefaults = new Map()
+const writtenFingerprints = new Map()
+
+function rawFingerprint(raw) {
+  let first = 2166136261
+  let second = 0x9e3779b9
+  for (let index = 0; index < raw.length; index += 1) {
+    const code = raw.charCodeAt(index)
+    first = Math.imul(first ^ code, 16777619)
+    second = Math.imul(second ^ code, 0x85ebca6b)
+  }
+  return `${raw.length}:${first >>> 0}:${second >>> 0}`
+}
 // 这些高增长集合由领域命令显式提交，避免每次嵌套修改递归遍历整棵状态树。
 //
 // 【加入本集合的前提，两条缺一不可】
@@ -159,7 +190,6 @@ if (typeof document !== 'undefined') {
   })
 }
 
-const WRITE_DELAY = 300
 // 不同类型数据的差异化防抖：表单输入 500ms，大集合 300ms，设置类 1000ms
 const WRITE_DELAY_BY_TYPE = {
   default: 300,
@@ -168,7 +198,6 @@ const WRITE_DELAY_BY_TYPE = {
   settings: 1000,   // 设置类：低频变更，延迟更久避免抖动
 }
 const pendingWrites = new Map()
-const lastWrittenRaw = new Map()
 let writeTimer = null
 let idleWrite = null
 
@@ -191,10 +220,16 @@ function writeNow(key, makeRaw) {
     const serializeStartedAt = performanceNow()
     raw = makeRaw()
     const serializeMs = Math.round((performanceNow() - serializeStartedAt) * 100) / 100
-    if (raw === lastWrittenRaw.get(key)) return
+    if (raw === localStorage.getItem(key)) return
+    const fingerprint = rawFingerprint(raw)
+    // Keep only a compact fingerprint for the last committed serialization.
+    // This suppresses a change-and-revert before first persistence without
+    // retaining another full JSON string for every large collection.
+    if (fingerprint === writtenFingerprints.get(key)) return
     const localStartedAt = performanceNow()
     localStorage.setItem(key, raw)
-    lastWrittenRaw.set(key, raw)
+    if (typeof window !== 'undefined') window.dispatchEvent(new Event('study-life:storage-updated'))
+    writtenFingerprints.set(key, fingerprint)
     const localStorageMs = Math.round((performanceNow() - localStartedAt) * 100) / 100
     observeStorage(key, { payloadBytes: payloadBytes(raw), serializeMs, localStorageMs })
     markPersistenceSuccess()
@@ -228,7 +263,7 @@ function writePendingBatch() {
   for (const [key, producer] of batch) {
     try {
       serialized.set(key, producer())
-    } catch (e) {
+    } catch {
       // producer error will be caught in writeNow
       serialized.set(key, producer)
     }
@@ -239,11 +274,14 @@ function writePendingBatch() {
     } else {
       // Already serialized
       const raw = rawOrProducer
-      if (raw === lastWrittenRaw.get(key)) continue
+      if (raw === localStorage.getItem(key)) continue
+      const fingerprint = rawFingerprint(raw)
+      if (fingerprint === writtenFingerprints.get(key)) continue
       try {
         const localStartedAt = performanceNow()
         localStorage.setItem(key, raw)
-        lastWrittenRaw.set(key, raw)
+        if (typeof window !== 'undefined') window.dispatchEvent(new Event('study-life:storage-updated'))
+        writtenFingerprints.set(key, fingerprint)
         const localStorageMs = Math.round((performanceNow() - localStartedAt) * 100) / 100
         observeStorage(key, { payloadBytes: payloadBytes(raw), serializeMs: 0, localStorageMs })
         markPersistenceSuccess()
@@ -306,24 +344,28 @@ function installPersistenceWatcher(key) {
   }
 
   persistenceScope.run(() => {
+    installedPersistenceRefs.add(pending.state)
     watch(
       pending.state,
       () => {
+        if (suppressedRestoreRefs.has(pending.state)) suppressedRestoreRefs.delete(pending.state)
+        else notifyLocalMutation(key)
         scheduleWrite(key, () => JSON.stringify(pending.state.value))
       },
       { deep: pending.deep }
     )
   })
   try {
-    if (JSON.stringify(pending.state.value) !== pending.baselineRaw) {
-      scheduleWrite(key, () => JSON.stringify(pending.state.value))
+    const raw = JSON.stringify(pending.state.value)
+    if (rawFingerprint(raw) !== pending.baselineFingerprint) {
+      scheduleWrite(key, () => raw)
     }
   } catch {
   }
 }
 
 function schedulePersistenceWatcher(key, state, baselineRaw, { deep = true } = {}) {
-  const pending = { state, baselineRaw, deep, timer: null, idle: null }
+  const pending = { state, baselineFingerprint: rawFingerprint(baselineRaw), deep, timer: null, idle: null }
   pendingWatcherInstalls.set(key, pending)
   const install = () => installPersistenceWatcher(key)
   if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
@@ -381,6 +423,7 @@ export function normalizeStoredValue(saved, defaultValue) {
 export function useStoredRef(key, defaultValue, options = {}) {
   if (storedRefs.has(key)) return storedRefs.get(key)
   const isExplicitCommit = EXPLICIT_COMMIT_KEYS.has(key)
+  storedDefaults.set(key, JSON.parse(JSON.stringify(defaultValue)))
   const deep = options.deep ?? !isExplicitCommit
   const shallow = options.shallow ?? isExplicitCommit
 
@@ -403,7 +446,7 @@ export function useStoredRef(key, defaultValue, options = {}) {
     try {
       const raw = JSON.stringify(normalized.value)
       localStorage.setItem(key, raw)
-      lastWrittenRaw.set(key, raw)
+      writtenFingerprints.set(key, rawFingerprint(raw))
       markPersistenceSuccess()
       mirrorLocalValue(key, raw).catch((error) => reportPersistenceFailure(error, key, 'mirror'))
       savedRaw = raw
@@ -413,9 +456,44 @@ export function useStoredRef(key, defaultValue, options = {}) {
   }
   storedRefs.set(key, state)
   const baselineRaw = savedRaw ?? JSON.stringify(normalized.value)
-  lastWrittenRaw.set(key, baselineRaw)
+  writtenFingerprints.set(key, rawFingerprint(baselineRaw))
   schedulePersistenceWatcher(key, state, baselineRaw, { deep })
   return state
+}
+
+/** Clear user-owned keys and reset mounted refs after account logout or a full local purge. */
+export async function clearStoredDataByPrefix(prefix = 'sl_') {
+  flushAllWrites()
+  const keys = new Set([...storedRefs.keys(), ...storedDefaults.keys()])
+  try {
+    for (let index = 0; index < localStorage.length; index += 1) {
+      const key = localStorage.key(index)
+      if (key?.startsWith(prefix)) keys.add(key)
+    }
+  } catch { /* Continue with values known to the store registry. */ }
+  const suppressed = []
+  for (const key of keys) {
+    if (!key.startsWith(prefix)) continue
+    cancelPendingWrite(key)
+    const pending = pendingWatcherInstalls.get(key)
+    if (pending?.idle && typeof window !== 'undefined') window.cancelIdleCallback?.(pending.idle)
+    if (pending?.timer && typeof window !== 'undefined') window.clearTimeout(pending.timer)
+    pendingWatcherInstalls.delete(key)
+    try { localStorage.removeItem(key) } catch { /* The in-memory ref is still reset below. */ }
+    writtenFingerprints.delete(key)
+    const state = storedRefs.get(key)
+    if (state && storedDefaults.has(key)) {
+      suppressedRestoreRefs.add(state)
+      suppressed.push(state)
+      state.value = JSON.parse(JSON.stringify(storedDefaults.get(key)))
+    }
+  }
+  await nextTick()
+  for (const state of suppressed) suppressedRestoreRefs.delete(state)
+  const cleared = await clearDataVault()
+  if (!cleared) throw new Error('无法清理 IndexedDB 本机安全副本。')
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event('study-life:storage-updated'))
+  return [...keys].filter((key) => key.startsWith(prefix))
 }
 
 // 显式提交 seam：调用方已经掌握一次完整业务变更时，可避免大集合的递归监听。
@@ -432,6 +510,9 @@ export function touchStoredRef(key) {
   // 先发布：深的 ref 本来就靠变更自动通知，这里多一次通知是无害的重复；
   // shallow 的 ref 只有这一下能让 computed/模板失效。
   triggerRef(state)
+  // Signal immediately for explicit-commit collections; their persistence is
+  // intentionally debounced, but an in-flight sync must already be invalidated.
+  notifyLocalMutation(key)
   scheduleWrite(key, () => JSON.stringify(state.value))
   return true
 }
@@ -481,18 +562,35 @@ export async function restoreStoredValues(values, { markChanged = true } = {}) {
   if (!entries.length) return
   const rawValues = Object.fromEntries(entries.map(([key, value]) => [key, JSON.stringify(value)]))
   const previous = Object.fromEntries(entries.map(([key]) => [key, localStorage.getItem(key)]))
+  const previousFingerprints = new Map(entries.map(([key]) => [key, writtenFingerprints.get(key)]))
+  const suppressedRefs = []
   const previousStates = new Map(entries.flatMap(([key]) => (
     storedRefs.has(key)
       ? [[key, JSON.parse(JSON.stringify(storedRefs.get(key).value))]]
       : []
   )))
   try {
-    for (const [key, raw] of Object.entries(rawValues)) localStorage.setItem(key, raw)
-    for (const [key, raw] of Object.entries(rawValues)) lastWrittenRaw.set(key, raw)
-    for (const [key, value] of entries) {
-      if (storedRefs.has(key)) storedRefs.get(key).value = value
+    for (const [key, raw] of Object.entries(rawValues)) {
+      localStorage.setItem(key, raw)
+      writtenFingerprints.set(key, rawFingerprint(raw))
     }
+    for (const [key, value] of entries) {
+      if (storedRefs.has(key)) {
+        const state = storedRefs.get(key)
+        if (installedPersistenceRefs.has(state)) {
+          suppressedRestoreRefs.add(state)
+          suppressedRefs.push(state)
+        }
+        state.value = value
+      }
+    }
+    // Let Vue flush the restore watchers before clearing their one-shot guard.
+    // A restore is already represented by markChanged below and must not look
+    // like an independent user edit to the account-sync sequence guard.
+    await nextTick()
+    for (const state of suppressedRefs) suppressedRestoreRefs.delete(state)
     await mirrorLocalValues(rawValues)
+    if (typeof window !== 'undefined') window.dispatchEvent(new Event('study-life:storage-updated'))
     if (markChanged && entries.some(([key]) => isSyncKey(key))) notifyLocalChanged()
     markPersistenceSuccess()
   } catch (error) {
@@ -501,6 +599,9 @@ export async function restoreStoredValues(values, { markChanged = true } = {}) {
       for (const [key, raw] of Object.entries(previous)) {
         if (raw === null) localStorage.removeItem(key)
         else localStorage.setItem(key, raw)
+        const fingerprint = previousFingerprints.get(key)
+        if (raw === null || fingerprint === undefined) writtenFingerprints.delete(key)
+        else writtenFingerprints.set(key, fingerprint)
       }
     } catch (cause) {
       rollbackError = cause
@@ -521,15 +622,20 @@ if (typeof window !== 'undefined') {
     // storage 事件对 sessionStorage 也会触发；这里只关心业务数据的 localStorage。
     // 不判断的话，任何写 sessionStorage 的代码都会让本标签页取消待写入并覆盖内存值。
     if (event.storageArea && event.storageArea !== window.localStorage) return
-    if (!event.key || !storedRefs.has(event.key) || event.newValue === null) return
+    if (!event.key) return
+    if (event.newValue === null) {
+      writtenFingerprints.delete(event.key)
+      return
+    }
+    if (!storedRefs.has(event.key)) return
+    writtenFingerprints.set(event.key, rawFingerprint(event.newValue))
     // 另一个标签页写了同一个键：放弃本次待写入、采用对方的值。
     // 这是有意的「后写者胜」策略，保证多标签页看到同一份数据；
     // 真正的多设备合并由同步管线负责，不在这里做。
-    cancelPendingWrite(event.key)
-    try {
-      storedRefs.get(event.key).value = JSON.parse(event.newValue)
-      lastWrittenRaw.set(event.key, event.newValue)
-    } catch {
+      cancelPendingWrite(event.key)
+      try {
+        storedRefs.get(event.key).value = JSON.parse(event.newValue)
+      } catch {
     }
     // 另一个标签页改了农历纪念日时，内存镜像也要跟着走；否则本标签页的首页
     // 会一直读旧镜像（镜像只在首次读取时补水、之后只由设置面板发布）。

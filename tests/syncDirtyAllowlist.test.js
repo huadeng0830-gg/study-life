@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { nextTick } from 'vue'
 import { cloneValue, SYNC_DEFAULTS, SYNC_KEYS } from '../src/composables/accountSyncData.js'
+import { isEntityCollectionKey, isSingletonKey } from '../src/composables/syncMetadata.js'
 import { flushStoredWrites, useStoredRef } from '../src/composables/store/index.js'
 
 const LOCAL_ONLY_KEYS = [
@@ -26,6 +27,10 @@ let dirtyEvents = []
 const collectDirtyEvent = (event) => dirtyEvents.push(event.detail)
 
 describe('账号同步本机变更信号', () => {
+  it('每个同步键都有实体或单例 manifest 指纹覆盖', () => {
+    expect(SYNC_KEYS.filter((key) => !isEntityCollectionKey(key) && !isSingletonKey(key))).toEqual([])
+  })
+
   beforeEach(() => {
     localStorage.clear()
     dirtyEvents = []

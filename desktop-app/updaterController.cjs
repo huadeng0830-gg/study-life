@@ -8,18 +8,25 @@ function safeVersion(value, fallback = '') {
     : fallback
 }
 
-function createUpdaterController({ autoUpdater, currentVersion, publish = () => {}, enabled = true }) {
+function createUpdaterController({
+  autoUpdater,
+  currentVersion,
+  publish = () => {},
+  enabled = true,
+  disabledStage = INITIAL_STAGE,
+  disabledMessage = '桌面更新仅在已安装的 Windows 版本中可用。',
+}) {
   if (!autoUpdater || typeof autoUpdater.on !== 'function') {
     throw new TypeError('autoUpdater must be an event emitter')
   }
 
   const state = {
-    stage: INITIAL_STAGE,
+    stage: enabled ? INITIAL_STAGE : disabledStage,
     currentVersion: safeVersion(currentVersion),
     availableVersion: '',
     percent: 0,
     lastCheckedAt: 0,
-    message: enabled ? '启动和联网时自动检查；也可以手动检查。' : '桌面更新仅在已安装的 Windows 版本中可用。',
+    message: enabled ? '启动和联网时自动检查；也可以手动检查。' : disabledMessage,
   }
 
   let checking = false

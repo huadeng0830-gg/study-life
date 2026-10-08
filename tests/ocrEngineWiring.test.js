@@ -72,6 +72,13 @@ describe('OCR 引擎接线', () => {
     vi.restoreAllMocks()
   })
 
+  it('没有 deviceMemory 时使用保守像素预算', async () => {
+    const { maxPixelsFor } = await loadPipeline()
+    expect(maxPixelsFor('accurate', Number.NaN)).toBe(6_500_000)
+    expect(maxPixelsFor('accurate', 2)).toBe(4_000_000)
+    expect(maxPixelsFor('accurate', 8)).toBe(12_000_000)
+  })
+
   it('引擎与 worker 都指向本站资源，不出现任何 CDN 主机名', async () => {
     const { performOCR } = await loadPipeline()
     await performOCR(pngFile()).catch(() => {})

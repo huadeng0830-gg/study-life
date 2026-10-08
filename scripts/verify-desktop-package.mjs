@@ -1,14 +1,18 @@
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import path from 'node:path'
 import { createRequire } from 'node:module'
+import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { isExpectedDesktopUpdateSource } from './desktop-update-source.mjs'
+import { matchesDesktopPublisher } from './desktop-signature.mjs'
 import { readPublicSupabaseConfig, verifySupabaseBundle } from './supabase-build-checks.mjs'
 
 const require = createRequire(import.meta.url)
 const { extractFile, listPackage } = require('@electron/asar')
 const ROOT = fileURLToPath(new URL('../', import.meta.url))
-const packageDirectory = path.resolve(ROOT, process.argv[2] || 'release-desktop/win-unpacked')
+const args = process.argv.slice(2)
+const requireSignature = args.includes('--require-signature')
+const packageDirectory = path.resolve(ROOT, args.find((arg) => !arg.startsWith('--')) || 'release-desktop/win-unpacked')
 const archivePath = path.join(packageDirectory, 'resources', 'app.asar')
 const updateConfigPath = path.join(packageDirectory, 'resources', 'app-update.yml')
 const desktopRendererPath = path.join(packageDirectory, 'resources', 'dist-desktop')
@@ -41,10 +45,35 @@ if (!isExpectedDesktopUpdateSource(updateConfig)) {
   fail('app-update.yml 没有指向预期的 GitHub Releases 仓库')
 }
 
+if (requireSignature) {
+  if (process.platform !== 'win32') fail('签名校验必须在 Windows runner 上执行')
+  const yaml = createRequire(path.join(ROOT, 'desktop-app/package.json'))('js-yaml')
+  const publisherNames = yaml.load(updateConfig)?.publisherName
+  const executables = readdirSync(packageDirectory).filter((name) => name.toLowerCase().endsWith('.exe'))
+  if (executables.length !== 1) fail(`预期在解包目录找到一个应用 exe，实际找到 ${executables.length} 个`)
+  const executablePath = path.join(packageDirectory, executables[0])
+  const encodedPath = Buffer.from(executablePath, 'utf8').toString('base64')
+  const script = [
+    `$path = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${encodedPath}'))`,
+    '$signature = Get-AuthenticodeSignature -LiteralPath $path',
+    '[PSCustomObject]@{ status = [string]$signature.Status; subject = [string]$signature.SignerCertificate.Subject } | ConvertTo-Json -Compress',
+  ].join('; ')
+  const signatureResult = spawnSync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script], {
+    encoding: 'utf8', timeout: 15000,
+  })
+  if (signatureResult.error || signatureResult.status !== 0) fail(`无法读取 Authenticode 签名：${signatureResult.stderr || signatureResult.error?.message || 'PowerShell 失败'}`)
+  let signature
+  try { signature = JSON.parse(signatureResult.stdout.trim()) } catch { fail('Windows 未返回可解析的 Authenticode 签名信息') }
+  if (signature.status !== 'Valid') fail(`应用 exe 的 Authenticode 签名状态为 ${signature.status || 'unknown'}`)
+  if (!matchesDesktopPublisher(publisherNames, signature.subject)) {
+    fail('app-update.yml 的 publisherName 与应用 exe 的签名证书主题不匹配')
+  }
+}
+
 try {
   verifySupabaseBundle(desktopRendererPath, readPublicSupabaseConfig('desktop'))
 } catch (error) {
   fail(`桌面渲染资源没有有效的账号配置：${error.message}`)
 }
 
-console.log(`✓ Windows 包含 electron-updater ${appUpdaterVersion}、版本 ${appManifest.version}、GitHub 更新源和有效的 Supabase 账号配置`)
+console.log(`✓ Windows 包含 electron-updater ${appUpdaterVersion}、版本 ${appManifest.version}、GitHub 更新源和有效的 Supabase 账号配置${requireSignature ? '；Authenticode 签名与发布者匹配' : ''}`)

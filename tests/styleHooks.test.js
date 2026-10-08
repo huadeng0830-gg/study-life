@@ -196,6 +196,17 @@ const isWrittenBySetter = (name) =>
 
 const deadTokens = declaredTokens.filter((name) => !isReadByVar(name) && !isWrittenBySetter(name))
 
+// Catch the reverse failure too: a component can start using var(--x) before
+// the token exists in a stylesheet or is supplied by runtime/inline style.
+const allCssTokens = new Set(allFiles.flatMap((file) => [...cssDeclaredTokens(cleaned.get(file))]))
+const allLiteralStyleTokens = new Set(
+  [...haystack.matchAll(/[\x27\x22\x60](--[a-zA-Z][\w-]*)[\x27\x22\x60]/g)].map((match) => match[1]),
+)
+const referencedTokens = [
+  ...new Set([...haystack.matchAll(/var\(\s*(--[a-zA-Z][\w-]*)/g)].map((match) => match[1])),
+].sort()
+const undefinedReferences = referencedTokens.filter((name) => !allCssTokens.has(name) && !allLiteralStyleTokens.has(name))
+
 describe('style.css 的工具类必须真的被接线', () => {
   it('没有「定义了却零引用」的工具类', () => {
     // 例外清单当前为空。加东西进来之前先问：能不能改成直接用
@@ -250,6 +261,11 @@ describe('设计令牌必须真的被消费', () => {
     expect(written.length, '没扫到任何写入点，这条守卫没有意义').toBeGreaterThanOrEqual(8)
     const notRead = written.filter((name) => !isReadByVar(name))
     expect(notRead, `被写入但全仓没有 var() 读取点：${notRead.join(', ')}`).toEqual([])
+  })
+
+  it('所有 var() 引用都能找到 CSS 声明或明确的运行时/内联属性名', () => {
+    expect(referencedTokens.length).toBeGreaterThan(20)
+    expect(undefinedReferences, `被读取但没有定义的令牌：${undefinedReferences.join(', ')}`).toEqual([])
   })
 
   it('--dur-reveal 这条 CSS/JS 双份令牌两边都真的在用', () => {

@@ -5,6 +5,7 @@ import { socialRequest } from '../services/social.js'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import Modal from '../components/Modal.vue'
 import { accountOpen, accountUser } from '../composables/accountAuth.js'
+import { announce as announceLive, announceAlert } from '../composables/liveRegion.js'
 import { detachProjectTaskTodos, ensureProjectTaskTodo, setProjectTaskTodoStatus, useProjectTaskSyncState } from '../composables/projectTaskBridge.js'
 import { useDomainCommands } from '../composables/domain/commands.js'
 import { syncProjectMeetingEvents, detachProjectMeetingEvents } from '../composables/projectMeetingBridge.js'
@@ -13,6 +14,7 @@ import {
   getProjectDeliverableFileUrl, projectRequest, uploadProjectDeliverableFile, validateProjectForm,
 } from '../services/projects.js'
 import { dateInZone, wallTimeToEpoch, zonedParts } from '../../supabase/functions/campus-social/availability.js'
+import { formatDateTime } from '../composables/intlFormatters.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -92,6 +94,7 @@ const deliverableSaveBusy = ref(false)
 const reviewSaveBusy = ref(false)
 const planningSaveBusy = ref(false)
 const statusFilter = ref('open')
+const visibleTaskLimit = ref(50)
 let detailLoadSequence = 0
 let availabilitySequence = 0
 
@@ -103,7 +106,24 @@ const filteredTasks = computed(() => {
   const list = tasks.value.filter((task) => !task.parentTaskId)
   return statusFilter.value === 'all' ? list : list.filter((task) => statusFilter.value === 'done' ? task.status === 'completed' : task.status !== 'completed')
 })
-const assignedSubtasks = (taskId) => tasks.value.filter((task) => task.parentTaskId === taskId)
+const visibleTasks = computed(() => filteredTasks.value.slice(0, visibleTaskLimit.value))
+const remainingTaskCount = computed(() => Math.max(0, filteredTasks.value.length - visibleTasks.value.length))
+const dependencyTaskOptions = computed(() => tasks.value.filter((task) => task.id !== taskDraft.value.id))
+const deliverableTaskOptions = computed(() => {
+  const assignedTaskIds = new Set(deliverables.value.map((item) => item.taskId).filter(Boolean))
+  return tasks.value.filter((task) => !task.parentTaskId && !assignedTaskIds.has(task.id))
+})
+const subtasksByParent = computed(() => {
+  const grouped = new Map()
+  for (const task of tasks.value) {
+    if (!task?.parentTaskId) continue
+    const children = grouped.get(task.parentTaskId) || []
+    children.push(task)
+    grouped.set(task.parentTaskId, children)
+  }
+  return grouped
+})
+const assignedSubtasks = (taskId) => subtasksByParent.value.get(taskId) || []
 function isTaskDependencyBlocked(task) { return Boolean(task?.dependsOnTaskId && task.dependencyStatus !== 'completed') }
 const activeMembers = computed(() => members.value.filter((member) => member.status === 'active'))
 const pendingMemberInvites = computed(() => members.value.filter((member) => member.status === 'invited'))
@@ -153,7 +173,12 @@ function blankMilestone() { return { id: '', title: '', description: '', dueOn: 
 function blankDeliveryCheck() { return { id: '', title: '', required: true } }
 function blankMeeting() { return { id: '', title: '', note: '', startsLocal: '', endsLocal: '' } }
 
-function notify(kind, text) { notice.value = text ? { kind, text } : null }
+function notify(kind, text) {
+  notice.value = text ? { kind, text } : null
+  if (!text) return
+  if (kind === 'error') announceAlert(text, { clearAfter: 7000 })
+  else announceLive(text, { clearAfter: 5000 })
+}
 
 function errorMessage(error, fallback = '操作没有完成，请稍后重试。') {
   return error?.message || fallback
@@ -210,6 +235,7 @@ async function loadProjects({ keepSelected = true } = {}) {
 
 async function loadProject(id = selectedProjectId.value) {
   if (!isSignedIn.value || !id) return
+  visibleTaskLimit.value = 50
   const requestSequence = ++detailLoadSequence
   detailLoading.value = true
   try {
@@ -253,8 +279,15 @@ async function loadProject(id = selectedProjectId.value) {
   }
 }
 
+let refreshPromise = null
 async function refresh() {
-  await loadProjects()
+  if (refreshPromise) return refreshPromise
+  refreshPromise = loadProjects()
+  try {
+    return await refreshPromise
+  } finally {
+    refreshPromise = null
+  }
 }
 
 async function syncProjectQuery(id) {
@@ -545,7 +578,6 @@ function openDeliverableEditor(item) {
 }
 
 function addContentLink() { draftContent.value.links.push({ type: 'document', title: '', url: '' }) }
-function removeContentLink(index) { draftContent.value.links.splice(index, 1) }
 
 async function uploadDeliverableFiles(event) {
   const files = [...(event.target.files || [])]
@@ -731,7 +763,7 @@ function epochForLocalInput(value, edge = 'start') {
 }
 
 function formatProjectTime(value) {
-  return new Intl.DateTimeFormat('zh-CN', { timeZone: scheduleTimezone.value || 'Asia/Shanghai', month: 'long', day: 'numeric', weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(value))
+  return formatDateTime(value, { timeZone: scheduleTimezone.value || 'Asia/Shanghai', month: 'long', day: 'numeric', weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
 }
 
 async function queryGroupAvailability(days = scheduleDays.value) {
@@ -1019,7 +1051,7 @@ async function undoDeleteProject() {
 
 function formatDate(value) {
   if (!value) return ''
-  const [year, month, day] = String(value).slice(0, 10).split('-')
+  const [, month, day] = String(value).slice(0, 10).split('-')
   return `${Number(month)} 月 ${Number(day)} 日`
 }
 function nextDay(value) {
@@ -1053,7 +1085,7 @@ function activityLabel(item) {
 }
 
 watch(() => accountUser.value?.id, (id) => {
-  if (id) void loadProjects({ keepSelected: false })
+  if (id) void refresh()
   else {
     projects.value = []; project.value = null; members.value = []; tasks.value = []; milestones.value = []; deliveryChecks.value = []; adjustments.value = []; deliverables.value = []; meetings.value = []; inbox.value = { invitations: [], assignments: [], adjustments: [], reviews: [], meetings: [] }
   }
@@ -1065,11 +1097,21 @@ watch(() => route.query.join, () => { void processJoinLink() })
 watch(() => accountUser.value?.id, () => { void processJoinLink() })
 
 let refreshTimer = 0
-function onWindowFocus() { if (document.visibilityState === 'visible' && isSignedIn.value) void refresh() }
+let lastAutomaticRefreshAt = 0
+const AUTO_REFRESH_INTERVAL = 120_000
+function refreshAutomatically() {
+  if (document.visibilityState !== 'visible' || route.path !== '/projects' || !isSignedIn.value) return
+  const now = Date.now()
+  // focus 和 visibilitychange 经常在同一轮恢复时连续触发；合并它们，避免重复请求。
+  if (now - lastAutomaticRefreshAt < 30_000) return
+  lastAutomaticRefreshAt = now
+  void refresh()
+}
+function onWindowFocus() { refreshAutomatically() }
 
 onMounted(() => {
   void processJoinLink()
-  refreshTimer = window.setInterval(() => { if (document.visibilityState === 'visible' && isSignedIn.value) void refresh() }, 45_000)
+  refreshTimer = window.setInterval(refreshAutomatically, AUTO_REFRESH_INTERVAL)
   window.addEventListener('focus', onWindowFocus)
   document.addEventListener('visibilitychange', onWindowFocus)
 })
@@ -1094,7 +1136,7 @@ onBeforeUnmount(() => {
       </div>
     </header>
 
-    <div v-if="notice" class="projects-notice" :class="`is-${notice.kind}`" role="status">
+    <div v-if="notice" class="projects-notice" :class="`is-${notice.kind}`">
       <span>{{ notice.text }}</span><button v-if="lastDeletedProjectId" class="projects-undo" type="button" :disabled="actionBusy === 'restore-deleted'" @click="undoDeleteProject">撤销删除</button><button type="button" aria-label="关闭提示" @click="notice = null">×</button>
     </div>
     <div v-if="taskSync.pending" class="projects-notice is-warning" role="status">
@@ -1198,7 +1240,7 @@ onBeforeUnmount(() => {
               <div class="projects-section-head"><div><h4>里程碑</h4><p>记录项目关键阶段；任务可以关联到对应阶段。</p></div><button v-if="isManager && project.status === 'active'" class="btn btn-ghost" type="button" @click="openMilestoneForm()">＋ 添加里程碑</button></div>
               <div v-if="!milestones.length" class="projects-empty compact"><strong>还没有里程碑</strong><small>简单项目可以跳过；需要跟进关键日期时再添加。</small></div>
               <article v-for="item in milestones" :key="item.id" class="project-milestone-row" :class="{ completed: item.status === 'completed' }">
-                <button class="milestone-check" type="button" :disabled="project.status !== 'active' || actionBusy === `milestone:${item.id}`" :aria-label="item.status === 'completed' ? `重新打开${item.title}` : `完成${item.title}`" @click="toggleMilestone(item, item.status !== 'completed')">{{ item.status === 'completed' ? '✓' : '' }}</button>
+                <button class="milestone-check" type="button" :disabled="project.status !== 'active' || actionBusy === `milestone:${item.id}`" :aria-label="item.status === 'completed' ? `重新打开${item.title}` : `完成${item.title}`" :aria-pressed="item.status === 'completed'" @click="toggleMilestone(item, item.status !== 'completed')">{{ item.status === 'completed' ? '✓' : '' }}</button>
                 <div class="project-milestone-copy"><strong>{{ item.title }}</strong><small><template v-if="item.dueOn">{{ formatDate(item.dueOn) }} · </template>{{ item.status === 'completed' ? '已完成' : '进行中' }}</small><p v-if="item.description">{{ item.description }}</p></div>
                 <div v-if="isManager && project.status === 'active'" class="projects-row-actions"><button class="btn btn-ghost" type="button" @click="openMilestoneForm(item)">编辑</button><button class="btn btn-ghost danger-text" type="button" @click="askConfirm({ kind: 'delete-milestone', milestoneId: item.id })">删除</button></div>
               </article>
@@ -1208,7 +1250,7 @@ onBeforeUnmount(() => {
               <span aria-hidden="true">✓</span><strong>{{ statusFilter === 'done' ? '还没有完成的任务' : '现在没有待处理任务' }}</strong><small>{{ project.status === 'active' ? '添加一个简单任务，或邀请队友一起分工。' : '归档项目只保留历史查看。' }}</small>
               <button v-if="project.status === 'active'" class="btn btn-secondary" type="button" @click="openTaskCreate()">添加第一个任务</button>
             </div>
-            <article v-for="task in filteredTasks" :key="task.id" class="project-task">
+            <article v-for="task in visibleTasks" :key="task.id" class="project-task">
               <div class="project-task-main">
                 <span class="task-priority" :class="`priority-${task.priority}`" :aria-label="`优先级：${PROJECT_TASK_PRIORITY[task.priority] || '普通'}`"></span>
                 <div class="project-task-copy">
@@ -1236,6 +1278,7 @@ onBeforeUnmount(() => {
                 <div v-for="child in assignedSubtasks(task.id)" :key="child.id" class="project-subtask-row"><span aria-hidden="true">↳</span><strong :class="{ 'task-is-done': child.status === 'completed' }">{{ child.title }}</strong><small>{{ taskAssignmentLabel(child) }}<template v-if="child.dueOn"> · {{ formatDate(child.dueOn) }}</template><template v-if="isTaskDependencyBlocked(child)"> · 等待前置：{{ child.dependencyTaskTitle }}</template></small><template v-if="project.status === 'active' && child.assigneeId === accountUser.id && child.assignmentStatus === 'pending'"><button class="btn btn-ghost" type="button" @click="respondTask(child, 'decline')">拒绝</button><button class="btn btn-ghost" type="button" @click="respondTask(child, 'accept')">接受</button></template><button v-else-if="project.status === 'active' && child.assigneeId === accountUser.id && child.assignmentStatus === 'accepted' && child.status !== 'completed'" class="btn btn-ghost" type="button" :disabled="isTaskDependencyBlocked(child)" @click="changeTaskStatus(child, 'completed')">完成</button><button v-if="isManager && project.status === 'active'" class="icon-btn" type="button" :aria-label="`编辑子任务 ${child.title}`" @click="openTaskEdit(child)">✎</button></div>
               </div>
             </article>
+            <button v-if="remainingTaskCount" class="btn btn-ghost project-tasks-more" type="button" @click="visibleTaskLimit += 50">再显示 50 项（剩余 {{ remainingTaskCount }} 项）</button>
           </section>
 
           <section v-else-if="activeSection === 'schedule'" class="project-panel panel" aria-labelledby="project-schedule-title">
@@ -1273,7 +1316,7 @@ onBeforeUnmount(() => {
             <div v-if="!adjustments.length" class="projects-empty compact"><strong>暂时没有任务调整</strong><small>需要延期、协助或重新分工时，可以从任务卡片发起协商。</small></div>
             <article v-for="request in adjustments" :key="request.id" class="project-process-row">
               <div class="project-process-main"><div class="project-process-title"><strong>{{ request.taskTitle }} · {{ adjustmentTypeLabel(request.type) }}</strong><span class="project-process-status" :class="`state-${request.status}`">{{ adjustmentStatus(request.status) }}</span></div>
-                <p>{{ request.reason }}</p><small>{{ request.requesterName }} · {{ adjustmentDataSummary(request) }} · {{ new Date(request.createdAt).toLocaleString('zh-CN') }}</small>
+                <p>{{ request.reason }}</p><small>{{ request.requesterName }} · {{ adjustmentDataSummary(request) }} · {{ formatDateTime(request.createdAt) }}</small>
                 <small v-if="request.decisionNote">处理说明：{{ request.decisionNote }}</small>
               </div>
               <div class="projects-row-actions">
@@ -1289,7 +1332,7 @@ onBeforeUnmount(() => {
               <div><strong>成员已完成的任务</strong><p v-if="deliveryCenter.completedTasks.length">{{ deliveryCenter.completedTasks.map((task) => task.title).join('、') }}</p><small v-else>暂时没有已完成任务</small></div>
               <div><strong>等待验收</strong><p v-if="deliveryCenter.awaitingReview.length">{{ deliveryCenter.awaitingReview.map((item) => item.title).join('、') }}</p><small v-else>没有待验收成果</small></div>
               <div><strong>必需材料缺失或未通过</strong><p v-if="deliveryCenter.missing.length">{{ deliveryCenter.missing.map((item) => item.title).join('、') }}</p><small v-else>必需成果已齐备</small></div>
-              <div><strong>已验收的最终版本</strong><p v-if="deliveryCenter.approved.length">{{ deliveryCenter.approved.map((item) => `${item.title} · V${item.versions[0].number} · ${new Date(item.versions[0].createdAt).toLocaleString('zh-CN')}`).join('；') }}</p><small v-else>还没有通过验收的成果版本</small></div>
+              <div><strong>已验收的最终版本</strong><p v-if="deliveryCenter.approved.length">{{ deliveryCenter.approved.map((item) => `${item.title} · V${item.versions[0].number} · ${formatDateTime(item.versions[0].createdAt)}`).join('；') }}</p><small v-else>还没有通过验收的成果版本</small></div>
             </section>
             <section v-if="deliveryChecks.length || isManager" class="delivery-checklist" aria-label="项目交付检查清单">
               <div class="projects-section-head"><div><h4>交付检查清单</h4><p>记录最终提交前需要确认的材料和检查结果。</p></div><button v-if="isManager && project.status === 'active'" class="btn btn-ghost" type="button" @click="openDeliveryCheckForm">＋ 添加检查项</button></div>
@@ -1308,7 +1351,7 @@ onBeforeUnmount(() => {
                 <small>{{ item.required ? '必需交付' : '选填交付' }} · {{ item.reviewRequired ? `验收人：${item.reviewerName || '项目负责人或管理员'}` : '无需验收' }}<template v-if="item.taskTitle"> · 关联任务：{{ item.taskTitle }}</template></small>
                 <template v-if="item.versions?.length">
                   <div v-for="version in item.versions" :key="version.id" class="deliverable-version">
-                    <div class="deliverable-version-head"><strong>V{{ version.number }} <span>{{ version.reviewStatus === 'pending' ? '等待验收' : version.reviewStatus === 'approved' ? '已通过' : version.reviewStatus === 'returned' ? '已退回' : '已提交' }}</span></strong><small>{{ version.submitterName }} · {{ new Date(version.createdAt).toLocaleString('zh-CN') }}</small></div>
+                    <div class="deliverable-version-head"><strong>V{{ version.number }} <span>{{ version.reviewStatus === 'pending' ? '等待验收' : version.reviewStatus === 'approved' ? '已通过' : version.reviewStatus === 'returned' ? '已退回' : '已提交' }}</span></strong><small>{{ version.submitterName }} · {{ formatDateTime(version.createdAt) }}</small></div>
                     <p v-if="version.changeNote" class="deliverable-change-note">修改说明：{{ version.changeNote }}</p>
                     <p v-if="version.content.summary" class="deliverable-summary">{{ version.content.summary }}</p>
                     <div v-if="version.content.links?.length || version.content.files?.length" class="deliverable-links">
@@ -1339,7 +1382,7 @@ onBeforeUnmount(() => {
           <section v-else class="project-panel panel" aria-labelledby="project-activity-title">
             <div class="projects-section-head"><div><h3 id="project-activity-title">项目动态</h3><p>最近的成员、任务和项目操作记录。</p></div></div>
             <div v-if="!activities.length" class="projects-empty compact"><strong>还没有操作记录</strong><small>项目创建、分工和成员变化会显示在这里。</small></div>
-            <ol v-else class="project-activity-list"><li v-for="item in activities" :key="item.id"><span class="activity-dot"></span><div><strong>{{ item.actorName }}</strong><span>{{ activityLabel(item) }}</span><small>{{ new Date(item.createdAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) }}</small></div></li></ol>
+            <ol v-else class="project-activity-list"><li v-for="item in activities" :key="item.id"><span class="activity-dot"></span><div><strong>{{ item.actorName }}</strong><span>{{ activityLabel(item) }}</span><small>{{ formatDateTime(item.createdAt, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) }}</small></div></li></ol>
           </section>
         </section>
 
@@ -1369,7 +1412,7 @@ onBeforeUnmount(() => {
         <label>任务说明 <textarea v-model="taskDraft.description" maxlength="3000" rows="3" placeholder="选填" /></label>
         <div class="projects-form-grid"><label>负责人<select v-model="taskDraft.assigneeId"><option value="">暂不分配</option><option v-for="member in activeMembers" :key="member.userId" :value="member.userId">{{ member.userId === accountUser.id ? '我' : member.nickname }}</option></select></label><label>截止日期<input v-model="taskDraft.dueOn" type="date" /></label></div>
         <label v-if="milestones.length">所属阶段<select v-model="taskDraft.milestoneId"><option value="">不关联里程碑</option><option v-for="item in milestones" :key="item.id" :value="item.id">{{ item.title }}</option></select></label>
-        <label>前置任务<select v-model="taskDraft.dependsOnTaskId"><option value="">没有前置任务</option><option v-for="item in tasks.filter((entry) => entry.id !== taskDraft.id)" :key="item.id" :value="item.id">{{ item.title }}{{ item.status === 'completed' ? '（已完成）' : '' }}</option></select></label>
+        <label>前置任务<select v-model="taskDraft.dependsOnTaskId"><option value="">没有前置任务</option><option v-for="item in dependencyTaskOptions" :key="item.id" :value="item.id">{{ item.title }}{{ item.status === 'completed' ? '（已完成）' : '' }}</option></select></label>
         <p v-if="taskDraft.dependsOnTaskId" class="projects-form-hint">前置任务完成前，成员不能开始或完成此任务；系统会阻止循环依赖。</p>
         <label>优先级<select v-model="taskDraft.priority"><option v-for="(label, value) in PROJECT_TASK_PRIORITY" :key="value" :value="value">{{ label }}</option></select></label>
         <p v-if="taskDraft.assigneeId" class="projects-form-hint">{{ editingTask ? '更换负责人后，新负责人需要明确接受；原负责人待办会转为个人记录。' : '分配后会等待负责人明确接受；接受后才加入对方的个人待办。' }}</p>
@@ -1422,7 +1465,7 @@ onBeforeUnmount(() => {
       <form class="projects-form" @submit.prevent="saveDeliverable">
         <label>交付项名称 <span aria-hidden="true">*</span><input v-model="deliverableDraft.title" maxlength="160" required autofocus placeholder="例如：最终报告" /></label>
         <label>交付要求<textarea v-model="deliverableDraft.instructions" maxlength="3000" rows="3" placeholder="选填，写下格式、内容或检查要求" /></label>
-        <label>关联任务<select v-model="deliverableDraft.taskId"><option value="">不关联具体任务</option><option v-for="task in tasks.filter((item) => !item.parentTaskId && !deliverables.some((existing) => existing.taskId === item.id))" :key="task.id" :value="task.id">{{ task.title }}</option></select></label>
+        <label>关联任务<select v-model="deliverableDraft.taskId"><option value="">不关联具体任务</option><option v-for="task in deliverableTaskOptions" :key="task.id" :value="task.id">{{ task.title }}</option></select></label>
         <label>验收人<select v-model="deliverableDraft.reviewerId"><option value="">项目负责人或管理员</option><option v-for="member in activeMembers.filter((item) => item.userId !== accountUser.id)" :key="member.userId" :value="member.userId">{{ member.nickname }}</option></select></label>
         <label class="project-check-row"><input v-model="deliverableDraft.required" type="checkbox" />项目交付必需</label>
         <label class="project-check-row"><input v-model="deliverableDraft.reviewRequired" type="checkbox" />正式提交后需要验收</label>
@@ -1464,7 +1507,7 @@ onBeforeUnmount(() => {
     </Modal>
 
     <Modal v-if="taskEventsTitle" :open="Boolean(taskEventsTitle)" :title="`${taskEventsTitle} · 进展记录`" @close="taskEventsTitle = ''; taskEvents = []">
-      <ol class="project-activity-list task-event-list"><li v-for="event in taskEvents" :key="event.id"><span class="activity-dot"></span><div><strong>{{ event.actorName }}</strong><span>{{ ({ created: '创建任务', assigned: '更新负责人', assignment_accepted: '接受分工', assignment_declined: '拒绝分工', updated: '更新任务信息', status_changed: `状态更新为${PROJECT_TASK_STATUS[event.details?.to] || '已变更'}`, member_left: '负责人退出项目，任务已释放', member_removed: '负责人已移出项目，任务已释放' })[event.type] || '记录了进展' }}</span><small>{{ new Date(event.createdAt).toLocaleString('zh-CN') }}</small></div></li></ol>
+      <ol class="project-activity-list task-event-list"><li v-for="event in taskEvents" :key="event.id"><span class="activity-dot"></span><div><strong>{{ event.actorName }}</strong><span>{{ ({ created: '创建任务', assigned: '更新负责人', assignment_accepted: '接受分工', assignment_declined: '拒绝分工', updated: '更新任务信息', status_changed: `状态更新为${PROJECT_TASK_STATUS[event.details?.to] || '已变更'}`, member_left: '负责人退出项目，任务已释放', member_removed: '负责人已移出项目，任务已释放' })[event.type] || '记录了进展' }}</span><small>{{ formatDateTime(event.createdAt) }}</small></div></li></ol>
       <p v-if="!taskEvents.length" class="projects-rail-empty">还没有进展记录。</p>
     </Modal>
 
@@ -1477,4 +1520,4 @@ onBeforeUnmount(() => {
   </div>
 </template>
 
-<style src="./projects.css"></style>
+<style scoped src="./projects.css"></style>

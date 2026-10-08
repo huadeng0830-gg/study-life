@@ -24,6 +24,7 @@ asar: true
 npmRebuild: false
 win:
   icon: desktop/sanliangshi.ico
+  verifyUpdateCodeSignature: true
   target:
     - target: nsis
       arch:

@@ -183,7 +183,7 @@ function choose(item) {
   align-items: center;
   gap: 9px;
   width: 100%;
-  min-height: 42px;
+  min-height: 44px;
   padding: 9px 11px;
   color: var(--text);
   font-size: var(--fs-13-5);

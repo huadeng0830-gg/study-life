@@ -100,7 +100,7 @@ const courseManager = useScheduleCourseManager({
   domain, courses, courseTemplateCommands, coursesRemovalTarget, importTemplateTarget, deleteTemplateTarget,
 })
 const {
-  showCourseManager, selectedCourseIds, selectedCourses, templateName, managerMessage, managerError,
+  showCourseManager, selectedCourseIds, templateName, managerMessage, managerError,
   openCourseManager, toggleCourseSelection, toggleAllCourses, deleteSelectedCourses, clearCurrentSchedule,
   duplicateSelectedCourses, saveCourseTemplate, importCourseTemplate, deleteCourseTemplate,
 } = courseManager
@@ -116,9 +116,9 @@ const courseForm = useScheduleCourseForm({
   beginCourseImport: lazyBeginCourseImport, deleteCourseTarget, managerMessage,
 })
 const {
-  form, showForm, editingId, error, quickHomeworkCourse, openAdd, openEdit, addAnotherInCell,
+  form, showForm, editingId, quickHomeworkCourse, openAdd, openEdit, addAnotherInCell,
   saveCourseFromEditor, removeCourseFromEditor, archiveCourseFromEditor, linkedStudyProgress,
-  periodOption, openHomeworkForCourse, closeHomeworkRecord, onHomeworkSaved,
+  openHomeworkForCourse, closeHomeworkRecord, onHomeworkSaved,
 } = courseForm
 
 const batchTextApi = useScheduleBatchText({ courses, beginCourseImport: lazyBeginCourseImport })
@@ -201,7 +201,7 @@ function confirmCoursesRemoval() {
   const target = coursesRemovalTarget.value
   coursesRemovalTarget.value = null
   if (!target) return
-  // 默认只解除关联，保留历史任务、考试、日程与笔记。
+  // 默认只解除课程关联，保留历史任务、考试、日程与备注。
   for (const id of target.ids) domain.deleteCourse(id)
   selectedCourseIds.value = []
   managerMessage.value = target.doneMessage
@@ -570,8 +570,7 @@ function confirmDeleteCourse() {
 /* 「聚焦态」反馈条：模板用了 .notice-success，但这条类只在**别的组件**的 scoped 块里定义过
    （TasksView / EventsView / WeeklyReviewView），scoped 样式不会跨组件生效，
    于是这里渲染成默认段落（正文黑字 + 默认外边距），与全站绿色成功提示不一致。
-   注意：LedgerView.vue:762 与 NotesView.vue:194 用的是同一个类、同样是**本地没有定义**，
-   三处一起补齐，别只补这里。 */
+   注意：LedgerView.vue 也用了同一个类、同样是**本地没有定义**，两处一起补齐。 */
 .notice-success {
   margin:12px 0 0;
   color:var(--success);
@@ -665,8 +664,8 @@ function confirmDeleteCourse() {
   margin-left:auto;
   display:flex}
 .exception-tag.makeup {
-  color:#6a45c4;
-  background:#f1ebff}
+  color:var(--primary);
+  background:var(--primary-soft)}
 /* 这一条**必须**排在上一条之后，位置别再挪。两者特异性相同（都是 0,2,0）、都设 background，
    所以顺序直接决定"笔记本皮肤下悬停或今天是格用哪个底色"。第五十一轮做同值规则去重时，
    后出现的那份 `.skin-notebook` 一族被删掉，顺序因此翻转；这里把这一条移回它最后一次出现的

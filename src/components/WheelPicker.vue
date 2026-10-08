@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue'
 import { animationsEnabled } from '../composables/motion.js'
 import {
   WHEEL_ITEM_HEIGHT,
@@ -34,10 +34,15 @@ const emit = defineEmits(['update:modelValue'])
 
 const columnEl = ref(null)
 let settleTimer = 0
+const optionIdPrefix = 'wheel-' + useId()
 
 const padding = computed(() => wheelPadding(props.itemHeight, props.visibleRows))
 const columnHeight = computed(() => Math.max(1, props.itemHeight) * Math.max(1, props.visibleRows))
 const currentIndex = computed(() => wheelIndexForValue(props.values, props.modelValue))
+function optionId(index) {
+  return optionIdPrefix + '-option-' + index
+}
+const activeOptionId = computed(() => props.values.length ? optionId(currentIndex.value) : undefined)
 
 function textOf(value) {
   return props.format ? props.format(value) : String(value)
@@ -115,14 +120,16 @@ onBeforeUnmount(() => window.clearTimeout(settleTimer))
       class="wheel-column"
       role="listbox"
       tabindex="0"
+      :aria-activedescendant="activeOptionId"
       :aria-label="label || '滚轮选择'"
       :style="{ paddingTop: `${padding}px`, paddingBottom: `${padding}px` }"
       @scroll.passive="onScroll"
       @keydown="onKeydown"
     >
       <div
-        v-for="value in values"
+        v-for="(value, index) in values"
         :key="value"
+        :id="optionId(index)"
         class="wheel-item"
         role="option"
         :aria-selected="value === modelValue"

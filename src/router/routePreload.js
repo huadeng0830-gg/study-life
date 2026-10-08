@@ -9,15 +9,15 @@ export const routeLoaders = Object.freeze({
   '/lists': () => import('../views/ListsView.vue'),
   '/bills': () => import('../views/LedgerView.vue'),
   '/review': () => import('../views/WeeklyReviewView.vue'),
-  '/notes': () => import('../views/NotesView.vue'),
   '/together': () => import('../views/TogetherView.vue'),
   '/projects': () => import('../views/ProjectsView.vue'),
 })
 
-function connectionAllowsPrefetch() {
+export function connectionAllowsPrefetch() {
   if (typeof navigator === 'undefined') return false
   const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection
-  if (!connection) return true
+  // Network Information API 不可用时无法判断弱网；保守地跳过后台预取。
+  if (!connection) return false
   if (connection.saveData) return false
   return !/^(slow-2g|2g)$/i.test(connection.effectiveType || '')
 }

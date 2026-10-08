@@ -1,5 +1,6 @@
 import { removeVaultKeys } from './dataVault.js'
 import { FOOD_RETIREMENT_MIGRATION, PACKAGE_RETIREMENT_MIGRATION, RETIRED_FOOD_KEYS, RETIRED_PACKAGE_KEYS, removeRetiredAppearanceFields } from './retiredData.js'
+import { restoreStoredValues } from './store/index.js'
 
 const MIGRATIONS_KEY = 'sl_migrations'
 
@@ -89,15 +90,13 @@ export async function retireFoodData({ exportBackup = downloadEmergencyBackupOnD
   if (foodDetected) {
     for (const key of RETIRED_FOOD_KEYS) localStorage.removeItem(key)
 
+    const cleanAppearanceValues = {}
     const appearance = readJson('sl_appearance', null)
-    if (appearance) {
-      const next = removeRetiredAppearanceFields(appearance)
-      localStorage.setItem('sl_appearance', JSON.stringify(next))
-    }
+    if (appearance) cleanAppearanceValues.sl_appearance = removeRetiredAppearanceFields(appearance)
     const wallpaper = readJson('sl_wallpaper_config', null)
-    if (wallpaper) {
-      const next = removeRetiredAppearanceFields(wallpaper)
-      localStorage.setItem('sl_wallpaper_config', JSON.stringify(next))
+    if (wallpaper) cleanAppearanceValues.sl_wallpaper_config = removeRetiredAppearanceFields(wallpaper)
+    if (Object.keys(cleanAppearanceValues).length) {
+      await restoreStoredValues(cleanAppearanceValues, { markChanged: false })
     }
     markMigrationRun(FOOD_RETIREMENT_MIGRATION)
   }

@@ -4,6 +4,7 @@ import { raceWithControls, throwIfAborted } from './asyncTask.js'
 
 const INIT_TIMEOUT_MS = 45000
 const RECOGNIZE_TIMEOUT_MS = 120000
+const WORKER_IDLE_TIMEOUT_MS = 5 * 60 * 1000
 const MAX_PIXELS = { fast: 6_500_000, auto: 8_500_000, accurate: 12_000_000 }
 
 // 【每种内容形态的版式模式，不是每个场景一份】
@@ -76,12 +77,14 @@ function assertSimdAvailable() {
   throw new Error('当前浏览器不支持 WebAssembly SIMD，无法在本机运行图片识课。请更新浏览器，或改用 Excel / 文字方式导入课表。')
 }
 
-function maxPixelsFor(mode) {
+export function maxPixelsFor(mode, memoryValue = typeof navigator !== 'undefined' ? navigator.deviceMemory : undefined) {
   const requested = MAX_PIXELS[mode] || MAX_PIXELS.auto
-  const memory = Number(navigator.deviceMemory)
+  const memory = Number(memoryValue)
   // 低内存设备会同时持有原图、增强图与 OCR worker 缓冲，准确模式必须更保守。
   if (Number.isFinite(memory) && memory <= 2) return Math.min(requested, 4_000_000)
   if (Number.isFinite(memory) && memory <= 4) return Math.min(requested, 6_500_000)
+  // Safari 等浏览器不暴露 deviceMemory；不能因此假设设备有桌面级内存。
+  if (!Number.isFinite(memory)) return Math.min(requested, 6_500_000)
   return requested
 }
 
@@ -105,6 +108,20 @@ class OCRWorkerManager {
 
 const ocrWorker = new OCRWorkerManager()
 export const ocrState = ocrWorker.state
+let workerIdleCleanupTimer = null
+
+function clearWorkerIdleCleanup() {
+  if (workerIdleCleanupTimer !== null) clearTimeout(workerIdleCleanupTimer)
+  workerIdleCleanupTimer = null
+}
+
+function scheduleWorkerIdleCleanup() {
+  clearWorkerIdleCleanup()
+  workerIdleCleanupTimer = setTimeout(() => {
+    workerIdleCleanupTimer = null
+    if (!ocrWorker.busy) void cleanupOCR()
+  }, WORKER_IDLE_TIMEOUT_MS)
+}
 
 function logError(message, error) {
   console.error(`[OCR] ${message}`, error)
@@ -599,6 +616,7 @@ async function recognizeRecordRows(instance, source, kind, signal = null) {
 export async function performOCR(file, onProgress = null, options = {}) {
   if (ocrWorker.busy) throw new Error('OCR 正在进行中，请稍候')
   if (!file?.type?.startsWith('image/')) throw new Error('请选择图片文件')
+  clearWorkerIdleCleanup()
   // 先判环境再干活：不支持 SIMD 时若等到解码完一张 12MP 图片之后才提示，
   // 用户已经白等了一整轮预处理。引擎起不来是"这台设备不行"，应当立刻说。
   assertSimdAvailable()
@@ -671,6 +689,7 @@ export async function performOCR(file, onProgress = null, options = {}) {
     }
     ocrWorker.busy = false
     ocrWorker.activeProgressCallback = null
+    if (ocrWorker.worker) scheduleWorkerIdleCleanup()
   }
 }
 
@@ -696,6 +715,8 @@ async function destroyWorker() {
 }
 
 export async function cleanupOCR() {
+  if (ocrWorker.busy) return false
+  clearWorkerIdleCleanup()
   await destroyWorker()
   ocrWorker.busy = false
   ocrWorker.activeProgressCallback = null
@@ -703,4 +724,5 @@ export async function cleanupOCR() {
   ocrState.progress = 0
   ocrState.stage = ''
   ocrState.error = null
+  return true
 }

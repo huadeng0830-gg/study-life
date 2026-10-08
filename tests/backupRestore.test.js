@@ -5,7 +5,6 @@ const STORAGE_KEYS = {
   courses: 'sl_courses',
   tasks: 'sl_tasks',
   events: 'sl_events',
-  quickNotes: 'sl_quick_notes',
   theme: 'sl_theme',
 }
 
@@ -25,7 +24,6 @@ describe('旧备份恢复范围', () => {
       sl_courses: [],
       sl_tasks: [],
       sl_events: [],
-      sl_quick_notes: [],
     })
   })
 

@@ -13,6 +13,8 @@ const APP_ORIGIN = APP_SCHEME + '://' + APP_HOST
 const INSTALL_ROOT_MARKER = 'study-life.install-root'
 const isWindows = process.platform === 'win32'
 let updaterController = null
+let localAppProtocolRegistered = false
+let mainWindowCreation = null
 
 app.setAppUserModelId('com.study-life.desktop')
 protocol.registerSchemesAsPrivileged([{
@@ -33,7 +35,13 @@ function readInstallRoot() {
   const markerPath = path.join(process.resourcesPath, INSTALL_ROOT_MARKER)
   try {
     const configuredRoot = fs.readFileSync(markerPath, 'utf8').trim()
-    if (configuredRoot) return path.resolve(configuredRoot)
+    if (configuredRoot) {
+      const realResources = fs.realpathSync(process.resourcesPath)
+      const realConfiguredRoot = fs.realpathSync(path.resolve(configuredRoot))
+      const expectedRoot = path.dirname(path.dirname(realResources))
+      if (realConfiguredRoot === expectedRoot) return realConfiguredRoot
+      console.error('[desktop] install-root marker did not match the installed app layout')
+    }
   } catch {
     // A missing marker is handled with the parent of the packaged executable.
   }
@@ -123,16 +131,38 @@ function publishUpdateState(state) {
   }
 }
 
-function initializeDesktopUpdater() {
+async function readUpdatePublisherConfiguration() {
+  try {
+    const { load } = require('js-yaml')
+    const configPath = path.join(process.resourcesPath, 'app-update.yml')
+    const configText = await fs.promises.readFile(configPath, 'utf8')
+    const config = load(configText)
+    const publisherNames = Array.isArray(config?.publisherName)
+      ? config.publisherName
+      : [config?.publisherName]
+    return publisherNames.some((name) => typeof name === 'string' && name.trim().length > 0)
+  } catch {
+    return false
+  }
+}
+
+async function initializeDesktopUpdater() {
   if (!app.isPackaged || !isWindows) return false
   try {
     const { autoUpdater } = require('electron-updater')
+    const hasPublisherConfiguration = await readUpdatePublisherConfiguration()
     updaterController = createUpdaterController({
       autoUpdater,
       currentVersion: app.getVersion(),
       publish: publishUpdateState,
+      enabled: hasPublisherConfiguration,
+      disabledStage: hasPublisherConfiguration ? undefined : 'unavailable',
+      disabledMessage: '此安装包缺少 Windows 发布者签名配置，自动更新已停用。请安装正式签名版本。',
     })
-    return true
+    if (!hasPublisherConfiguration) {
+      console.error('[desktop] updater disabled: app-update.yml has no publisherName')
+    }
+    return hasPublisherConfiguration
   } catch (error) {
     console.error('[desktop] updater unavailable', error)
     return false
@@ -172,7 +202,13 @@ function response(status, message = '') {
   })
 }
 
-async function registerLocalAppProtocol() {
+function pathIsInside(root, candidate) {
+  const relative = path.relative(root, candidate)
+  return relative === '' || (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative))
+}
+
+function registerLocalAppProtocol() {
+  if (localAppProtocolRegistered) return
   protocol.handle(APP_SCHEME, async (request) => {
     const url = new URL(request.url)
     if (url.hostname !== APP_HOST || (request.method !== 'GET' && request.method !== 'HEAD')) {
@@ -192,15 +228,23 @@ async function registerLocalAppProtocol() {
       return response(403, 'Forbidden')
     }
 
-    let filePath = requestedPath
+    let selectedPath = requestedPath
     try {
-      if (fs.statSync(filePath).isDirectory()) filePath = path.join(filePath, 'index.html')
+      if ((await fs.promises.stat(selectedPath)).isDirectory()) selectedPath = path.join(selectedPath, 'index.html')
     } catch {
       // Unknown extensionless URLs receive the app shell; asset misses remain 404.
-      if (!path.extname(filePath)) filePath = path.join(rendererRoot, 'index.html')
+      if (!path.extname(selectedPath)) selectedPath = path.join(rendererRoot, 'index.html')
+      else return response(404, 'Not found')
     }
 
+    let filePath
     try {
+      const [realRoot, realFile] = await Promise.all([
+        fs.promises.realpath(rendererRoot),
+        fs.promises.realpath(selectedPath),
+      ])
+      if (!pathIsInside(realRoot, realFile)) return response(403, 'Forbidden')
+      filePath = realFile
       await fs.promises.access(filePath, fs.constants.R_OK)
     } catch {
       return response(404, 'Not found')
@@ -208,6 +252,7 @@ async function registerLocalAppProtocol() {
 
     return net.fetch(pathToFileURL(filePath).href, { method: request.method })
   })
+  localAppProtocolRegistered = true
 }
 
 function configureSession() {
@@ -236,53 +281,77 @@ function installNavigationGuards(window) {
   })
 }
 
-async function createMainWindow() {
-  await registerLocalAppProtocol()
+async function createMainWindowInternal() {
+  registerLocalAppProtocol()
   configureSession()
   Menu.setApplicationMenu(null)
 
-  const window = new BrowserWindow({
-    width: 1280,
-    height: 860,
-    minWidth: 960,
-    minHeight: 640,
-    show: false,
-    autoHideMenuBar: true,
-    backgroundColor: '#f4f6fa',
-    ...(isWindows ? { icon: path.join(rendererRoot, 'pwa-v2-512x512.png') } : {}),
-    webPreferences: {
-      preload: path.join(__dirname, 'preload.cjs'),
-      contextIsolation: true,
-      nodeIntegration: false,
-      sandbox: true,
-      webviewTag: false,
-    },
-  })
+  let window = null
+  try {
+    window = new BrowserWindow({
+      width: 1280,
+      height: 860,
+      minWidth: 960,
+      minHeight: 640,
+      show: false,
+      autoHideMenuBar: true,
+      backgroundColor: '#f4f6fa',
+      ...(isWindows ? { icon: path.join(rendererRoot, 'pwa-v2-512x512.png') } : {}),
+      webPreferences: {
+        preload: path.join(__dirname, 'preload.cjs'),
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+        webviewTag: false,
+      },
+    })
 
-  installNavigationGuards(window)
-  window.once('ready-to-show', () => window.show())
-  window.webContents.on('render-process-gone', (_event, details) => {
-    console.error('[desktop] renderer stopped', details.reason, details.exitCode)
-  })
-  await window.loadURL(APP_ORIGIN + '/index.html')
+    installNavigationGuards(window)
+    window.once('ready-to-show', () => window.show())
+    window.webContents.on('render-process-gone', (_event, details) => {
+      console.error('[desktop] renderer stopped', details.reason, details.exitCode)
+    })
+    await window.loadURL(APP_ORIGIN + '/index.html')
+    return window
+  } catch (error) {
+    if (window && !window.isDestroyed()) window.destroy()
+    throw error
+  }
+}
+
+async function createMainWindow() {
+  if (mainWindowCreation) return mainWindowCreation
+  const creation = createMainWindowInternal()
+  mainWindowCreation = creation
+  try {
+    return await creation
+  } finally {
+    if (mainWindowCreation === creation) mainWindowCreation = null
+  }
+}
+
+function reportWindowCreationFailure(error, { quit = false } = {}) {
+  console.error('[desktop] window creation failed', error)
+  dialog.showErrorBox('三两事启动失败', '应用资源未能打开。请重新安装，或联系维护者检查安装文件。')
+  if (quit) app.quit()
 }
 
 if (gotLock) {
   app.whenReady().then(async () => {
-    const updaterReady = initializeDesktopUpdater()
     await createMainWindow()
-    if (updaterReady) {
+    void initializeDesktopUpdater().then((updaterReady) => {
+      if (!updaterReady) return
       const timer = setTimeout(() => void updaterController?.check(), 4000)
       timer.unref?.()
-    }
+    }).catch((error) => console.error('[desktop] updater initialization failed', error))
   }).catch((error) => {
-    console.error('[desktop] startup failed', error)
-    dialog.showErrorBox('三两事启动失败', '应用资源未能打开。请重新安装，或联系维护者检查安装文件。')
-    app.quit()
+    reportWindowCreationFailure(error, { quit: true })
   })
 
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) void createMainWindow()
+    if (BrowserWindow.getAllWindows().length === 0) {
+      void createMainWindow().catch((error) => reportWindowCreationFailure(error))
+    }
   })
   app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') app.quit()

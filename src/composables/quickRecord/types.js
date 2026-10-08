@@ -9,18 +9,12 @@ export const RECORD_TYPES = Object.freeze({
   refund: { label: '退款', icon: '↩️' },
   bill: { label: '固定账单', icon: '🧾' },
   countdown: { label: '重要日期', icon: '⏳' },
-  note: { label: '快速笔记', icon: '📝' },
   unknown: { label: '不确定类型', icon: '❓' },
 })
 
-// 顶部四个快捷入口：前三类继续走智能解析，笔记是完全自由模式。
-export const QUICK_ACTIONS = ['expense', 'todo', 'event', 'note']
+// 快捷入口统一进入结构化记录，避免出现与待办、日程分离的自由笔记数据。
+export const QUICK_ACTIONS = ['expense', 'todo', 'event']
 
 export function recordTypeMeta(type) {
   return RECORD_TYPES[type] ?? RECORD_TYPES.unknown
 }
-
-export const QUICK_MODES = Object.freeze({
-  smart: 'smart',
-  note: 'note',
-})

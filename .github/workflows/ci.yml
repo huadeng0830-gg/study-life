@@ -47,15 +47,6 @@ jobs:
       - name: Verify account configuration in web bundle
         run: npm run supabase:verify-bundle -- dist production
 
-      # 类型债务棘轮。不放在 npm run check 里 —— 它要跑一遍全量 checkJs（约 1 分钟），
-      # 而 checkJs 目前并没有真正打开（tsconfig 里 checkJs 仍是 false，见
-      # scripts/typecheck-ratchet.mjs 顶部的实测数据）。它守的是两件事：
-      # 1) 硬红线 TS2304「引用了不存在的名字」必须为 0 —— 这类几乎都是
-      #    运行时会抛 ReferenceError 的真缺陷；
-      # 2) 总数不许比基线增长。
-      - name: Type-debt ratchet
-        run: npm run typecheck:ratchet
-
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
@@ -93,7 +84,7 @@ jobs:
       - name: Build and inspect the Windows app package
         run: |
           npm run build:desktop
-          npx electron-builder --config electron-builder.yml --win nsis --x64 --publish never
+          npm exec --offline -- electron-builder --config electron-builder.yml --win nsis --x64 --publish never
           npm run desktop:verify
 
   # 依赖漏洞与过期提示。npm audit 放在独立 job：它是"信息"而非"门禁"，

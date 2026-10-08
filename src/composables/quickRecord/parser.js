@@ -16,10 +16,9 @@ import { defaultAccount, policyDateKey, policyTimeKey } from '../settingsPolicy.
 const HOMEWORK_WORDS = /作业|实验报告|论文|习题|复习|预习|测验|英语作文|报告/
 const EVENT_WORDS = /开会|会议|组会|班会|答辩|面试|约|活动|讲座|值班|课题组|上课|课程/
 const COUNTDOWN_WORDS = /倒计时|还有\d+天|距离.*?(考试|生日|放假|纪念日)|六级|四级|考研/
-const NOTE_WORDS = /^(记一下|笔记|note[：:]?)/i
-const REFLECTION_WORDS = /实验(?:挺|很)?顺利|老师讲的.*听懂|实验结果|实验记录/
 const INCOME_WORDS = /生活费|工资|奖学金|报销|退款|到账|收入|收款|红包|转入|兼职/
 const BILL_WORDS = /每月|每周|每年|每季度|周期|自动续费|月租|订阅|会员/
+const ALLOWED_FORCED_TYPES = new Set(['expense', 'income', 'bill', 'countdown', 'event', 'homework', 'todo'])
 
 let uidSeq = 0
 function uid() {
@@ -120,8 +119,6 @@ function inferIntent(source, schedule, amountCount, forcedType, preferredType = 
   if (COUNTDOWN_WORDS.test(source) && hasDate) return { type: 'countdown', confidence: 0.8, uncertain: false }
   if (EVENT_WORDS.test(source) && (hasDate || hasTime)) return { type: 'event', confidence: 0.84, uncertain: false }
   if (HOMEWORK_WORDS.test(source)) return { type: 'homework', confidence: 0.72, uncertain: false }
-  if (NOTE_WORDS.test(source)) return { type: 'note', confidence: 0.9, uncertain: false }
-  if (REFLECTION_WORDS.test(source)) return { type: 'note', confidence: 0.78, uncertain: false }
   if (hasDate || hasTime || /提醒我|记得|截止|开始|完成|提交|交/.test(source)) return { type: preferredType === 'event' ? 'event' : 'todo', confidence: 0.66, uncertain: false }
   if (hasAmbiguousAmount(source)) return { type: 'unknown', confidence: 0.3, uncertain: true }
   if (preferredType) return { type: preferredType, confidence: 0.5, uncertain: true }
@@ -141,15 +138,6 @@ function questionsFor(type, source, schedule, amount) {
 function parseStatement(statement, { courses = [], now = new Date(), forcedType = '', context = {} } = {}) {
   const source = String(statement ?? '').trim()
   if (!source) return null
-  // 自由笔记是明确的用户意图：不做日期、金额、课程等实体提取，
-  // 既避免无意义的计算，也不会把笔记误显示成待办草稿。
-  if (forcedType === 'note') {
-    return {
-      id: uid(), type: 'note', raw: source, title: '', course: '', courseId: '',
-      date: '', time: '', priority: 'normal', note: source, amount: 0,
-      category: '', account: '', cycle: 'monthly', questions: [], confidence: 0.94, uncertain: false,
-    }
-  }
   const knownAmount = typeof context.knownAmount === 'number' ? context.knownAmount : null
   const amounts = extractAmounts(source)
   const schedule = extractSchedule(source, courses, policyReferenceDate(now))
@@ -220,7 +208,7 @@ function parseStatement(statement, { courses = [], now = new Date(), forcedType 
     base.time = timeOf(source, schedule)
   }
 
-  if (type === 'note' || type === 'unknown') {
+  if (type === 'unknown') {
     base.title = ''
     base.note = source
   }
@@ -229,16 +217,19 @@ function parseStatement(statement, { courses = [], now = new Date(), forcedType 
 }
 
 export function parseQuickRecord(text, { courses = [], now = new Date(), forcedType = '', context = {} } = {}) {
-  const statements = splitStatements(text, forcedType)
+  // Ignore legacy/unknown modes (including the removed free-note mode) and
+  // classify the text through the same structured-record path as auto mode.
+  const safeForcedType = ALLOWED_FORCED_TYPES.has(forcedType) ? forcedType : ''
+  const statements = splitStatements(text, safeForcedType)
   return statements
     .map(({ statement, amount: knownAmount, title: knownTitle }) => {
       const mergedContext = { ...context }
       if (knownAmount !== null) mergedContext.knownAmount = knownAmount
-      const draft = parseStatement(statement, { courses, now, forcedType, context: mergedContext })
+      const draft = parseStatement(statement, { courses, now, forcedType: safeForcedType, context: mergedContext })
       if (!draft) return null
       if (knownTitle) draft.title = knownTitle
       if (knownAmount !== null) {
-        draft.type = forcedType || 'expense'
+        draft.type = safeForcedType || 'expense'
         draft.amount = knownAmount
         draft.confidence = 0.9
       }

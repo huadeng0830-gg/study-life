@@ -10,6 +10,7 @@
  * 所以"匹配用的是 A 字段、高亮用的是 B 字段"这类漂移在结构上就不可能发生。
  */
 import { formatFocusDuration } from './focusTimer.js'
+import { focusLocation } from './focusNavigation.js'
 
 /** 命中等级：数字越小越靠前。 */
 export const MATCH_RANKS = Object.freeze({
@@ -143,4 +144,10 @@ export function focusSearchMeta(session) {
   const planned = Math.max(1, Number(session?.plannedMinutes) || 0)
   const duration = seconds > 0 ? formatFocusDuration(seconds) : `${planned}分钟`
   return [focusSearchDate(session), duration].filter(Boolean).join(' · ')
+}
+
+/** O(1) 地选择专注记录的可用落点；调用方应先为任务 ID 建一个 Set。 */
+export function focusSearchTarget(session, taskIds) {
+  const todoId = String(session?.todoId || '')
+  return todoId && taskIds?.has(todoId) ? focusLocation('/tasks', todoId) : { path: '/' }
 }

@@ -14,11 +14,13 @@
 | `--muted` | 次要文字 | `#667085` |
 | `--ink-soft` | 辅助文字 | `#55607a` |
 | `--ink-faint` | 最弱文字（小号分组标题等） | `#626d84` |
+| `--ink` | 正文色兼容别名 | `var(--text)` |
 | `--primary` | 主色（文字与实底） | `#3d63d8` |
 | `--primary-hover` | 主色悬停 | `#3151b8` |
 | `--primary-soft` | 主色浅底 | `#edf2ff` |
 | `--on-primary` | **主色实底上的文字色** | `#ffffff` |
 | `--danger` | 危险色（文字与实底） | `#c62828` |
+| `--danger-soft` | 危险操作的浅底 | `color-mix(in srgb, var(--danger) 9%, var(--card))` |
 | `--on-danger` | **危险色实底上的文字色** | `#ffffff` |
 | `--success` | 成功/完成语义色（文字） | `#067654`（深色 `#4ecfa4`） |
 | `--warning` | 警告/待确认语义色（文字） | `#8a5a12`（深色 `#e0b45c`） |
@@ -63,6 +65,7 @@ CSS 定义在 `src/style.css` 的 `:root`，JS 镜像在 `src/composables/motion
 | `--dur-instant` | `MOTION.instant` | 90ms | 按下、开关、拖拽跟手 |
 | `--dur-fast` | `MOTION.fast` | 150ms | 悬停、颜色、图标 |
 | `--dur-base` | `MOTION.base` | 220ms | 常规过渡、浮层进出 |
+| `--dur-normal` | `--dur-base` 兼容别名 | 220ms | 常规过渡 |
 | `--dur-slow` | `MOTION.slow` | 320ms | 结构变化（宽度、进度条） |
 | `--dur-reveal` | `MOTION.reveal` | 420ms | 页面级揭示：主题切换的圆形扩散（CSS 侧的 `::view-transition-group` 与 JS 侧的 WAAPI 引用同一刻度） |
 | `--ease-standard` | `MOTION.easeStandard` | `cubic-bezier(.2,.8,.2,1)` | 默认 |

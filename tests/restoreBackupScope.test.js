@@ -21,10 +21,10 @@ function backupWith(fields) {
 }
 
 describe('备份恢复范围：文案必须由真源算出', () => {
-  it('备份携带的每个模块都会出现在范围里（含旧文案漏掉的账本/清单/笔记/外观）', () => {
+  it('备份携带的每个模块都会出现在范围里（含旧文案漏掉的账本/清单/外观）', () => {
     const labels = restoreBackupModuleLabels(backupWith([
       'courses', 'countdowns', 'tasks', 'events', 'expenses', 'bills',
-      'checklists', 'quickNotes', 'theme', 'focusSessions', 'moodLog',
+      'checklists', 'theme', 'focusSessions', 'moodLog',
       'timeConfig', 'semester', 'scheduleExceptions', 'scheduleNote',
       'ledgerCategories', 'ledgerFx', 'ledgerBudget', 'ledgerTemplates', 'ocrVocabulary',
     ]))

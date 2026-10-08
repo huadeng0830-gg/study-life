@@ -72,25 +72,47 @@ function minorOf(value) {
  * `level`：`over`（超出预算）/ `near`（≥80%）/ `ok`（在预算内）/ `none`（未设置预算）。
  * 比较全部在「分」上做，负的 spent（退款冲抵后为负）也会如实算出剩余额度。
  */
-export function budgetStatus({ spent = 0, todaySpent = 0, budget = null, nearRatio = BUDGET_NEAR_RATIO, today = null } = {}) {
+export function budgetStatus({
+  spent = 0,
+  todaySpent = 0,
+  budget = null,
+  nearRatio = BUDGET_NEAR_RATIO,
+  today = null,
+  excludedExpenseCount = 0,
+  excludedRefundCount = 0,
+  missingRates = [],
+} = {}) {
   const limit = normalizeMonthlyBudget(budget)
   const spentCents = minorOf(spent)
+  const missingExpenseCount = Math.max(0, Number(excludedExpenseCount) || 0)
+  const missingRefundCount = Math.max(0, Number(excludedRefundCount) || 0)
+  const excludedCount = missingExpenseCount + missingRefundCount
   if (limit === null) {
     return {
       set: false, level: 'none', budget: null, spent: spentCents / 100,
       spentCents, budgetCents: null, remaining: null, remainingCents: null, ratio: null, pct: 0,
-      pacing: null,
+      pacing: null, excludedCount, excludedExpenseCount: missingExpenseCount,
+      excludedRefundCount: missingRefundCount, missingRates: [...missingRates],
     }
   }
   const budgetCents = Math.round(limit * 100)
   const remainingCents = budgetCents - spentCents
   const ratio = budgetCents > 0 ? spentCents / budgetCents : 0
-  const level = spentCents > budgetCents ? 'over' : ratio >= nearRatio ? 'near' : 'ok'
+  const canProveOver = spentCents > budgetCents && missingRefundCount === 0
+  const level = canProveOver
+    ? 'over'
+    : excludedCount > 0
+      ? 'unknown'
+      : ratio >= nearRatio ? 'near' : 'ok'
   return {
     set: true, level, budget: limit, spent: spentCents / 100,
     spentCents, budgetCents, remaining: remainingCents / 100, remainingCents,
     ratio, pct: Math.round(ratio * 100),
-    pacing: budgetPacing({ remainingCents, budgetCents, spentCents, todaySpentCents: minorOf(todaySpent), today }),
+    excludedCount, excludedExpenseCount: missingExpenseCount,
+    excludedRefundCount: missingRefundCount, missingRates: [...missingRates],
+    partial: excludedCount > 0,
+    spentIsLowerBound: missingExpenseCount > 0 && missingRefundCount === 0,
+    pacing: excludedCount > 0 ? null : budgetPacing({ remainingCents, budgetCents, spentCents, todaySpentCents: minorOf(todaySpent), today }),
   }
 }
 

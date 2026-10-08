@@ -10,10 +10,10 @@ import { activeCategories, classifyTransaction, commonCategories, detectCategory
 import { buildSplit, hasSplit, splitCentsEvenly } from '../ledgerSplit.js'
 import { moneyWithCurrency } from '../../utils/formatters.js'
 import { amountToCents, normalizeAmount } from '../ledger.js'
-import { COMMON_LEDGER_CURRENCIES, currencyChoices, currencyField, normalizeCurrency, useLedgerFx } from '../ledgerFx.js'
+import { currencyChoices, currencyField, normalizeCurrency, useLedgerFx } from '../ledgerFx.js'
 import { parseNatural } from '../ledger.js'
-import { defaultAccount, policyTimeKey } from '../settingsPolicy.js'
-import { appNow, appToday } from '../timeContext.js'
+import { defaultAccount } from '../settingsPolicy.js'
+import { appToday } from '../timeContext.js'
 
 export function useQuickEntryForm({ baseCurrency, domain, notify, closeSwipe, ledgerNowHM }) {
   const { fx } = useLedgerFx()

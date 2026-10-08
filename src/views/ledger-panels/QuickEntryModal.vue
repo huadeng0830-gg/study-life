@@ -1,12 +1,9 @@
 <script setup>
-import { ref, computed, watch, nextTick } from 'vue'
+import { ref, computed, watch } from 'vue'
 import Modal from '../../components/Modal.vue'
 import QuickRecordPanel from '../../components/QuickRecordPanel.vue'
-import { activeCategories, catInfo, classifyTransaction, parseNatural, ledgerIndex, ledgerCategories, commonCategories } from '../../composables/ledger.js'
+import { activeCategories, catInfo, classifyTransaction, parseNatural } from '../../composables/ledger.js'
 import { splitCentsEvenly } from '../../composables/ledgerSplit.js'
-import { currencyChoices, normalizeCurrency, useLedgerFx } from '../../composables/ledgerFx.js'
-import { defaultAccount, policyTimeKey } from '../../composables/settingsPolicy.js'
-import { appNow, appToday, formatAppDate } from '../../composables/timeContext.js'
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -97,12 +94,7 @@ const emit = defineEmits([
   'open-bill-form',
 ])
 
-const { fx } = useLedgerFx()
-
 const amountEl = ref(null)
-
-const ledgerNowHM = () => policyTimeKey(appNow.value)
-const ledgerToday = () => appToday.value
 
 // 本地镜像状态：直接响应输入事件，解决测试直接设值不触发父级 props 更新的问题
 const localAmountInput = ref(props.amountInput)

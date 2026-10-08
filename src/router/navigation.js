@@ -30,7 +30,6 @@ export const desktopNavigationGroups = Object.freeze([
     label: '记录',
     items: Object.freeze([
       Object.freeze({ path: '/bills', label: '账本', icon: '📒', shortcut: 6 }),
-      Object.freeze({ path: '/notes', label: '笔记', icon: '📝', shortcut: 9 }),
       Object.freeze({ path: '/lists', label: '清单', icon: '☑️', shortcut: 5 }),
     ]),
   }),

@@ -1,12 +1,11 @@
 import { createApp } from 'vue'
 import { createRouter, createWebHashHistory } from 'vue-router'
 import './style.css'
-import { initializeAccountAuth, prepareAccountCallback } from './composables/accountAuth.js'
+import { prepareAccountCallback } from './composables/accountAuth.js'
 import { initializeDataVault, redirectPreviewOrigin } from './composables/dataVault.js'
 // 高对比度开关在本机数据与账号提交恢复后加载，避免启动早期读取存储。
 import { installGlobalErrorHandling } from './composables/globalError.js'
 import { clearPwaStartupRecovery, recoverPwaStartupResources } from './composables/pwaStartupRecovery.js'
-import { prepareDomainData } from './composables/startupData.js'
 import { runStartupGate } from './composables/startupGate.js'
 import { markStartupStep } from './composables/startupStatus.js'
 import { recallScroll, rememberScroll, resolveScrollPosition, scrollMemoryKey } from './composables/viewScrollMemory.js'
@@ -14,12 +13,10 @@ import { animationsEnabled } from './composables/motion.js'
 import { enableLocalSafeMode } from './composables/localSafeMode.js'
 import { routes } from './router/routes.js'
 import { preloadRoute } from './router/routePreload.js'
-import { retireLegacySyncState } from './composables/retireLegacySyncState.js'
 import { configureStartupDiagnostics, recordStartupTiming, startupElapsedMs, startupNow } from './composables/startupDiagnostics.js'
 import { configureOverlayHistory } from './composables/overlayStack.js'
 
 const isDesktopShell = window.studyLifeDesktop?.isDesktop === true
-retireLegacySyncState()
 const startupDebugEnabled = import.meta.env.DEV
   || new URLSearchParams(window.location.search).get('startupDebug') === '1'
 configureStartupDiagnostics(startupDebugEnabled)
@@ -145,11 +142,31 @@ async function bootstrap({ skipGate = false } = {}) {
     }
     return appModulePromise
   }
+  const loadPreparedDomainData = async () => {
+    const { prepareDomainData } = await import('./composables/startupData.js')
+    return prepareDomainData()
+  }
 
   if (!skipGate) {
     const startup = await runStartupGate({
       initializeVault: () => initializeDataVault({ onTiming: startupTiming }),
       recoverSync: async () => {
+        if (localStorage.getItem('study-life-retired-notes-purged-v1') !== '1') {
+          const purge = import('./composables/accountLocalData.js')
+            .then(({ purgeRetiredNotesFromAccountData }) => purgeRetiredNotesFromAccountData())
+            .catch((error) => {
+              console.warn('[Migration] Unable to purge retired notes from account snapshots', error?.name || 'unknown')
+            })
+          let timeout = null
+          try {
+            // Scan once even when the current account marker is absent: an orphaned local
+            // account snapshot can be reused after a later sign-in. A slow/blocked IndexedDB
+            // must not hold the mobile app at startup.
+            await Promise.race([purge, new Promise((resolve) => { timeout = window.setTimeout(resolve, 1200) })])
+          } finally {
+            if (timeout !== null) window.clearTimeout(timeout)
+          }
+        }
         if (localStorage.getItem('study-life-account-switch') || localStorage.getItem('study-life-account-sync-commit')) {
           const { recoverAccountDataSwitch } = await import('./composables/accountLocalData.js')
           const switched = await recoverAccountDataSwitch()
@@ -165,7 +182,7 @@ async function bootstrap({ skipGate = false } = {}) {
         // 首页一定是本次会话的首个路由；先发起请求，让它和数据准备共用等待时间。
         // routePreload 会吞掉预加载失败，真正导航时仍由路由自己的失败界面处理。
         void preloadRoute('/')
-        const [prepared] = await Promise.all([prepareDomainData(), loadAppModule()])
+        const [prepared] = await Promise.all([loadPreparedDomainData(), loadAppModule()])
         return prepared
       },
       onTiming: startupTiming,
@@ -181,7 +198,7 @@ async function bootstrap({ skipGate = false } = {}) {
     await import('./composables/contrast.js')
     // 初始化已完成但账号数据恢复失败时，安全模式仍需准备本机业务数据。
     void preloadRoute('/')
-    await Promise.all([prepareDomainData(), loadAppModule()])
+    await Promise.all([loadPreparedDomainData(), loadAppModule()])
   }
 
   const { default: App } = await loadAppModule()
@@ -221,8 +238,6 @@ async function bootstrap({ skipGate = false } = {}) {
   const routerStartedAt = startupNow()
   app.use(router).mount('#app')
   appBooted = true
-  // 普通启动不等待账号网络；邮箱验证回调已经在路由创建前消费。
-  void initializeAccountAuth()
   void import('./composables/projectTaskBridge.js')
     .then((module) => module.startProjectTaskBridge())
     .catch((error) => console.warn('[projects] 待办关联未能启动', error))

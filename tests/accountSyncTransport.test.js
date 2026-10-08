@@ -25,6 +25,14 @@ describe('账号同步传输边界', () => {
     await requestAccountSync('pull', { accountUserId: 'fictional-account-a' }, new AbortController().signal)
     expect(query.eq).toHaveBeenCalledWith('user_id', 'fictional-account-a')
   })
+  it('同步轮询可以只查询版本元数据，不读取完整快照', async () => {
+    query.maybeSingle.mockResolvedValue({ data: { revision: 9, updated_at: '2026-10-08T00:00:00Z', device_name: '虚构设备' }, error: null, status: 200 })
+    const result = await requestAccountSync('probe', { accountUserId: 'fictional-account-a' })
+    const payload = await result.json()
+    expect(query.select).toHaveBeenCalledWith('revision,updated_at,device_name')
+    expect(payload).toMatchObject({ exists: true, revision: 9 })
+    expect(payload.data).toBeUndefined()
+  })
   it('写入由服务端决定 owner，携带期望版本并保留 CAS 冲突', async () => {
     rpcQuery.abortSignal.mockResolvedValue({ data: { conflict: true, revision: 4 }, error: null, status: 200 })
     const result = await requestAccountSync('push', { accountUserId: 'fictional-account-a', expectedRevision: 3, data: { sample: true }, deviceName: '虚构设备' })

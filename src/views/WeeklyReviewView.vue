@@ -1,11 +1,12 @@
 <script setup>
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 import { useStoredRef } from '../composables/store'
 import { moodLog } from '../composables/atmosphereStore.js'
-import { selectWeeklyReview } from '../composables/domain/weeklySelectors.js'
+import { selectWeeklyReview, weekRange } from '../composables/domain/weeklySelectors.js'
+import { isActiveEntity } from '../composables/domain/state.js'
+import { policyDateTime, timestampOf } from '../composables/settingsPolicy.js'
 import { buildCompletionTrend, buildFocusHours, buildMoodFocusWeeks, buildRhythmWeeks, describeMoodFocus, scaleTrendGeometry } from '../composables/reviewCharts.js'
 import { appNow } from '../composables/timeContext.js'
-import { useDomainCommands } from '../composables/domain/commands.js'
 
 const tasks = useStoredRef('sl_tasks', [])
 const courses = useStoredRef('sl_courses', [])
@@ -13,15 +14,38 @@ const milestones = useStoredRef('sl_exams', [])
 const bills = useStoredRef('sl_bills', [])
 const transactions = useStoredRef('sl_expenses', [], { deep: false })
 const events = useStoredRef('sl_events', [])
-const notes = useStoredRef('sl_quick_notes', [])
 const focusSessions = useStoredRef('sl_focus_sessions', [])
 
-// ⚠ 这里原来写的是 `const { notes: noteCommands } = useDomainCommands()`，而
-// `useDomainCommands()` 返回的 `notes` 是**存储 ref**（数组），不是命令对象——
-// `noteCommands.createNote` 从来就不存在，点「一键生成回顾笔记」会在这一行直接抛
-// `TypeError: noteCommands.createNote is not a function`。命令按仓库惯例从
-// `domain.createNote` 上取（TasksView / quickRecord/adapters.js 都是这个写法）。
-const domain = useDomainCommands()
+// 本周日期范围在一周内固定。把时钟分钟变化收敛到本周起点，避免周汇总、心情图和
+// 专注图在每次整分钟跳动时重扫整份历史数据。
+const weekStartAt = computed(() => weekRange(appNow.value).startAt)
+const reviewNow = computed(() => new Date(weekStartAt.value))
+const taskChartTransitions = computed(() => {
+  const transitions = []
+  for (const task of tasks.value) {
+    if (!isActiveEntity(task)) continue
+    if (task.dueDate) {
+      const dueAt = policyDateTime(task.dueDate, task.dueTime || '23:59')
+      // isOverdueAt 使用 dueAt < cutoff，故边界落在截止时刻之后 1ms。
+      if (Number.isFinite(dueAt)) transitions.push(dueAt + 1)
+    }
+    const completedAt = timestampOf(task.completedAt)
+    if (completedAt > 0) transitions.push(completedAt)
+  }
+  return transitions.sort((left, right) => left - right)
+})
+const taskChartAsOf = computed(() => {
+  const now = appNow.value.getTime()
+  const transitions = taskChartTransitions.value
+  let low = 0
+  let high = transitions.length
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2)
+    if (transitions[middle] <= now) low = middle + 1
+    else high = middle
+  }
+  return Math.max(weekStartAt.value, transitions[low - 1] || weekStartAt.value)
+})
 
 const review = computed(() => selectWeeklyReview({
   tasks: tasks.value,
@@ -30,9 +54,8 @@ const review = computed(() => selectWeeklyReview({
   bills: bills.value,
   transactions: transactions.value,
   events: events.value,
-  notes: notes.value,
   moodLog: moodLog.value,
-}, appNow.value))
+}, reviewNow.value))
 
 const weekLabel = computed(() => {
   const { startDate, endDate } = review.value.week
@@ -43,74 +66,25 @@ const weekLabel = computed(() => {
 const moodLabel = computed(() => ({ sunny: '晴朗', cloudy: '多云', rain: '低落' }[review.value.mood.dominant] || '未记录'))
 
 const chartData = computed(() => ({ tasks: tasks.value, focusSessions: focusSessions.value, moodLog: moodLog.value }))
-const rhythm = computed(() => buildRhythmWeeks(chartData.value, appNow.value))
-const completionTrend = computed(() => buildCompletionTrend(chartData.value, appNow.value))
+const timeSensitiveTaskCharts = computed(() => {
+  const options = { asOf: taskChartAsOf.value }
+  const rhythm = buildRhythmWeeks(chartData.value, reviewNow.value, options)
+  const completionTrend = buildCompletionTrend(chartData.value, reviewNow.value, { ...options, rhythmWeeks: rhythm.weeks })
+  return { rhythm, completionTrend }
+})
+const rhythm = computed(() => timeSensitiveTaskCharts.value.rhythm)
+const completionTrend = computed(() => timeSensitiveTaskCharts.value.completionTrend)
 const trendGeometry = computed(() => scaleTrendGeometry(completionTrend.value.points, { width: 100, height: 42, left: 1, right: 1, top: 2, bottom: 2 }))
 const maxTrendBacklog = computed(() => trendGeometry.value.maxBacklog)
-const moodFocus = computed(() => buildMoodFocusWeeks(chartData.value, appNow.value))
+const moodFocus = computed(() => buildMoodFocusWeeks(chartData.value, reviewNow.value))
 const moodFocusSummary = computed(() => describeMoodFocus(moodFocus.value.weeks))
-const focusHours = computed(() => buildFocusHours(chartData.value, appNow.value))
+const focusHours = computed(() => buildFocusHours(chartData.value, reviewNow.value))
 const peakHourLabel = computed(() => focusHours.value.peakHours.map((hour) => `${String(hour).padStart(2, '0')}:00`).join('、'))
 const maxMoodFocusMinutes = computed(() => Math.max(0, ...moodFocus.value.weeks.map((week) => week.focusMinutes)))
 const maxFocusSeconds = computed(() => Math.max(0, ...focusHours.value.buckets.map((bucket) => bucket.seconds)))
 const moodName = (mood) => ({ sunny: '晴朗', cloudy: '多云', rain: '低落' }[mood] || '未记录')
 const weekRangeLabel = (week) => `${week.startDate.slice(5)}–${week.lastDate.slice(5)}`
 
-// 生成回顾笔记的结果提示。改造前这里是两处**原生 `alert()`**：浏览器级对话框，阻塞页面、
-// 不受主题控制、读屏拿不到，而且在测试环境（happy-dom）里 `alert` 是 `undefined`，
-// 调用直接抛 TypeError，这条路径根本没法验证。现在按本仓最常见的做法改成页面内联提示
-// （与 NotesView 的 noteMessage / TodayView 的 showExperienceMessage 同一形态）。
-// 行为上唯一的变化是"不再阻塞"——两句文案逐字未改。
-const reviewMessage = ref('')
-
-function generateReviewNote() {
-  const r = review.value
-  const lines = [
-    `# 本周回顾（${weekLabel.value}）`,
-    '',
-    '## 待办完成',
-    `- 完成：${r.tasks.completed} 项（作业 ${r.tasks.homeworkCompleted} · 复习 ${r.tasks.reviewCompleted}）`,
-    `- 新增：${r.tasks.created} 项`,
-    `- 待处理：${r.tasks.pending} 项`,
-    `- 专注：${r.tasks.focusMinutes} 分钟`,
-    '',
-    '## 学习节奏',
-    `- 课程：${r.courses.sessions} 节（${r.courses.courses} 门）`,
-    `- 笔记新增：${r.notes.created} 条`,
-    '',
-    '## 收支',
-    `- 支出：¥${r.finance.expense.toFixed(2)}`,
-    `- 收入：¥${r.finance.income.toFixed(2)}`,
-    `- 交易笔数：${r.finance.count}`,
-    r.finance.categories.length ? `- 分类 TOP：${r.finance.categories.slice(0, 3).map(c => `${c.key} ¥${c.amount.toFixed(2)}`).join('、')}` : '',
-    `- 账单应付：${r.bills.due} · 已支付 ${r.bills.paid} (¥${r.bills.paidAmount.toFixed(2)})`,
-    '',
-    '## 心情',
-    `- 本周：${moodLabel.value}（记录 ${r.mood.days} 天）`,
-    `- 细分：晴 ${r.mood.sunny} · 多云 ${r.mood.cloudy} · 低落 ${r.mood.rain}`,
-    '',
-    '## 下周预告',
-    r.nextWeek.length ? r.nextWeek.map(item => `- ${item.date.slice(5)} ${item.time || ''} [${item.sourceType === 'task' ? '待办' : item.sourceType === 'event' ? '日程' : item.sourceType === 'milestone' ? '重要日期' : '账单'}] ${item.title}`).join('\n') : '- 暂无',
-    '',
-    '---',
-    '*由三两事自动生成*'
-  ].filter(Boolean).join('\n')
-
-  // `createNote` 是**同步**命令（返回新建的那条笔记，内容为空时抛错），所以这里用
-  // try/catch 而不是 `.then/.catch`——原来那条 promise 链串在一个同步返回值上，
-  // 一个 `.then` 都取不到，两条 alert 全是不可达的死代码。
-  try {
-    domain.createNote({
-      title: `本周回顾 ${weekLabel.value}`,
-      content: lines,
-      course: '',
-      courseId: '',
-    })
-    reviewMessage.value = '回顾笔记已生成，可在「笔记」页面查看'
-  } catch {
-    reviewMessage.value = '生成失败，请重试'
-  }
-}
 </script>
 
 <template>
@@ -121,12 +95,9 @@ function generateReviewNote() {
         <p class="page-desc">{{ weekLabel }} · 从已经发生的记录里，看见这一周。</p>
       </div>
       <div class="page-head-actions">
-        <button type="button" class="btn btn-primary" @click="generateReviewNote">一键生成回顾笔记</button>
         <router-link class="btn btn-ghost" to="/">回到今天</router-link>
       </div>
     </header>
-
-    <p v-if="reviewMessage" class="notice-success" role="status">✓ {{ reviewMessage }}</p>
 
     <section class="review-grid">
       <article class="card review-card review-primary">
@@ -139,7 +110,6 @@ function generateReviewNote() {
         <span class="review-kicker">学习节奏</span>
         <strong>{{ review.courses.sessions }} <small>节</small></strong>
         <span>{{ review.courses.courses }} 门课程 · 预计投入 {{ review.tasks.focusMinutes }} 分钟</span>
-        <small>笔记新增 {{ review.notes.created }} 条</small>
       </article>
       <article class="card review-card">
         <span class="review-kicker">收支</span>

@@ -211,7 +211,12 @@
 .meeting-actions { justify-content: flex-end; }
 
 @media (max-width: 900px) {
-  .projects-page { padding: 18px 14px calc(96px + env(safe-area-inset-bottom)); }
+  /* App.vue already reserves the mobile bottom navigation + safe-area inset. */
+  .projects-page { padding: 18px 14px 24px; }
+  .projects-page .icon-btn { min-width: 44px; min-height: 44px; }
+  .projects-notice > button:last-child { display: inline-grid; place-items: center; flex: 0 0 44px; width: 44px; min-width: 44px; height: 44px; }
+  .projects-undo { min-width: 44px; min-height: 44px; }
+  .milestone-check { flex-basis: 44px; width: 44px; height: 44px; }
   .projects-layout { grid-template-columns: minmax(0, 1fr); }
   .projects-rail { position: static; }
   .projects-rail { padding-bottom: 10px; }
@@ -220,11 +225,11 @@
 }
 
 @media (max-width: 520px) {
-  .projects-page { padding: 14px 10px calc(94px + env(safe-area-inset-bottom)); }
+  .projects-page { padding: 14px 10px 20px; }
   .projects-head { align-items: center; gap: 8px; }
   .projects-head .page-subtitle { max-width: 240px; font-size: var(--fs-11); }
   .projects-head-actions { gap: 5px; }
-  .projects-head-actions .btn { min-height: 35px; padding: 5px 9px; font-size: var(--fs-11); }
+  .projects-head-actions .btn { min-height: 44px; padding: 5px 9px; font-size: var(--fs-11); }
   .projects-signin { grid-template-columns: 40px minmax(0, 1fr); gap: 10px; padding: 14px; }
   .projects-signin-icon { width: 40px; height: 40px; font-size: 20px; }
   .projects-signin > .btn { grid-column: 1 / -1; width: 100%; }

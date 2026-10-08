@@ -30,12 +30,11 @@ import { parseNotice } from './noticeParser.js'
 /** 段数上限。超过时截断并显式报 overflowCount，绝不静默丢弃。 */
 export const MAX_NOTICE_SEGMENTS = 20
 
-/** 段级处理方式（与单条路径的四种处理方式一致，只是粒度更细）。 */
+/** 段级处理方式（与单条路径一致，只是粒度更细）。 */
 export const SEGMENT_PROCESS_OPTIONS = [
   { key: 'task', label: '创建待办' },
   { key: 'homework', label: '添加作业' },
   { key: 'event', label: '加入日程' },
-  { key: 'note', label: '仅保存通知' },
 ]
 
 /* ------------------------------------------------------------------ 行与单位 */

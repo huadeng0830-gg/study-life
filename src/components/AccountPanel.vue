@@ -176,18 +176,20 @@ async function resend() {
   startCooldown()
 }
 
-async function signOut() {
+async function signOut(scope = 'local') {
   if (accountBusy.value) return
   feedbackError.value = ''
   feedback.value = ''
-  const result = await logoutAccount()
+  const result = await logoutAccount({ scope })
   if (!result.ok) {
     feedbackError.value = result.message
     return
   }
   mode.value = 'login'
   clearPasswords()
-  feedback.value = '已退出当前设备，本机记录已保留。'
+  feedback.value = result.warning || (scope === 'global'
+    ? '已退出所有设备，并清除了当前设备上的本机业务数据。'
+    : '已退出当前设备，并清除了本机业务数据。')
   await nextTick()
   emailInput.value?.focus()
 }
@@ -213,7 +215,8 @@ onBeforeUnmount(() => {
         <h3 id="account-summary-title" ref="summaryHeading" tabindex="-1">已登录</h3>
         <p class="account-email">{{ accountUser.email }}</p>
         <small>同步状态与设备间同步开关见下方。</small>
-        <button type="button" class="btn" :disabled="busy" :aria-busy="busy" @click="signOut">退出当前设备</button>
+        <button type="button" class="btn" :disabled="busy" :aria-busy="busy" @click="signOut">退出并清除本机数据</button>
+        <button type="button" class="btn btn-ghost" :disabled="busy" :aria-busy="busy" @click="signOut('global')">退出所有设备并清除本机数据</button>
       </section>
 
       <section v-else-if="confirmationEmail" class="account-confirmation" aria-labelledby="account-confirmation-title">
@@ -262,7 +265,7 @@ onBeforeUnmount(() => {
         </form>
       </template>
       <AccountSyncPanel v-if="accountUser" compact />
-    <p class="account-privacy">登录后可开启账号同步；退出账号会停止同步并保留本机记录。</p>
+    <p class="account-privacy">退出账号会清除当前设备上的业务数据与本机副本；需要保留时，请先导出备份。</p>
     </div>
   </Modal>
 </template>

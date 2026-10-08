@@ -7,7 +7,6 @@ export const SYNC_ENTITY_COLLECTIONS = Object.freeze({
   sl_course_templates: 'CourseTemplate',
   sl_tasks: 'Task',
   sl_events: 'Event',
-  sl_quick_notes: 'Note',
   sl_exams: 'Milestone',
   sl_bills: 'Bill',
   sl_expenses: 'Transaction',
@@ -15,6 +14,7 @@ export const SYNC_ENTITY_COLLECTIONS = Object.freeze({
   sl_checklists: 'Checklist',
   sl_focus_sessions: 'FocusSession',
   sl_course_checkins: 'CourseCheckin',
+  sl_reminder_log: 'ReminderLog',
 })
 
 /** @type {Set<string>} */
@@ -24,7 +24,8 @@ const SYNC_SINGLETON_KEYS = new Set([
   'sl_capture_enabled', 'sl_focus_settings', 'sl_countdown_show_past', 'sl_ledger_categories',
   'sl_ledger_freq', 'sl_theme', 'sl_custom_theme_color', 'sl_auto_wallpaper_color',
   'sl_wallpaper_accent', 'sl_appearance', 'sl_wallpaper_config', 'sl_performance_mode',
-  'sl_ledger_fx', 'sl_ledger_budget', 'sl_festive_lunar', 'sl_ui_language',
+  'sl_ledger_fx', 'sl_ledger_budget', 'sl_festive_lunar', 'sl_ui_language', 'sl_high_contrast',
+  'sl_archived_quick_notes',
 ])
 
 /**
@@ -61,6 +62,7 @@ export function isSingletonKey(key) { return SYNC_SINGLETON_KEYS.has(key) }
 export function stableEntityId(key, item) {
   if (item?.id !== undefined && item?.id !== null && String(item.id).trim()) return String(item.id)
   if (key === 'sl_focus_sessions' && item?.sessionId) return String(item.sessionId)
+  if (key === 'sl_reminder_log' && item?.key) return String(item.key)
   if (key === 'sl_course_checkins' && item?.date && item?.courseId) return `${item.date}:${item.courseId}`
   return ''
 }

@@ -41,7 +41,7 @@ const error = reactive({ message: '', field: '' })
 const nameInput = ref(null)
 
 // 单一入口，保证 error.message 与 error.field 不会各自漂移
-//（与 NotesView / LedgerView / EventsView 同一套约定）。
+//（与 LedgerView / EventsView 同一套约定）。
 // field 非空表示这是字段校验错误：控件标 aria-invalid，并把焦点移回去。
 // 补这套的原因是：此前「请填写课程名称」只渲染在表单最底部的 <p class="error">，
 // 既不关联到 #course-name、也没有 role="alert"——读屏用户点保存后什么都听不到。
@@ -100,12 +100,6 @@ function periodOption(id) {
   const label = periodLabelById(id)
   const range = periodRangeById(id)
   return range ? `${label}（${range}）` : label
-}
-
-function coursePeriodText(course) {
-  const start = periodLabelById(course.start)
-  const end = periodLabelById(course.end)
-  return course.start === course.end ? start : `${start}至${end}`
 }
 
 function save() {

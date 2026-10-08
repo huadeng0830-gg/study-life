@@ -7,11 +7,13 @@ import EmptyState from '../components/EmptyState.vue'
 import DomainCsvImportButton from '../components/DomainCsvImportButton.vue'
 import IcsImportButton from '../components/IcsImportButton.vue'
 import SocialCalendarEvents from '../components/SocialCalendarEvents.vue'
+import VirtualList from '../components/VirtualList.vue'
 import { useDomainCommands } from '../composables/domain/commands.js'
 import { isArchived } from '../composables/domain/state.js'
 import { appToday, formatAppDate } from '../composables/timeContext.js'
 import { detectTaskEventConflicts, getConflictSummary } from '../composables/conflictDetection.js'
 import { useDebouncedRef } from '../composables/useDebouncedRef.js'
+import { announce, announceAlert } from '../composables/liveRegion.js'
 
 
 const domain = useDomainCommands()
@@ -29,13 +31,14 @@ const formOpen = ref(false)
 const editing = ref(null)
 const form = ref(emptyForm())
 const formError = ref('')
-// 与 NotesView / LedgerView 同一套约定：记录是哪个字段不过，用于 aria-invalid 与焦点回跳。
+// 与 LedgerView 同一套约定：记录是哪个字段不过，用于 aria-invalid 与焦点回跳。
 // 保存失败（catch 分支）不带 field —— 那是操作失败，不是输入有问题。
 const formErrorField = ref('')
 const titleInput = ref(null)
 function setFormError(message, field = '') {
   formError.value = message
   formErrorField.value = message ? field : ''
+  if (message) announceAlert(message, { clearAfter: 7000 })
   if (message && field === 'title') titleInput.value?.focus()
 }
 const notice = ref('')
@@ -63,6 +66,7 @@ function emptyForm() {
 
 function showNotice(message) {
   notice.value = message
+  announce(message, { clearAfter: 5000 })
   window.clearTimeout(noticeTimer)
   noticeTimer = window.setTimeout(() => { notice.value = '' }, 3200)
 }
@@ -272,25 +276,36 @@ function importIcsEvents(rows) {
     </section>
 
     <section v-if="visibleEvents.length" class="events-list" aria-label="日程列表">
-      <article v-for="event in visibleEvents" :key="event.id" class="event-card panel" :class="{ past: event.date && event.date < appToday }">
-        <div class="event-card-main">
-          <div class="event-line1">
-            <span class="event-title">{{ event.title }}</span>
-            <span v-if="event.courseName" class="event-course">{{ event.courseName }}</span>
-          </div>
-          <div class="event-meta">
-            <span class="event-when">{{ relativeOf(event) }}<template v-if="timeRangeOf(event)"> · {{ timeRangeOf(event) }}</template></span>
-            <span v-if="event.location" class="event-loc">📍 {{ event.location }}</span>
-          </div>
-          <p v-if="event.note" class="event-note">{{ event.note }}</p>
-        </div>
-        <div class="event-card-actions">
-          <button v-if="!isArchived(event)" type="button" @click="openEdit(event)">编辑</button>
-          <button v-if="isArchived(event)" type="button" @click="restore(event)">恢复</button>
-          <button v-else type="button" @click="archive(event)">归档</button>
-          <button type="button" class="danger-text" @click="remove(event)">删除</button>
-        </div>
-      </article>
+      <VirtualList
+        :items="visibleEvents"
+        class="event-virtual-list"
+        :estimated-height="112"
+        :gap="8"
+        :threshold="30"
+        :overscan="4"
+      >
+        <template #default="{ item: event }">
+          <article class="event-card panel" :class="{ past: event.date && event.date < appToday }">
+            <div class="event-card-main">
+              <div class="event-line1">
+                <span class="event-title">{{ event.title }}</span>
+                <span v-if="event.courseName" class="event-course">{{ event.courseName }}</span>
+              </div>
+              <div class="event-meta">
+                <span class="event-when">{{ relativeOf(event) }}<template v-if="timeRangeOf(event)"> · {{ timeRangeOf(event) }}</template></span>
+                <span v-if="event.location" class="event-loc">📍 {{ event.location }}</span>
+              </div>
+              <p v-if="event.note" class="event-note">{{ event.note }}</p>
+            </div>
+            <div class="event-card-actions">
+              <button v-if="!isArchived(event)" type="button" @click="openEdit(event)">编辑</button>
+              <button v-if="isArchived(event)" type="button" @click="restore(event)">恢复</button>
+              <button v-else type="button" @click="archive(event)">归档</button>
+              <button type="button" class="danger-text" @click="remove(event)">删除</button>
+            </div>
+          </article>
+        </template>
+      </VirtualList>
     </section>
     <EmptyState :level="2" v-else :title="emptyState.title" :description="emptyState.description" />
 
@@ -382,16 +397,17 @@ function importIcsEvents(rows) {
 .events-toolbar { display: flex; align-items: end; gap: 12px; margin-bottom: 14px; padding: 12px; flex-wrap: wrap; }
 .events-header-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .events-filters { display: flex; gap: 6px; }
-.filter-tab { min-height: 38px; padding: 0 13px; color: var(--ink-soft); font-size: var(--fs-12-5); font-weight: var(--fw-700); border: 1px solid var(--border); border-radius: var(--radius-pill); background: var(--bg); cursor: pointer; }
+.filter-tab { min-width: 44px; min-height: 38px; padding: 0 13px; color: var(--ink-soft); font-size: var(--fs-12-5); font-weight: var(--fw-700); border: 1px solid var(--border); border-radius: var(--radius-pill); background: var(--bg); cursor: pointer; }
 .filter-tab.on { color: var(--on-primary, #fff); border-color: var(--primary); background: var(--primary); }
 .search-field { display: grid; flex: 1; gap: 5px; min-width: 200px; }
 .search-field input { width: 100%; min-height: 38px; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-8); background: var(--bg); }
 .events-count { color: var(--muted); font-size: var(--fs-11); white-space: nowrap; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); border: 0; }
 .events-list { display: grid; gap: 8px; }
-.event-card { display: flex; align-items: center; gap: 12px; padding: 12px 14px; }
+:deep(.event-virtual-list) { display: grid; gap: 8px; }
+.event-card { display: flex; align-items: center; gap: 12px; min-width: 0; max-width: 100%; box-sizing: border-box; padding: 12px 14px; }
 .event-card.past { opacity: .68; }
-.event-card-main { display: grid; flex: 1; gap: 5px; min-width: 0; }
+.event-card-main { display: grid; flex: 1; gap: 5px; min-width: 0; max-width: 100%; }
 .event-line1 { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .event-title { color: var(--text); font-size: var(--fs-14-5); font-weight: var(--fw-800); }
 .event-course { flex: 0 0 auto; padding: 2px 8px; color: var(--primary); font-size: var(--fs-11); font-weight: var(--fw-700); border-radius: var(--radius-pill); background: var(--primary-soft); }
@@ -399,7 +415,7 @@ function importIcsEvents(rows) {
 .event-when { font-variant-numeric: tabular-nums; }
 .event-loc { color: var(--muted); }
 .event-note { margin: 0; color: var(--muted); font-size: var(--fs-12); line-height: 1.5; white-space: pre-wrap; }
-.event-card-actions { display: flex; gap: 6px; flex: 0 0 auto; }
+.event-card-actions { display: flex; gap: 6px; flex: 0 0 auto; min-width: 0; max-width: 100%; }
 .event-card-actions button { padding: 6px 9px; color: var(--primary); font-size: var(--fs-11-5); font-weight: var(--fw-750); border: 0; border-radius: var(--radius-6); background: var(--primary-soft); }
 .event-card-actions .danger-text { color: var(--danger); background: var(--danger-soft); }
 .event-form { display: grid; gap: 12px; }
@@ -416,14 +432,23 @@ function importIcsEvents(rows) {
 /* 提示落在 Modal 的 var(--card) 上，只改字色：原 #0d9463 在浅色 3.87:1、
    深色 4.11:1（深色卡片上写死的深绿一直读不出来）。 */
 .notice-success { margin: 12px 0 0; color: var(--success); font-size: var(--fs-12); text-align: center; }
+@media (max-width: 900px) {
+  .filter-tab,
+  .search-field input,
+  .field input,
+  .field textarea,
+  .time-field { min-height: 44px; }
+  .event-card-actions { flex-wrap: wrap; }
+  .event-card-actions button { min-width: 44px; min-height: 44px; box-sizing: border-box; }
+}
 @media (max-width: 520px) {
   .events-header-actions { width: 100%; }
   .events-header-actions > * { flex: 1; }
   .events-toolbar { align-items: stretch; }
   .search-field { flex-basis: 100%; }
   .event-card { align-items: flex-start; flex-direction: column; }
-  .event-card-actions { width: 100%; }
-  .event-card-actions button { flex: 1; }
+  .event-card-actions { width: 100%; flex-wrap: nowrap; }
+  .event-card-actions button { flex: 1 1 0; min-width: 0; }
   .form-grid-inline { grid-template-columns: 1fr; }
 }
 </style>

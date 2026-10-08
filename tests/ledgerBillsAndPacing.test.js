@@ -83,9 +83,9 @@ describe('固定账单：once 与 autoRenew 不再是死字段', () => {
     // 现在只推进一期，静默跳过的期数也不再发生。
     domain.skipBill(bill.id)
     expect(target.nextDate).toBe('2026-02-28')
-    // 再跳一次正常顺延（手动跳过是一次性的，不该被开关锁死）
+    // 再跳一次仍按账单原始锚点顺延（手动跳过是一次性的，不该被开关锁死）
     domain.skipBill(bill.id)
-    expect(target.nextDate).toBe('2026-03-28')
+    expect(target.nextDate).toBe('2026-03-31')
   })
 
   it('once 周期原地不动（判别力）', () => {

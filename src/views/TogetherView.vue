@@ -1,6 +1,8 @@
 <script setup>
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { accountOpen, accountUser } from '../composables/accountAuth.js'
+import { formatDateTime } from '../composables/intlFormatters.js'
+import { announce as announceLive, announceAlert } from '../composables/liveRegion.js'
 import { dateInZone, wallTimeToEpoch, zonedParts } from '../../supabase/functions/campus-social/availability.js'
 import { ensureSocialScheduleReady, socialRequest, subscribeSocialNotifications } from '../services/social.js'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
@@ -87,7 +89,12 @@ function blankProfile() {
   }
 }
 
-function announce(kind, text) { notice.value = text ? { kind, text } : null }
+function announce(kind, text) {
+  notice.value = text ? { kind, text } : null
+  if (!text) return
+  if (kind === 'error') announceAlert(text, { clearAfter: 7000 })
+  else announceLive(text, { clearAfter: 5000 })
+}
 function applyProfile(value) {
   profile.value = value || null
   const fallback = blankProfile()
@@ -119,11 +126,11 @@ const canSubmitInvitation = computed(() => inviteRangeValid.value && inviteTitle
 
 function formatTime(iso) {
   const time = new Date(iso)
-  return new Intl.DateTimeFormat('zh-CN', { timeZone: timezone.value, month: 'numeric', day: 'numeric', weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(time)
+  return formatDateTime(time, { timeZone: timezone.value, month: 'numeric', day: 'numeric', weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
 }
 
 function formatClock(iso) {
-  return new Intl.DateTimeFormat('zh-CN', { timeZone: timezone.value, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(iso))
+  return formatDateTime(iso, { timeZone: timezone.value, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
 }
 
 function durationText(interval) {
@@ -134,7 +141,7 @@ function durationText(interval) {
 }
 
 function dayGroupLabel(iso) {
-  return new Intl.DateTimeFormat('zh-CN', { timeZone: timezone.value, month: 'long', day: 'numeric', weekday: 'long' }).format(new Date(iso))
+  return formatDateTime(iso, { timeZone: timezone.value, month: 'long', day: 'numeric', weekday: 'long' })
 }
 
 const groupedIntervals = computed(() => {
@@ -545,7 +552,7 @@ onBeforeUnmount(() => {
       </button>
     </div>
 
-    <p v-if="notice" class="together-notice" :class="`notice-${notice.kind}`" role="status">{{ notice.text }}</p>
+    <p v-if="notice" class="together-notice" :class="`notice-${notice.kind}`">{{ notice.text }}</p>
 
     <section v-if="!accountUser" class="together-card account-gate">
       <div class="gate-icon">👤</div>
@@ -614,8 +621,8 @@ onBeforeUnmount(() => {
             <div class="section-heading"><div><span class="eyebrow">共同时间</span><h2>选择一位好友</h2></div><button type="button" class="icon-button" aria-label="刷新好友" :disabled="friendLoading" @click="loadFriends">↻</button></div>
             <p v-if="friendLoading" class="muted">正在读取好友…</p>
             <p v-else-if="friendsError" class="inline-error">{{ friendsError }} <button type="button" class="text-button" @click="loadFriends">重试</button></p>
-            <div v-else-if="friends.length" class="friend-list" role="listbox" aria-label="好友列表">
-              <button v-for="item in friends" :key="item.profile?.userId" type="button" role="option" :aria-selected="selectedFriendId === item.profile?.userId" class="friend-choice" :class="{ selected: selectedFriendId === item.profile?.userId }" @click="selectedFriendId = item.profile.userId; availability = null; selectedSlot = null">
+            <div v-else-if="friends.length" class="friend-list" role="group" aria-label="好友列表">
+              <button v-for="item in friends" :key="item.profile?.userId" type="button" :aria-pressed="selectedFriendId === item.profile?.userId" class="friend-choice" :class="{ selected: selectedFriendId === item.profile?.userId }" @click="selectedFriendId = item.profile.userId; availability = null; selectedSlot = null">
                 <span class="avatar">{{ item.profile?.nickname?.slice(0, 1) || '友' }}</span><span class="friend-copy"><b>{{ item.profile?.nickname || '好友' }}</b><small>{{ item.profile?.school || '已添加好友' }}</small></span><span class="choice-check">{{ selectedFriendId === item.profile?.userId ? '✓' : '' }}</span>
               </button>
             </div>

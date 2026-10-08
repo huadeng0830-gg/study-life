@@ -162,10 +162,10 @@ describe('通知解析真实输入回归', () => {
     expect(understanding.facts.map((item) => item.key)).toEqual(['dueDate'])
   })
 
-  it('按通知语义推荐日程、作业或仅保存通知', () => {
+  it('按通知语义推荐日程、作业或待办', () => {
     expect(buildNoticeUnderstanding(parseNotice('明天下午3点在教学楼302开班会。', [], now)).recommendation.key).toBe('event')
     expect(buildNoticeUnderstanding(parseNotice('9月10日前提交实验报告。', [], now)).recommendation.key).toBe('homework')
-    expect(buildNoticeUnderstanding(parseNotice('图书馆国庆期间开放时间调整如下……', [], now)).recommendation.key).toBe('note')
+    expect(buildNoticeUnderstanding(parseNotice('图书馆国庆期间开放时间调整如下……', [], now)).recommendation.key).toBe('task')
   })
 
   it('只在动作边界清楚时拆分多事项', () => {

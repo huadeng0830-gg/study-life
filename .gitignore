@@ -55,6 +55,18 @@ sl_*.json
 # 把 docs/archive/ 下那两份（带已核实为真的过期状态标注）一起排除掉。
 /HANDOFF.md
 /NEXT_PROMPT.md
+/HANDOVER.md
+
+# Historical audit and prompt drafts are retained outside the repository.
+/docs/archive/FINAL_PRODUCT_AUDIT.md
+/docs/archive/HANDOFF.md
+/docs/archive/LEDGER_FINAL_OPTIMIZATION_REPORT.md
+/docs/archive/LEDGER_REVIEW_CATEGORY_DRILLDOWN_REPORT.md
+/docs/archive/NEXT_PROMPT.md
+/docs/archive/RECORD_LEDGER_UX_OPTIMIZATION_REPORT.md
+/docs/archive/SYSTEM_CLOSURE_AUDIT.md
+/docs/archive/UX_AUDIT_176_REPORT.md
+/scripts/typecheck-baseline.json
 
 # Editor directories and files
 .vscode/*

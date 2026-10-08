@@ -243,8 +243,8 @@ async function recoverToLatest() {
   padding:16px}
 .update-overview { display:grid; grid-template-columns:38px minmax(0, 1fr); align-items:start; gap:13px; }
 .section-icon.update {
-  color:#7755d0;
-  background:#f0ebff}
+  color:var(--primary);
+  background:color-mix(in srgb, var(--primary) 10%, var(--card))}
 .section-icon.update.is-success { color:var(--success); background:color-mix(in srgb, var(--success) 11%, var(--card)); }
 .section-icon.update.is-warning { color:var(--warning); background:color-mix(in srgb, var(--warning) 12%, var(--card)); }
 .section-icon.update.is-error { color:var(--danger); background:color-mix(in srgb, var(--danger) 10%, var(--card)); }

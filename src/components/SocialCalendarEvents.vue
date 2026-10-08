@@ -4,6 +4,7 @@ import { accountUser } from '../composables/accountAuth.js'
 import { appNow } from '../composables/timeContext.js'
 import { dateInZone } from '../../supabase/functions/campus-social/availability.js'
 import { socialRequest, subscribeSocialNotifications } from '../services/social.js'
+import { formatDateTime } from '../composables/intlFormatters.js'
 
 const props = defineProps({ scope: { type: String, default: 'upcoming' } })
 const items = ref([])
@@ -23,11 +24,11 @@ const upcoming = computed(() => {
 })
 
 function formatTime(value, { date = true } = {}) {
-  return new Intl.DateTimeFormat('zh-CN', {
+  return formatDateTime(value, {
     timeZone: timeZone.value,
     ...(date ? { month: 'numeric', day: 'numeric', weekday: 'short' } : {}),
     hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
-  }).format(new Date(value))
+  })
 }
 
 function startsSoon(item) {

@@ -1,11 +1,13 @@
 <script setup>
-import { defineAsyncComponent, computed, KeepAlive, onBeforeUnmount, onMounted, ref, watch, watchEffect } from 'vue'
+import { retireLegacySyncState } from './composables/retireLegacySyncState.js'
+import { defineAsyncComponent, computed, onBeforeUnmount, onMounted, ref, watch, watchEffect } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Sidebar from './components/Sidebar.vue'
 import FocusReturn from './components/FocusReturn.vue'
 import TaskCenter from './components/TaskCenter.vue'
 import WallpaperLayer from './components/WallpaperLayer.vue'
 import { useStoredRef } from './composables/store'
+
 import { isIOSDevice, reducedEffects } from './composables/performanceMode.js'
 import { appNow } from './composables/timeContext.js'
 import { useFestiveAtmosphere } from './composables/festiveAtmosphere.js'
@@ -24,7 +26,7 @@ import {
   reloadAfterError,
 } from './composables/globalError.js'
 import { isTaskActionable } from './composables/domain/state.js'
-import { initializeAccountAuth } from './composables/accountAuth.js'
+import { hasPersistedAccountSession, initializeAccountAuth } from './composables/accountAuth.js'
 import { accountSyncStatus, accountSyncError } from './composables/accountSyncState.js'
 import { localSafeMode } from './composables/localSafeMode.js'
 import { persistenceState, dismissPersistenceNotice } from './composables/store/core.js'
@@ -33,6 +35,8 @@ import { attachFloatingSlot, createFloatingSlot, detachFloatingSlot, useFloating
 import { announce, announceAlert, clearAnnouncement, liveAlert, liveMessage } from './composables/liveRegion.js'
 import { openSearch, searchOpen } from './composables/globalSearch.js'
 import { desktopShortcutRoutes } from './router/navigation.js'
+
+retireLegacySyncState()
 
 const UpdateNotes = defineAsyncComponent(() => import('./components/UpdateNotes.vue'))
 const QuickRecordPanel = defineAsyncComponent(() => import('./components/QuickRecordPanel.vue'))
@@ -43,13 +47,13 @@ const sidebarRef = ref(null)
 // 待办与课程数据可能较大，同步读取延后到首帧渲染之后完成（see onMounted），
 // 让手机端先画出基本入口。标题与课程迁移也随数据就绪后一并建立。
 let tasks = null
-let courses = null
 let stopTitleWatcher = null
 let stopRouteAnnouncer = null
 let accountSyncLifecycle = null
 let appUnmounted = false
 const showReleaseNotes = ref(false)
 const showQuickRecord = ref(false)
+const quickRecordMounted = ref(false)
 const showBackupNudge = ref(false)
 let releaseTimer = 0
 let quickRecordToastTimer = 0
@@ -63,7 +67,7 @@ const quickToastOffset = useFloatingOffset(quickToastSlot, 56)
 const errorToastSlot = createFloatingSlot()
 const errorToastOffset = useFloatingOffset(errorToastSlot, 56)
 
-const { toast: quickRecordToast, showToast } = useToastQueue()
+const { toast: quickRecordToast } = useToastQueue()
 
 watch(() => Boolean(quickRecordToast.value), (open) => {
   if (open) attachFloatingSlot(quickToastSlot)
@@ -208,7 +212,10 @@ const quickRecordContext = computed(() => {
   if (route.path === '/schedule') return { preferredType: 'event' }
   return {}
 })
-function openQuickRecord() { showQuickRecord.value = true }
+function openQuickRecord() {
+  quickRecordMounted.value = true
+  showQuickRecord.value = true
+}
 function closeQuickRecord() { showQuickRecord.value = false }
 function showQuickRecordToast(payload) {
   quickRecordToast.value = payload
@@ -231,8 +238,7 @@ function viewQuickRecordEntity() {
   const path = entity.entityType === 'transaction' || entity.entityType === 'bill' ? '/bills'
     : entity.entityType === 'task' ? '/tasks'
       : entity.entityType === 'event' ? '/'
-        : entity.entityType === 'milestone' ? '/exams'
-          : entity.entityType === 'note' ? '/notes' : '/'
+        : entity.entityType === 'milestone' ? '/exams' : '/'
   quickRecordToast.value = null
   window.clearTimeout(quickRecordToastTimer)
   const target = entity.entityType === 'bill'
@@ -310,13 +316,12 @@ onMounted(() => {
   // main.js 已完成账号数据恢复与业务 migration；mount 后启动账号同步生命周期。
   void (async () => {
     if (localSafeMode.value) return
-    await initializeAccountAuth()
+    if (hasPersistedAccountSession()) await initializeAccountAuth()
     if (appUnmounted) return
     accountSyncLifecycle = await import('./composables/accountSyncLifecycle.js')
     if (!appUnmounted) accountSyncLifecycle.startAccountSyncLifecycle()
   })()
   tasks = useStoredRef('sl_tasks', [])
-  courses = useStoredRef('sl_courses', [])
   // 浏览器标签页标题实时显示未完成待办数量，并带上当前页面名。
   // 同时把页面名播报给读屏：单页应用切换路由时焦点不动，
   // 没有播报的话键盘/读屏用户察觉不到"已经换页了"。
@@ -382,7 +387,7 @@ const WIDTH_BY_PATH = {
   '/bills': 'content-mid',
 }
 const widthClass = computed(() => WIDTH_BY_PATH[route.path] ?? '')
-const cachedPageNames = ['TodayView', 'ScheduleView', 'CourseArchiveView', 'TasksView', 'ExamsView', 'EventsView', 'ListsView', 'LedgerView', 'NotesView']
+const cachedPageNames = ['TodayView', 'ScheduleView', 'CourseArchiveView', 'TasksView', 'ExamsView', 'EventsView', 'ListsView', 'LedgerView']
 // 视觉降级与页面缓存分开处理。移动 Safari 保留“当前页 + 上一页”，
 // 避免每次返回都重建复杂页面；桌面保留更多常用页面以提高来回切换速度。
 const pageCacheSize = isIOSDevice() ? 2 : 4
@@ -391,8 +396,6 @@ const i18n = {
   'skip.toContent': '跳到主内容',
   'skip.toMain': 'Skip to main content',
 }
-const currentLang = ref('zh-CN')
-
 function t(key) {
   return i18n[key] || key
 }
@@ -511,7 +514,7 @@ function t(key) {
   </div>
   <UpdateNotes v-if="showReleaseNotes" :open="showReleaseNotes" @close="showReleaseNotes = false" />
   <QuickRecordPanel
-    v-if="showQuickRecord"
+    v-if="quickRecordMounted"
     :open="showQuickRecord"
     :context="quickRecordContext"
     @saved="onQuickRecordSaved"
@@ -787,11 +790,11 @@ to {
   order:var(--alert-slot,0)}
 .global-sync-alert {
   z-index:240;
-  color:#765b2b;
+  color:var(--warning);
   max-width:min(620px,100vw - 28px);
   box-shadow:var(--shadow-sm);
-  background:#fffaf0;
-  border:1px solid #f0d69c;
+  background:color-mix(in srgb, var(--warning) 10%, var(--card));
+  border:1px solid color-mix(in srgb, var(--warning) 35%, var(--card));
   border-radius:var(--radius-10);
   align-items:center;
   gap:8px;
@@ -801,14 +804,14 @@ to {
   position:relative;
   pointer-events:auto}
 .global-sync-alert span {
-  color:#836a44}
+  color:var(--ink-soft)}
 .global-safe-mode-alert,.global-persistence-alert {
   z-index:241;
-  color:#6b4d16;
+  color:var(--warning);
   max-width:min(760px,100vw - 28px);
   box-shadow:var(--shadow-md);
-  background:#fff9e8;
-  border:1px solid #efd08b;
+  background:color-mix(in srgb, var(--warning) 10%, var(--card));
+  border:1px solid color-mix(in srgb, var(--warning) 35%, var(--card));
   border-radius:var(--radius-10);
   align-items:center;
   gap:8px;
@@ -818,9 +821,9 @@ to {
   position:relative;
   pointer-events:auto}
 .global-safe-mode-alert {
-  color:#8a351d;
-  background:#fff3ef;
-  border-color:#efb8a4}
+  color:var(--danger);
+  background:color-mix(in srgb, var(--danger) 8%, var(--card));
+  border-color:color-mix(in srgb, var(--danger) 35%, var(--card))}
 .global-safe-mode-alert span,.global-persistence-alert span {
   flex:1}
 .global-safe-mode-alert .text-button {
@@ -882,6 +885,7 @@ to {
   position:fixed;
   transform:translate(-50%)}
 .quick-record-toast button {
+  min-height:44px;
   color:var(--primary);
   background:var(--primary-soft);
   pointer-events:auto;
@@ -939,8 +943,9 @@ to {
   padding:7px 12px;
   font-size:var(--fs-12-5)}
 .global-error-close {
-  width:26px;
-  height:26px;
+  width:44px;
+  min-width:44px;
+  height:44px;
   color:var(--ink-faint);
   background:0 0;
   border:none;

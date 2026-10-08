@@ -1,5 +1,6 @@
-{
-  "total": 2962,
+// Ratchet input is source configuration, not a generated test artifact.
+export const TYPECHECK_BASELINE = Object.freeze({
+  "total": 2935,
   "flags": [
     "--noEmit",
     "--checkJs",
@@ -7,16 +8,16 @@
     "false"
   ],
   "byCode": {
-    "TS2339": 1887,
-    "TS2322": 198,
-    "TS18046": 416,
+    "TS2339": 1852,
+    "TS2345": 113,
+    "TS2322": 202,
+    "TS18046": 418,
     "TS18048": 43,
-    "TS18047": 218,
-    "TS2698": 13,
+    "TS18047": 221,
+    "TS2698": 11,
     "TS2551": 1,
     "TS2740": 1,
-    "TS2345": 113,
-    "TS2531": 5,
+    "TS2531": 6,
     "TS2367": 12,
     "TS2365": 4,
     "TS2353": 5,
@@ -38,4 +39,4 @@
     "TS2739": 1,
     "TS2769": 2
   }
-}
+})

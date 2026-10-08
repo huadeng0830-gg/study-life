@@ -18,8 +18,8 @@ const importing = ref(false)
 const labels = {
   tasks: { noun: '待办', title: '导入待办 CSV' },
   events: { noun: '日程', title: '导入日程 CSV' },
-  notes: { noun: '笔记', title: '导入笔记 CSV' },
 }
+const importAvailable = computed(() => props.kind === 'tasks' || props.kind === 'events')
 const copy = computed(() => labels[props.kind] || labels.tasks)
 const previewRows = computed(() => preview.value?.rows?.slice(0, 8) || [])
 
@@ -30,6 +30,7 @@ watch(() => props.kind, () => {
 })
 
 function openImport() {
+  if (!importAvailable.value) return
   preview.value = null
   filename.value = ''
   error.value = ''
@@ -37,6 +38,7 @@ function openImport() {
 }
 
 async function readFile(event) {
+  if (!importAvailable.value) return
   const file = event.target.files?.[0]
   event.target.value = ''
   if (!file) return
@@ -69,7 +71,7 @@ function confirmImport() {
 </script>
 
 <template>
-  <div class="csv-import-control">
+  <div v-if="importAvailable" class="csv-import-control">
     <button type="button" class="btn btn-ghost" @click="openImport">⇧ 导入 CSV</button>
     <Modal :open="open" :title="copy.title" medium @close="open = false">
       <div class="csv-import-body">
@@ -108,6 +110,6 @@ function confirmImport() {
 <style scoped>
 .csv-import-control{display:inline-flex;align-items:center;gap:8px}
 .csv-import-body{display:flex;flex-direction:column;gap:11px}.csv-import-body>p:first-child{margin:0;color:var(--muted);font-size:var(--fs-12);line-height:1.55}
-.csv-file-picker{display:flex;align-items:center;justify-content:center;min-height:42px;padding:8px 12px;border:1px dashed var(--border-strong,var(--border));border-radius:var(--radius-9);background:var(--bg);color:var(--primary);font-size:var(--fs-12);font-weight:var(--fw-700);cursor:pointer}.csv-file-picker input{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;clip-path:inset(50%)}
+.csv-file-picker{display:flex;align-items:center;justify-content:center;min-height:44px;padding:8px 12px;border:1px dashed var(--border-strong,var(--border));border-radius:var(--radius-9);background:var(--bg);color:var(--primary);font-size:var(--fs-12);font-weight:var(--fw-700);cursor:pointer}.csv-file-picker input{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;clip-path:inset(50%)}
 .csv-preview{padding:12px;border:1px solid var(--border);border-radius:var(--radius-10);background:var(--bg)}.csv-preview-count{display:flex;align-items:baseline;gap:5px}.csv-preview-count b{font-size:var(--fs-20);color:var(--primary)}.csv-preview-count span,.csv-preview-skips,.csv-preview li small,.csv-more{color:var(--muted);font-size:var(--fs-10)}.csv-preview-skips{display:flex;gap:10px;flex-wrap:wrap;margin-top:4px}.csv-preview ul{display:flex;flex-direction:column;gap:5px;margin:9px 0 0;padding:0;list-style:none}.csv-preview li{display:flex;justify-content:space-between;align-items:baseline;gap:8px;padding-top:6px;border-top:1px solid var(--border)}.csv-preview li b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:var(--fs-11)}.csv-preview li small{flex:0 0 auto}.csv-more{margin:7px 0 0}.csv-error{margin:0;color:var(--danger);font-size:var(--fs-11);line-height:1.5}.csv-import-footer{display:flex;justify-content:flex-end;gap:8px}
 </style>

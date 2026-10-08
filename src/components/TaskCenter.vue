@@ -268,10 +268,10 @@ onBeforeUnmount(() => {
   width: 8px;
   height: 8px;
   border-radius: var(--radius-circle);
-  background: #14966d;
+  background: var(--success);
 }
-.task-row-status[data-status="warning"] { background: #d98324; }
-.task-row-status[data-status="failed"] { background: #dc4c4c; }
+.task-row-status[data-status="warning"] { background: var(--warning); }
+.task-row-status[data-status="failed"] { background: var(--danger); }
 .task-row-status[data-status="cancelled"] { background: var(--ink-faint); }
 .task-row-tag {
   color: var(--ink-faint);

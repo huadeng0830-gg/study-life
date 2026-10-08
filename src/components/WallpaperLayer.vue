@@ -1,7 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { activeWallpaperSpec, wallpaperConfig } from '../composables/appearance.js'
+import { activeWallpaperSpec } from '../composables/appearance.js'
 import { getWallpaper, getWallpaperBlurVariant, wallpaperRevision } from '../composables/wallpaperStorage.js'
 import { isIOSDevice, reducedEffects } from '../composables/performanceMode.js'
 

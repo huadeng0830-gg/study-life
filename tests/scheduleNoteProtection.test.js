@@ -14,6 +14,6 @@ describe('Schedule note protection', () => {
     expect(SYNC_KEYS).toContain('sl_schedule_note')
     expect(sanitizeSyncPayload({ sl_schedule_note: '下周调课', sl_tasks: [] }).values).toEqual({ sl_schedule_note: '下周调课', sl_tasks: [] })
     expect(buildEntityManifest({ sl_schedule_note: '下周调课' }).singletons.sl_schedule_note).toBeTruthy()
-    expect(ACCOUNT_SYNC_DATA_SCHEMA_VERSION).toBe(4)
+    expect(ACCOUNT_SYNC_DATA_SCHEMA_VERSION).toBe(6)
   })
 })

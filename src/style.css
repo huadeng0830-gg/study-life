@@ -1,4 +1,5 @@
 :root {
+  color-scheme: light;
   --bg: #f5f7fb;
   --card: #ffffff;
   --text: #172033;
@@ -10,6 +11,7 @@
   --primary-hover: #3151b8;
   --primary-soft: #edf2ff;
   --danger: #c62828;
+  --danger-soft: color-mix(in srgb, var(--danger) 9%, var(--card));
   /* 成功/警告语义色。此前全仓只有 --danger 有令牌，成功与警告一律写死
      （#07805d / #0d9463 / #9a6414 等 33 处），于是深色主题下这些文字仍是深色，
      落在深色卡片上几乎读不出来；而 ExamsView 的 .review-message 甚至写了
@@ -38,6 +40,7 @@
   --border-strong: #d3dbea;
   --ink-soft: #55607a;
   --ink-faint: #626d84;
+  --ink: var(--text);
   --bg-tint: #f9fafd;
   /* ---------- v5 尺度令牌：字号 / 字重 / 圆角（阶段 4 全量迁移） ----------
      此前全仓 font-size 约 678 处、font-weight 约 229 处、border-radius 约 333 处
@@ -119,6 +122,7 @@
   --dur-instant: 90ms;
   --dur-fast: 150ms;
   --dur-base: 220ms;
+  --dur-normal: var(--dur-base);
   --dur-slow: 320ms;
   --dur-reveal: 420ms;
   --ease-standard: cubic-bezier(0.2, 0.8, 0.2, 1);
@@ -153,6 +157,7 @@
 
 /* 深色主题：焦点实色提亮，光环压暗，保证在深色卡片上仍然清晰。 */
 :root[data-theme='dark'] {
+  color-scheme: dark;
   --focus-solid: #8fb0ff;
   --focus-halo: rgba(8, 12, 22, 0.92);
   /* 深色的 --success/--warning 必须提亮：浅色的 #067654 在 #1b2233 上只有 1.9:1。
@@ -208,6 +213,23 @@ body {
     sans-serif;
   font-size: var(--fs-15);
 }
+
+/* Shared screen-reader-only utility. Component-scoped copies do not apply to
+   App.vue live regions or labels that participate in non-scoped layouts. */
+.sr-only {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
+
+/* Reused by small secondary copy across pages, including together.css users. */
+.muted { color: var(--muted); }
 
 /* 横屏 / 移动浏览器地址栏收放时，100vh 会大于真正的可见高度，
    底部内容会被推出屏幕。有 dvh 就跟着动态视口走。 */
@@ -322,6 +344,7 @@ summary:focus:not(:focus-visible) {
 }
 
 .btn {
+  text-decoration: none;
   border: none;
   border-radius: var(--radius-8);
   padding: 9px 18px;
@@ -386,7 +409,7 @@ summary:focus:not(:focus-visible) {
    这里原来有一套从未被任何组件使用的 .icon-btn，已删除。 */
 
 /* 粗指针设备（手机 / 平板）上的主要按钮、独立链接，以及显式标记 tap-target 的
-   图标按钮（弹窗关闭、通知关闭、模板删除、设置行删除等）至少 44px 高。
+   图标按钮（弹窗关闭、通知关闭、模板删除、设置行删除等）至少 44×44px。
    刻意排除 .chip / .segmented / .link-btn / .toast-btn 这类密集内联控件：
    它们靠间距而非尺寸达成可分性，强行放大反而会挤爆筛选行。 */
 @media (pointer: coarse) {
@@ -395,6 +418,11 @@ summary:focus:not(:focus-visible) {
   [role='button'].tap-target,
   .setting-del {
     min-height: var(--tap-min);
+  }
+  button.tap-target,
+  [role='button'].tap-target,
+  .setting-del {
+    min-width: var(--tap-min);
   }
 }
 

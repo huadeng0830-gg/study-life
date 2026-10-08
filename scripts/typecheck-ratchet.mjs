@@ -17,11 +17,12 @@
 //   node scripts/typecheck-ratchet.mjs --write    # 把当前值写成新基线（确认是主动改善后再用）
 //   node scripts/typecheck-ratchet.mjs --report   # 只打印各错误码分布
 import { execFileSync } from 'node:child_process'
-import { readFileSync, writeFileSync, existsSync } from 'node:fs'
+import { writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { PROJECT_ROOT } from './source-signature.mjs'
+import { TYPECHECK_BASELINE } from './typecheck-baseline.mjs'
 
-const BASELINE_PATH = resolve(PROJECT_ROOT, 'scripts/typecheck-baseline.json')
+const BASELINE_PATH = resolve(PROJECT_ROOT, 'scripts/typecheck-baseline.mjs')
 
 // 「引用了不存在的名字」这一类必须是 0，且不参与棘轮比较 —— 它是硬红线。
 //
@@ -71,15 +72,6 @@ export function collectDiagnostics(output) {
   return { total, byCode, byFile }
 }
 
-function readBaseline() {
-  if (!existsSync(BASELINE_PATH)) return null
-  try {
-    return JSON.parse(readFileSync(BASELINE_PATH, 'utf8'))
-  } catch {
-    return null
-  }
-}
-
 const args = new Set(process.argv.slice(2))
 const output = runChecker()
 const stats = collectDiagnostics(output)
@@ -97,7 +89,11 @@ if (args.has('--report')) {
   process.exit(0)
 }
 
-const baseline = readBaseline()
+const baseline = TYPECHECK_BASELINE
+if (baseline.flags.join('\0') !== FLAGS.join('\0')) {
+  console.error('类型棘轮基线的检查参数与当前固定口径不一致。')
+  process.exit(1)
+}
 
 // 硬红线优先于一切：哪怕总数比基线少，只要出现「引用不存在的名字」就必须失败。
 const fatal = Object.entries(stats.byCode)
@@ -113,7 +109,7 @@ if (fatal.length) {
 }
 
 if (args.has('--write')) {
-  writeFileSync(BASELINE_PATH, `${JSON.stringify({ total: stats.total, flags: FLAGS, byCode: stats.byCode }, null, 2)}\n`)
+  writeFileSync(BASELINE_PATH, `// Ratchet input is source configuration, not a generated test artifact.\nexport const TYPECHECK_BASELINE = Object.freeze(${JSON.stringify({ total: stats.total, flags: FLAGS, byCode: stats.byCode }, null, 2)})\n`)
   console.log(`✓ 基线已更新为 ${stats.total} 条`)
   process.exit(0)
 }

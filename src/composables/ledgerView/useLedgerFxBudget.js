@@ -7,10 +7,9 @@
 import { computed, ref } from 'vue'
 import { useLedgerFx } from '../ledgerFx.js'
 import { useLedgerBudget } from '../ledgerBudget.js'
-import { summarizeLedgerInBase, sumLedgerMonthInBase, COMMON_LEDGER_CURRENCIES, normalizeCurrency, normalizeLedgerFx, fxRateNote, currencyField as currencyFieldFor } from '../ledgerFx.js'
+import { summarizeLedgerInBase, COMMON_LEDGER_CURRENCIES, normalizeLedgerFx, fxRateNote, currencyField as currencyFieldFor } from '../ledgerFx.js'
 import { mySpendYuan } from '../ledgerSplit.js'
 import { budgetStatus } from '../ledgerBudget.js'
-import { moneyWithCurrency } from '../../utils/formatters.js'
 
 export function useLedgerFxBudget({ expenses, ledgerToday, baseMonthSummary }) {
   const { fx } = useLedgerFx()
@@ -49,6 +48,9 @@ export function useLedgerFxBudget({ expenses, ledgerToday, baseMonthSummary }) {
       todaySpent: baseTodaySummary.value.expenseTotal,
       budget: budget.value.monthly,
       today: ledgerToday(),
+      excludedExpenseCount: baseMonthSummary.value.excludedExpenseCount,
+      excludedRefundCount: baseMonthSummary.value.excludedRefundCount,
+      missingRates: baseMonthSummary.value.missingRates,
     })
     return status.set ? status : null
   })

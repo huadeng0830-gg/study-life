@@ -7,10 +7,10 @@
  */
 import { computed, ref } from 'vue'
 import { expenses, isRefundTransaction, freqPrefs, rememberCategoryOverride } from '../ledger.js'
-import { amountToCents, normalizeAmount } from '../ledger.js'
+import { normalizeAmount } from '../ledger.js'
 import { buildSplit, hasSplit, mySpendCents } from '../ledgerSplit.js'
 import { isBillPayment } from '../ledgerRelations.js'
-import { moneyRow, moneyWithCurrency } from '../../utils/formatters.js'
+import { moneyRow } from '../../utils/formatters.js'
 import { appToday } from '../timeContext.js'
 import { normalizeCurrency, currencyField, useLedgerFx } from '../ledgerFx.js'
 

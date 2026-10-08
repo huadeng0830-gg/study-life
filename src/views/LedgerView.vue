@@ -5,53 +5,32 @@ import Modal from '../components/Modal.vue'
 import PromptDialog from '../components/PromptDialog.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import Toast from '../components/Toast.vue'
-import { useStoredRef } from '../composables/store'
 import { ledgerTabFromQuery } from '../composables/routeState.js'
 import {
   activeCategories,
   catInfo,
   computeFrequentFromIndex,
-  detectCategory,
   expenses,
   freqPrefs,
   ledgerIndex,
-  amountToCents,
-  buildLedgerMonthReview,
-  filterLedgerTransactions,
-  isDateInLedgerRange,
-  isRefundTransaction,
-  isValidDateKey,
-  normalizeAmount,
-  parseNatural,
-  rememberCategoryOverride,
 } from '../composables/ledger.js'
-import { dayLabel, moneyHero, moneyRow, moneyWithCurrency, pad2 } from '../utils/formatters.js'
+import { moneyRow } from '../utils/formatters.js'
 import { useDomainCommands } from '../composables/domain/commands.js'
-import { defaultAccount, policyDateTime, policyTimeKey, timestampOf } from '../composables/settingsPolicy.js'
-import { appNow, appToday, formatAppDate } from '../composables/timeContext.js'
+import { policyTimeKey } from '../composables/settingsPolicy.js'
+import { appNow, appToday } from '../composables/timeContext.js'
 import { clearFocusFromRoute, focusElementWhenReady, readFocusQuery } from '../composables/focusNavigation.js'
-import { transactionSwipeActions } from '../composables/ledgerSwipe.js'
 import { useTabKeys } from '../composables/tabKeys.js'
-import { isBillPayment } from '../composables/ledgerRelations.js'
 // 本轮新增的四个功能各自一个模块：多币种汇率 / 预算预警 / 账单模板 / 报销分摊。
 // 它们都只提供纯函数与新选择器，既有汇总路径（buildLedgerIndex 等）一行都没改。
-import {
-  COMMON_LEDGER_CURRENCIES,
-  currencyChoices,
-  fxRateNote,
-  normalizeCurrency,
-  normalizeLedgerFx,
-  sumLedgerMonthInBase,
-  useLedgerFx,
-} from '../composables/ledgerFx.js'
+import { normalizeCurrency, normalizeLedgerFx, useLedgerFx } from '../composables/ledgerFx.js'
+import { sumLedgerMonthInBase } from '../composables/ledgerFx.js'
 import { useLedgerBudget } from '../composables/ledgerBudget.js'
 import { useLedgerFeed } from '../composables/ledgerView/feed.js'
 import { useLedgerSpendStats } from '../composables/ledgerView/spendStats.js'
 import { useLedgerExport } from '../composables/ledgerView/export.js'
 import { useLedgerBills } from '../composables/ledgerView/bills.js'
 import { useLedgerReview } from '../composables/ledgerView/review.js'
-import { templateToBillForm, useLedgerTemplateCommands } from '../composables/ledgerTemplates.js'
-import { buildSplit, hasSplit, mySpendCents, mySpendYuan, normalizeSplit, personalMonthCategoryTotals, personalSpendTotals, splitCentsEvenly } from '../composables/ledgerSplit.js'
+import { mySpendYuan, personalMonthCategoryTotals } from '../composables/ledgerSplit.js'
 
 // 本轮新增：筛选、快速记账表单、记录详情、汇率预算页面态
 // const filters = useLedgerFilters()  // 不再需要，feed.js 已包含筛选逻辑
@@ -317,7 +296,7 @@ onMounted(() => {
 
 /* ---------- 分摊口径的「我花了多少」 ---------- */
 // 三个口径块（今天/本周/本月 + 分摊摘要 + 环比）整段搬进 composables/ledgerView/spendStats.js。
-const { mySpendPeriodStats, spendStats, currentMonthPersonal, currentMonthHasSplit, monthCompare } = useLedgerSpendStats()
+const { spendStats, currentMonthPersonal, currentMonthHasSplit, monthCompare } = useLedgerSpendStats()
 
 /* ================= 多币种汇率 + 预算（页面侧派生） ================= */
 // 汇率与预算都是页面侧的新 computed：既有的 monthStats / spendStats 一行没改。
@@ -429,7 +408,6 @@ const {
   editFromDetail,
   cancelDetailEdit,
   saveDetailEdit,
-  againFromDetail,
   fullEditFromDetail,
   undoBillPaymentFromDetail,
   deleteFromDetail,
@@ -511,7 +489,7 @@ const {
   jumpToMonth,
   mostFrequent, topCategory, maxSingle, maxSingleMine, REVIEW_CATEGORY_LIMIT,
   expandedCategory, showAllReviewCats, reviewCategoryRows, reviewCategorySum,
-  visibleCategoryRows, hiddenCategoryCount, resetReviewCategoryView,
+  visibleCategoryRows, hiddenCategoryCount,
   toggleReviewCategory, revealReviewCategory, openReviewCategoryFromHome,
   reviewMyShareNote, calendarCells, selectedDay, selectedDayInfo, reviewTrendMonths,
 } = useLedgerReview({ personalAmount, ledgerToday, tab, fx })

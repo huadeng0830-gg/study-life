@@ -1,5 +1,5 @@
 import { touchStoredRef, useStoredRef } from '../store/index.js'
-import { createNextRepeatingTask, normalizeTaskRepeat, repeatsTask } from '../taskRecurrence.js'
+import { createNextRepeatingTask, nextRepeatDueDate, normalizeTaskRepeat, repeatsTask } from '../taskRecurrence.js'
 import { classifyTask } from '../smartClassify.js'
 import { amountToCents, categoriesForScope, classifyTransaction, isRefundTransaction, normalizeAmount, normalizeLedgerTime } from '../ledger.js'
 // 新增可选字段的来源：币种（多币种记账）与分摊（报销分摊）。
@@ -23,6 +23,9 @@ function createId(prefix) {
   if (bytes) return `${prefix}-${bytes[0].toString(36)}${bytes[1].toString(36)}`
   return `${prefix}-${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`
 }
+// Deletion undo is an in-memory convenience, not durable history. Keep its
+// relation snapshot cache bounded if a page stays open through many deletions.
+const MAX_MILESTONE_RESTORE_RELATIONS = 100
 function origin(value = {}) { return { createdFrom: value.createdFrom || 'manual', sourceType: value.sourceType || '', sourceId: value.sourceId || '', relationId: value.relationId || '' } }
 function dateParts(value) { return String(value || '').split('-').map(Number) }
 function validDateKey(value) {
@@ -62,13 +65,60 @@ function addMonthsKeyAnchored(from, count, anchorDay) {
   target.setUTCDate(Math.min(anchor, lastDay))
   return target.toISOString().slice(0, 10)
 }
-function nextBillDate(bill) {
+function validAnchorDay(value) {
+  if (value === null || value === undefined || value === '' || typeof value === 'boolean') return null
+  const day = Number(value)
+  return Number.isInteger(day) && day >= 1 && day <= 31 ? day : null
+}
+function billCycleMonths(cycle) {
+  if (cycle === 'monthly') return 1
+  if (cycle === 'quarterly') return 3
+  if (cycle === 'yearly') return 12
+  return 0
+}
+function inferLegacyBillAnchorDay(bill, transactions) {
+  const stepMonths = billCycleMonths(bill.cycle)
+  if (!stepMonths || !validDateKey(bill.nextDate)) return null
+  const periods = [...new Set((transactions || [])
+    .filter((item) => transactionBillId(item) === bill.id && validDateKey(item.billingPeriodKey))
+    .map((item) => item.billingPeriodKey))]
+    .sort()
+  // One generated payment plus the current due date is sufficient when the old
+  // clamp-on-every-step chain matches. If it does not, preserve the current date
+  // instead of guessing about a manual schedule change.
+  if (periods.length < 1) return null
+
+  const first = periods[0]
+  const anchorDay = dateParts(first)[2]
+  let cursor = first
+  for (const target of [...periods.slice(1), bill.nextDate]) {
+    if (target < cursor) return null
+    let matched = cursor === target
+    for (let count = 0; !matched && cursor < target && count < 1200; count += 1) {
+      const next = addMonthsKey(cursor, stepMonths)
+      if (next <= cursor) return null
+      cursor = next
+      if (cursor === target) matched = true
+      else if (cursor > target) break
+    }
+    // The stored period keys and current due date must still fit the legacy clamp-on-every-step chain.
+    if (!matched) return null
+  }
+  return anchorDay
+}
+function nextBillDate(bill, transactions = []) {
   // 非法 nextDate 曾经一路走到 toISOString() 抛 RangeError（Invalid time value），
   // 而 skipBill 没有守卫，异常会冒到全局 errorHandler。这里就地兜住：
   // 读不出日期就按「今天」推进，至少保证账单不会变成一个点不动也删不掉的东西。
   const from = validDateKey(bill.nextDate) ? bill.nextDate : policyDateKey()
-  // 锚点只在按月推进的周期里有意义；weekly 走 +7 天本来就不会漂移。
-  const anchorDay = dateParts(from)[2]
+  // 新账单显式保存锚点。旧账单只在关联支付历史能验证整条旧月末链时补回；
+  // 证据不足时单次按当前 due date 推进，且不把猜测写回用户数据。
+  let anchorDay = validAnchorDay(bill.anchorDay)
+  if (!anchorDay && billCycleMonths(bill.cycle)) {
+    anchorDay = inferLegacyBillAnchorDay(bill, transactions)
+    if (anchorDay) bill.anchorDay = anchorDay
+  }
+  anchorDay ||= dateParts(from)[2]
   const advance = (date) => bill.cycle === 'weekly' ? addDaysKey(date, 7)
     : bill.cycle === 'quarterly' ? addMonthsKeyAnchored(date, 3, anchorDay)
       : bill.cycle === 'yearly' ? addMonthsKeyAnchored(date, 12, anchorDay)
@@ -117,10 +167,9 @@ function restoreDeletedItem(list, entity) {
 }
 
 export function useDomainCommands() {
-  const tasks = useStoredRef('sl_tasks', []); const courses = useStoredRef('sl_courses', []); const milestones = useStoredRef('sl_exams', []); const bills = useStoredRef('sl_bills', []); const transactions = useStoredRef('sl_expenses', []); const events = useStoredRef('sl_events', []); const notes = useStoredRef('sl_quick_notes', []); const focusSessions = useStoredRef('sl_focus_sessions', [])
+  const tasks = useStoredRef('sl_tasks', []); const courses = useStoredRef('sl_courses', []); const milestones = useStoredRef('sl_exams', []); const bills = useStoredRef('sl_bills', []); const transactions = useStoredRef('sl_expenses', []); const events = useStoredRef('sl_events', []); const focusSessions = useStoredRef('sl_focus_sessions', [])
   const commitTasks = () => touchStoredRef('sl_tasks')
   const commitTransactions = () => touchStoredRef('sl_expenses')
-  const commitNotes = () => touchStoredRef('sl_quick_notes')
   const commitEvents = () => touchStoredRef('sl_events')
   const commitMilestones = () => touchStoredRef('sl_exams')
   const commitBills = () => touchStoredRef('sl_bills')
@@ -145,7 +194,32 @@ export function useDomainCommands() {
    */
   function spawnNextRepeatTask(item) {
     const now = stamp()
-    const next = createNextRepeatingTask(item)
+    const taskForGeneration = { ...item }
+    if (normalizeTaskRepeat(item.repeat) === 'monthly' && !validAnchorDay(item.repeatAnchorDay)) {
+      // 旧版重复待办没有锚点字段。生成来源链能证明原始月末日时恢复它；
+      // 日期被改过或来源已丢失时，taskRecurrence 会兼容地以当前截止日为锚点。
+      const seen = new Set([item.id])
+      let cursor = item
+      let recoveredAnchor = null
+      while (cursor?.sourceType === 'task-repeat' && cursor.sourceId && !seen.has(cursor.sourceId)) {
+        seen.add(cursor.sourceId)
+        const parent = tasks.value.find((task) => task.id === cursor.sourceId)
+        if (!parent || normalizeTaskRepeat(parent.repeat) !== 'monthly' || !parent.dueDate) break
+        const parentAnchor = validAnchorDay(parent.repeatAnchorDay)
+        const expected = nextRepeatDueDate(parent.dueDate, 'monthly', parentAnchor ? { anchorDay: parentAnchor } : {})
+        if (expected !== cursor.dueDate) break
+        if (parentAnchor) {
+          recoveredAnchor = parentAnchor
+          break
+        }
+        const parentDay = new Date(`${parent.dueDate}T00:00:00`).getDate()
+        const childDay = new Date(`${cursor.dueDate}T00:00:00`).getDate()
+        if (!recoveredAnchor && parentDay > childDay) recoveredAnchor = parentDay
+        cursor = parent
+      }
+      if (recoveredAnchor) taskForGeneration.repeatAnchorDay = recoveredAnchor
+    }
+    const next = createNextRepeatingTask(taskForGeneration)
     if (!next) return false
     item.repeatGeneratedAt = now
     tasks.value.push({ ...next, status: 'pending', updatedAt: now, createdFrom: item.createdFrom || 'manual', sourceType: 'task-repeat', sourceId: item.id })
@@ -156,12 +230,40 @@ export function useDomainCommands() {
     if (!repeatsTask(item) || !item.dueDate || item.repeatGeneratedAt) return
     spawnNextRepeatTask(item)
   }
-  function updateTask(id, value) { const item = tasks.value.find((task) => task.id === id); if (!item) return null; Object.assign(item, value, { updatedAt: stamp() }); if ('repeat' in value) { item.repeat = normalizeTaskRepeat(item.repeat); if (item.repeat === 'none') delete item.repeatEndDate } if (item.done === true) maybeSpawnNextRepeat(item); commitTasks(); return item }
+  function updateTask(id, value) {
+    const item = tasks.value.find((task) => task.id === id)
+    if (!item) return null
+    const previousRepeat = normalizeTaskRepeat(item.repeat)
+    const previousDueDate = item.dueDate
+    Object.assign(item, value, { updatedAt: stamp() })
+    if ('repeat' in value) item.repeat = normalizeTaskRepeat(item.repeat)
+    if (item.repeat === 'none') {
+      delete item.repeatEndDate
+      delete item.repeatAnchorDay
+    } else if (item.repeat === 'monthly' && (item.repeat !== previousRepeat || item.dueDate !== previousDueDate)) {
+      const day = new Date(`${item.dueDate}T00:00:00`).getDate()
+      if (Number.isInteger(day) && day >= 1 && day <= 31) item.repeatAnchorDay = day
+      else delete item.repeatAnchorDay
+    } else if (item.repeat !== 'monthly') {
+      delete item.repeatAnchorDay
+    }
+    if (item.done === true) maybeSpawnNextRepeat(item)
+    commitTasks()
+    return item
+  }
   function toggleTask(id) { const item = tasks.value.find((task) => task.id === id); if (!item) return null; const now = stamp(); item.done = !item.done; item.status = item.done ? 'completed' : 'pending'; item.completedAt = item.done ? now : null; item.updatedAt = now; if (item.done) maybeSpawnNextRepeat(item); commitTasks(); return item }
   function deleteTask(id) {
     const index = tasks.value.findIndex((item) => item.id === id)
     if (index < 0) return null
     const deleted = tasks.value.splice(index, 1)[0]
+    let detachedFocus = false
+    for (const session of focusSessions.value) {
+      if (String(session?.todoId ?? '') !== String(deleted.id)) continue
+      session.title = String(session.title || deleted.title || '')
+      session.todoId = null
+      detachedFocus = true
+    }
+    if (detachedFocus) commitFocusSessions()
     commitTasks()
     return deleted
   }
@@ -181,6 +283,9 @@ export function useDomainCommands() {
     milestoneRestoreRelations.set(id, tasks.value
       .filter((task) => task.sourceType === 'milestone-review' && task.sourceId === id)
       .map((task) => ({ id: task.id, sourceType: task.sourceType, sourceId: task.sourceId, relationId: task.relationId })))
+    while (milestoneRestoreRelations.size > MAX_MILESTONE_RESTORE_RELATIONS) {
+      milestoneRestoreRelations.delete(milestoneRestoreRelations.keys().next().value)
+    }
     const now = stamp()
     tasks.value = tasks.value.map((task) => {
       if (task.sourceType !== 'milestone-review' || task.sourceId !== id) return task
@@ -205,20 +310,6 @@ export function useDomainCommands() {
     return restored
   }
   function createEvent(value) { const now = stamp(); const item = { id: value.id || createId('event'), title: String(value.title || '').trim(), date: value.date || '', time: value.time || '', endTime: value.endTime || '', location: value.location || '', courseId: value.courseId || '', courseName: value.courseName || value.course || '', note: value.note || '', sourceText: value.sourceText || '', normalizedText: value.normalizedText || '', noticeType: value.noticeType || '', reminderMinutes: defaultReminderMinutes('event', value.reminderMinutes), createdAt: now, updatedAt: now, ...origin(value) }; if (!item.title) throw new Error('请填写日程内容'); events.value.push(item); commitEvents(); return item }
-  function createNote(value) { const now = stamp(); const content = String(value.content || value.note || value.title || '').trim(); const firstLine = content.split(/\r?\n/).map((line) => line.trim()).find(Boolean) || ''; const autoTitle = firstLine || content.replace(/\s+/g, ' '); const title = String(value.title || '').trim() || autoTitle.slice(0, 42); const item = { id: value.id || createId('note'), title: title.slice(0, 42), content, courseId: value.courseId || '', courseName: value.courseName || value.course || '', sourceText: value.sourceText || value.raw || content, tags: Array.isArray(value.tags) ? value.tags : [], createdAt: now, updatedAt: now, ...origin(value) }; if (!item.content) throw new Error('请填写笔记内容'); notes.value.unshift(item); commitNotes(); return item }
-  function updateNote(id, value) { const item = notes.value.find((note) => note.id === id); if (!item) return null; Object.assign(item, value, { updatedAt: stamp() }); commitNotes(); return item }
-  function deleteNote(id) {
-    const index = notes.value.findIndex((item) => item.id === id)
-    if (index < 0) return null
-    const [note] = notes.value.splice(index, 1)
-    const now = stamp()
-    tasks.value = tasks.value.map((task) => task.sourceType === 'note' && task.sourceId === id ? { ...task, sourceType: '', sourceId: '', relationId: '', updatedAt: now } : task)
-    commitTasks()
-    events.value = events.value.map((event) => event.sourceType === 'note' && event.sourceId === id ? { ...event, sourceType: '', sourceId: '', relationId: '', updatedAt: now } : event)
-    commitEvents()
-    commitNotes()
-    return note
-  }
   function createTransaction(value = {}) {
     const now = stamp()
     const direction = value.direction === 'income' || value.type === 'income' ? 'income' : 'expense'
@@ -416,10 +507,12 @@ export function useDomainCommands() {
     const nextDate = value.nextDate || value.date || ''
     const cycles = new Set(['weekly', 'monthly', 'quarterly', 'yearly', 'once'])
     if (!name || amount === null || !validDateKey(nextDate)) throw new Error('请补充正确的账单名称、金额和日期')
+    const cycle = cycles.has(value.cycle) ? value.cycle : 'monthly'
     const item = {
       id: value.id || createId('bill'), name, amount,
       category: value.cat || value.category || classifyTransaction(name).categoryId,
-      cycle: cycles.has(value.cycle) ? value.cycle : 'monthly', nextDate,
+      cycle, nextDate,
+      ...(billCycleMonths(cycle) ? { anchorDay: validAnchorDay(value.anchorDay) ?? dateParts(nextDate)[2] } : {}),
       remindDays: Number.isFinite(Number(value.remindDays)) ? Math.max(0, Math.round(Number(value.remindDays))) : 3,
       autoRenew: value.autoRenew !== false, active: value.active !== false,
       note: String(value.note || '').trim(), account: defaultAccount(value.account),
@@ -437,12 +530,24 @@ export function useDomainCommands() {
     const next = { ...item, ...value }
     const amount = normalizeAmount(next.amount)
     if (amount === null || !String(next.name || '').trim() || !validDateKey(next.nextDate)) throw new Error('请补充正确的账单名称、金额和日期')
+    const cycle = ['weekly', 'monthly', 'quarterly', 'yearly', 'once'].includes(next.cycle) ? next.cycle : item.cycle || 'monthly'
+    const dateChanged = next.nextDate !== item.nextDate
+    const cycleChanged = cycle !== item.cycle
+    let anchorDay = validAnchorDay(value.anchorDay)
+    if (!anchorDay && dateChanged) anchorDay = dateParts(next.nextDate)[2]
+    if (!anchorDay && billCycleMonths(cycle) && !dateChanged) {
+      anchorDay = validAnchorDay(item.anchorDay)
+        ?? inferLegacyBillAnchorDay(item, transactions.value)
+        ?? (cycleChanged ? dateParts(next.nextDate)[2] : null)
+    }
     Object.assign(item, {
       ...value,
       name: String(next.name).trim(), amount, nextDate: next.nextDate,
-      cycle: ['weekly', 'monthly', 'quarterly', 'yearly', 'once'].includes(next.cycle) ? next.cycle : item.cycle || 'monthly',
+      cycle,
       updatedAt: stamp(),
     })
+    if (anchorDay) item.anchorDay = anchorDay
+    else if (dateChanged || ('anchorDay' in value && !validAnchorDay(value.anchorDay))) delete item.anchorDay
     commitBills()
     return item
   }
@@ -474,9 +579,8 @@ export function useDomainCommands() {
     if (index < 0) return null
     const [course] = courses.value.splice(index, 1)
     commitCourses()
-    detachCourseRelations(course, { tasks: tasks.value, milestones: milestones.value, events: events.value, notes: notes.value })
+    detachCourseRelations(course, { tasks: tasks.value, milestones: milestones.value, events: events.value })
     commitTasks()
-    commitNotes()
     commitEvents()
     commitMilestones()
     return course
@@ -492,8 +596,11 @@ export function useDomainCommands() {
       travelMinutes: Math.max(0, Number(value.travelMinutes) || 0),
       color: value.color || '#456fe8',
       day: Number(value.day) || 0,
-      start: Number(value.start) || 1,
-      end: Number(value.end) || Number(value.start) || 1,
+      // Period IDs are opaque identifiers (normally "p1", "p2", ...). Keep
+      // the caller's type/value intact so legacy numeric IDs remain readable
+      // by the migration layer and modern string IDs are never coerced to NaN.
+      start: value.start === '' || value.start == null ? 'p1' : value.start,
+      end: value.end === '' || value.end == null ? (value.start === '' || value.start == null ? 'p1' : value.start) : value.end,
       startWeek: Number(value.startWeek) || 1,
       endWeek: Number(value.endWeek) || 20,
       weekType: value.weekType || 'all',
@@ -534,8 +641,6 @@ export function useDomainCommands() {
   function restoreMilestone(id) { const item = restoreItem(milestones, id); if (item) commitMilestones(); return item }
   function archiveEvent(id) { const item = archiveItem(events, id); if (item) commitEvents(); return item }
   function restoreEvent(id) { const item = restoreItem(events, id); if (item) commitEvents(); return item }
-  function archiveNote(id) { const item = archiveItem(notes, id); if (item) commitNotes(); return item }
-  function restoreNote(id) { const item = restoreItem(notes, id); if (item) commitNotes(); return item }
   function archiveBill(id) { const item = archiveItem(bills, id, { inactive: true }); if (item) commitBills(); return item }
   function restoreBill(id) { const item = restoreItem(bills, id, { active: true }); if (item) commitBills(); return item }
   function setBillActive(id, active) {
@@ -551,7 +656,7 @@ export function useDomainCommands() {
     const item = bills.value.find((entry) => entry.id === id)
     if (!item) return null
     if (item.active === false || item.archivedAt) return { blocked: true, bill: item, reason: '账单已暂停，请恢复后再跳过本期。' }
-    item.nextDate = nextBillDate(item)
+    item.nextDate = nextBillDate(item, transactions.value)
     item.updatedAt = stamp()
     commitBills()
     return item
@@ -574,7 +679,7 @@ export function useDomainCommands() {
       billId: bill.id, billingPeriodKey: period, source: 'bill', createdFrom: 'bill',
       sourceType: 'bill', sourceId: bill.id,
     })
-    bill.nextDate = nextBillDate(bill)
+    bill.nextDate = nextBillDate(bill, transactions.value)
     bill.updatedAt = stamp()
     commitBills()
     return { bill, transaction, duplicate: false }
@@ -601,5 +706,5 @@ export function useDomainCommands() {
     if (session.todoId) recordTaskFocusSession(session.todoId, session)
     return session
   }
-  return { tasks, courses, milestones, bills, transactions, events, notes, focusSessions, createTask, updateTask, toggleTask, completeTask, deleteTask, restoreDeletedTask, archiveTask, restoreTask, createMilestone, updateMilestone, deleteMilestone, restoreDeletedMilestone, archiveMilestone, restoreMilestone, createEvent, updateEvent, deleteEvent, restoreDeletedEvent, archiveEvent, restoreEvent, createNote, updateNote, deleteNote, archiveNote, restoreNote, createTransaction, updateTransaction, updateTransactionCategories, deleteTransaction, restoreDeletedTransaction, refundTransaction, undoBillPayment, createBill, updateBill, deleteBill, archiveBill, restoreBill, setBillActive, skipBill, deleteCourse, createCourse, replaceCourses, archiveCourse, restoreCourse, recordTaskFocusSession, recordFocusSession, payBill }
+  return { tasks, courses, milestones, bills, transactions, events, focusSessions, createTask, updateTask, toggleTask, completeTask, deleteTask, restoreDeletedTask, archiveTask, restoreTask, createMilestone, updateMilestone, deleteMilestone, restoreDeletedMilestone, archiveMilestone, restoreMilestone, createEvent, updateEvent, deleteEvent, restoreDeletedEvent, archiveEvent, restoreEvent, createTransaction, updateTransaction, updateTransactionCategories, deleteTransaction, restoreDeletedTransaction, refundTransaction, undoBillPayment, createBill, updateBill, deleteBill, archiveBill, restoreBill, setBillActive, skipBill, deleteCourse, createCourse, replaceCourses, archiveCourse, restoreCourse, recordTaskFocusSession, recordFocusSession, payBill }
 }

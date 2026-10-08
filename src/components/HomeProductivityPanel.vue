@@ -21,7 +21,6 @@ const hasData = computed(() => [
   domain.tasks.value,
   domain.events.value,
   domain.milestones.value,
-  domain.notes.value,
   domain.bills.value,
   domain.transactions.value,
   domain.focusSessions.value,
@@ -128,7 +127,7 @@ onBeforeUnmount(() => window.clearTimeout(feedbackTimer))
         <div><span class="eyebrow">GET STARTED</span><h2 id="first-use-title">先搭好你的学习工作台</h2></div>
         <button type="button" class="text-button" @click="dismissGuide">收起引导</button>
       </div>
-      <p>从课程表和待办开始，之后再按需要添加日程、笔记和生活记录。</p>
+      <p>从课程表和待办开始，之后再按需要添加日程和生活记录。</p>
       <div class="first-use-actions">
         <RouterLink class="btn btn-primary" to="/schedule">添加课程</RouterLink>
         <RouterLink class="btn" to="/tasks">添加第一条待办</RouterLink>

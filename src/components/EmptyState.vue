@@ -25,8 +25,8 @@ const emit = defineEmits(['primary', 'secondary'])
       <small v-if="hint">{{ hint }}</small>
     </div>
     <div v-if="primaryLabel || secondaryLabel || $slots.default" class="es-actions">
-      <button v-if="secondaryLabel" class="btn btn-ghost" @click="emit('secondary')">{{ secondaryLabel }}</button>
-      <button v-if="primaryLabel" class="btn btn-primary" @click="emit('primary')">{{ primaryLabel }}</button>
+      <button v-if="secondaryLabel" type="button" class="btn btn-ghost" @click="emit('secondary')">{{ secondaryLabel }}</button>
+      <button v-if="primaryLabel" type="button" class="btn btn-primary" @click="emit('primary')">{{ primaryLabel }}</button>
       <slot />
     </div>
   </div>
@@ -87,7 +87,12 @@ const emit = defineEmits(['primary', 'secondary'])
 .es-copy {
   max-width: 420px;
 }
-.es-copy h3 {
+.es-copy h2 {
+  font-size: var(--fs-15-5);
+  font-weight: var(--fw-700);
+}
+.es-copy h3,
+.es-copy h4 {
   font-size: var(--fs-14-5);
   font-weight: var(--fw-700);
 }

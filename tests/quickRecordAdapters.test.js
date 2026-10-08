@@ -2,7 +2,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { useDomainCommands } from '../src/composables/domain/commands.js'
 import { useQuickRecordAdapters } from '../src/composables/quickRecord/adapters.js'
-import { selectDayAgenda, selectReminders } from '../src/composables/domain/selectors.js'
+import { selectReminders } from '../src/composables/domain/selectors.js'
 
 const domain = useDomainCommands()
 const quickRecord = useQuickRecordAdapters()
@@ -14,7 +14,6 @@ beforeEach(() => {
   domain.bills.value = []
   domain.transactions.value = []
   domain.events.value = []
-  domain.notes.value = []
 })
 
 describe('QuickRecord 业务适配与撤销', () => {
@@ -23,19 +22,17 @@ describe('QuickRecord 业务适配与撤销', () => {
     ['支出', { id: 'qr-expense', type: 'expense', title: '午饭', raw: '午饭18元', amount: 18, category: 'food', date: '2026-09-02', time: '12:00' }, 'transactions', 'direction'],
     ['收入', { id: 'qr-income', type: 'income', title: '生活费', raw: '生活费到账500', amount: 500, category: 'other', date: '2026-09-02', time: '09:00' }, 'transactions', 'direction'],
     ['日程', { id: 'qr-event', type: 'event', title: '开组会', raw: '明天下午三点开组会', date: '2026-09-03', time: '15:00' }, 'events', 'title'],
-    ['笔记', { id: 'qr-note', type: 'note', title: '', note: '下次实验降低浓度', raw: '记一下：下次实验降低浓度' }, 'notes', 'content'],
     ['倒计时', { id: 'qr-countdown', type: 'countdown', title: '六级考试', raw: '距离六级考试还有90天', date: '2026-12-01' }, 'milestones', 'kind'],
     ['固定账单', { id: 'qr-bill', type: 'bill', title: '话费', raw: '每月15号39元话费', amount: 39, date: '2026-09-15', cycle: 'monthly' }, 'bills', 'cycle'],
   ])('%s 写入真实业务集合并可撤销', (_label, draft, collectionName, field) => {
     const result = quickRecord.save(draft)
     const collection = domain[collectionName].value
     expect(collection).toHaveLength(1)
-    const expected = field === 'direction' ? draft.type : field === 'courseId' ? 'course-1' : field === 'content' ? draft.note : field === 'kind' ? 'countdown' : draft[field]
+    const expected = field === 'direction' ? draft.type : field === 'courseId' ? 'course-1' : field === 'kind' ? 'countdown' : draft[field]
     expect(collection[0][field]).toBe(expected)
     expect(collection[0].createdFrom).toBe('quick-record')
     expect(collection[0].sourceId).toBe('')
     expect(collection[0].sourceType).toBe('')
-    expect(domain.notes.value.some((item) => item.id === 'quick-records')).toBe(false)
 
     result.undo()
     expect(domain[collectionName].value).toHaveLength(0)
@@ -48,7 +45,6 @@ describe('QuickRecord 业务适配与撤销', () => {
     })
     const task = domain.tasks.value[0]
     expect(task.courseId).toBe('course-1')
-    expect(selectDayAgenda({ courses: [], tasks: domain.tasks.value }, new Date('2026-09-04T10:00:00')).map((item) => item.sourceId)).toContain(task.id)
     expect(selectReminders({ tasks: domain.tasks.value }, new Date('2026-09-02T10:00:00')).map((item) => item.sourceId)).toContain(task.id)
     result.undo()
     expect(selectReminders({ tasks: domain.tasks.value }, new Date('2026-09-02T10:00:00'))).toHaveLength(0)
@@ -202,42 +198,10 @@ describe('QuickRecord 业务适配与撤销', () => {
     const task = domain.createTask({ id: 'task-course-delete', title: '课程作业', courseId: 'course-1' })
     domain.createMilestone({ id: 'exam-course-delete', name: '考试', date: '2026-09-20', courseId: 'course-1' })
     domain.createEvent({ id: 'event-course-delete', title: '课程提醒', date: '2026-09-10', courseId: 'course-1' })
-    domain.createNote({ id: 'note-course-delete', content: '课程笔记', courseId: 'course-1' })
 
     expect(domain.deleteCourse('course-1')).toMatchObject({ id: 'course-1' })
     expect(domain.tasks.value[0]).toMatchObject({ id: task.id, courseId: '', course: '高数' })
     expect(domain.milestones.value[0].courseName).toBe('高数')
     expect(domain.events.value[0].courseName).toBe('高数')
-    expect(domain.notes.value[0].courseName).toBe('高数')
-  })
-
-  it('Note 转待办保留原文，删除 Note 后只解除来源关系', () => {
-    const note = domain.createNote({ id: 'note-source', content: '老师说周五前交实验报告' })
-    const result = quickRecord.convertNote(note.id, 'todo')
-    const task = domain.tasks.value[0]
-
-    expect(result.ok).toBe(true)
-    expect(domain.notes.value[0]).toMatchObject({ id: note.id, inboxStatus: 'organized', content: note.content })
-    expect(task).toMatchObject({ sourceType: 'note', sourceId: note.id })
-
-    expect(domain.deleteNote(note.id)).toMatchObject({ id: note.id })
-    expect(domain.tasks.value[0]).toMatchObject({ sourceType: '', sourceId: '', relationId: '' })
-  })
-
-  it('Note 重复转换保持幂等，并分别维护待办与日程关系', () => {
-    const note = domain.createNote({ id: 'note-idempotent', content: '周五交实验报告' })
-    const firstTask = quickRecord.convertNote(note.id, 'todo')
-    const secondTask = quickRecord.convertNote(note.id, 'todo')
-    const firstEvent = quickRecord.convertNote(note.id, 'event')
-    const secondEvent = quickRecord.convertNote(note.id, 'event')
-
-    expect(firstTask).toMatchObject({ ok: true, entityType: 'task' })
-    expect(firstTask).not.toHaveProperty('duplicate')
-    expect(secondTask).toMatchObject({ ok: true, duplicate: true, entityType: 'task', entityId: firstTask.entityId })
-    expect(firstEvent).toMatchObject({ ok: true, entityType: 'event' })
-    expect(firstEvent).not.toHaveProperty('duplicate')
-    expect(secondEvent).toMatchObject({ ok: true, duplicate: true, entityType: 'event', entityId: firstEvent.entityId })
-    expect(domain.tasks.value.filter((item) => item.sourceId === note.id)).toHaveLength(1)
-    expect(domain.events.value.filter((item) => item.sourceId === note.id)).toHaveLength(1)
   })
 })

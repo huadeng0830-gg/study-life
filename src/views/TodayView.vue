@@ -1,6 +1,7 @@
 <script setup>
-import { computed, defineAsyncComponent, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { accountUser } from '../composables/accountAuth.js'
 import {
   MAX_WEEK,
   dayName,
@@ -16,19 +17,17 @@ import { festiveFor } from '../composables/festive.js'
 import { narrativeFor, narrativeLang } from '../composables/narrative.js'
 import MemoryView from '../components/MemoryView.vue'
 import FocusPanel from '../components/FocusPanel.vue'
-import InboxPanel from '../components/InboxPanel.vue'
-import SocialCalendarEvents from '../components/SocialCalendarEvents.vue'
 import Modal from '../components/Modal.vue'
 import { useStoredRef } from '../composables/store/index.js'
+import { coursesForDates } from '../composables/store/schedule.js'
 import { useDomainCommands } from '../composables/domain/commands.js'
-import { useQuickRecordAdapters } from '../composables/quickRecord/adapters.js'
 import { selectTodayActionPanels, reminderAction } from '../composables/domain/selectors.js'
 import { selectWeeklyBillSummary, weekRange } from '../composables/domain/weeklySelectors.js'
 import { normalizeLedgerFx, summarizeLedgerInBase, useLedgerFx } from '../composables/ledgerFx.js'
 import { mySpendYuan } from '../composables/ledgerSplit.js'
 import { moneyWithCurrency } from '../utils/formatters.js'
-import { isArchived, isBillDueSoon, isTaskActionable, taskPlanningState, taskStatus } from '../composables/domain/state.js'
-import { weeklyPulse } from '../composables/experience.js'
+import { taskPlanningState, taskStatus } from '../composables/domain/state.js'
+import { COURSE_CHECKIN_STATES, upsertCourseCheckin, weeklyPulse } from '../composables/experience.js'
 import { schedulePolicy } from '../composables/settingsPolicy.js'
 import { addAppDays, appCalendarDaysBetween, appNow, appToday, currentDayIndex, currentWeek, getAppTime, formatAppDate } from '../composables/timeContext.js'
 import { selectHomeNextUp } from '../composables/home/nextUp.js'
@@ -38,17 +37,41 @@ import { clearFocusFromRoute, focusElementWhenReady, readFocusQuery } from '../c
 import { recordStartupTiming, reportStartupAssetSummary, startupNow } from '../composables/startupDiagnostics.js'
 
 const HomeProductivityPanel = defineAsyncComponent(() => import('../components/HomeProductivityPanel.vue'))
+// Keep campus-social utilities out of the initial home route for guests and until
+// a verified user's calendar section approaches the viewport.
+const SocialCalendarEvents = defineAsyncComponent(() => import('../components/SocialCalendarEvents.vue'))
+const canShowSocialCalendar = computed(() => Boolean(accountUser.value?.id && accountUser.value?.email_confirmed_at))
+const socialCalendarAnchor = ref(null)
+const shouldLoadSocialCalendar = ref(false)
+let socialCalendarObserver = null
+onMounted(() => {
+  if (!socialCalendarAnchor.value) return
+  if (typeof IntersectionObserver === 'undefined') {
+    shouldLoadSocialCalendar.value = true
+    return
+  }
+  socialCalendarObserver = new IntersectionObserver((entries) => {
+    if (!entries.some((entry) => entry.isIntersecting)) return
+    shouldLoadSocialCalendar.value = true
+    socialCalendarObserver?.disconnect()
+    socialCalendarObserver = null
+  })
+  socialCalendarObserver.observe(socialCalendarAnchor.value)
+})
+onBeforeUnmount(() => {
+  socialCalendarObserver?.disconnect()
+  socialCalendarObserver = null
+})
 const domain = useDomainCommands()
-const { courses, tasks, milestones: exams, bills, transactions, events, notes: quickNotes } = domain
+const { courses, tasks, milestones: exams, bills, transactions, events } = domain
 const { fx: ledgerFx } = useLedgerFx()
 const router = useRouter()
 const route = useRoute()
 const focusSessions = useStoredRef('sl_focus_sessions', [])
+const courseCheckins = useStoredRef('sl_course_checkins', [])
 const eventDetail = ref(null)
 const focusMessage = ref('')
 let focusHandled = ''
-const showInbox = ref(false)
-const quickRecord = useQuickRecordAdapters()
 const now = appNow
 const todayKey = () => appToday.value
 const activeSchedule = computed(() => schedulePolicy())
@@ -165,7 +188,21 @@ const nextUpTimeRange = computed(() => nextProjection.value.nextUpTimeRange)
 const nextDeparture = computed(() => nextProjection.value.nextDeparture)
 const nextTimingLabel = computed(() => nextProjection.value.nextTimingLabel)
 
-const pulse = computed(() => weeklyPulse({ tasks: tasks.value, focusSessions: focusSessions.value, moodLog: moodLog.value }, now.value))
+const pulse = computed(() => weeklyPulse({ tasks: tasks.value, focusSessions: focusSessions.value, courseCheckins: courseCheckins.value, moodLog: moodLog.value }, now.value))
+const todayCourses = computed(() => coursesForDates(courses.value, [todayKey()])[0] || [])
+const COURSE_CHECKIN_OPTIONS = Object.freeze([
+  { state: COURSE_CHECKIN_STATES.understood, label: '听懂了' },
+  { state: COURSE_CHECKIN_STATES.unclear, label: '有疑问' },
+  { state: COURSE_CHECKIN_STATES.review, label: '需要复习' },
+  { state: COURSE_CHECKIN_STATES.absent, label: '缺席' },
+])
+const courseCheckinState = (course) => courseCheckins.value.find((item) => item.date === todayKey() && String(item.courseId) === String(course.id))?.state || ''
+function markCourseCheckin(course, state) {
+  courseCheckins.value = upsertCourseCheckin(courseCheckins.value, {
+    courseId: course.id, courseName: course.name, state, date: todayKey(),
+  }, now.value)
+  showExperienceMessage(`已记录「${course.name}」的课后反馈`)
+}
 const weeklyFinance = computed(() => {
   const range = weekRange(now.value)
   return summarizeLedgerInBase(transactions.value, ledgerFx.value, {
@@ -223,19 +260,6 @@ function taskDeadline(task) {
 }
 
 /* ---------- 倒计时 / 提醒 ---------- */
-const inboxNotes = computed(() => quickNotes.value.filter((note) => note.inboxStatus !== 'organized' && note.inboxStatus !== 'archived' && !isArchived(note)))
-const inboxCount = computed(() => inboxNotes.value.length)
-
-function organizeInbox(note, targetType) {
-  const result = quickRecord.convertNote(note.id, targetType)
-  showExperienceMessage(result.message || result.error || '已更新收件箱')
-}
-
-function archiveInbox(note) {
-  domain.archiveNote(note.id)
-  showExperienceMessage('已归档')
-}
-
 function reminderMeta(item) {
   if (item.kind === 'overdue') return '已逾期'
   if (item.sourceType === 'task') return taskDeadline(item.entity)
@@ -325,6 +349,7 @@ function countdownLabel(item) {
             <template v-else><span class="next-empty-line">今天暂时没有紧接着要处理的事项。</span><strong class="next-title is-muted">可以自由安排时间</strong></template>
           </div>
           <button v-if="nextUp.kind !== 'none'" type="button" class="next-action tap-target" @click="openNext">{{ nextUp.kind === 'course' ? '查看课程表' : '查看' }} →</button>
+          <router-link v-else class="next-action tap-target" to="/tasks?new=1">＋ 新建待办</router-link>
         </section>
 
         <template v-else-if="id === 'tasks'">
@@ -352,7 +377,15 @@ function countdownLabel(item) {
 
         <section v-else-if="id === 'week'" class="week-progress panel" aria-label="本周进展">
           <div class="panel-head"><div><h2>本周进展</h2><span class="panel-subtitle">{{ pulse.suggestion }}</span></div><router-link class="panel-link" to="/review">查看回顾 →</router-link></div>
-          <p>{{ pulse.done }} 项完成 · 专注 {{ pulse.minutes ? `${pulse.minutes} 分钟` : '暂无记录' }}<template v-if="inboxCount"> · 待整理 {{ inboxCount }} 条笔记</template></p>
+          <p>{{ pulse.done }} 项完成 · 专注 {{ pulse.minutes ? `${pulse.minutes} 分钟` : '暂无记录' }}</p>
+          <div v-if="todayCourses.length" class="today-course-checkins" aria-label="今日课程反馈">
+            <div v-for="course in todayCourses" :key="course.id" class="today-course-checkin">
+              <b>{{ course.name }}</b>
+              <div role="group" :aria-label="`${course.name}课后反馈`">
+                <button v-for="option in COURSE_CHECKIN_OPTIONS" :key="option.state" type="button" :aria-pressed="courseCheckinState(course) === option.state" @click="markCourseCheckin(course, option.state)">{{ option.label }}</button>
+              </div>
+            </div>
+          </div>
         </section>
 
         <section v-else-if="id === 'finance'" class="week-finance panel" aria-label="本周收支">
@@ -368,7 +401,9 @@ function countdownLabel(item) {
         <FocusPanel v-else-if="id === 'focus'" />
       </template>
 
-      <SocialCalendarEvents scope="today" />
+      <div ref="socialCalendarAnchor" class="social-calendar-anchor">
+        <SocialCalendarEvents v-if="canShowSocialCalendar && shouldLoadSocialCalendar" scope="today" />
+      </div>
 
       <section v-if="unscheduledCount" class="compact-link-row"><span>待安排 <b>{{ unscheduledCount }}</b></span><small>还没有日期的事项</small><router-link to="/tasks">去安排 →</router-link></section>
 
@@ -393,10 +428,6 @@ function countdownLabel(item) {
         </div>
       </section>
 
-      <section v-if="inboxCount" class="inbox-entry">
-        <button type="button" class="compact-link-row compact-button" :aria-expanded="showInbox" @click="showInbox = !showInbox"><span>收件箱 <b>待整理 {{ inboxCount }}</b></span><small>保存的内容都在这里</small><span class="compact-action">{{ showInbox ? '收起 ↑' : '查看 →' }}</span></button>
-        <InboxPanel v-if="showInbox" :notes="inboxNotes" @convert="organizeInbox" @archive="archiveInbox" />
-      </section>
     </template>
 
     <MemoryView :open="showMemory" @close="showMemory = false" />
@@ -408,12 +439,13 @@ function countdownLabel(item) {
 </template>
 
 <style scoped>
+.social-calendar-anchor { min-height: 1px; }
 /* 第三十七轮说明：本样式块曾因一次删除器 bug 被破坏，内容由删除前的构建产物
    （dist/assets 的编译 CSS，去掉 scope 属性后反压缩）整体重建，**原有注释在重建中丢失**。
    第三十八轮已按 scope 归属清掉其中属于别组件的同值副本。新增规则时请照常写注释。 */
-/* 第三十九轮（TodayView 分片）：这里原先还有 66 条规则体 / 72 个选择器引用 **FocusPanel.vue /
-   MemoryView.vue / InboxPanel.vue 内部节点** 上的类，已按 tests/scopedChildReachability.test.js 的
-   判据清除（三对命中数 46 / 14 / 12 → 0 / 0 / 0）。它们分三组：
+/* 第三十九轮（TodayView 分片）：这里原先还有选择器引用 **FocusPanel.vue /
+   MemoryView.vue 内部节点** 上的类，已按 tests/scopedChildReachability.test.js 的
+   判据清除。剩下的引用分两组：
      MemoryView  .memory/.memory-bar/.memory-actions/.memory-message/.story/.story-title/
                  .story-stats/.stat-cell/.story-list（11 个选择器）
      FocusPanel  .focus-flash/.focus-active,.focus-rest,.focus-completed,.focus-idle/.focus-goal-label/
@@ -423,17 +455,16 @@ function countdownLabel(item) {
                  .focus-done-actions/.focus-done-hint/.focus-rest-row/.rest-btn/.todo-picker/
                  .todo-option/.empty-line/.custom-time/.custom-hint,.early-hint/.custom-error/
                  .modal-actions（46 个选择器）
-     InboxPanel  .inbox-row/.inbox-tags/.inbox-empty/.inbox-actions/.inbox-toggle（12 个选择器）
    根因同 App.vue 那一批：第三十七轮把入口分片的编译产物搬回宿主文件时带上了 TodayView 的作用域
    属性，而 Vue 的 scoped CSS 只会把父作用域属性落在子组件的**根节点**上——「TodayView 的作用域 +
    只存在于子组件内部节点的类」永远匹配不到元素。删除前后用 @vue/compiler-sfc 编译成 CSS 文本
-   逐条 diff 过：消失的正好是上面这些选择器，新增 0 条、改动 0 条。这些样式在三个子组件自己的
+   逐条 diff 过：消失的正好是上面这些选择器，新增 0 条、改动 0 条。这些样式在两个子组件自己的
    scoped 样式块里都有等价副本，需要改请改那边。
-   随之清空的三处 @media (max-width:520px)（原只含 .memory*、.focus-actions .btn、.inbox-row）
+   随之清空的两处 @media (max-width:520px)（原只含 .memory*、.focus-actions .btn）
    整块删除；.todo-picker 规则体里的 vh/dvh 孪生注释随规则一起消失（FocusPanel.vue 里仍有那条
    规则与孪生，全仓 dvh 计数不受影响）。
-   **故意保留**：`.task-*` / `.bill-*` / `.add-btn` / `.secondary-panel` 等规则不属本轮——它们引用的组件
-   （TaskCenter 等）TodayView 并没有 import，不在上面三个配对里。 */
+   **故意保留**：`.bill-*` / `.add-btn` 等规则不属本轮——它们引用的组件
+   （TaskCenter 等）TodayView 并没有 import，不在上面两个配对里。 */
 .focus-panel {
   grid-template-columns:minmax(0,1fr);
   gap:10px;
@@ -692,29 +723,16 @@ function countdownLabel(item) {
   font-size:var(--fs-12);
   font-weight:var(--fw-750);
   text-decoration:none}
-.compact-button {
-  text-align:left;
-  cursor:pointer;
-  background:0 0;
-  border:0;
-  width:100%}
-.compact-action {
-  color:var(--primary);
-  white-space:nowrap;
-  margin-left:auto;
-  font-size:var(--fs-12);
-  font-weight:var(--fw-750)}
-.inbox-entry {
-  flex-direction:column;
-  gap:7px;
-  display:flex}
-.inbox-entry>.inbox {
-  margin:0}
 .week-progress {
   padding:16px 18px}
 .week-progress p {
   color:var(--ink-soft);
   font-size:var(--fs-12)}
+.today-course-checkins { display:grid; gap:8px; margin-top:10px; }
+.today-course-checkin { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+.today-course-checkin>div { display:flex; flex-wrap:wrap; gap:5px; }
+.today-course-checkin button { border:1px solid var(--border); border-radius:var(--radius-pill); background:var(--card); color:var(--ink-soft); padding:5px 9px; font-size:var(--fs-10-5); }
+.today-course-checkin button[aria-pressed='true'] { border-color:var(--primary); background:var(--primary-soft); color:var(--primary); }
 .week-finance-stats {
   grid-template-columns:repeat(3,minmax(0,1fr));
   gap:8px;
@@ -793,43 +811,6 @@ function countdownLabel(item) {
   display:flex}
 .task-row:first-child {
   border-top:0}
-.task-check {
-  color:#0000;
-  border:1.5px solid var(--border);
-  background:var(--bg);
-  cursor:pointer;
-  width:26px;
-  height:26px;
-  transition:background var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard), border-color var(--dur-fast) var(--ease-standard);
-  border-radius:var(--radius-8);
-  flex:0 0 26px;
-  place-items:center;
-  font-size:var(--fs-13);
-  font-weight:var(--fw-900);
-  display:grid}
-.task-check:hover {
-  border-color:var(--primary);
-  background:var(--primary-soft)}
-.task-row.overdue .task-check {
-  border-color:var(--danger);
-  background:color-mix(in srgb, var(--danger) 8%, var(--card))}
-.task-copy {
-  flex-direction:column;
-  flex:1;
-  gap:2px;
-  min-width:0;
-  display:flex}
-.task-copy b {
-  text-overflow:ellipsis;
-  white-space:nowrap;
-  font-size:var(--fs-13-5);
-  overflow:hidden}
-.task-copy span {
-  color:var(--ink-soft);
-  font-size:var(--fs-11-5)}
-.task-copy span.danger {
-  color:var(--danger);
-  font-weight:var(--fw-650)}
 .task-priority {
   color:var(--danger);
   flex:none;
@@ -918,8 +899,6 @@ function countdownLabel(item) {
 .task-row {
   min-height:56px}
 
-.secondary-panel {
-  margin-top:2px}
 .action-panel {
   padding:14px}
 .action-row {
@@ -966,7 +945,7 @@ function countdownLabel(item) {
   align-items:start;
   gap:16px 18px;
   display:grid}
-.today-page>.page-head,.today-page>.experience-message,.today-page>.home-productivity,.today-page>.next-panel,.today-page>.compact-link-row,.today-page>.today-mood-lower,.today-page>.inbox-entry {
+.today-page>.page-head,.today-page>.experience-message,.today-page>.home-productivity,.today-page>.next-panel,.today-page>.compact-link-row,.today-page>.today-mood-lower {
   grid-column:1/-1}
 .today-page>.home-productivity {
   grid-template-columns:repeat(auto-fit,minmax(min(100%,430px),1fr));

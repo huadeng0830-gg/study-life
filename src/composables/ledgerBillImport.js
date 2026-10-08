@@ -38,18 +38,42 @@ export function decodeBillText(arrayBuffer) {
  *
  * 与导出侧（ledgerView/export.js 的 csvCell）是一对，但**不能复用**：
  * 导出侧还会中和公式前缀，解析侧只需要处理引号转义与内嵌换行。
+ * `maxRows` caps non-empty records; omitted means the existing unlimited behavior.
  *
  * @param {string} text
- * @returns {string[][]}
+ * @param {{ maxRows?: number }} [options] Optional cap on non-empty parsed rows.
+ * @returns {string[][] & { truncated?: boolean }}
  */
-export function parseCsv(text) {
+export function parseCsv(text, { maxRows = Infinity } = {}) {
   const rows = []
-  let row = []
+  const numericLimit = Number(maxRows)
+  const rowLimit = Number.isFinite(numericLimit) ? Math.max(0, Math.floor(numericLimit)) : Infinity
+  let row = rowLimit > 0 ? [] : null
   let field = ''
+  let rowHasContent = false
   let quoted = false
+  let truncated = false
   const source = String(text ?? '').replace(/^﻿/, '')
 
+  const finishField = () => {
+    if (field.trim() !== '') rowHasContent = true
+    if (row) row.push(field)
+    field = ''
+  }
+  const finishRow = () => {
+    finishField()
+    if (rowHasContent) {
+      if (rows.length < rowLimit) rows.push(row)
+      else truncated = true
+    }
+    rowHasContent = false
+    row = rows.length < rowLimit ? [] : null
+  }
+
   for (let index = 0; index < source.length; index += 1) {
+    // Once an extra non-empty row is recognized, remaining CSV text cannot
+    // affect the capped result. Stop scanning instead of parsing the rest.
+    if (truncated) break
     const char = source[index]
     if (quoted) {
       if (char === '"') {
@@ -64,20 +88,19 @@ export function parseCsv(text) {
     // 账单 CSV 用 CRLF，但 Excel 在某些区域设置下会写 LF；两者都要认。
     if (char === '\r') {
       if (source[index + 1] === '\n') index += 1
-      row.push(field); field = ''
-      rows.push(row); row = []
+      finishRow()
       continue
     }
     if (char === '\n') {
-      row.push(field); field = ''
-      rows.push(row); row = []
+      finishRow()
       continue
     }
-    if (char === ',') { row.push(field); field = ''; continue }
+    if (char === ',') { finishField(); continue }
     field += char
   }
-  if (field !== '' || row.length) { row.push(field); rows.push(row) }
-  return rows.filter((item) => item.some((cell) => String(cell).trim() !== ''))
+  if (field !== '' || rowHasContent || (row && row.length)) finishRow()
+  Object.defineProperty(rows, 'truncated', { value: truncated, enumerable: false })
+  return rows
 }
 
 /**
@@ -131,12 +154,6 @@ function aliasedCell(row, map, group) {
     }
   }
   return ''
-}
-
-const cell = (row, map, name) => {
-  const position = map[name]
-  if (position === undefined) return ''
-  return String(row[position] ?? '').trim()
 }
 
 /** "2026-10-04 12:30:00" / "2026/10/04 12:30" -> { date, time } */
@@ -247,13 +264,6 @@ export function classifyFlowProbe(flow, type) {
 
 function fingerprint({ date, time, amount, direction, counterparty }) {
   return [date, time, amount, direction, counterparty].join('|')
-}
-
-async function sha256Hex(text) {
-  // Web Crypto 原生，不需要依赖。
-  const bytes = new TextEncoder().encode(text)
-  const digest = await crypto.subtle.digest('SHA-256', bytes)
-  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('')
 }
 
 /**

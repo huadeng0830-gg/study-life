@@ -5,7 +5,7 @@
  * 【缺口是什么】`window.prompt` / `alert` / `confirm` 是**浏览器级**对话框：不受主题控制、
  * 不参与 `Modal` 的浮层栈（没有焦点陷阱、没有 Escape 出口、遮罩点不掉）、读屏用户完全脱离
  * 文档；更直接的后果是**在测试环境里它们根本不存在**——happy-dom 下这三个都是 `undefined`，
- * 调用直接抛 `TypeError`，于是走那条路径的功能（改分类名、生成回顾笔记的提示）此前
+ * 调用直接抛 `TypeError`，于是走那条路径的功能（改分类名与状态提示）此前
  * **无法被任何用例验证**。本轮把最后这处 `window.prompt`（账本「修改分类名称」）搬到
  * `PromptDialog`，并把本周回顾页那两处裸 `alert()` 换成页面内联提示。
  *
@@ -235,7 +235,7 @@ const promptBlockCount = (sources) =>
   sources.reduce((sum, { code }) => sum + (code.match(PROMPT_BLOCK)?.length ?? 0), 0)
 
 /** 本轮迁到应用内提示的两个文件（改造后都不该再出现任何原生弹窗）。 */
-const MIGRATED = ['views/LedgerView.vue', 'views/WeeklyReviewView.vue']
+const MIGRATED = ['views/LedgerView.vue']
 
 /** 仓库允许保留的本地同名函数定义（与 tests/confirmDialogMigration.test.js 的清单一致）。 */
 const ALLOWED_LOCAL_DEFINITIONS = ['components/TimeWheelSheet.vue', 'components/schedule/ImageCropModal.vue']
@@ -271,7 +271,7 @@ describe('静态层：原生弹窗已经全部退场', () => {
     expect(windowDialogHits([{ file: 'Fixture.vue', code: "window.confirm('x')" }])).toEqual(['Fixture.vue: window.confirm'])
 
     // 裸 alert：本周回顾页改造前的写法，必须被抓出来
-    const bareAlert = "noteCommands.createNote({}).then(() => { alert('回顾笔记已生成，可在「笔记」页面查看') })"
+    const bareAlert = "reviewResult.then(() => { alert('回顾已生成') })"
     expect(bareDialogIssues([{ file: 'Fixture.vue', code: bareAlert }]), '裸 alert( 没被抓住').toHaveLength(1)
     expect(bareDialogIssues([{ file: 'Fixture.vue', code: "alert('生成失败，请重试')" }])).toHaveLength(1)
     expect(bareDialogIssues([{ file: 'Fixture.vue', code: "prompt('改个名')" }])).toHaveLength(1)
@@ -313,9 +313,6 @@ describe('静态层：原生弹窗已经全部退场', () => {
     // 改名入口还在（不是靠把功能删掉来让棘轮变绿）
     expect(sourceOf('views/LedgerView.vue')).toMatch(/@click="renameCategory\(c\)">重命名/)
     expect(sourceOf('composables/ledgerView/useLedgerCategoryManager.js')).toMatch(/function applyCategoryRename\(/)
-    // 本周回顾页的提示改成了页面内联提示，文案逐字保留
-    expect(sourceOf('views/WeeklyReviewView.vue')).toMatch(/role="status"/)
-    expect(sourceOf('views/WeeklyReviewView.vue')).toMatch(/reviewMessage\.value\s*=\s*'回顾笔记已生成，可在「笔记」页面查看'/)
   })
 
   it('全仓 <PromptDialog> 用法都写了 v-if，绑定也都指向真实存在的处理函数', () => {
@@ -324,13 +321,6 @@ describe('静态层：原生弹窗已经全部退场', () => {
     expect(promptBindingIssues(SOURCES)).toEqual([])
   })
 
-  it('失败分支的文案是静态判据（happy-dom 里无法确定性触发，如实标注）', () => {
-    // 该视图生成的内容永远非空，`createNote` 不会抛；要确定性触发失败分支只能去 stub 命令，
-    // 那验的就是 stub 而不是代码了。所以这条只做静态对账：文案逐字保留、且走的是提示 ref。
-    const code = sourceOf('views/WeeklyReviewView.vue')
-    expect(code).toMatch(/reviewMessage\.value\s*=\s*'生成失败，请重试'/)
-    expect(code, '失败分支不许再回到原生弹窗').not.toMatch(/\balert\s*\(/)
-  })
 })
 
 /* ================= ② 行为层：PromptDialog 自身 ================= */
@@ -639,29 +629,5 @@ describe('账本页「修改分类名称」：真对话框取代原生 prompt', 
     expect(categoryNameOf('food'), 'Escape 取消不该改内存里的分类名').toBe('餐饮')
     await flushWrites()
     expect(localStorage.getItem('sl_ledger_categories') ?? '', 'Escape 取消不该写入任何数据').not.toContain('不该生效')
-  })
-})
-
-/* ================= ④ 行为层：真实路由下的本周回顾页 ================= */
-
-describe('本周回顾页：原生 alert 换成页面内联提示', () => {
-  const notice = (main) => main.querySelector('.notice-success')
-
-  it('点「一键生成回顾笔记」后提示真的渲染出来，且笔记真的建出来了', async () => {
-    mounted = await mountApp({ routes })
-    const main = await gotoRoute(mounted, '/review')
-    // 反向对照先跑：还没点按钮时，同一探针必须什么都看不到
-    expect(notice(main), '没点按钮时不该有任何提示').toBeNull()
-
-    await click(buttonByText(main, '一键生成回顾笔记'))
-    const message = notice(main)
-    expect(message, '提示必须渲染在页面里（原来是原生 alert，happy-dom 下根本没法验）').toBeTruthy()
-    expect(message.getAttribute('role'), '提示要能被读屏播报').toBe('status')
-    expect(message.textContent, '文案与改造前逐字一致').toContain('回顾笔记已生成，可在「笔记」页面查看')
-
-    await flushWrites()
-    const notes = readStored('sl_quick_notes')
-    expect(notes.length, '提示出现时笔记必须真的建出来了').toBeGreaterThan(0)
-    expect(notes[0].title).toContain('本周回顾')
   })
 })

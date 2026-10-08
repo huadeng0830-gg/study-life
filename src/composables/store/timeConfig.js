@@ -3,7 +3,6 @@ import {
   DEFAULT_PERIOD_LABELS,
   DEFAULT_TIMES,
   FALLBACK_TIME,
-  todayIndex,
 } from './utils.js'
 
 export function defaultTimeConfig() {
@@ -204,36 +203,6 @@ import { clock } from './core.js'
 
 export const timeConfig = useStoredRef('sl_timecfg', loadTimeConfig())
 normalizeTimes(timeConfig.value)
-
-;(function migrateCoursePeriodIds() {
-  const migrateList = (list) =>
-    list.map((c) =>
-      c && typeof c.start === 'number'
-        ? { ...c, start: 'p' + c.start, end: 'p' + c.end }
-        : c
-    )
-  try {
-    const raw = localStorage.getItem('sl_courses')
-    if (raw) {
-      const list = JSON.parse(raw)
-      if (Array.isArray(list) && list.some((c) => c && typeof c.start === 'number')) {
-        localStorage.setItem('sl_courses', JSON.stringify(migrateList(list)))
-      }
-    }
-  } catch {}
-  try {
-    const raw = localStorage.getItem('sl_course_templates')
-    if (raw) {
-      const templates = JSON.parse(raw)
-      if (Array.isArray(templates) && templates.some((t) => t?.courses?.some((c) => typeof c.start === 'number'))) {
-        localStorage.setItem(
-          'sl_course_templates',
-          JSON.stringify(templates.map((t) => ({ ...t, courses: migrateList(t.courses ?? []) })))
-        )
-      }
-    }
-  } catch {}
-})()
 
 export function campusName(id) {
   const campus = timeConfig.value.campuses.find((c) => c.id === id)

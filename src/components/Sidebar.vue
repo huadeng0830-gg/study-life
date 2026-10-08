@@ -1,5 +1,5 @@
 <script setup>
-import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { accountOpen, accountUser } from '../composables/accountAuth.js'
 import { autoWallpaperColor, THEMES, themeKey } from '../composables/theme.js'
 import { originFromEvent, revealChange } from '../composables/motion.js'
@@ -62,6 +62,9 @@ const mobileLeadingItems = [
 const mobileScheduleItems = [
   { path: '/schedule', label: '课程', icon: '📅' },
 ]
+const mobileTaskItems = [
+  { path: '/tasks', label: '待办', icon: '✅' },
+]
 const mobileTrailingItems = [
   { path: '/bills', label: '账本', icon: '📒' },
 ]
@@ -71,8 +74,6 @@ const mobileMoreGroups = [
     { path: '/exams', label: '重要日期', icon: '⏳' },
     { path: '/events', label: '日程', icon: '🗓️' },
     { path: '/review', label: '本周回顾', icon: '↺' },
-    { path: '/tasks', label: '待办', icon: '✅' },
-    { path: '/notes', label: '笔记', icon: '📝' },
     { path: '/lists', label: '清单', icon: '☑️', subdued: true },
   ], tools: [{ key: 'search', label: '搜索', icon: '🔍' }] },
   { label: '个性化与专注', items: [], tools: [
@@ -102,7 +103,6 @@ const showSearch = searchOpen
 const toast = ref({ open: false, message: '', type: 'info', actionLabel: '', undoFn: null, viewFn: null, duration: 3200 })
 const props = defineProps({ quickRecordOpen: Boolean })
 const emit = defineEmits(['open-quick-record'])
-const noticeTimer = 0
 let warmupTimer = 0
 
 function openDataManager() {
@@ -363,10 +363,6 @@ function onDrawerPointerCancel() {
   clearDrawerInlineStyles()
 }
 
-function showToast(message, { type = 'info', actionLabel = '', undoFn = null, viewFn = null, duration = 3200 } = {}) {
-  toast.value = { open: true, message, type, actionLabel, undoFn, viewFn, duration }
-}
-
 function chooseTheme(key, event) {
   autoWallpaperColor.value = false
   // 从手指按下的位置向外扩散一个圆，圆扫到哪里新的配色才出现在哪里；
@@ -443,6 +439,16 @@ function openMobileTool(key) {
       >
         <span>{{ item.icon }}</span><small>{{ item.label }}</small>
       </router-link>
+      <router-link
+        v-for="item in mobileTaskItems"
+        :key="item.path"
+        :to="item.path"
+        class="mobile-nav-item"
+        active-class="active"
+        @pointerdown="warmRoute(item.path)"
+      >
+        <span>{{ item.icon }}</span><small>{{ item.label }}</small>
+      </router-link>
       <button
         class="mobile-nav-item mobile-ledger-trigger"
         :class="{ active: props.quickRecordOpen }"
@@ -463,6 +469,9 @@ function openMobileTool(key) {
       >
         <span>{{ item.icon }}</span><small>{{ item.label }}</small>
       </router-link>
+      <button class="mobile-nav-item mobile-search-trigger" type="button" aria-label="搜索" @click="openMobileTool('search')" @pointerdown="warmTool('search')">
+        <span>🔍</span><small>搜索</small>
+      </button>
       <button ref="moreTriggerEl" class="mobile-nav-item more-trigger" :class="{ active: showMobileMore }" type="button" :aria-expanded="showMobileMore" @click="showMobileMore = !showMobileMore">
         <span>⋯</span><small>更多</small>
       </button>
@@ -889,14 +898,15 @@ function openMobileTool(key) {
   .desktop-nav,
   .sidebar-foot { display: none; }
 
-  .mobile-nav { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 2px; width: 100%; min-width: 0; }
+  .mobile-nav { display: grid; grid-template-columns: repeat(7, minmax(44px, 1fr)); gap: 2px; width: 100%; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+  .mobile-nav::-webkit-scrollbar { display: none; }
   .mobile-nav-item,
   .mobile-more-item {
     display: flex;
     align-items: center;
     justify-content: center;
     flex-direction: column;
-    min-width: 0;
+    min-width: 44px;
     min-height: 54px;
     gap: 2px;
     padding: 4px 2px;
@@ -949,7 +959,7 @@ function openMobileTool(key) {
     overflow-y: auto;
     overscroll-behavior: contain;
     -webkit-overflow-scrolling: touch;
-    padding: 14px max(12px, env(safe-area-inset-right)) calc(14px + env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+    padding: calc(14px + env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) calc(14px + env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
     border: 0;
     border-left: 1px solid var(--border);
     border-radius: var(--radius-16) 0 0 var(--radius-16);
@@ -960,7 +970,7 @@ function openMobileTool(key) {
     transition: transform var(--dur-base) var(--ease-standard), opacity var(--dur-fast) var(--ease-standard);
   }
   .mobile-more-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
-  .mobile-more-head button { width: 30px; height: 30px; color: var(--muted); font-size: var(--fs-22); border: 0; border-radius: var(--radius-circle); background: var(--bg); }
+  .mobile-more-head button { width: 44px; height: 44px; color: var(--muted); font-size: var(--fs-22); border: 0; border-radius: var(--radius-circle); background: var(--bg); }
   .mobile-more-group + .mobile-more-group { margin-top: 13px; padding-top: 11px; border-top: 1px solid var(--border); }
   .mobile-more-group h3 { margin: 0 0 7px 2px; color: var(--ink-faint); font-size: var(--fs-11); font-weight: var(--fw-800); letter-spacing: .04em; }
   .mobile-more-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
@@ -982,6 +992,15 @@ function openMobileTool(key) {
   .more-backdrop-leave-to { opacity: 0; }
 
   }
+@media (max-width: 360px) {
+  .sidebar,
+  .sidebar.collapsed {
+    padding-left: max(3px, env(safe-area-inset-left));
+    padding-right: max(3px, env(safe-area-inset-right));
+  }
+  .mobile-nav { grid-template-columns: repeat(7, minmax(44px, 1fr)); gap: 0; }
+}
+
 @media (min-width: 901px) {
   .mobile-nav,
   .mobile-more-sheet,

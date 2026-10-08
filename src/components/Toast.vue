@@ -1,6 +1,7 @@
 <script setup>
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, watch } from 'vue'
 import { attachFloatingSlot, createFloatingSlot, detachFloatingSlot, useFloatingOffset } from '../composables/floatingStack.js'
+import { announce } from '../composables/liveRegion.js'
 
 // update:open 必须登记：六个调用点全都写的是 `v-model:open="toast.open"`，
 // 而这个组件原本只 emit close/action，于是 v-model 展开出来的 onUpdate:open
@@ -39,7 +40,8 @@ function closeToast() {
 function show() {
   attachFloatingSlot(slotId)
   if (timer) window.clearTimeout(timer)
-  if (props.duration > 0) {
+  // Keep actionable feedback visible until the user has had a chance to act.
+  if (props.duration > 0 && !props.actionLabel) {
     timer = window.setTimeout(() => {
       closeToast()
     }, props.duration)
@@ -69,6 +71,10 @@ watch(() => props.open, (open) => {
   else hide()
 }, { immediate: true })
 
+watch([() => props.open, () => props.message], ([open, message]) => {
+  if (open && message) announce(message, { clearAfter: 5000 })
+}, { immediate: true })
+
 onBeforeUnmount(hide)
 
 const typeClass = computed(() => ({
@@ -81,7 +87,7 @@ const typeClass = computed(() => ({
 
 <template>
   <Transition name="toast">
-    <div v-if="open" class="toast" :class="typeClass" role="status" aria-live="polite" :style="{ '--stack-offset': `${stackOffset}px` }">
+    <div v-if="open" class="toast" :class="typeClass" :style="{ '--stack-offset': `${stackOffset}px` }">
       <span class="toast-message">{{ message }}</span>
       <div v-if="actionLabel" class="toast-actions">
         <button v-if="undoFn" type="button" class="toast-btn toast-undo" @click="doAction">{{ actionLabel }}</button>
@@ -151,9 +157,9 @@ const typeClass = computed(() => ({
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 24px;
-  min-height: 24px;
-  padding: 4px 9px;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 8px 12px;
   font-size: var(--fs-11-5);
   font-weight: var(--fw-700);
   border: 0;
@@ -167,8 +173,9 @@ const typeClass = computed(() => ({
 }
 .toast-close {
   flex: 0 0 auto;
-  width: 24px;
-  height: 24px;
+  width: 44px;
+  min-width: 44px;
+  height: 44px;
   display: grid;
   place-items: center;
   color: var(--ink-faint);

@@ -205,7 +205,7 @@ import { openImportPlan } from '../../composables/timeImportPlan.js'
    底色一起从 --card 混出来，深色下才不是两条白条配亮色字。 */
 .assignment-message { margin: 0; padding: 8px 10px; border-radius: var(--radius-8); background: color-mix(in srgb, var(--success) 10%, var(--card)); color: var(--success); font-size: var(--fs-11-5); line-height: 1.5; }
 .assignment-message.missing { background: color-mix(in srgb, var(--warning) 10%, var(--card)); color: var(--warning); }
-.assignment-message.matched { background: #eef4ff; color: #2456b8; }
+.assignment-message.matched { background: var(--primary-soft); color: var(--primary); }
 .detail-tabs { align-self: flex-start; }
 .detail-tabs button { padding: 7px 14px; }
 .detail-rows { display: flex; flex-direction: column; gap: 6px; max-height: 46vh;max-height:46dvh; overflow-y: auto; padding-right: 2px; }

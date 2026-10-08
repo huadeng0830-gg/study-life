@@ -92,7 +92,6 @@ export function extractStrongFeatures(segments, periodsMax, MAX_WEEK) {
   
   for (let i = 0; i < segments.length; i++) {
     const segment = segments[i]
-    const lowerSegment = segment.toLowerCase()
 
     const labeledRoom = segment.match(/^(?:地点|位置|教室)[:：](.+)$/)
     if (features.room === null && labeledRoom?.[1]) {

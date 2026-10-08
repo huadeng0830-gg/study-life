@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import Modal from '../Modal.vue'
+import { cropCanvasDimensions } from '../../composables/imageCropSizing.js'
 
 const props = defineProps({ show: Boolean, file: { type: Object, default: null } })
 const emit = defineEmits(['close', 'confirm'])
@@ -117,10 +118,18 @@ async function confirm() {
   const sy = Math.round(img.naturalHeight * crop.top / 100)
   const sw = Math.round(img.naturalWidth * (crop.right - crop.left) / 100)
   const sh = Math.round(img.naturalHeight * (crop.bottom - crop.top) / 100)
-  canvas.width = sw
-  canvas.height = sh
-  canvas.getContext('2d').drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh)
-  const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png', 0.95))
+  const output = cropCanvasDimensions(sw, sh)
+  canvas.width = output.width
+  canvas.height = output.height
+  canvas.getContext('2d').drawImage(img, sx, sy, sw, sh, 0, 0, output.width, output.height)
+  let blob
+  try {
+    blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'))
+  } finally {
+    // toBlob 完成后及时释放像素缓冲，避免弹窗关闭前同时保留大画布和 PNG。
+    canvas.width = 1
+    canvas.height = 1
+  }
   if (!blob) return
   emit('confirm', new File([blob], `${file.name.replace(/\.[^.]+$/, '') || 'timetable'}-crop.png`, { type: 'image/png', lastModified: Date.now() }))
 }

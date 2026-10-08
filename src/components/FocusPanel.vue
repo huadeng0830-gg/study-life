@@ -13,6 +13,7 @@ import {
   focusDisplayState,
   focusPlannedSeconds,
   formatFocusDuration,
+  finalizeStaleActiveSession,
   normalizeActiveSession,
   normalizeFocusSettings,
   pushRecentTemporary,
@@ -312,6 +313,15 @@ function showFlash(message) {
   flashTimer = window.setTimeout(() => { if (flashMessage.value === message) flashMessage.value = '' }, 3200)
 }
 
+function recoverStaleFocusSession() {
+  const saved = finalizeStaleActiveSession(activeRef.value)
+  if (!saved) return
+  domain.recordFocusSession(saved)
+  activeRef.value = null
+  lastSavedSession.value = saved
+  showFlash('上次专注长时间未结束，已按计划时长记录。')
+}
+
 function playSound() {
   try {
     const AudioContext = window.AudioContext || window.webkitAudioContext
@@ -392,6 +402,7 @@ onMounted(() => {
   if (activeRef.value) {
     activeRef.value = normalizeActiveSession(activeRef.value)
     now.value = Date.now()
+    recoverStaleFocusSession()
   }
   syncTicker()
   document.addEventListener('visibilitychange', onVisibilityChange)
@@ -581,9 +592,9 @@ onActivated(() => {
   margin: 0;
   padding: 8px 12px;
   border-radius: var(--radius-9);
-  color: #087a58;
-  background: #effaf6;
-  border: 1px solid #b9e6d5;
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 10%, var(--card));
+  border: 1px solid color-mix(in srgb, var(--success) 35%, var(--card));
   font-size: var(--fs-12-5);
 }
 .focus-active,
@@ -743,9 +754,8 @@ onActivated(() => {
   display: grid;
   place-items: center;
   border-radius: var(--radius-circle);
-  background: #e7f8f1;
-  /* #14966d 在 #e7f8f1 上只有 3.40:1；#067654 得 5.12:1（与 AppearanceSettings 同步）。 */
-  color: #067654;
+  background: color-mix(in srgb, var(--success) 10%, var(--card));
+  color: var(--success);
   font-size: var(--fs-22);
   font-weight: var(--fw-900);
 }

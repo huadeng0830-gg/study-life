@@ -124,7 +124,7 @@ describe('注册面板的实际表单行为', () => {
     expect(document.querySelector('#account-password').getAttribute('autocomplete')).toBe('current-password')
   })
 
-  it('登录和退出可操作，页面展示账号且保留本机记录', async () => {
+  it('登录和退出可操作，退出后清理共享设备上的本机业务记录', async () => {
     await mountPanel()
     localStorage.setItem('sl_tasks', '[{"id":"demo-task","title":"虚构任务"}]')
     await click('登录')
@@ -133,10 +133,11 @@ describe('注册面板的实际表单行为', () => {
     await submit()
     await vi.waitFor(() => expect(document.querySelector('#account-summary-title')).toBeTruthy())
     expect(document.querySelector('.account-summary').textContent).toContain(user.email)
-    await click('退出当前设备')
+    await click('退出并清除本机数据')
     await vi.waitFor(() => expect(document.querySelector('#account-email')).toBeTruthy())
-    expect(document.querySelector('.account-success').textContent).toContain('本机记录已保留')
-    expect(localStorage.getItem('sl_tasks')).toContain('demo-task')
+    await vi.waitFor(() => expect(document.querySelector('.account-success')).toBeTruthy())
+    expect(document.querySelector('.account-success').textContent).toContain('账号已退出')
+    expect(localStorage.getItem('sl_tasks')).toBeNull()
   })
 
   it('服务端登录失败显示提示，表单仍可修改和再次提交', async () => {

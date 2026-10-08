@@ -1,7 +1,21 @@
-export const DOMAIN_SCHEMA_VERSION = 1
+export const DOMAIN_SCHEMA_VERSION = 3
 
-// 只补充缺失字段，永不删除或改写用户已有内容；可安全重复执行。
-export function migrateDomainData({ tasks = [], milestones = [], transactions = [], events = [], notes = [] } = {}) {
+export function detachRetiredNoteRelations({ tasks = [], events = [] } = {}) {
+  let changed = 0
+  const now = new Date().toISOString()
+  for (const item of [...tasks, ...events]) {
+    if (item.sourceType !== 'note') continue
+    item.sourceType = ''
+    item.sourceId = ''
+    item.relationId = ''
+    item.updatedAt = now
+    changed++
+  }
+  return changed
+}
+
+// 补充缺失字段，并在退役独立笔记后解除旧任务/日程到笔记的关系；原文和备注内容不变。
+export function migrateDomainData({ tasks = [], milestones = [], transactions = [], events = [] } = {}) {
   let changed = 0
   for (const task of tasks) {
     if (task.done === undefined) { task.done = task.status === 'completed'; changed++ }
@@ -18,10 +32,5 @@ export function migrateDomainData({ tasks = [], milestones = [], transactions = 
     if (!item.updatedAt && item.createdAt) { item.updatedAt = item.createdAt; changed++ }
   }
   for (const item of events) if (!item.updatedAt && item.createdAt) { item.updatedAt = item.createdAt; changed++ }
-  for (const item of notes) {
-    if (!item.updatedAt && item.createdAt) { item.updatedAt = item.createdAt; changed++ }
-    if (!Array.isArray(item.tags)) { item.tags = []; changed++ }
-    if (!item.sourceText) { item.sourceText = item.content || item.title || ''; changed++ }
-  }
-  return changed
+  return changed + detachRetiredNoteRelations({ tasks, events })
 }

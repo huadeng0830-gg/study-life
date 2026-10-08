@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { useDomainCommands } from '../src/composables/domain/commands.js'
-import { selectDayAgenda, selectHistoricalItems, selectReminders } from '../src/composables/domain/selectors.js'
+import { selectHistoricalItems, selectReminders } from '../src/composables/domain/selectors.js'
 import { isArchived } from '../src/composables/domain/state.js'
 import { selectNextWeekHighlights, selectWeeklyBillSummary, selectWeeklyFinanceSummary, selectWeeklyMoodSummary, selectWeeklyTaskSummary, weekRange } from '../src/composables/domain/weeklySelectors.js'
 import { settings } from '../src/composables/settingsPolicy.js'
@@ -17,7 +17,6 @@ beforeEach(() => {
   domain.bills.value = []
   domain.transactions.value = []
   domain.events.value = []
-  domain.notes.value = []
 })
 
 afterEach(() => { settings.value = originalSettings })
@@ -29,7 +28,6 @@ describe('P2-A archive lifecycle', () => {
     domain.archiveTask(task.id)
 
     expect(isArchived(task)).toBe(true)
-    expect(selectDayAgenda({ tasks: domain.tasks.value }, new Date('2026-09-02T10:00:00'))).toEqual([])
     expect(selectReminders({ tasks: domain.tasks.value }, new Date('2026-09-02T10:00:00'))).toEqual([])
     expect(selectHistoricalItems(domain.tasks.value)).toContainEqual(expect.objectContaining({ id: task.id }))
 
@@ -42,18 +40,14 @@ describe('P2-A archive lifecycle', () => {
     domain.courses.value.push(course)
     domain.tasks.value.push({ id: 'course-task', title: '作业', courseId: course.id, course: course.name })
     domain.milestones.value.push({ id: 'course-milestone', name: '考试', date: '2026-09-10', courseId: course.id })
-    domain.notes.value.push({ id: 'course-note', title: '笔记', content: '内容', courseId: course.id })
 
     domain.archiveCourse(course.id)
-    expect(selectDayAgenda({ courses: domain.courses.value }, new Date('2026-09-02T10:00:00'))).toEqual([])
     expect(domain.tasks.value[0].courseId).toBe(course.id)
     expect(domain.milestones.value[0].courseId).toBe(course.id)
-    expect(domain.notes.value[0].courseId).toBe(course.id)
 
     domain.deleteCourse(course.id)
     expect(domain.tasks.value[0].courseId).toBe('')
     expect(domain.milestones.value[0].courseId).toBe('')
-    expect(domain.notes.value[0].courseId).toBe('')
   })
 
   it('keeps past milestones and inactive bills out of current reminders but keeps history', () => {
@@ -69,14 +63,6 @@ describe('P2-A archive lifecycle', () => {
     expect(domain.transactions.value).toHaveLength(1)
   })
 
-  it('archives a note without breaking its task source relation', () => {
-    const note = { id: 'archive-note', title: '通知', content: '周五交', sourceType: 'notice' }
-    domain.notes.value.push(note)
-    domain.tasks.value.push({ id: 'note-task', title: '交报告', sourceType: 'note', sourceId: note.id })
-    domain.archiveNote(note.id)
-    expect(isArchived(note)).toBe(true)
-    expect(domain.tasks.value[0]).toMatchObject({ sourceType: 'note', sourceId: note.id })
-  })
 })
 
 describe('P2-A weekly review selectors', () => {
