@@ -3,6 +3,7 @@ import path from 'node:path'
 import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import { isExpectedDesktopUpdateSource } from './desktop-update-source.mjs'
+import { readPublicSupabaseConfig, verifySupabaseBundle } from './supabase-build-checks.mjs'
 
 const require = createRequire(import.meta.url)
 const { extractFile, listPackage } = require('@electron/asar')
@@ -10,6 +11,7 @@ const ROOT = fileURLToPath(new URL('../', import.meta.url))
 const packageDirectory = path.resolve(ROOT, process.argv[2] || 'release-desktop/win-unpacked')
 const archivePath = path.join(packageDirectory, 'resources', 'app.asar')
 const updateConfigPath = path.join(packageDirectory, 'resources', 'app-update.yml')
+const desktopRendererPath = path.join(packageDirectory, 'resources', 'dist-desktop')
 
 function fail(message) {
   console.error(`✗ 桌面更新包校验失败：${message}`)
@@ -39,4 +41,10 @@ if (!isExpectedDesktopUpdateSource(updateConfig)) {
   fail('app-update.yml 没有指向预期的 GitHub Releases 仓库')
 }
 
-console.log(`✓ Windows 包含 electron-updater ${appUpdaterVersion}、版本 ${appManifest.version} 和 GitHub 更新源配置`)
+try {
+  verifySupabaseBundle(desktopRendererPath, readPublicSupabaseConfig('desktop'))
+} catch (error) {
+  fail(`桌面渲染资源没有有效的账号配置：${error.message}`)
+}
+
+console.log(`✓ Windows 包含 electron-updater ${appUpdaterVersion}、版本 ${appManifest.version}、GitHub 更新源和有效的 Supabase 账号配置`)

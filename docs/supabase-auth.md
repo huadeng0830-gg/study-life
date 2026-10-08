@@ -24,6 +24,8 @@
 
 Cloudflare Pages 的生产及预览构建环境也需要上述两个变量，再重新构建部署。Vite 在构建时读取变量；修改环境变量不会更新已有静态资源。账号同步直接连接 Supabase，不依赖旧 Cloudflare 同步协调器。
 
+GitHub Actions 的网页构建、Windows 桌面打包和桌面 Release 使用仓库级 Actions Variables：`VITE_SUPABASE_URL` 与 `VITE_SUPABASE_PUBLISHABLE_KEY`。这两个值是面向客户端的公开配置，不得改用 Supabase secret 或 `service_role` key。发布工作流会验证配置并扫描最终网页/桌面 JavaScript 包；配置缺失或没有打入安装包时会阻止发布。可在仓库 **Settings → Secrets and variables → Actions → Variables** 中维护这两个变量。不要把真实值写进源码、README 或 `.env.example`。
+
 ## Supabase Auth 状态
 
 按当前要求，邮箱验证与邮件服务暂不配置。现有项目仍使用 Supabase 默认设置：邮箱验证开启，自定义 SMTP 尚未配置。默认邮件服务限制收件范围，普通用户邮箱的注册验证仍需要完成邮件配置后验收。

@@ -9,14 +9,10 @@
 [🌐 在线体验](https://study-life.pages.dev/) · [📦 GitHub](https://github.com/huadeng0830-gg/study-life)
 
 <!-- RELEASE_STATUS:START -->
-> **当前源码版本**：网页 / PWA `2026年10月08日-版本3` · Windows 桌面版 `1.0.4`
+> **当前源码版本**：网页 / PWA `2026年10月08日-版本4` · Windows 桌面版 `1.0.5`
 > **最近更新**：
-> - Windows 更新器随包校验，缓存与临时文件跟随可选安装目录
-> - v* 标签自动构建 Windows 安装包并发布应用内更新元数据
-> - 桌面版本号和 README 版本区块随发布说明自动同步
-> - 齐行项目协作支持成员邀请、任务分配、成果评审、里程碑与会议
-> - 已安装 1.0.3 的用户需手动安装 1.0.4 一次，之后可在应用内更新
-> - 好友协作页完善确认、错误播报、标签切换与窄屏适配
+> - 修复网页、手机与 Windows 桌面版账号配置漏打包，并在构建和发布阶段增加校验
+> - 根据首页实际内容宽度调整‘今天’页面布局，避免桌面窄窗口下挤压
 > [下载已发布的 Windows 安装包与版本说明](https://github.com/huadeng0830-gg/study-life/releases/latest)
 <!-- RELEASE_STATUS:END -->
 

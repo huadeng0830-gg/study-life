@@ -7,6 +7,14 @@
 // 3. 更早的版本逐条下移，最多保留 3 个版本，超出即删除。
 export const RELEASE_UPDATES = Object.freeze([
   {
+    version: '2026年10月08日-版本4',
+    signature: 'd205050f3f',
+    notes: [
+      '修复网页、手机与 Windows 桌面版账号配置漏打包，并在构建和发布阶段增加校验',
+      '根据首页实际内容宽度调整‘今天’页面布局，避免桌面窄窗口下挤压',
+    ],
+  },
+  {
     version: '2026年10月08日-版本3',
     signature: 'df8e00dddf',
     notes: [
@@ -29,21 +37,13 @@ export const RELEASE_UPDATES = Object.freeze([
       '统一快速记账分摊预览的计算与展示，避免表单口径出现两套结果',
     ],
   },
-  {
-    version: '2026年10月08日-版本1',
-    signature: 'e2e6c8c7fc',
-    notes: [
-      '拆分任务编辑、应用提示队列与节日氛围管理，保持现有使用流程',
-      '抽离账本分类管理并保护分类 ID、历史交易与自动分类规则',
-    ],
-  },
 ])
 
 // 对用户展示、version.txt 和更新检测统一使用此版本号；后续同日发布只递增“版本”序号。
 export const RELEASE_VERSION = RELEASE_UPDATES[0].version
 
 // 与第一条签名保持一致，交给 vite.config.js 校验源码一致性。
-export const RELEASE_SOURCE_SIGNATURE = '1a6644f749'
+export const RELEASE_SOURCE_SIGNATURE = 'd205050f3f'
 
 // 兼容旧引用：当前版本的更新说明。
 export const RELEASE_NOTES = RELEASE_UPDATES[0].notes

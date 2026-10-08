@@ -15,6 +15,9 @@ concurrency:
 jobs:
   release:
     runs-on: windows-latest
+    env:
+      VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
+      VITE_SUPABASE_PUBLISHABLE_KEY: ${{ vars.VITE_SUPABASE_PUBLISHABLE_KEY }}
     timeout-minutes: 45
     steps:
       - name: Checkout
@@ -45,6 +48,9 @@ jobs:
             throw "Tag $env:GITHUB_REF_NAME does not match desktop-app version $version (expected $expectedTag)."
           }
           npm run check:release-readme
+
+      - name: Verify public account configuration
+        run: npm run supabase:verify-config -- desktop
 
       - name: Run release quality gates
         run: |

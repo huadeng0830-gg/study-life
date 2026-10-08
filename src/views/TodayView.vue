@@ -295,6 +295,7 @@ function countdownLabel(item) {
 </script>
 
 <template>
+  <div class="today-layout">
   <div class="page today-page">
     <header class="page-head">
       <div class="head-copy">
@@ -402,6 +403,7 @@ function countdownLabel(item) {
     <Modal v-if="eventDetail" :open="Boolean(eventDetail)" title="日程详情" medium @close="eventDetail = null">
       <div class="event-detail" :data-focus-id="eventDetail.id"><h3>{{ eventDetail.title }}</h3><p>{{ eventDetail.date || '待安排' }}<template v-if="eventDetail.time"> · {{ eventDetail.time }}</template><template v-if="eventDetail.endTime">–{{ eventDetail.endTime }}</template></p><p v-if="eventDetail.location">地点：{{ eventDetail.location }}</p><p v-if="eventDetail.courseName">课程：{{ eventDetail.courseName }}</p><p v-if="eventDetail.note" class="event-detail-note">{{ eventDetail.note }}</p></div>
     </Modal>
+  </div>
   </div>
 </template>
 
@@ -951,7 +953,14 @@ function countdownLabel(item) {
   max-width:none}
 }
 
-@media (min-width:901px) {
+/* The app's sidebar consumes viewport width on desktop. Base this two-column
+   layout on the space the page actually receives, not the outer window. */
+.today-layout {
+  min-width:0;
+  container-name:today-layout;
+  container-type:inline-size}
+
+@container today-layout (min-width:850px) {
   .today-page {
   grid-template-columns:repeat(2,minmax(0,1fr));
   align-items:start;
