@@ -190,9 +190,12 @@ beforeEach(() => {
   vi.spyOn(console, 'warn').mockImplementation((...args) => { warnings.push(args.join(' ')) })
 })
 
-afterEach(() => {
+afterEach(async () => {
   mounted?.unmount()
   mounted = null
+  // SearchPanel 延迟播报搜索摘要；用例卸载后要清掉当前 vi.resetModules() 实例的定时器。
+  const { clearAnnouncement } = await import('../src/composables/liveRegion.js')
+  clearAnnouncement()
   vi.restoreAllMocks()
   document.body.innerHTML = ''
   delete document.body.dataset.modalLockCount
