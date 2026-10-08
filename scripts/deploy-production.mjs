@@ -14,7 +14,10 @@ export function assertProductionDeployPreflight({ branch, status, localHead, rem
 }
 
 function run(command, args) {
-  const result = spawnSync(command, args, { cwd: ROOT, stdio: 'inherit', shell: process.platform === 'win32' })
+  // .cmd shims (such as npm) need cmd.exe on Windows, but passing an absolute
+  // node.exe path through the shell breaks when the installation path has spaces.
+  const shell = process.platform === 'win32' && !path.isAbsolute(command)
+  const result = spawnSync(command, args, { cwd: ROOT, stdio: 'inherit', shell })
   if (result.error) throw result.error
   if (result.status !== 0) process.exit(result.status || 1)
 }
