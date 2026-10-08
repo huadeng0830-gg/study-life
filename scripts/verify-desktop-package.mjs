@@ -58,22 +58,29 @@ if (requireSignature) {
   const executablePath = path.join(packageDirectory, executables[0])
   const encodedPath = Buffer.from(executablePath, 'utf8').toString('base64')
   const script = [
+    "$ErrorActionPreference = 'Stop'",
+    'Import-Module Microsoft.PowerShell.Security -ErrorAction Stop',
     `$path = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${encodedPath}'))`,
     '$signature = Get-AuthenticodeSignature -LiteralPath $path',
-    '[PSCustomObject]@{ status = [string]$signature.Status; subject = [string]$signature.SignerCertificate.Subject; thumbprint = [string]$signature.SignerCertificate.Thumbprint; statusMessage = [string]$signature.StatusMessage } | ConvertTo-Json -Compress',
+    '$chain = [System.Security.Cryptography.X509Certificates.X509Chain]::new(); $null = $chain.Build($signature.SignerCertificate)',
+    '[PSCustomObject]@{ status = [string]$signature.Status; subject = [string]$signature.SignerCertificate.Subject; thumbprint = [string]$signature.SignerCertificate.Thumbprint; chainStatus = @($chain.ChainStatus | ForEach-Object { [string]$_.Status }) } | ConvertTo-Json -Compress',
   ].join('; ')
-  const signatureResult = spawnSync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script], {
+  const signatureResult = spawnSync('pwsh.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script], {
     encoding: 'utf8', timeout: 15000,
   })
   if (signatureResult.error || signatureResult.status !== 0) fail(`无法读取 Authenticode 签名：${signatureResult.stderr || signatureResult.error?.message || 'PowerShell 失败'}`)
   let signature
   try { signature = JSON.parse(signatureResult.stdout.trim()) } catch { fail('Windows 未返回可解析的 Authenticode 签名信息') }
   const actualThumbprint = String(signature.thumbprint ?? '').replaceAll(':', '').toUpperCase()
+  if (!actualThumbprint) fail('Windows 未返回签名证书指纹')
   if (actualThumbprint !== expectedThumbprint) fail('应用 exe 的签名者指纹与仓库内公钥证书不匹配')
+  const chainStatus = (Array.isArray(signature.chainStatus) ? signature.chainStatus : [signature.chainStatus])
+    .filter(Boolean)
   const untrustedSelfSignedChain = signature.status === 'UnknownError'
-    && /certificate chain processed,\s*but terminated in a root certificate which is not trusted/i.test(signature.statusMessage)
+    && chainStatus.length === 1
+    && chainStatus[0] === 'UntrustedRoot'
   if (signature.status !== 'Valid' && !untrustedSelfSignedChain) {
-    fail(`应用 exe 的 Authenticode 签名状态为 ${signature.status || 'unknown'}`)
+    fail(`应用 exe 的 Authenticode 签名状态为 ${signature.status || 'unknown'}${chainStatus.length ? `（${chainStatus.join(', ')}）` : ''}`)
   }
   if (!matchesDesktopPublisher(publisherNames, signature.subject)) {
     fail('app-update.yml 的 publisherName 与公钥证书主题不匹配')
