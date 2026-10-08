@@ -84,7 +84,7 @@ const showSemester = ref(false)
 const showExceptions = ref(false)
 const clampViewWeek = (week) => Math.min(Math.max(week, 0), MAX_WEEK)
 const viewWeek = ref(clampViewWeek(appCurrentWeek.value))
-const mobileView = ref(typeof window !== 'undefined' && window.matchMedia('(max-width: 760px)').matches ? 'day' : 'week')
+const mobileView = ref(typeof window !== 'undefined' && window.matchMedia('(max-width: 1024px)').matches ? 'day' : 'week')
 const mobileDay = ref(currentDayIndex.value)
 const todayIdx = currentDayIndex
 
@@ -242,7 +242,7 @@ function confirmDeleteCourse() {
 </script>
 
 <template>
-  <div class="page">
+  <div class="page schedule-page">
     <div class="head">
       <h1 class="page-title">课程表</h1>
       <div class="head-btns">
@@ -567,6 +567,15 @@ function confirmDeleteCourse() {
   background:linear-gradient(90deg,#0000 58px,#da5e5e38 59px,#0000 60px),repeating-linear-gradient(#fffdf7 0 31px,#dce7ef 32px);
   border-color:#ddcfab;
   box-shadow:0 10px 28px #6c532317}
+/* 「聚焦态」反馈条：模板用了 .notice-success，但这条类只在**别的组件**的 scoped 块里定义过
+   （TasksView / EventsView / WeeklyReviewView），scoped 样式不会跨组件生效，
+   于是这里渲染成默认段落（正文黑字 + 默认外边距），与全站绿色成功提示不一致。
+   注意：LedgerView.vue:762 与 NotesView.vue:194 用的是同一个类、同样是**本地没有定义**，
+   三处一起补齐，别只补这里。 */
+.notice-success {
+  margin:12px 0 0;
+  color:var(--success);
+  font-size:var(--fs-12)}
 .page {
   flex-direction:column;
   gap:16px;
@@ -681,7 +690,19 @@ function confirmDeleteCourse() {
 .auto-mode-hint.unavailable {
   color:var(--warning)}
 .mobile-view-switcher {
-  display:none}
+  display:flex}
+@media (min-width:901px) {
+  .schedule-page>.toolbar {
+  border:1px solid var(--border);
+  background:var(--card);
+  border-radius:var(--radius-12);
+  gap:12px;
+  padding:12px 14px}
+.schedule-page>.toolbar .seg-group {
+  gap:7px}
+.schedule-page>.toolbar .seg button {
+  padding:7px 11px}
+}
 @media (max-width:760px) {
   .skin-switcher,.schedule-campus,.schedule-season {
   display:none}

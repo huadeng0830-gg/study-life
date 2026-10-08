@@ -11,8 +11,10 @@
  * （composables/timeImportPlan.js），弹窗开着时用户可能切走再切回来；
  * 把状态放在组件里会让"切走再回来"丢掉执行进度。
  */
+import { computed } from 'vue'
 import Modal from '../Modal.vue'
 import TaskProgress from '../TaskProgress.vue'
+import { importError } from '../../composables/timeSettingsShared.js'
 import {
   canImportItem,
   canReplaceItem,
@@ -20,6 +22,7 @@ import {
   confirmImportPlan,
   createActionLabel,
   editFromPlan,
+  importFailed,
   importPlan,
   importPlanOpen,
   importProgress,
@@ -28,17 +31,45 @@ import {
   setPlanItemAction,
   togglePlanDiff,
 } from '../../composables/timeImportPlan.js'
+
+/**
+ * 标题三态：失败 > 进行中 > 计划。
+ * 原来只有后两态，失败时标题写着「本次导入计划」而正文是一张报错页，自相矛盾。
+ */
+const modalTitle = computed(() => {
+  if (importFailed.value) return '导入失败'
+  return importRunning.value ? '正在导入' : '本次导入计划'
+})
 </script>
 
 <template>
   <Modal
     v-if="importPlanOpen"
     :open="importPlanOpen"
-    :title="importRunning ? '正在导入' : '本次导入计划'"
+    :title="modalTitle"
     medium
     @close="closeImportPlan"
   >
-    <template v-if="!importRunning && importPlan">
+    <!-- 失败态：留在**本弹窗**里说清结果并给出出口。
+         原因：importRunning 一置回 false，下面的计划分支就会立刻接管视图，而失败文案
+         原本只写进 importError，它唯一的渲染点在下层 TimeSettingsModal（被本弹窗盖住）——
+         用户看到的是"点确认 → 闪一下 → 又回到计划列表"，无从判断成没成，很可能再点一次。
+         【否掉的替代方案】失败时不复位 importRunning，让 TaskProgress 的 is-failed 卡片留在原地：
+         那张卡里的 task-error 与这里的文案是同一句，屏幕上会出现两个报错面；而且它的动作行
+         由进度组件的语义决定（本次 start() 没传 cancel，动作行本就渲染不出来），
+         出口写在这里更直接可控。
+         【role="alert" 而不是走常驻播报通道】这条失败与下层那条是同一份文案，两层都渲染会
+         被读屏播两遍，所以 TimeSettingsModal 里那一行在本弹窗打开时被抑制（见那里的注释），
+         全应用只留这一条 role="alert" 在报信。 -->
+    <template v-if="importFailed">
+      <p class="plan-fail" role="alert">{{ importError || '导入失败，原数据已恢复。' }}</p>
+      <p class="tool-tip">这次导入没有写入任何改动，原数据已回滚到导入前的状态。你可以直接重试，或返回计划列表再检查识别结果。</p>
+      <div class="plan-foot">
+        <button class="btn" @click="closeImportPlan">返回计划列表</button>
+        <button class="btn btn-primary" :disabled="!importPlan?.executable" @click="confirmImportPlan">重试导入</button>
+      </div>
+    </template>
+    <template v-else-if="!importRunning && importPlan">
       <p class="plan-summary">
         共 {{ importPlan.summary.total }} 组作息 ·
         <b class="ok-text">{{ importPlan.summary.replace }} 组替换</b> ·
@@ -140,6 +171,9 @@ import {
 .plan-diff-list { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border-radius: var(--radius-8); background: var(--bg-tint); }
 .plan-warning { margin: 0; color: var(--warning); font-size: var(--fs-11-5); }
 .plan-blocker { margin: 0; color: var(--danger); font-size: var(--fs-11-5); font-weight: var(--fw-700); }
+/* 失败原因：这是整张失败态里唯一的高优先信息，用与 .plan-blocker 同一档的危险色，
+   字号比 block 行略大（失败是"整件事没成"，不是某一行的问题）。 */
+.plan-fail { margin: 0; color: var(--danger); font-size: var(--fs-12-5); line-height: 1.6; }
 .plan-skip-note { margin: 0; color: var(--ink-faint); font-size: var(--fs-11-5); }
 .plan-foot { display: flex; justify-content: flex-end; gap: 10px; margin-top: 12px; }
 </style>

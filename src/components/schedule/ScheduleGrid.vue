@@ -1,6 +1,6 @@
 <script setup>
 import { computed, nextTick, ref } from 'vue'
-import { timeConfig, currentTimes, periodLabelById } from '../../composables/store/timeConfig.js'
+import { timeConfig, currentTimes, currentCampusId, currentSeasonId, periodLabelById } from '../../composables/store/timeConfig.js'
 import { weekLabel } from '../../composables/store/schedule.js'
 import { useScheduleGrid } from '../../composables/schedule/useScheduleGrid.js'
 
@@ -17,6 +17,8 @@ const props = defineProps({
 
 const emit = defineEmits(['open-add', 'open-edit', 'week-change', 'mobile-day-change'])
 const todayIdx = computed(() => props.currentDayIndex)
+const activeCampus = computed(() => timeConfig.value.campuses.find((campus) => campus.id === currentCampusId()))
+const activeSeason = computed(() => timeConfig.value.seasons.find((season) => season.id === currentSeasonId()))
 
 const {
   DAYS,
@@ -276,10 +278,10 @@ async function onCellKeydown(event, day, periodIndex) {
     </div>
 
     <p class="tip">
-      💡 正在查看：{{ timeConfig.campuses.find(c => c.id === timeConfig.currentCampus)?.name || '' }} ·
-      {{ timeConfig.seasons.find(s => s.id === timeConfig.currentSeason)?.name || '' }}<template v-if="timeConfig.seasons.length > 1 && timeConfig.autoSeason">（自动）</template> ·
+      💡 正在查看：{{ activeCampus?.name || '' }} ·
+      {{ activeSeason?.name || '' }}<template v-if="timeConfig.seasons.length > 1 && timeConfig.autoSeason">（自动）</template> ·
       {{ viewWeekText(viewWeek) }}的课程；
-      点击空白格子或**聚焦后用方向键选中再回车**都能快速添加，点击课程卡片可编辑
+      点击空白格子，或聚焦后用方向键选中再回车，都能快速添加，点击课程卡片可编辑
     </p>
   </div>
 </template>

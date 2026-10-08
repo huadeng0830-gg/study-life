@@ -3,16 +3,11 @@ import { isSyncKey } from '../syncKeys.js'
 import { mirrorLocalValue, mirrorLocalValues, setMirrorErrorHandler, setMirrorTimingHandler } from '../dataVault.js'
 import { recordSilentError } from '../globalError.js'
 
-// 云同步在启动时注册本机变更回调；存储层只依赖这个钩子，
-// 避免 core → cloudSync 的静态导入把整张同步图打进业务 chunk（timeConfig 等）。
-let localChangedHandler = null
-
-export function setLocalChangedHandler(handler) {
-  localChangedHandler = typeof handler === 'function' ? handler : null
-}
-
+// 存储层只发出本机数据变更信号；账号同步监听同一个事件，不反向耦合存储实现。
 function notifyLocalChanged(key = '', rawValue = undefined) {
-  if (localChangedHandler) localChangedHandler(key, rawValue)
+  if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function' && typeof CustomEvent === 'function') {
+    window.dispatchEvent(new CustomEvent('study-life:sync-dirty', { detail: { key, rawValue } }))
+  }
 }
 
 const storedRefs = new Map()
@@ -209,7 +204,7 @@ function writeNow(key, makeRaw) {
     if (isSyncKey(key)) notifyLocalChanged(key, raw)
   } catch (error) {
     // 配额溢出/隐私模式等失败不阻塞应用，但必须留下排查线索。
-    reportPersistenceFailure(error, 'local')
+    reportPersistenceFailure(error, key, 'local')
   }
 }
 
@@ -464,7 +459,7 @@ export function migrateTaskCourseLinks(taskList, courseList) {
 
 /**
  * 农历纪念日的内存镜像（lunarAnniversaries.js）不在存储层里：它只在首次读取时从
- * localStorage 补水，之后只有设置面板会发布。云同步恢复、本地迁移导入、备份恢复
+ * localStorage 补水，之后只有设置面板会发布。账号同步应用与备份恢复
  * 都经过 restoreStoredValues，写完这个键必须补一次发布 —— 否则首页会一直读旧镜像
  * 直到刷新，用户看到的是「恢复成功了但首页没变」。
  */

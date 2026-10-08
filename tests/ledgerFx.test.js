@@ -19,6 +19,7 @@ import {
   normalizeCurrency,
   normalizeLedgerFx,
   sumLedgerMonthInBase,
+  summarizeLedgerMonthsInBase,
   summarizeLedgerInBase,
   toBaseMinor,
 } from '../src/composables/ledgerFx.js'
@@ -136,6 +137,24 @@ describe('按基准币种折算求和（月/区间）', () => {
     expect(august.hasForeign).toBe(false)
     const firstWeek = summarizeLedgerInBase(list, FX, { dateFilter: (date) => date >= '2026-09-01' && date <= '2026-09-06' })
     expect(firstWeek.expenseTotal).toBe(102)
+  })
+
+  it('多月一次汇总与逐月汇总逐字段一致（含退款、收入、缺汇率与自定义金额）', () => {
+    const entries = [
+      record({ id: 'sep-cny', amount: 30, date: '2026-09-03', personalAmount: 18 }),
+      record({ id: 'sep-usd', amount: 10, currency: 'USD', date: '2026-09-04', personalAmount: 5 }),
+      record({ id: 'sep-refund', amount: 2, currency: 'USD', direction: 'refund', date: '2026-09-05', personalAmount: 1 }),
+      record({ id: 'sep-eur', amount: 50, currency: 'EUR', date: '2026-09-06', personalAmount: 20 }),
+      record({ id: 'aug-income', amount: 500, direction: 'income', date: '2026-08-08', personalAmount: 300 }),
+      record({ id: 'oct-ignored', amount: 999, date: '2026-10-01' }),
+    ]
+    const amountOf = (item) => item.personalAmount
+    const months = ['2026-08', '2026-09', '2026-07']
+    const summaries = summarizeLedgerMonthsInBase(entries, FX, months, { amountOf })
+
+    for (const month of months) {
+      expect(summaries.get(month)).toEqual(sumLedgerMonthInBase(entries, FX, month, { amountOf }))
+    }
   })
 
   it('没有任何非基准币种记录时，折算合计与既有 summarizeLedgerTransactions 逐分相等', () => {

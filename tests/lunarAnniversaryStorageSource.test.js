@@ -8,9 +8,9 @@
 // `function hydrateMirror() { if (mirrored) return ... }`。它能过掉所有"面板写、面板读"的
 // 测试，但在**别人写**的路径上全错：
 //
-//   - 云同步合并：`cloudSync.commitStoredValues()` → `store/core.js:restoreStoredValues()`。
+//   - 账号同步应用：`accountSyncEngine` → `store/core.js:restoreStoredValues()`。
 //     那个函数只更新**注册过的** `storedRefs`（`useStoredRef` 建的），模块自己的镜像不在其中，
-//     而且这条路径**不会重新载入页面**（备份恢复与本地迁移导入会 reload，所以它们没事）。
+//     而且这条路径**不会重新载入页面**（备份恢复会 reload，所以它们没事）。
 //   - 另一个标签页直接改 localStorage。
 //
 // 结果是最难查的那种不一致：**设置面板显示新数据，首页仍按旧镜像点亮**——用户看到的是

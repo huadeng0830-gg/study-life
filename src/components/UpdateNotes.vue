@@ -16,15 +16,17 @@ function acknowledge() {
     <div class="release-notes">
       <span class="release-version">版本 {{ APP_RELEASE }}</span>
       <h4>这次有这些变化</h4>
-      <ul><li v-for="note in RELEASE_NOTES" :key="note">{{ note }}</li></ul>
+      <!-- 【key 用下标】原来 key 就是 note 文本：同一个版本里出现两条相同的说明
+           会产生重复 key，Vue 会告警并按错误的方式复用 DOM。 -->
+      <ul><li v-for="(note, index) in RELEASE_NOTES" :key="index">{{ note }}</li></ul>
       <template v-if="PREVIOUS_RELEASE_GROUPS.length">
         <h4 class="previous-title">之前的更新</h4>
         <div v-for="group in PREVIOUS_RELEASE_GROUPS" :key="group.version" class="previous-group">
           <span class="previous-version">{{ group.version }}</span>
-          <ul><li v-for="note in group.notes" :key="note">{{ note }}</li></ul>
+          <ul><li v-for="(note, index) in group.notes" :key="index">{{ note }}</li></ul>
         </div>
       </template>
-      <button type="button" class="btn btn-primary" @click="acknowledge">知道了</button>
+      <button type="button" class="btn btn-primary" autofocus @click="acknowledge">知道了</button>
     </div>
   </Modal>
 </template>

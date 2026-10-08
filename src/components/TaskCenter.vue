@@ -1,7 +1,6 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import Modal from './Modal.vue'
-import { registerAutoSyncTask } from '../composables/autoSyncTask.js'
 import {
   TASK_RESULT_LABELS,
   cancelTask,
@@ -80,11 +79,8 @@ function ageOf(result) {
   return formatTaskAge(result.at, now.value)
 }
 
-let stopAutoSyncTask = null
-onMounted(() => { stopAutoSyncTask = registerAutoSyncTask() })
 onBeforeUnmount(() => {
   stopTick()
-  stopAutoSyncTask?.()
 })
 </script>
 

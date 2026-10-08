@@ -140,13 +140,13 @@ export function fxRateFor(currency, fx) {
  *   - `reason === 'rate'` 缺该币种汇率 —— 调用方必须**排除**它，不能按 1:1 硬算。
  * 换算在「分」上做乘法再取整，避免浮点尾差；这一步对基准币种是恒等（rate=1）。
  */
-export function convertToBaseMinor(amountYuan, currency, fx) {
-  const config = normalizeLedgerFx(fx)
+function convertToBaseMinorWithConfig(amountYuan, currency, config) {
   const code = normalizeCurrency(currency)
   const cents = amountToCents(amountYuan)
   if (cents === null) return { cents: null, currency: code || config.base, rate: null, reason: 'amount' }
-  const rate = fxRateFor(code, config)
+  const rate = !code || code === config.base ? 1 : config.rates[code]
   if (rate === null) return { cents: null, currency: code, rate: null, reason: 'rate' }
+  if (!Number.isFinite(rate) || rate <= 0) return { cents: null, currency: code, rate: null, reason: 'rate' }
   // 换算后必须仍然是「非负的安全整数分」，否则宁可返回 null 让调用方排除它，
   // 也不能把 Infinity / 超精度整数当成一个金额累加进合计。
   const converted = Math.round(cents * rate)
@@ -154,6 +154,10 @@ export function convertToBaseMinor(amountYuan, currency, fx) {
     return { cents: null, currency: code, rate, reason: 'rate' }
   }
   return { cents: converted, currency: code || config.base, rate, reason: '' }
+}
+
+export function convertToBaseMinor(amountYuan, currency, fx) {
+  return convertToBaseMinorWithConfig(amountYuan, currency, normalizeLedgerFx(fx))
 }
 
 /** 简版换算：成功返回基准币种「分」，失败（金额非法或缺汇率）返回 null。 */
@@ -183,58 +187,128 @@ export function ledgerMonthFilter(month) {
  * 账本页传 `mySpendYuan` 即「我承担」口径——折算与分摊口径互不干扰，先按份额、再按汇率。
  * 可见性/删除/归档、id 与日期校验始终留在本函数，换口径不会放宽「哪些记录能进合计」。
  */
+function createLedgerBaseAccumulator() {
+  return {
+    expenseCents: 0,
+    incomeCents: 0,
+    refundCents: 0,
+    count: 0,
+    foreignCount: 0,
+    convertedForeignCount: 0,
+    excludedCount: 0,
+    missingRates: new Set(),
+  }
+}
+
+function addLedgerBaseItem(totals, item, config, amountOf) {
+  const code = normalizeCurrency(item.currency)
+  const isForeign = Boolean(code) && code !== config.base
+  if (isForeign) totals.foreignCount += 1
+  const amount = typeof amountOf === 'function' ? amountOf(item) : item.amount
+  const converted = convertToBaseMinorWithConfig(amount, code, config)
+  if (converted.cents === null) {
+    if (converted.reason === 'rate') {
+      totals.excludedCount += 1
+      totals.missingRates.add(code || '未知币种')
+    }
+    return
+  }
+  if (isForeign) totals.convertedForeignCount += 1
+  totals.count += 1
+  if (item.direction === 'income') totals.incomeCents += converted.cents
+  else if (isRefundTransaction(item)) totals.refundCents += converted.cents
+  else totals.expenseCents += converted.cents
+}
+
+/**
+ * @typedef {Object} LedgerBaseSummary
+ * @property {string} base
+ * @property {string} ratesUpdatedAt
+ * @property {number} count
+ * @property {number} expenseTotal
+ * @property {number} incomeTotal
+ * @property {number} refundTotal
+ * @property {number} foreignCount
+ * @property {number} convertedForeignCount
+ * @property {number} excludedCount
+ * @property {string[]} missingRates
+ * @property {boolean} hasForeign
+ * @property {boolean} hasMissing
+ */
+
+/** @returns {LedgerBaseSummary} */
+function finishLedgerBaseSummary(totals, config) {
+  return {
+    base: config.base,
+    ratesUpdatedAt: config.updatedAt,
+    count: totals.count,
+    expenseTotal: (totals.expenseCents - totals.refundCents) / 100,
+    incomeTotal: totals.incomeCents / 100,
+    refundTotal: totals.refundCents / 100,
+    foreignCount: totals.foreignCount,
+    convertedForeignCount: totals.convertedForeignCount,
+    excludedCount: totals.excludedCount,
+    missingRates: [...totals.missingRates].sort((a, b) => a.localeCompare(b)),
+    hasForeign: totals.foreignCount > 0,
+    hasMissing: totals.excludedCount > 0,
+  }
+}
+
+/**
+ * @param {any[]} list
+ * @param {any} fx
+ * @param {{ dateFilter?: ((date: string) => boolean) | null, amountOf?: ((item: any) => number | null) | null }} [options]
+ * @returns {LedgerBaseSummary}
+ */
 export function summarizeLedgerInBase(list, fx, { dateFilter = null, amountOf = null } = {}) {
   const config = normalizeLedgerFx(fx)
-  let expenseCents = 0
-  let incomeCents = 0
-  let refundCents = 0
-  let count = 0
-  let foreignCount = 0
-  let convertedForeignCount = 0
-  let excludedCount = 0
-  const missingRates = new Set()
-
+  const totals = createLedgerBaseAccumulator()
   for (const item of Array.isArray(list) ? list : []) {
     if (!item || typeof item !== 'object') continue
     if (item.archivedAt || item.deletedAt || item.tombstone) continue
     if (!String(item.id ?? '').trim() || !isValidDateKey(item.date)) continue
     if (typeof dateFilter === 'function' && !dateFilter(item.date)) continue
-    const code = normalizeCurrency(item.currency)
-    const isForeign = Boolean(code) && code !== config.base
-    if (isForeign) foreignCount += 1
-    const amount = typeof amountOf === 'function' ? amountOf(item) : item.amount
-    const converted = convertToBaseMinor(amount, code, config)
-    if (converted.cents === null) {
-      if (converted.reason === 'rate') {
-        excludedCount += 1
-        missingRates.add(code || '未知币种')
-      }
-      continue
-    }
-    if (isForeign) convertedForeignCount += 1
-    count += 1
-    if (item.direction === 'income') incomeCents += converted.cents
-    else if (isRefundTransaction(item)) refundCents += converted.cents
-    else expenseCents += converted.cents
+    addLedgerBaseItem(totals, item, config, amountOf)
+  }
+  return finishLedgerBaseSummary(totals, config)
+}
+
+/**
+ * 多个月度汇总共用一次完整扫描，返回 monthKey → 与 sumLedgerMonthInBase 相同形状的摘要。
+ * @param {any[]} list
+ * @param {any} fx
+ * @param {string[]} months
+ * @param {{ amountOf?: ((item: any) => number | null) | null }} [options]
+ * @returns {Map<string, LedgerBaseSummary>}
+ */
+export function summarizeLedgerMonthsInBase(list, fx, months, { amountOf = null } = {}) {
+  const config = normalizeLedgerFx(fx)
+  const totalsByMonth = new Map()
+  for (const month of Array.isArray(months) ? months : []) {
+    const key = String(month ?? '').slice(0, 7)
+    if (!totalsByMonth.has(key)) totalsByMonth.set(key, createLedgerBaseAccumulator())
   }
 
-  return {
-    base: config.base,
-    ratesUpdatedAt: config.updatedAt,
-    count,
-    expenseTotal: (expenseCents - refundCents) / 100,
-    incomeTotal: incomeCents / 100,
-    refundTotal: refundCents / 100,
-    foreignCount,
-    convertedForeignCount,
-    excludedCount,
-    missingRates: [...missingRates].sort((a, b) => a.localeCompare(b)),
-    hasForeign: foreignCount > 0,
-    hasMissing: excludedCount > 0,
+  for (const item of Array.isArray(list) ? list : []) {
+    if (!item || typeof item !== 'object') continue
+    if (item.archivedAt || item.deletedAt || item.tombstone) continue
+    if (!String(item.id ?? '').trim() || !isValidDateKey(item.date)) continue
+    const totals = totalsByMonth.get(String(item.date).slice(0, 7))
+    if (!totals) continue
+    addLedgerBaseItem(totals, item, config, amountOf)
   }
+
+  return new Map([...totalsByMonth].map(([month, totals]) => [month, finishLedgerBaseSummary(totals, config)]))
 }
 
 /** 一个月的折算合计（`summarizeLedgerInBase` 的月度便捷入口）。 */
+/**
+ * @param {any[]} list
+ * @param {any} fx
+ * @param {string} month
+ * @param {{ amountOf?: ((item: any) => number | null) | null }} [options]
+ * @returns {LedgerBaseSummary}
+ */
 export function sumLedgerMonthInBase(list, fx, month, { amountOf = null } = {}) {
   return summarizeLedgerInBase(list, fx, { dateFilter: ledgerMonthFilter(month), amountOf })
 }

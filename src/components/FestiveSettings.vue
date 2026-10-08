@@ -1,18 +1,14 @@
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { ref, watch } from 'vue'
 import Modal from './Modal.vue'
 import { festiveConfig } from '../composables/atmosphereStore.js'
 import { builtInFestivalTable, normalizeFestiveConfig } from '../composables/festive.js'
 import {
   LUNAR_ANNIVERSARY_HINT,
-  LUNAR_ANNIVERSARY_KEY,
-  LUNAR_ANNIVERSARY_STATUS,
   LUNAR_DAY_OPTIONS,
   LUNAR_MONTH_OPTIONS,
-  normalizeLunarAnniversaries,
-  publishLunarAnniversaries,
-  resolveLunarAnniversary,
 } from '../composables/lunarAnniversaries.js'
+import { useLunarAnniversaryEditor } from '../composables/lunarAnniversaryEditor.js'
 import { NARRATIVE_LANGUAGES, narrativeLang } from '../composables/narrative.js'
 import { useStoredRef } from '../composables/store/index.js'
 import { appToday } from '../composables/timeContext.js'
@@ -66,8 +62,7 @@ function syncFromConfig() {
   installDateInput.value = cfg.installDate
   anniversaries.value = toRows(cfg.anniversaries)
   // 农历纪念日走独立的新键：打开面板时重读一次，并同步内存镜像（供首页氛围判断使用）。
-  lunarAnniversaries.value = toLunarRows(lunarStored.value)
-  publishLunarAnniversaries(lunarStored.value)
+  syncLunarAnniversaries()
 }
 
 async function refreshTable() {
@@ -106,6 +101,10 @@ function addAnniversary() {
   })
 }
 
+function anniversaryNeedsFields(row) {
+  return !row?.date || !String(row?.label ?? '').trim()
+}
+
 function setAnniversaryDate(id, value) {
   const row = anniversaries.value.find((item) => item.id === id)
   if (!row) return
@@ -118,115 +117,19 @@ function removeAnniversary(id) {
   commit()
 }
 
-// ---- 农历纪念日（新键 sl_festive_lunar，与 sl_festive_config 完全分开）----
-//
-// 写入走 useStoredRef（拿持久化与同步脏标记），同时把同一份列表发布到
-// lunarAnniversaries.js 的内存镜像 —— 首页的氛围判断读的是那个镜像，
-// 因此**不需要**改动 App.vue 或 atmosphereStore.js。
-// 农历月日可能"今年不存在"：小月没有三十、勾了闰月但该年没有这个闰月、
-// 公历年超出 1900–2101。这些一律显示明确状态，绝不按平月或邻近日期计算。
-const lunarStored = useStoredRef(LUNAR_ANNIVERSARY_KEY, [])
-let lunarSeq = 0
-const lunarAnniversaries = ref(toLunarRows(lunarStored.value))
-
-/**
- * 存储里的条目 → 面板行。
- * **保留存储中的 id**（新键的形状是 `[{ id, label, lunarMonth, lunarDay, isLeapMonth }]`，
- * id 要稳定：同步/备份按 id 对账，每次打开面板都换 id 会制造无意义的差异）。
- * 只有在 id 缺失（历史数据）或重复时才补一个，避免 v-for 的 key 冲突。
- */
-function toLunarRows(list) {
-  const seen = new Set()
-  return normalizeLunarAnniversaries(list).map((item) => {
-    let id = item.id
-    while (seen.has(id)) id = `${item.id}-${lunarSeq++}`
-    seen.add(id)
-    return {
-      id,
-      label: item.label,
-      lunarMonth: item.lunarMonth,
-      lunarDay: item.lunarDay,
-      isLeapMonth: item.isLeapMonth,
-    }
-  })
-}
-
-function commitLunar() {
-  const normalized = normalizeLunarAnniversaries(lunarAnniversaries.value.map((row) => ({
-    id: row.id,
-    label: row.label,
-    lunarMonth: row.lunarMonth,
-    lunarDay: row.lunarDay,
-    isLeapMonth: row.isLeapMonth,
-  })))
-  lunarStored.value = normalized
-  publishLunarAnniversaries(normalized)
-}
-
-function addLunarAnniversary() {
-  lunarAnniversaries.value.push({
-    id: `lunar-${Date.now()}-${lunarSeq++}`,
-    label: '',
-    lunarMonth: 1,
-    lunarDay: 1,
-    isLeapMonth: false,
-  })
-}
-
-function lunarRowOf(id) {
-  return lunarAnniversaries.value.find((row) => row.id === id)
-}
-
-function setLunarMonth(id, value) {
-  const row = lunarRowOf(id)
-  if (!row) return
-  row.lunarMonth = Number(value)
-  commitLunar()
-}
-
-function setLunarDay(id, value) {
-  const row = lunarRowOf(id)
-  if (!row) return
-  row.lunarDay = Number(value)
-  commitLunar()
-}
-
-function setLunarLeap(id, checked) {
-  const row = lunarRowOf(id)
-  if (!row) return
-  row.isLeapMonth = checked === true
-  commitLunar()
-}
-
-function removeLunarAnniversary(id) {
-  lunarAnniversaries.value = lunarAnniversaries.value.filter((row) => row.id !== id)
-  commitLunar()
-}
-
-/** 每行的解析结果：用应用时区的今天，纯函数计算（闰月语义由 lunar.js 保证）。 */
-const lunarResolutions = computed(() =>
-  new Map(lunarAnniversaries.value.map((row) => [row.id, resolveLunarAnniversary(row, appToday.value)]))
-)
-
-/** 行内文案：先把农历写法摆出来，再给公历日期或明确的不可用原因（含"下一次"提示）。 */
-function lunarResolveText(row) {
-  const resolved = lunarResolutions.value.get(row.id)
-  if (!resolved) return ''
-  const head = resolved.lunarText ? `${resolved.lunarText} · ` : ''
-  if (resolved.status === LUNAR_ANNIVERSARY_STATUS.OK) {
-    const next = resolved.nextDateKey && resolved.daysFromToday < 0 ? `，${resolved.nextText}` : ''
-    return `${head}${resolved.dateKey}（${resolved.relativeText}${next}）`
-  }
-  return resolved.nextText
-    ? `${head}${resolved.statusText}；${resolved.nextText}`
-    : `${head}${resolved.statusText}`
-}
-
-/** 不可用的行整体降一级字色（类名在样式块里，避免内联色值）。 */
-function lunarResolveClass(row) {
-  const resolved = lunarResolutions.value.get(row.id)
-  return resolved && resolved.status === LUNAR_ANNIVERSARY_STATUS.OK ? '' : 'off'
-}
+// 农历纪念日单独存储与归一化，由编辑模型维护；组件仅接收字段变化并展示解析结果。
+const {
+  rows: lunarAnniversaries,
+  sync: syncLunarAnniversaries,
+  add: addLunarAnniversary,
+  setLabel: setLunarLabel,
+  setMonth: setLunarMonth,
+  setDay: setLunarDay,
+  setLeapMonth: setLunarLeap,
+  remove: removeLunarAnniversary,
+  resolutionText: lunarResolveText,
+  resolutionClass: lunarResolveClass,
+} = useLunarAnniversaryEditor(appToday)
 
 watch(
   () => props.open,
@@ -292,16 +195,21 @@ watch(
               type="date"
               :value="row.date ? '2000-' + row.date : ''"
               :aria-label="`纪念日 ${row.label || '未命名'} 的日期`"
+              :aria-invalid="anniversaryNeedsFields(row)"
+              :aria-describedby="anniversaryNeedsFields(row) ? `anniversary-hint-${row.id}` : undefined"
               @change="setAnniversaryDate(row.id, $event.target.value)"
             />
             <input
-              v-model="row.label"
+              :value="row.label"
               maxlength="30"
               placeholder="名称，如：在一起"
               aria-label="纪念日名称"
+              :aria-invalid="anniversaryNeedsFields(row)"
+              :aria-describedby="anniversaryNeedsFields(row) ? `anniversary-hint-${row.id}` : undefined"
               @input="commit"
             />
             <button type="button" class="del-btn" :aria-label="`删除纪念日 ${row.label || ''}`" @click="removeAnniversary(row.id)">删除</button>
+            <p v-if="anniversaryNeedsFields(row)" :id="`anniversary-hint-${row.id}`" class="anniversary-draft-hint">同时填写日期和名称后，这条纪念日才会保存。</p>
           </div>
         </div>
       </div>
@@ -320,7 +228,7 @@ watch(
               maxlength="30"
               placeholder="名称，如：外婆生日"
               aria-label="农历纪念日名称"
-              @input="commitLunar"
+              @input="setLunarLabel(row.id, $event.target.value)"
             />
             <select :value="row.lunarMonth" aria-label="农历月份" @change="setLunarMonth(row.id, $event.target.value)">
               <option v-for="option in LUNAR_MONTH_OPTIONS" :key="option.value" :value="option.value">{{ option.label }}</option>
@@ -656,6 +564,12 @@ watch(
   background: var(--bg);
 }
 /* 「已自动保存」提示落在 Modal 的 var(--card) 上：原 #0d9463 浅色 3.87:1、深色 4.11:1。 */
+.anniversary-draft-hint {
+  grid-column:1/-1;
+  margin:0;
+  color:var(--warning);
+  font-size:var(--fs-11);
+  line-height:1.45}
 .saved-hint {
   color: var(--success);
   font-size: var(--fs-12);

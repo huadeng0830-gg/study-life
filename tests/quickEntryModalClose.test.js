@@ -78,6 +78,20 @@ async function setInput(node, value) {
 }
 
 describe('记一笔弹窗：关闭与保存', () => {
+  it('分摊预览使用表单模型的同一份计算结果', async () => {
+    const amountInput = await openQuickEntry()
+    expect(amountInput, '记一笔弹窗没打开').toBeTruthy()
+
+    await setInput(amountInput, '100')
+    await click(document.querySelector('.quick-form .more-toggle'))
+    await setInput(document.querySelector('.quick-form .more-grid input[type="number"]'), '4')
+
+    const preview = await waitFor(() => document.querySelector('.quick-form .form-note'))
+    expect(preview?.textContent).toContain('共 4 人')
+    expect(preview?.textContent).toContain('我承担 ¥25.00')
+    expect(preview?.textContent).toContain('其余 ¥75.00')
+  })
+
   it('点右上角 × 能关闭弹窗', async () => {
     const amountInput = await openQuickEntry()
     expect(amountInput, '记一笔弹窗没打开').toBeTruthy()
@@ -124,6 +138,38 @@ describe('记一笔弹窗：关闭与保存', () => {
     expect(expenses.value.find((item) => item.name === '测试午餐'), '记录没有落库').toBeTruthy()
     const stillOpen = await waitFor(() => document.querySelector('.quick-form .amount-input'), 300)
     expect(stillOpen, '保存成功后弹窗没有自动关闭').toBe(null)
+  })
+
+  /**
+   * 账本里那一层「⚡ 用一句话记」：既要能**打开**，也要能**关闭**。
+   *
+   * 【为什么两个方向都要测】这条链路上有两个各自独立的缺陷，而且它们互相掩盖：
+   *   1. 面板从来打不开 —— `QuickEntryModal` 模板读 `$attrs.showQuickRecord`，而父级传的是
+   *      短横线写法 `:show-quick-record`。Vue 只对**已声明的 prop** 做 camelize 匹配，
+   *      非 prop 属性进 `$attrs` 时**保留原键名**，于是那个表达式恒为 `undefined`；
+   *   2. 就算它开了也关不掉 —— 关闭走 `update:showQuickRecord`，而这个事件名既没登记进
+   *      `defineEmits`，页面也没监听。
+   * 只测"关了没"会被第 1 条挡在前面：面板根本没开，断言"已经关闭"照样成立——**假绿**。
+   * 所以必须先断言打开、再断言关闭。同一形状的教训本文件开头已经记过一次。
+   */
+  it('账本内的「⚡ 用一句话记」面板能打开，也能关闭', async () => {
+    const amountInput = await openQuickEntry()
+    expect(amountInput, '记一笔弹窗没打开').toBeTruthy()
+
+    const entry = byText('.natural-entry-link', '用一句话记')
+    expect(entry, '找不到「⚡ 用一句话记」入口').toBeTruthy()
+    await click(entry)
+
+    const panel = await waitFor(() => document.querySelector('.quick-record'))
+    expect(panel, '点了「用一句话记」之后面板没有打开（属性键名对不上，或事件没接线）').toBeTruthy()
+
+    // 这时 body 里有两个浮层（记一笔 + 快速记录），要找**面板自己那个**遮罩里的关闭键。
+    const close = panel.closest('.overlay')?.querySelector('.close')
+    expect(close, '「用一句话记」面板上找不到关闭按钮').toBeTruthy()
+    await click(close)
+
+    const stillOpen = await waitFor(() => document.querySelector('.quick-record'), 400)
+    expect(stillOpen, '点了 × 之后「用一句话记」面板没有关闭').toBe(null)
   })
 
   it('「连续记」保持弹窗打开，记完能点「完成」退出', async () => {

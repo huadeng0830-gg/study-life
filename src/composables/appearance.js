@@ -1,4 +1,7 @@
 import { useStoredRef } from './store'
+import { HOME_MODULES, findHomeModuleState, normalizeHomeModuleOrder } from './homeModules.js'
+
+export { HOME_MODULES } from './homeModules.js'
 
 export const WALLPAPER_TARGETS = {
   global: { label: '全站默认', path: '' },
@@ -10,14 +13,6 @@ export const WALLPAPER_TARGETS = {
   bills: { label: '账本', path: '/bills' },
 }
 
-export const HOME_MODULES = [
-  { id: 'next', label: '接下来' },
-  { id: 'tasks', label: '现在该做' },
-  { id: 'countdowns', label: '需要注意' },
-  { id: 'focus', label: '专注' },
-  { id: 'week', label: '本周进展' },
-]
-
 const DEFAULT_EFFECTS = {
   blur: 0,
   brightness: 100,
@@ -27,14 +22,14 @@ const DEFAULT_EFFECTS = {
   fit: 'auto',
 }
 
-const defaultTargets = Object.fromEntries(
+export const defaultTargets = Object.fromEntries(
   Object.keys(WALLPAPER_TARGETS).map((key) => [key, {
     ...(key === 'global' ? { enabled: false } : { mode: 'inherit' }),
     ...DEFAULT_EFFECTS,
   }])
 )
 
-function defaultAppearanceValue() {
+export function defaultAppearanceValue() {
   return {
     quotes: ['今天也要漂亮通关。'],
     quoteMode: 'daily',
@@ -70,16 +65,7 @@ function normalize() {
   if (JSON.stringify(normalizedConfig) !== JSON.stringify(config)) wallpaperConfig.value = normalizedConfig
 
   const current = appearance.value ?? {}
-  const existing = Array.isArray(current.homeModules) ? current.homeModules : []
-  // 保留用户拖拽后的顺序：先按已存顺序保留合法模块，再补齐新增模块（追加到末尾），并丢弃过时 id。
-  // 这样未来新增首页模块时，老用户的旧顺序数组不会丢掉新模块入口。
-  const knownIds = new Set(HOME_MODULES.map((item) => item.id))
-  const ordered = existing.filter((entry) => entry && knownIds.has(entry.id))
-  const seen = new Set(ordered.map((entry) => entry.id))
-  for (const item of HOME_MODULES) {
-    if (!seen.has(item.id)) ordered.push({ id: item.id, visible: true })
-  }
-  const homeModules = ordered
+  const homeModules = normalizeHomeModuleOrder(current.homeModules)
   const swipeActions = {
     tasks: {
       left: current.swipeActions?.tasks?.left ?? 'complete',
@@ -107,6 +93,10 @@ function normalize() {
 
 normalize()
 
+export function homeModuleState(id) {
+  return findHomeModuleState(appearance.value.homeModules, id)
+}
+
 export function targetForPath(path) {
   return Object.entries(WALLPAPER_TARGETS).find(([, item]) => item.path === path)?.[0] ?? 'global'
 }
@@ -119,10 +109,6 @@ export function activeWallpaperSpec(path) {
   if (pageTarget !== 'global' && page?.mode === 'own') return { target: pageTarget, settings: page }
   if (!global?.enabled) return null
   return { target: 'global', settings: global }
-}
-
-export function homeModuleState(id) {
-  return appearance.value.homeModules.find((item) => item.id === id) ?? { id, visible: true }
 }
 
 export function resetAppearanceState() {

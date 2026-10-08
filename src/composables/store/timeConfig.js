@@ -6,7 +6,7 @@ import {
   todayIndex,
 } from './utils.js'
 
-function defaultTimeConfig() {
+export function defaultTimeConfig() {
   return {
     campuses: [
       { id: 'south', name: '南校区' },

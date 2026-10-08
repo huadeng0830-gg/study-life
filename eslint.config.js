@@ -8,6 +8,8 @@ export default [
     // 对它跑 no-var 之类的规则只会产出成百上千条与本项目无关的报错。
     ignores: [
       'dist/**',
+      'dist-desktop/**',
+      'release-desktop/**',
       'dist-bak/**',
       'node_modules/**',
       '.wrangler/**',

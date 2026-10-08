@@ -38,7 +38,7 @@ const emit = defineEmits(['select', 'close'])
 const panelEl = ref(null)
 const overlayEl = ref(null)
 const titleId = `action-sheet-title-${++nextSheetId}`
-const entry = { modalEl: panelEl, previousFocus: null, active: false }
+const entry = { modalEl: panelEl, previousFocus: null, active: false, onBack: () => emit('close') }
 const scrollLock = createScrollLock()
 
 function focusInitial() {

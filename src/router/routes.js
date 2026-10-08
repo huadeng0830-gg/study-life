@@ -18,6 +18,7 @@ import NotFoundView from '../components/NotFoundView.vue'
 export const ROUTE_COMPONENT_NAMES = Object.freeze({
   '/': 'TodayView',
   '/schedule': 'ScheduleView',
+  '/course': 'CourseArchiveView',
   '/tasks': 'TasksView',
   '/exams': 'ExamsView',
   '/events': 'EventsView',
@@ -25,6 +26,8 @@ export const ROUTE_COMPONENT_NAMES = Object.freeze({
   '/bills': 'LedgerView',
   '/review': 'WeeklyReviewView',
   '/notes': 'NotesView',
+  '/together': 'TogetherView',
+  '/projects': 'ProjectsView',
 })
 
 const RouteLoading = { setup: () => () => h(RouteFallback, { error: false }) }
@@ -58,6 +61,7 @@ export const routes = [
   { path: '/', name: 'today', meta: { title: '今天' }, component: asyncRoute('/') },
   { path: '/today', redirect: '/' },
   { path: '/schedule', name: 'schedule', meta: { title: '课程表' }, component: asyncRoute('/schedule') },
+  { path: '/course', name: 'course-archive', meta: { title: '课程档案' }, component: asyncRoute('/course') },
   { path: '/tasks', name: 'tasks', meta: { title: '待办' }, component: asyncRoute('/tasks') },
   { path: '/exams', name: 'exams', meta: { title: '重要日期' }, component: asyncRoute('/exams') },
   { path: '/events', name: 'events', meta: { title: '日程' }, component: asyncRoute('/events') },
@@ -65,5 +69,7 @@ export const routes = [
   { path: '/bills', name: 'bills', meta: { title: '账本' }, component: asyncRoute('/bills') },
   { path: '/review', name: 'review', meta: { title: '回顾' }, component: asyncRoute('/review') },
   { path: '/notes', name: 'notes', meta: { title: '笔记' }, component: asyncRoute('/notes') },
+  { path: '/together', name: 'together', meta: { title: '一起约' }, component: asyncRoute('/together') },
+  { path: '/projects', name: 'projects', meta: { title: '齐行' }, component: asyncRoute('/projects') },
   { path: '/:pathMatch(.*)*', name: 'not-found', meta: { title: '页面不存在' }, component: NotFoundView },
 ]

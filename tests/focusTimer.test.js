@@ -121,6 +121,7 @@ describe('focusTimer 设置与记录归一化', () => {
       quickTimes: [15, 25, 45, 60],
       lastUsedMinutes: 37,
       recentTemporaries: ['a'],
+      pomodoroRounds: 4,
       soundEnabled: true,
       vibrationEnabled: true,
       systemNotificationEnabled: true,

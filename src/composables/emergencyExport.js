@@ -8,6 +8,7 @@ const BACKUP_FIELDS = Object.freeze({
   sl_ledger_categories: 'ledgerCategories', sl_ledger_freq: 'ledgerFreq', sl_ledger_fx: 'ledgerFx',
   sl_ledger_budget: 'ledgerBudget', sl_ledger_templates: 'ledgerTemplates', sl_timecfg: 'timeConfig', sl_semester: 'semester',
   sl_schedule_exceptions: 'scheduleExceptions', sl_schedule_note: 'scheduleNote', sl_theme: 'theme', sl_custom_theme_color: 'customThemeColor',
+  sl_high_contrast: 'highContrast',
   sl_countdown_show_past: 'countdownShowPast', sl_food_places: 'foodPlaces', sl_food_history: 'foodHistory',
   sl_food_filters: 'foodFilters', sl_ocr_vocabulary: 'ocrVocabulary', sl_appearance: 'appearance',
   sl_wallpaper_config: 'wallpaperConfig', sl_auto_wallpaper_color: 'autoWallpaperColor', sl_wallpaper_accent: 'wallpaperAccent',
@@ -40,7 +41,7 @@ export function createEmergencyBackup() {
   }
 }
 
-export function downloadEmergencyBackup(filename = 'study-life-本机数据备份.json') {
+export function downloadEmergencyBackup(filename = '三两事-本机数据备份.json') {
   const backup = createEmergencyBackup()
   const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' })
   const url = URL.createObjectURL(blob)

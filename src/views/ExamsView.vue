@@ -500,7 +500,7 @@ onBeforeUnmount(() => {
           <span class="tl-label strong">{{ item.timeline.end }}</span>
           <span class="tl-dot" :class="{ on: item.timeline.sameDay }"></span>
         </div>
-        <button v-if="item.category === '学习' && !item.countdown.isPast" type="button" class="review-action" @click="createReviewTask(item, $event)">{{ reviewSummary(item) ? '再安排 25 分钟复习' : '安排 25 分钟复习' }}</button>
+        <button v-if="item.category === '学习' && !item.countdown.isPast" type="button" class="review-action" @click="createReviewTask(item, $event)">{{ item.review ? '再安排 25 分钟复习' : '安排 25 分钟复习' }}</button>
       </div>
       </template>
     </VirtualList>

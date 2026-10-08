@@ -14,9 +14,17 @@ describe('Phase 1 交互回归契约', () => {
 
   it('首页首屏顺序为接下来、最重要、风险、本周', () => {
     const today = source('src/views/TodayView.vue')
-    expect(today.indexOf('aria-label="接下来"')).toBeLessThan(today.indexOf('aria-label="现在该做"'))
-    expect(today.indexOf('今天最重要')).toBeLessThan(today.indexOf('需要注意'))
-    expect(today.indexOf('需要注意')).toBeLessThan(today.indexOf('本周进展'))
+    const positions = [
+      'aria-label="接下来"',
+      'aria-label="现在该做"',
+      '今天最重要',
+      '需要注意',
+      '本周进展',
+    ].map((marker) => today.indexOf(marker))
+
+    expect(positions.every((position) => position >= 0)).toBe(true)
+    expect(positions.slice(0, 2)[0]).toBeLessThan(positions.slice(0, 2)[1])
+    expect(positions.slice(2)).toEqual([...positions.slice(2)].sort((a, b) => a - b))
   })
 
   it('高频切换控件使用正确的语义角色并暴露选中状态', () => {

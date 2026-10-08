@@ -94,10 +94,17 @@ describe('账本分区与 URL 的双向一致', () => {
 
   it('不改动 URL 上的其它参数', async () => {
     mounted = await mountApp({ routes })
-    await gotoRoute(mounted, '/bills?focus=abc')
+    // 【哨兵键必须是账本页不会去动的那个】
+    // 原先用 `focus=abc`。但 `?focus=` 恰恰是账本页**设计上会主动清掉**的：
+    // LedgerView 的 highlightTransaction/focusBill 消费完深链之后会调
+    // clearFocusFromRoute（见 focusReturn.test.js 里同一件事的记录）。
+    // 于是这条断言测到的不是"写分区会不会吃掉别的参数"，而是"深链被消费掉没有" ——
+    // 换成任何视图都不改写的合成键 `keep` 之后，两件事才彻底解耦，
+    // 判别力不变：把整份 query 清空的实现照样会把它删掉。
+    await gotoRoute(mounted, '/bills?keep=abc')
     await clickTab('#ledger-tab-review')
     expect(queryTab()).toBe('review')
-    expect(mounted.router.currentRoute.value.query.focus, '写分区不能把别的参数吃掉').toBe('abc')
+    expect(mounted.router.currentRoute.value.query.keep, '写分区不能把别的参数吃掉').toBe('abc')
   })
 
   it('写分区用的是 replace，不在历史里堆层', async () => {

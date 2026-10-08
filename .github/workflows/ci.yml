@@ -54,6 +54,33 @@ jobs:
           path: dist
           retention-days: 7
 
+  desktop-package:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: |
+            package-lock.json
+            desktop-app/package-lock.json
+
+      - name: Install root and Electron app dependencies
+        run: |
+          npm ci
+          npm ci --prefix desktop-app
+
+      - name: Build and inspect the Windows app package
+        run: |
+          npm run build:desktop
+          npx electron-builder --config electron-builder.yml --dir --win --x64 --publish never
+          npm run desktop:verify
+
   # 依赖漏洞与过期提示。npm audit 放在独立 job：它是"信息"而非"门禁"，
   # 单独跑失败不会把整个 PR 标红，但会在 job summary 里看得见。
   dependency-audit:

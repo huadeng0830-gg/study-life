@@ -1,0 +1,4 @@
+project_id = "study-life"
+
+[functions.campus-social]
+verify_jwt = true

@@ -6,7 +6,6 @@ import { createRouter, createWebHashHistory } from 'vue-router'
 vi.mock('virtual:pwa-register', () => ({ registerSW: vi.fn(() => vi.fn()) }))
 
 import DataManager from '../src/components/DataManager.vue'
-import { clearSyncSpaceSettings } from '../src/composables/syncSpace.js'
 
 /*
  * 备份文件的完整性校验。
@@ -73,7 +72,6 @@ function errorText() {
 describe('备份文件完整性校验', () => {
   beforeEach(() => {
     localStorage.clear()
-    clearSyncSpaceSettings()
     window.location.hash = ''
     vi.stubGlobal('fetch', vi.fn())
   })

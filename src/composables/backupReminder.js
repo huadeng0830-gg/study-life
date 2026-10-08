@@ -8,6 +8,12 @@ const DAY_MS = 86400000
 
 export const lastBackupAt = useStoredRef('sl_last_backup_at', '')
 
+export const backupReminderTitle = computed(() => {
+  if (!lastBackupAt.value) return '尚未备份'
+  const time = new Date(lastBackupAt.value).getTime()
+  return Number.isFinite(time) ? '已有 7 天未备份' : '备份时间无法识别'
+})
+
 export const needsBackup = computed(() => {
   if (!lastBackupAt.value) return true
   const time = new Date(lastBackupAt.value).getTime()

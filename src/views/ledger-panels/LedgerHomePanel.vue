@@ -1,8 +1,8 @@
 <script setup>
-import { defineEmits, defineProps } from 'vue'
 import EmptyState from '../../components/EmptyState.vue'
 import VirtualList from '../../components/VirtualList.vue'
 import SwipeActionItem from '../../components/SwipeActionItem.vue'
+import LedgerBudgetCard from './LedgerBudgetCard.vue'
 import { catInfo } from '../../composables/ledger.js'
 import { dayLabel, moneyHero, moneyRow } from '../../utils/formatters.js'
 
@@ -13,7 +13,7 @@ defineProps({
   monthCompare: { type: Object, default: null },
   fxRateLine: { type: String, default: '' },
   budgetAlert: { type: Object, default: null },
-  budgetPaceLine: { type: String, default: '' },
+  budgetBaseCurrency: { type: String, default: 'CNY' },
   budget: { type: Object, default: () => ({ monthly: null }) },
   pendingBills: { type: Array, default: () => [] },
   billAmountText: { type: Function, required: true },
@@ -109,17 +109,17 @@ defineEmits([
     <p v-if="monthCompare" class="hero-compare" :class="{ up: monthCompare.up, down: monthCompare.down }">较上月{{ monthCompare.diff > 0 ? '多' : monthCompare.diff < 0 ? '少' : '持平' }} {{ moneyRow(Math.abs(monthCompare.diff)) }}</p>
     <!-- 多币种折算行：只有真的存在非基准币种记录时才出现，缺汇率的笔数在文案里如实说明 -->
     <p v-if="fxRateLine" class="hero-sub" role="status">{{ fxRateLine }}</p>
-    <!-- 预算提示：复用首页「待处理」的 .pending-block 形态，紧邻 hero-compare。
-         未设预算时（budgetAlert === null）什么都不渲染，不会出现 0/0 这种假信息。 -->
-    <p v-if="budgetAlert" class="pending-block" :class="{ over: budgetAlert.level === 'over' }" role="status">{{ budgetAlert.text }}</p>
-    <!-- 「今天还能花多少」：预算没超也要说，因为「还剩 5000」在月初无法指导今天怎么花。
-         只在设了预算且仍有余额时出现（没余额时上一行的超支提示已经说清楚了）。 -->
-    <p v-if="budgetPaceLine && !budgetAlert" class="hero-sub" role="status">{{ budgetPaceLine }}</p>
     <div class="hero-sub">
       <button class="link-btn" type="button" @click="$emit('open-fx-settings')">汇率设置</button>
-      · <button class="link-btn" type="button" @click="$emit('open-budget-settings')">{{ budget.monthly === null ? '设置预算' : '预算设置' }}</button>
     </div>
   </section>
+
+  <LedgerBudgetCard
+    :budget-alert="budgetAlert"
+    :budget-base-currency="budgetBaseCurrency"
+    :budget="budget"
+    @open-budget-settings="$emit('open-budget-settings')"
+  />
 
   <section class="ledger-quick-entry" aria-label="快速记账">
     <div><b>刚刚发生了什么？</b><small>金额 + 内容就能记下，分类和账户会沿用默认值</small></div>
@@ -339,18 +339,20 @@ defineEmits([
   display:flex}
 .ledger-home>.hero-stat {
   order:1}
-.ledger-home>.ledger-quick-entry {
+.ledger-home>.budget-card {
   order:2}
-.ledger-home>.search-block {
+.ledger-home>.ledger-quick-entry {
   order:3}
-.ledger-home>.feed-block {
+.ledger-home>.search-block {
   order:4}
-.ledger-home>.pending-block {
+.ledger-home>.feed-block {
   order:5}
-.ledger-home>.freq-block {
+.ledger-home>.pending-block {
   order:6}
-.ledger-home>.category-block {
+.ledger-home>.freq-block {
   order:7}
+.ledger-home>.category-block {
+  order:8}
 .hero-stat {
   flex-direction:column;
   gap:10px;
@@ -411,24 +413,6 @@ defineEmits([
 .hero-compare.down {
   color:var(--success);
   background:color-mix(in srgb, var(--success) 10%, var(--card))}
-/* 预算提示：刻意复用首页「待处理」区块的 .pending-block 形态（不新增类名），
-   但它嵌在 hero-stat 卡片里、只是紧邻 .hero-compare 的一行字，
-   所以这里只补内层需要的排版；超支（.over）比「接近预算」多一层警示配色。
-   未设预算时模板不渲染这个元素，因此这里的规则不会凭空出现在页面上。 */
-.hero-stat>.pending-block {
-  border:1px solid var(--border);
-  background:var(--bg-tint);
-  color:var(--ink-soft);
-  font-variant-numeric:tabular-nums;
-  border-radius:var(--radius-10);
-  margin:0;
-  padding:6px 10px;
-  font-size:var(--fs-11-5);
-  font-weight:var(--fw-700)}
-.hero-stat>.pending-block.over {
-  border-color:var(--warning);
-  background:color-mix(in srgb, var(--warning) 10%, var(--card));
-  color:var(--warning)}
 .ledger-quick-entry {
   border:1px solid var(--border-strong);
   background:var(--card);

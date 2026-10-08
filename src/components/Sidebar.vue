@@ -1,9 +1,11 @@
 <script setup>
-import { defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { accountOpen, accountUser } from '../composables/accountAuth.js'
 import { autoWallpaperColor, THEMES, themeKey } from '../composables/theme.js'
 import { originFromEvent, revealChange } from '../composables/motion.js'
 import { needsBackup } from '../composables/backupReminder.js'
 import { preloadCommonRoutes, preloadRoute } from '../router/routePreload.js'
+import { desktopNavigationGroups } from '../router/navigation.js'
 import { closeSearch, openSearch, searchOpen } from '../composables/globalSearch.js'
 import {
   createScrollLock,
@@ -27,31 +29,33 @@ import {
 } from '../composables/drawerDrag.js'
 import Toast from './Toast.vue'
 
-// 工具弹窗严格按需加载。手机端不在后台预载二维码库，避免与页面切换争抢网络和主线程。
+// 工具弹窗严格按需加载，避免页面切换时争抢网络和主线程。
+const loadAccountPanel = () => import('./AccountPanel.vue')
 const loadDataManager = () => import('./DataManager.vue')
+const loadVersionUpdate = () => import('./VersionUpdateModal.vue')
 const loadAppearanceSettings = () => import('./AppearanceSettings.vue')
 const loadQuickRecordSettings = () => import('./QuickRecordSettings.vue')
 const loadFocusSettings = () => import('./FocusSettings.vue')
+const loadFestiveSettings = () => import('./FestiveSettings.vue')
 const loadSearchPanel = () => import('./SearchPanel.vue')
+const AccountPanel = defineAsyncComponent(loadAccountPanel)
+const toolLoaders = Object.freeze({ account: loadAccountPanel, data: loadDataManager, update: loadVersionUpdate,
+  appearance: loadAppearanceSettings, focus: loadFocusSettings, festive: loadFestiveSettings, search: loadSearchPanel })
+const accountLabel = '我的账号'
 const DataManager = defineAsyncComponent(loadDataManager)
+const VersionUpdateModal = defineAsyncComponent(loadVersionUpdate)
 const AppearanceSettings = defineAsyncComponent(loadAppearanceSettings)
 const QuickRecordSettings = defineAsyncComponent(loadQuickRecordSettings)
 const FocusSettings = defineAsyncComponent(loadFocusSettings)
+// 【节日与纪念日设置此前完全没有入口】
+// FestiveSettings.vue 从加进仓库起，全 `src/` 只有测试直接 import 它，Sidebar 从未挂载 ——
+// 于是「开关节日氛围 / 填生日 / 填开始使用日期 / 管理纪念日与农历纪念日」这一整块
+// 设置项，用户在任何界面都点不到（`sl_festive_config` 只能被备份/导入间接修改）。
+// 这里按既有工具面板的同一套接线补上入口：懒加载 + 预热 + 桌面按钮 + 手机「更多」格。
+const FestiveSettings = defineAsyncComponent(loadFestiveSettings)
 const SearchPanel = defineAsyncComponent(loadSearchPanel)
 
-const navGroups = [
-  {
-    label: '主要功能',
-    items: [
-      { path: '/', label: '首页', icon: '☀️' },
-      { path: '/schedule', label: '课程', icon: '📅' },
-      { path: '/bills', label: '账本', icon: '📒' },
-      { path: '/tasks', label: '待办', icon: '✅' },
-    ],
-  },
-  { label: '回顾', items: [{ path: '/exams', label: '重要日期', icon: '⏳' }, { path: '/review', label: '本周回顾', icon: '↺' }] },
-  { label: '更多', items: [{ path: '/events', label: '日程', icon: '🗓️' }, { path: '/notes', label: '笔记', icon: '📝' }, { path: '/lists', label: '清单', icon: '☑️' }] },
-]
+const navGroups = desktopNavigationGroups
 const mobileLeadingItems = [
   { path: '/', label: '首页', icon: '☀️' },
 ]
@@ -62,6 +66,7 @@ const mobileTrailingItems = [
   { path: '/bills', label: '账本', icon: '📒' },
 ]
 const mobileMoreGroups = [
+  { label: '常用', items: [{ path: '/projects', label: '齐行', icon: '🧩' }, { path: '/together', label: '一起约', icon: '👥' }], tools: [{ key: 'account', label: '我的账号', icon: '👤' }, { key: 'update', label: '版本与更新', icon: '↻' }] },
   { label: '工具与回顾', items: [
     { path: '/exams', label: '重要日期', icon: '⏳' },
     { path: '/events', label: '日程', icon: '🗓️' },
@@ -72,12 +77,12 @@ const mobileMoreGroups = [
   ], tools: [{ key: 'search', label: '搜索', icon: '🔍' }] },
   { label: '个性化与专注', items: [], tools: [
     { key: 'appearance', label: '个性化', icon: '🎨' },
+    { key: 'festive', label: '氛围与纪念日', icon: '🎉' },
     { key: 'focus', label: '专注设置', icon: '⏱' },
     { key: 'quick-record', label: '快速记录设置', icon: '⚡' },
   ] },
-  { label: '数据与系统', items: [], tools: [
+  { label: '账号、数据与系统', items: [], tools: [
     { key: 'data', label: '数据管理', icon: '💾' },
-    { key: 'update', label: '检查更新', icon: '↻' },
   ] },
 ]
 const collapsed = ref(false)
@@ -85,14 +90,15 @@ const showMobileMore = ref(false)
 const moreTriggerEl = ref(null)
 const moreSheetEl = ref(null)
 const showDataManager = ref(false)
+const showVersionUpdate = ref(false)
 const showAppearance = ref(false)
 const showQuickRecordSettings = ref(false)
 const showFocusSettings = ref(false)
+const showFestiveSettings = ref(false)
 // 搜索面板的开合是**模块级共享状态**：快捷键在 App 的全局 keydown 里
 // （App 够不到本组件的局部 ref），而面板与懒加载预热在这里。
 // 这里保留 showSearch 这个别名，模板里照旧读它。
 const showSearch = searchOpen
-const checkingUpdate = ref(false)
 const toast = ref({ open: false, message: '', type: 'info', actionLabel: '', undoFn: null, viewFn: null, duration: 3200 })
 const props = defineProps({ quickRecordOpen: Boolean })
 const emit = defineEmits(['open-quick-record'])
@@ -106,10 +112,7 @@ function openDataManager() {
 defineExpose({ openDataManager })
 
 function warmTool(name) {
-  if (name === 'data') void loadDataManager()
-  if (name === 'appearance') void loadAppearanceSettings()
-  if (name === 'focus') void loadFocusSettings()
-  if (name === 'search') void loadSearchPanel()
+  void toolLoaders[name]?.().catch(() => {}) // 预热失败或页面先卸载都不应产生未处理拒绝。
 }
 
 function warmRoute(path) {
@@ -166,7 +169,7 @@ onBeforeUnmount(() => {
 // `modalEl` 这个字段名不是笔误：Modal.vue 的 cleanup() 在关闭时会对栈里的**下一层**
 // 调用 `next.modalEl.value` 并 `focusInitialTarget` 它。抽屉按同一契约暴露这个字段，
 // 于是"弹窗压在抽屉上、弹窗关掉后焦点回到抽屉"这条既有逻辑不用改 Modal 就能生效。
-const drawerEntry = { modalEl: moreSheetEl, active: false }
+const drawerEntry = { modalEl: moreSheetEl, active: false, onBack: () => closeMobileMore() }
 const drawerScrollLock = createScrollLock()
 // 手势状态全是普通局部变量：它不参与渲染（位移写内联 style），进 ref 只会白白触发重渲染。
 let drawerPointerId = null
@@ -360,21 +363,6 @@ function onDrawerPointerCancel() {
   clearDrawerInlineStyles()
 }
 
-async function checkUpdate() {
-  if (checkingUpdate.value) return
-  checkingUpdate.value = true
-  showToast('正在检查新版本…', { type: 'info', duration: 0 })
-  try {
-    const updater = await import('../composables/appUpdate.js')
-    await updater.checkForAppUpdate(true)
-    showToast(updater.updateMessage.value || '检查完成', { type: 'success' })
-  } catch {
-    showToast('检查失败，请确认网络后重试', { type: 'error' })
-  } finally {
-    checkingUpdate.value = false
-  }
-}
-
 function showToast(message, { type = 'info', actionLabel = '', undoFn = null, viewFn = null, duration = 3200 } = {}) {
   toast.value = { open: true, message, type, actionLabel, undoFn, viewFn, duration }
 }
@@ -391,12 +379,14 @@ function chooseTheme(key, event) {
 
 function openMobileTool(key) {
   closeMobileMore()
-  if (key === 'appearance') showAppearance.value = true
+  if (key === 'account') accountOpen.value = true
+  else if (key === 'appearance') showAppearance.value = true
   else if (key === 'focus') showFocusSettings.value = true
+  else if (key === 'festive') showFestiveSettings.value = true
   else if (key === 'quick-record') showQuickRecordSettings.value = true
   else if (key === 'data') openDataManager()
   else if (key === 'search') openSearch()
-  else if (key === 'update') checkUpdate()
+  else if (key === 'update') showVersionUpdate.value = true
 }
 </script>
 
@@ -502,13 +492,13 @@ function openMobileTool(key) {
         @pointercancel="onDrawerPointerCancel"
       >
         <div class="mobile-more-head"><b>更多功能</b><button type="button" class="tap-target" aria-label="关闭更多功能" @click="closeMobileMore(true)">×</button></div>
-        <div v-for="group in mobileMoreGroups" :key="group.label" class="mobile-more-group">
+        <div v-for="group in mobileMoreGroups" :key="group.label" class="mobile-more-group" :class="{ 'mobile-more-group-common': group.label === '常用' }">
           <h3>{{ group.label }}</h3>
           <div class="mobile-more-grid">
             <router-link v-for="item in group.items" :key="item.path" :to="item.path" class="mobile-more-item" :class="{ subdued: item.subdued }" @click="closeMobileMore()" @pointerdown="warmRoute(item.path)">
               <span>{{ item.icon }}</span><small>{{ item.label }}</small>
             </router-link>
-            <button v-for="item in group.tools" :key="item.key" type="button" class="mobile-more-item subdued" :disabled="item.key === 'update' && checkingUpdate" @click="openMobileTool(item.key)" @pointerdown="item.key === 'focus' ? warmTool('focus') : item.key === 'data' ? warmTool('data') : item.key === 'appearance' ? warmTool('appearance') : item.key === 'search' ? warmTool('search') : null"><span>{{ item.icon }}</span><small>{{ item.key === 'update' && checkingUpdate ? '检查中…' : item.label }}</small></button>
+            <button v-for="item in group.tools" :key="item.key" type="button" class="mobile-more-item" :class="{ subdued: !['account', 'update'].includes(item.key) }" @click="openMobileTool(item.key)" @pointerdown="warmTool(item.key)"><span>{{ item.icon }}</span><small>{{ item.key === 'account' ? accountLabel : item.label }}</small><em v-if="item.key === 'account'">{{ accountUser ? '已登录' : '未登录' }}</em></button>
           </div>
         </div>
       </section>
@@ -529,7 +519,11 @@ function openMobileTool(key) {
 
     <div class="sidebar-foot">
       <span class="tools-title">设置与工具</span>
-      <button type="button" class="nav-item data-item" @pointerenter="warmTool('search')" @focus="warmTool('search')" @click="showSearch = true">
+      <button type="button" class="nav-item data-item account-entry" :aria-label="`${accountLabel}${accountUser ? '，已登录' : '，未登录'}`" :title="accountLabel" :aria-expanded="accountOpen" @pointerenter="warmTool('account')" @focus="warmTool('account')" @click="accountOpen = true">
+        <span class="icon" aria-hidden="true">👤</span>
+        <span class="nav-label">{{ accountLabel }}</span>
+      </button>
+      <button type="button" class="nav-item data-item sidebar-search-action" @pointerenter="warmTool('search')" @focus="warmTool('search')" @click="showSearch = true">
         <span class="icon">🔍</span>
         <span class="nav-label">搜索</span>
       </button>
@@ -551,6 +545,10 @@ function openMobileTool(key) {
           <span class="quick-add-label">记录</span>
         </button>
       </div>
+      <button type="button" class="nav-item data-item festive-item" @pointerenter="warmTool('festive')" @focus="warmTool('festive')" @click="showFestiveSettings = true">
+        <span class="icon" aria-hidden="true">🎉</span>
+        <span class="nav-label">氛围与纪念日</span>
+      </button>
       <button type="button" class="nav-item data-item" @pointerenter="warmTool('data')" @focus="warmTool('data')" @click="openDataManager">
         <span class="icon">💾<i v-if="needsBackup" class="backup-dot"></i></span>
         <span class="nav-label">数据管理</span>
@@ -561,9 +559,9 @@ function openMobileTool(key) {
 <button type="button" class="nav-item data-item" @pointerenter="warmTool('focus')" @focus="warmTool('focus')" @click="showFocusSettings = true">
           <span class="icon">⏱</span><span class="nav-label">专注设置</span>
         </button>
-      <button type="button" class="nav-item data-item" :disabled="checkingUpdate" @click="checkUpdate">
+      <button type="button" class="nav-item data-item" @pointerenter="warmTool('update')" @focus="warmTool('update')" @click="showVersionUpdate = true">
         <span class="icon" aria-hidden="true">↻</span>
-        <span class="nav-label">{{ checkingUpdate ? '检查中…' : '检查更新' }}</span>
+        <span class="nav-label">版本与更新</span>
       </button>
 
       <div class="theme-row" role="group" aria-label="主题色切换">
@@ -586,18 +584,21 @@ function openMobileTool(key) {
 
       <div class="footer">
         本地存储 · 可随时备份
-        <span class="kbd-hint">按 1-6 快速切换页面</span>
+        <span class="kbd-hint">按 1-9 快速切换页面</span>
       </div>
     </div>
   </aside>
 
   <Toast v-model:open="toast.open" :message="toast.message" :type="toast.type" :action-label="toast.actionLabel" :undo-fn="toast.undoFn" :view-fn="toast.viewFn" :duration="toast.duration" @action="() => {}" @close="toast.open = false" />
 
+  <AccountPanel v-if="accountOpen" :open="accountOpen" @close="accountOpen = false" />
   <DataManager v-if="showDataManager" :open="showDataManager" @close="showDataManager = false" />
+  <VersionUpdateModal v-if="showVersionUpdate" :open="showVersionUpdate" @close="showVersionUpdate = false" />
   <AppearanceSettings v-if="showAppearance" :open="showAppearance" @close="showAppearance = false" />
   <QuickRecordSettings v-if="showQuickRecordSettings" :open="showQuickRecordSettings" @close="showQuickRecordSettings = false" />
   <SearchPanel v-if="showSearch" :open="showSearch" @close="closeSearch()" />
   <FocusSettings v-if="showFocusSettings" :open="showFocusSettings" @close="showFocusSettings = false" />
+  <FestiveSettings v-if="showFestiveSettings" :open="showFestiveSettings" @close="showFestiveSettings = false" />
 </template>
 
 <style scoped>
@@ -940,7 +941,7 @@ function openMobileTool(key) {
     top: 0;
     bottom: 0;
     right: 0;
-    z-index: 31;
+    z-index: 30;
     width: min(86vw, 320px);
     /* 老浏览器看得懂 vh，新浏览器用 dvh 跟动态视口（地址栏收放时抽屉不会短一截）。 */
     height: 100vh;
@@ -963,9 +964,12 @@ function openMobileTool(key) {
   .mobile-more-group + .mobile-more-group { margin-top: 13px; padding-top: 11px; border-top: 1px solid var(--border); }
   .mobile-more-group h3 { margin: 0 0 7px 2px; color: var(--ink-faint); font-size: var(--fs-11); font-weight: var(--fw-800); letter-spacing: .04em; }
   .mobile-more-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+  .mobile-more-group-common .mobile-more-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .mobile-more-item { min-height: 66px; color: var(--text); background: var(--bg); }
+  .mobile-more-group-common .mobile-more-item { min-height: 76px; }
   .mobile-more-item.subdued { color: var(--ink-soft); background: var(--bg-tint); }
   .mobile-more-item > span { font-size: var(--fs-21); }
+  .mobile-more-item > em { color: var(--ink-faint); font-size: var(--fs-10-5); font-style: normal; line-height: 1; }
   /* 面板从**右边**滑进滑出（off-canvas 右外侧开始，与右划关闭同向），遮罩只做透明度淡入淡出。
      102% 必须与 drawerDrag.js 的 DRAWER_EXIT_SHIFT 保持一致（有测试比对这两个数）。 */
   .more-sheet-enter-active,
@@ -982,5 +986,11 @@ function openMobileTool(key) {
   .mobile-nav,
   .mobile-more-sheet,
   .mobile-more-backdrop { display: none; }
+
+  /* Desktop search and capture live in the app toolbar; the sidebar keeps
+     space for navigation and lower-frequency account/settings tools. */
+  .sidebar-search-action,
+  .sidebar .quick-add-button { display: none; }
+  .sidebar-action-row { gap: 0; }
 }
 </style>

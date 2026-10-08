@@ -3,20 +3,18 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Modal from '../components/Modal.vue'
 import PromptDialog from '../components/PromptDialog.vue'
+import ConfirmDialog from '../components/ConfirmDialog.vue'
 import Toast from '../components/Toast.vue'
 import { useStoredRef } from '../composables/store'
 import { ledgerTabFromQuery } from '../composables/routeState.js'
 import {
   activeCategories,
   catInfo,
-  categoriesForScope,
-  commonCategories,
   computeFrequentFromIndex,
   detectCategory,
   expenses,
   freqPrefs,
   ledgerIndex,
-  ledgerCategories,
   amountToCents,
   buildLedgerMonthReview,
   filterLedgerTransactions,
@@ -46,7 +44,7 @@ import {
   sumLedgerMonthInBase,
   useLedgerFx,
 } from '../composables/ledgerFx.js'
-import { budgetAlertText, budgetStatus, useLedgerBudget } from '../composables/ledgerBudget.js'
+import { useLedgerBudget } from '../composables/ledgerBudget.js'
 import { useLedgerFeed } from '../composables/ledgerView/feed.js'
 import { useLedgerSpendStats } from '../composables/ledgerView/spendStats.js'
 import { useLedgerExport } from '../composables/ledgerView/export.js'
@@ -60,6 +58,7 @@ import { buildSplit, hasSplit, mySpendCents, mySpendYuan, normalizeSplit, person
 import { useQuickEntryForm } from '../composables/ledgerView/useQuickEntryForm.js'
 import { useTransactionDetail } from '../composables/ledgerView/useTransactionDetail.js'
 import { useLedgerFxBudget } from '../composables/ledgerView/useLedgerFxBudget.js'
+import { useLedgerCategoryManager } from '../composables/ledgerView/useLedgerCategoryManager.js'
 
 // 三个分区各自一个文件（ledger-panels/）：本文件只保留分区壳 + 共享的弹窗与交互状态。
 import LedgerHomePanel from './ledger-panels/LedgerHomePanel.vue'
@@ -418,6 +417,8 @@ const {
   detailCategoryInput,
   detailDateInput,
   detailCurrencyInput,
+  applySameNameCategory,
+  sameNameCategoryCount,
   showRefund,
   refundItem,
   refundAmountInput,
@@ -453,7 +454,6 @@ const {
   baseCurrency,
   fxRateLine,
   budgetAlert,
-  budgetPaceLine,
   showFxSettings,
   showBudgetSettings,
   fxAddableCurrencies,
@@ -475,6 +475,7 @@ const allActiveCategories = computed(() => [...activeCategories('expense'), ...a
 const accountOptions = computed(() => [...new Set(ledgerIndex.value.sortedExpenses
   .map((item) => String(item?.account ?? '').trim())
   .filter(Boolean))].sort((a, b) => a.localeCompare(b)))
+const monthCategoryTotals = computed(() => personalMonthCategoryTotals(expenses.value, ledgerToday()))
 const categoryOverview = computed(() => {
   // 与 hero 的「本月承担」同源：分类条回答的也是「我的钱花到哪去了」，
   // 用全额分类合计会让同一屏上出现「本月承担 ¥40 / 其它 ¥200」这种自相矛盾。
@@ -484,7 +485,7 @@ const categoryOverview = computed(() => {
   // 所以分子是毛、分母若是净，有退款时 pct 会算出 >100%（回顾页早就修过这个问题，
   // 首页这条路径当时漏了）。用分类自身求和做分母，三者恒等式恒成立：
   // Σ(分类) === Σ(分类条)，且退款不再让每根条都撑满。
-  const entries = [...personalMonthCategoryTotals(expenses.value, ledgerToday()).entries()]
+  const entries = [...monthCategoryTotals.value.entries()]
   const grossTotal = entries.reduce((sum, [, value]) => sum + value, 0)
   const total = grossTotal || 1
   return entries
@@ -494,7 +495,7 @@ const categoryOverview = computed(() => {
 })
 // 卡片上只放前 5 名（首页要短），但「还有几个分类没显示」必须说出来，
 // 否则用户会把前 5 名当成全部（旧版连这句提示都没有，第 6 名以后是隐形的）。
-const monthCategoryKeys = computed(() => [...personalMonthCategoryTotals(expenses.value, ledgerToday()).keys()])
+const monthCategoryKeys = computed(() => [...monthCategoryTotals.value.keys()])
 
 /* ---------- 常记 ---------- */
 const frequent = computed(() => computeFrequentFromIndex(ledgerIndex.value, freqPrefs.value))
@@ -507,95 +508,43 @@ function useFrequent(item) {
 // 回顾分区的全部派生状态搬进 composables/ledgerView/review.js。
 const {
   reviewMonth, shiftMonth, reviewLabel, monthlyReview, reviewTotal, reviewCount,
+  jumpToMonth,
   mostFrequent, topCategory, maxSingle, maxSingleMine, REVIEW_CATEGORY_LIMIT,
   expandedCategory, showAllReviewCats, reviewCategoryRows, reviewCategorySum,
   visibleCategoryRows, hiddenCategoryCount, resetReviewCategoryView,
   toggleReviewCategory, revealReviewCategory, openReviewCategoryFromHome,
-  reviewMyShareNote, calendarCells, selectedDay, selectedDayInfo,
-} = useLedgerReview({ personalAmount, ledgerToday, tab })
+  reviewMyShareNote, calendarCells, selectedDay, selectedDayInfo, reviewTrendMonths,
+} = useLedgerReview({ personalAmount, ledgerToday, tab, fx })
 
 /* ================= 分类管理 ================= */
-const showCatManage = ref(false)
-const newCatName = ref('')
-// 改名目标（state + 回调，仓库惯例）：点「重命名」只记下目标，改不改由 PromptDialog 决定。
-// 这里刻意**不再**调用原生 `window.prompt`——它是浏览器级对话框，既没有 Modal 的浮层栈、
-// 焦点陷阱与 Escape 出口，在测试环境（happy-dom）里更是 undefined，调用直接抛 TypeError，
-// 于是改名这条路径此前无法被任何用例验证。见 src/components/PromptDialog.vue 头部说明。
-const renameTarget = ref(null)
-const categoryManageTab = ref('common')
-const categoryManageScope = ref('expense')
-const ICON_POOL = ['🍜', '☕', '🍪', '🚇', '🛍️', '📦', '📚', '💻', '🎮', '🧴', '✂️', '🛁', '🏠', '💡', '📱', '💊', '🏃', '🎁', '✈️', '🐾', '🔁', '💼', '💰', '🧾', '↩️', '🧧', '♻️', '⋯']
-function createCategoryId() {
-  return `custom-${globalThis.crypto?.randomUUID?.() || Math.random().toString(36).slice(2)}`
-}
-
-const managedCategories = computed(() => {
-  const all = categoriesForScope(categoryManageScope.value, { includeHidden: true })
-  if (categoryManageTab.value === 'hidden') return all.filter((category) => category.hidden)
-  if (categoryManageTab.value === 'custom') return all.filter((category) => !category.isDefault)
-  if (categoryManageTab.value === 'all') return all
-  return commonCategories(categoryManageScope.value)
-})
-
-function openCategoryManager() {
-  categoryManageTab.value = 'common'
-  categoryManageScope.value = 'expense'
-  showCatManage.value = true
-}
-
-function addCategory() {
-  const name = newCatName.value.trim()
-  if (!name) return
-  if (ledgerCategories.value.some((c) => c.name === name && (c.scope || 'expense') === categoryManageScope.value)) { newCatName.value = ''; return }
-  const used = new Set(ledgerCategories.value.map((c) => c.icon))
-  const icon = ICON_POOL.find((i) => !used.has(i)) ?? '📦'
-  ledgerCategories.value = [...ledgerCategories.value, { key: createCategoryId(), name, icon, scope: categoryManageScope.value, hidden: false, isDefault: false }]
-  newCatName.value = ''
-}
-function renameCategory(cat) {
-  // 只打开对话框。原来这里是 `const name = window.prompt('修改分类名称', cat.name)`。
-  renameTarget.value = cat
-}
-/**
- * 确认改名。与原 prompt 版的判据逐字一致：
- *   - 取消（原来 `name === null`）→ 不改名（走 @close，不回到这里）；
- *   - trim 后为空 → 不改名（PromptDialog 已经先兜住空值，这里再判一次是防御）；
- *   - 非空 → 按稳定 key 找到那一条，只改 name（分类 ID 不变，历史记录照旧关联）。
- */
-function applyCategoryRename(value) {
-  const target = renameTarget.value
-  const trimmed = String(value ?? '').trim()
-  if (!target || !trimmed) { renameTarget.value = null; return }
-  const category = ledgerCategories.value.find((c) => c.key === target.key)
-  if (category) category.name = trimmed
-  renameTarget.value = null
-}
-function cycleIcon(cat) {
-  const target = ledgerCategories.value.find((c) => c.key === cat.key)
-  if (!target) return
-  const idx = ICON_POOL.indexOf(target.icon)
-  target.icon = ICON_POOL[(idx + 1) % ICON_POOL.length]
-}
-function toggleCatHidden(cat) {
-  const target = ledgerCategories.value.find((c) => c.key === cat.key)
-  if (!target) return
-  if (categoriesForScope(target.scope || 'expense').length <= 1 && !target.hidden) return
-  target.hidden = !target.hidden
-}
-
-function moveCategory(cat, delta) {
-  const list = [...ledgerCategories.value]
-  const index = list.findIndex((item) => item.key === cat.key)
-  if (index < 0) return
-  const scope = cat.scope || 'expense'
-  const sameScope = list.map((item, itemIndex) => ({ item, itemIndex })).filter(({ item }) => (item.scope || 'expense') === scope)
-  const position = sameScope.findIndex(({ item }) => item.key === cat.key)
-  const target = sameScope[position + delta]
-  if (!target) return
-  list[index] = target.item
-  list[target.itemIndex] = cat
-  ledgerCategories.value = list
-}
+const {
+  showCatManage,
+  newCatName,
+  renameTarget,
+  renameError,
+  categoryManageTab,
+  categoryManageScope,
+  categoryFeedback,
+  iconPickerCategoryKey,
+  categoryDeleteTarget,
+  CATEGORY_NAME_MAX_LENGTH,
+  ICON_POOL,
+  managedCategories,
+  categoryUsageFor,
+  categoryDeleteMessage,
+  openCategoryManager,
+  addCategory,
+  renameCategory,
+  applyCategoryRename,
+  toggleIconPicker,
+  setCategoryIcon,
+  toggleCatHidden,
+  canHideCategory,
+  moveCategory,
+  canMoveCategory,
+  requestDeleteCategory,
+  confirmDeleteCategory,
+} = useLedgerCategoryManager({ notify: showToast })
 </script>
 
 <template>
@@ -629,7 +578,7 @@ function moveCategory(cat, delta) {
         :month-compare="monthCompare"
         :fx-rate-line="fxRateLine"
         :budget-alert="budgetAlert"
-    :budget-pace-line="budgetPaceLine"
+        :budget-base-currency="baseMonthSummary.base"
         :budget="budget"
         :pending-bills="pendingBills"
         :bill-amount-text="billAmountText"
@@ -713,6 +662,8 @@ function moveCategory(cat, delta) {
     <!-- ================= 回顾 ================= -->
     <div v-else role="tabpanel" aria-labelledby="ledger-tab-review">
       <ReviewPanel
+        :monthly-trend="reviewTrendMonths"
+        :trend-currency="baseCurrency"
         :review-label="reviewLabel"
         :review-month="reviewMonth"
         :today-month="ledgerToday().slice(0, 7)"
@@ -743,6 +694,7 @@ function moveCategory(cat, delta) {
         :toggle-review-category="toggleReviewCategory"
         :open-detail="openDetail"
         @selected-day-change="selectedDay = $event"
+        @jump-to-month="jumpToMonth"
         @update:showAllReviewCats="showAllReviewCats = $event"
       />
     </div>
@@ -808,6 +760,7 @@ function moveCategory(cat, delta) {
       @quick-record-saved="onQuickRecordSaved"
       @select-category="selectQuickCategory"
       :show-quick-record="showQuickRecord"
+      @update:show-quick-record="showQuickRecord = $event"
     />
 
     <!-- ================= 记录详情（拆出到 TransactionDetailModal.vue）=============
@@ -822,6 +775,8 @@ function moveCategory(cat, delta) {
       :detail-category-input="detailCategoryInput"
       :detail-date-input="detailDateInput"
       :detail-currency-input="detailCurrencyInput"
+      :apply-same-name-category="applySameNameCategory"
+      :same-name-category-count="sameNameCategoryCount"
       :show-refund="showRefund"
       :refund-item="refundItem"
       :refund-amount-input="refundAmountInput"
@@ -835,6 +790,7 @@ function moveCategory(cat, delta) {
       @update:detail-category-input="detailCategoryInput = $event"
       @update:detail-date-input="detailDateInput = $event"
       @update:detail-currency-input="detailCurrencyInput = $event"
+      @update:apply-same-name-category="applySameNameCategory = $event"
       @update:show-refund="showRefund = $event"
       @update:refund-item="refundItem = $event"
       @update:refund-amount-input="refundAmountInput = $event"
@@ -893,22 +849,81 @@ function moveCategory(cat, delta) {
           <button type="button" :aria-pressed="categoryManageTab === 'hidden'" :class="{ on: categoryManageTab === 'hidden' }" @click="categoryManageTab = 'hidden'">隐藏分类</button>
           <button type="button" :aria-pressed="categoryManageTab === 'custom'" :class="{ on: categoryManageTab === 'custom' }" @click="categoryManageTab = 'custom'">自定义</button>
         </div>
+        <p v-if="categoryManageTab === 'all'" class="category-order-note">上下箭头调整完整分类列表和录入时“更多分类”的顺序；常用快捷分类仍优先显示最近使用项。</p>
         <div v-if="managedCategories.length === 0" class="category-empty">这里还没有符合条件的分类。</div>
-        <div v-for="c in managedCategories" :key="c.key" class="cat-row" :class="{ hidden: c.hidden }">
-          <button class="cat-icon" aria-label="更换分类图标" title="换个图标" @click="cycleIcon(c)">{{ c.icon }}</button>
-          <div class="cat-name"><b>{{ c.name }}</b><small v-if="c.legacy">历史兼容分类</small></div>
-          <div class="cat-ops">
-            <button class="link-btn" title="上移" @click="moveCategory(c, -1)">↑</button>
-            <button class="link-btn" title="下移" @click="moveCategory(c, 1)">↓</button>
-            <button class="link-btn" @click="renameCategory(c)">重命名</button>
-            <button class="link-btn" @click="toggleCatHidden(c)">{{ c.hidden ? '显示' : '隐藏' }}</button>
+        <div v-for="c in managedCategories" :key="c.key" class="cat-item">
+          <div class="cat-row" :class="{ hidden: c.hidden }">
+            <button
+              class="cat-icon"
+              type="button"
+              :aria-label="`更换${c.name}图标`"
+              :aria-expanded="iconPickerCategoryKey === c.key"
+              :aria-controls="iconPickerCategoryKey === c.key ? `category-icon-picker-${c.key}` : undefined"
+              title="选择图标"
+              @click="toggleIconPicker(c)"
+            >{{ c.icon }}</button>
+            <div class="cat-name">
+              <b>{{ c.name }}</b>
+              <small v-if="c.legacy">历史兼容分类</small>
+              <small v-else-if="!c.isDefault && categoryUsageFor(c.key).transactions">{{ categoryUsageFor(c.key).transactions }} 笔历史交易，删除会受保护</small>
+            </div>
+            <div class="cat-ops">
+              <template v-if="categoryManageTab === 'all'">
+                <button class="link-btn" type="button" title="上移" :aria-label="`${c.name}上移`" :disabled="!canMoveCategory(c, -1)" @click="moveCategory(c, -1)">↑</button>
+                <button class="link-btn" type="button" title="下移" :aria-label="`${c.name}下移`" :disabled="!canMoveCategory(c, 1)" @click="moveCategory(c, 1)">↓</button>
+              </template>
+              <button class="link-btn" type="button" @click="renameCategory(c)">重命名</button>
+              <button
+                class="link-btn"
+                type="button"
+                :disabled="!canHideCategory(c)"
+                :aria-label="!canHideCategory(c) ? `至少保留一个可用分类，${c.name}暂不能隐藏` : `${c.hidden ? '显示' : '隐藏'}${c.name}`"
+                :title="!canHideCategory(c) ? '至少保留一个可用分类' : undefined"
+                @click="toggleCatHidden(c)"
+              >{{ c.hidden ? '显示' : '隐藏' }}</button>
+              <button
+                v-if="!c.isDefault"
+                class="link-btn category-delete"
+                type="button"
+                :disabled="categoryUsageFor(c.key).transactions > 0"
+                :aria-label="categoryUsageFor(c.key).transactions > 0 ? `${c.name}已有历史交易，不能删除` : `删除${c.name}`"
+                :title="categoryUsageFor(c.key).transactions > 0 ? '已有历史交易，只能隐藏' : '删除未使用的自定义分类'"
+                @click="requestDeleteCategory(c)"
+              >删除</button>
+            </div>
+          </div>
+          <div
+            v-if="iconPickerCategoryKey === c.key"
+            :id="`category-icon-picker-${c.key}`"
+            class="category-icon-picker"
+            role="group"
+            :aria-label="`为${c.name}选择图标`"
+          >
+            <button
+              v-for="icon in ICON_POOL"
+              :key="icon"
+              class="category-icon-option"
+              type="button"
+              :aria-label="`将${c.name}图标设为${icon}`"
+              :aria-pressed="c.icon === icon"
+              :class="{ selected: c.icon === icon }"
+              @click="setCategoryIcon(c, icon)"
+            >{{ icon }}</button>
           </div>
         </div>
         <div class="cat-add">
-          <input aria-label="新增分类名称" v-model="newCatName" :placeholder="categoryManageScope === 'income' ? '新增收入分类' : '新增支出分类'" @keydown.enter="addCategory" />
-          <button class="btn btn-sm btn-primary" @click="addCategory">添加</button>
+          <input
+            aria-label="新增分类名称"
+            v-model="newCatName"
+            :maxlength="CATEGORY_NAME_MAX_LENGTH"
+            :placeholder="categoryManageScope === 'income' ? '新增收入分类' : '新增支出分类'"
+            @input="categoryFeedback = null"
+            @keydown.enter.prevent="addCategory"
+          />
+          <button class="btn btn-sm btn-primary" type="button" @click="addCategory">添加</button>
         </div>
-        <p class="form-note">分类改名会保留稳定 ID；有历史记录的分类只能隐藏，不能直接删除。历史交易不会因新增规则而重分类。</p>
+        <p v-if="categoryFeedback" class="category-feedback" :class="`is-${categoryFeedback.type}`" role="status" aria-live="polite">{{ categoryFeedback.message }}</p>
+        <p class="form-note">默认分类不能删除。自定义分类没有历史交易时可以删除；有历史交易的分类请隐藏保留。改名会保留分类 ID，规则只影响之后的新记录。</p>
       </div>
     </Modal>
 
@@ -921,8 +936,21 @@ function moveCategory(cat, delta) {
       title="修改分类名称"
       label="分类名称"
       :initial-value="renameTarget?.name || ''"
-      @close="renameTarget = null"
+      :maxlength="CATEGORY_NAME_MAX_LENGTH"
+      :error="renameError"
+      @input="renameError = ''"
+      @close="renameTarget = null; renameError = ''"
       @confirm="applyCategoryRename"
+    />
+
+    <ConfirmDialog
+      v-if="categoryDeleteTarget"
+      :open="Boolean(categoryDeleteTarget)"
+      title="删除自定义分类"
+      :message="categoryDeleteMessage"
+      confirm-label="删除分类"
+      @close="categoryDeleteTarget = null"
+      @confirm="confirmDeleteCategory"
     />
 
     <Toast v-model:open="toast.open" :message="toast.message" :type="toast.type" :action-label="toast.actionLabel" :undo-fn="toast.undoFn" :view-fn="toast.viewFn" :duration="toast.duration" @action="() => {}" @close="toast.open = false" />
@@ -940,6 +968,13 @@ function moveCategory(cat, delta) {
    （tests/scopedChildReachability.test.js 的判据），一并删除而不是搬走。 */
 /* 样式迁移记录：QuickEntryModal、TransactionDetailModal、BillFormModal、FxSettingsModal、
    BudgetSettingsModal、LedgerHomePanel、BillsPanel、ReviewPanel 的 scoped 样式已随模板迁移。 */
+/* 「聚焦态」反馈条：模板用的是 .notice-success，但这条类只在**别的组件**的 scoped 块里定义过
+   （TasksView / EventsView / WeeklyReviewView），scoped 样式不跨组件生效，
+   于是这里渲染成默认段落（正文黑字 + 默认外边距），和全站绿色成功提示不是一套东西。 */
+.notice-success {
+  margin:12px 0 0;
+  color:var(--success);
+  font-size:var(--fs-12)}
 .page {
   gap:16px;
   flex-direction:column;
@@ -980,6 +1015,14 @@ function moveCategory(cat, delta) {
   text-align:center;
   padding:14px 8px;
   font-size:var(--fs-12)}
+.category-order-note {
+  margin:0;
+  color:var(--ink-faint);
+  font-size:var(--fs-10-5);
+  line-height:1.45}
+.cat-item {
+  flex-direction:column;
+  display:flex}
 .cat-row {
   border-radius:var(--radius-10);
   align-items:center;
@@ -1004,23 +1047,64 @@ function moveCategory(cat, delta) {
   min-width:0;
   display:flex}
 .cat-row b {
-  font-size:var(--fs-13)}
+  font-size:var(--fs-13);
+  overflow-wrap:anywhere}
 .cat-name small {
   color:var(--ink-faint);
   font-size:var(--fs-10)}
 .cat-ops {
+  flex-wrap:wrap;
+  flex:0 0 auto;
   gap:4px;
   display:flex}
 .cat-ops .link-btn {
-  padding:3px 4px}
+  min-height:34px;
+  padding:4px 6px}
+.cat-ops .link-btn:disabled {
+  color:var(--ink-faint);
+  cursor:not-allowed;
+  opacity:.45}
+.cat-ops .category-delete:not(:disabled) {
+  color:var(--danger)}
+.category-icon-picker {
+  margin:2px 10px 8px 54px;
+  grid-template-columns:repeat(7,minmax(34px,1fr));
+  gap:5px;
+  display:grid}
+.category-icon-option {
+  min-width:34px;
+  min-height:36px;
+  color:var(--text);
+  cursor:pointer;
+  background:var(--card);
+  border:1px solid var(--border);
+  border-radius:var(--radius-8);
+  font-size:var(--fs-16)}
+.category-icon-option.selected {
+  border-color:var(--primary);
+  background:var(--primary-soft);
+  box-shadow:inset 0 0 0 1px var(--primary)}
 .cat-add {
   gap:8px;
   margin-top:8px;
   display:flex}
 .cat-add input {
+  min-width:0;
   flex:1}
+.category-feedback {
+  margin:0;
+  font-size:var(--fs-11);
+  line-height:1.45}
+.category-feedback.is-error { color:var(--danger) }
+.category-feedback.is-success { color:var(--success) }
 @media (max-width:760px) {
   .page {
   gap:14px}
+}
+@media (max-width:520px) {
+  .cat-row { gap:7px; padding:7px 6px }
+  .cat-ops { gap:2px }
+  .cat-ops .link-btn { min-height:36px; padding:4px 5px; font-size:var(--fs-10-5) }
+  .category-icon-picker { margin-left:47px; grid-template-columns:repeat(6,minmax(34px,1fr)) }
 }
 </style>

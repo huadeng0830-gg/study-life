@@ -4,10 +4,10 @@ import { isActiveEntity } from './domain/state.js'
 
 /** @typedef {{ start: number, end: number }} TimeRange */
 /** @typedef {{ id: string|number, name: string, day: number, startPeriod: string, endPeriod: string, startWeek?: number, endWeek?: number, weekType?: 'all'|'odd'|'even' }} Course */
-/** @typedef {{ id: string|number, title?: string, name?: string, dueDate?: string, date?: string, dueTime?: string, time?: string, estimatedMinutes?: number }} TaskEventItem */
+/** @typedef {{ id: string|number, title?: string, name?: string, dueDate?: string, date?: string, dueTime?: string, time?: string, endTime?: string, estimateMinutes?: number }} TaskEventItem */
 /** @typedef {{ type: string, entityId: string|number, entityName: string, entityType: string, existing: Course|TaskEventItem, new: Course|TaskEventItem }} ConflictBase */
 /** @typedef {ConflictBase & { type: 'course-course', week: number, day: number, timeRange: TimeRange, message: string }} CourseConflict */
-/** @typedef {ConflictBase & { type: 'task-task'|'event-event', date: string, timeRange: TimeRange, message: string }} TaskEventConflict */
+/** @typedef {ConflictBase & { type: 'task-task'|'task-event'|'event-task'|'event-event', date: string, timeRange: TimeRange, message: string }} TaskEventConflict */
 /** @typedef {CourseConflict|TaskEventConflict} Conflict */
 /** @typedef {{ hasConflicts: boolean, count: number, byType: Record<string, number>, message: string }} ConflictSummary */
 
@@ -131,10 +131,14 @@ export function detectTaskEventConflicts(newItem, existingItems = [], date, item
   const targetDate = newItem.dueDate || newItem.date
   if (targetDate !== date) return []
 
-  const newTime = newItem.dueTime || newItem.time || '00:00'
+  const newTime = newItem.dueTime || newItem.time
+  // 只有日期的任务/日程没有可比较的时间区间，不应被当作午夜的一小时。
+  if (!newTime) return []
   const [newHour, newMinute] = newTime.split(':').map(Number)
   const newStart = (newHour || 0) * 60 + (newMinute || 0)
-  const newEnd = newStart + (newItem.estimatedMinutes || 60)
+  const newEnd = newItem.endTime
+    ? timeToMinutes(newItem.endTime)
+    : newStart + (Number(newItem.estimateMinutes) || 60)
 
   const conflicts = []
   for (const item of existingItems) {
@@ -143,17 +147,21 @@ export function detectTaskEventConflicts(newItem, existingItems = [], date, item
     const itemDate = item.dueDate || item.date
     if (itemDate !== targetDate) continue
 
-    const itemTime = item.dueTime || item.time || '00:00'
+    const itemTime = item.dueTime || item.time
+    if (!itemTime) continue
     const [itemHour, itemMinute] = itemTime.split(':').map(Number)
     const itemStart = (itemHour || 0) * 60 + (itemMinute || 0)
-    const itemEnd = itemStart + (item.estimatedMinutes || 60)
+    const itemEnd = item.endTime
+      ? timeToMinutes(item.endTime)
+      : itemStart + (Number(item.estimateMinutes) || 60)
 
     if (timeOverlap({ start: newStart, end: newEnd }, { start: itemStart, end: itemEnd })) {
+      const existingType = item.dueDate ? 'task' : 'event'
       conflicts.push({
-        type: `${itemType}-${itemType === 'task' ? 'task' : 'event'}`,
+        type: `${itemType}-${existingType}`,
         entityId: item.id,
         entityName: item.title || item.name || '',
-        entityType: itemType === 'task' ? 'Task' : 'Event',
+        entityType: existingType === 'task' ? 'Task' : 'Event',
         existing: item,
         new: newItem,
         date: targetDate,
@@ -163,6 +171,12 @@ export function detectTaskEventConflicts(newItem, existingItems = [], date, item
     }
   }
   return conflicts
+}
+
+/** @param {string} value */
+function timeToMinutes(value) {
+  const [hour, minute] = value.split(':').map(Number)
+  return (hour || 0) * 60 + (minute || 0)
 }
 
 /**

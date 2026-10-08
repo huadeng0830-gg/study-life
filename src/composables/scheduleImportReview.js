@@ -1,6 +1,9 @@
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, ref } from 'vue'
 import { MAX_WEEK } from './store'
 import { periodIndex } from './store/timeConfig.js'
+
+/** 「撤销本次导入」的可撤销窗口。到期后按钮必须一起消失，不能留在界面上。 */
+const IMPORT_UNDO_WINDOW_MS = 30000
 
 let courseImportApi = null
 let courseImportTask = null
@@ -38,6 +41,30 @@ export function useScheduleImportReview({
   const lastImportUndo = ref(null)
 
   const courseConflictOptions = computed(() => ({ maxWeek: MAX_WEEK, periodIndex: (id) => periodIndex(id) }))
+
+  /**
+   * 「撤销本次导入」的到期收口。
+   *
+   * 【修的是什么】按钮的可见性就是 `Boolean(lastImportUndo)`（ScheduleView 把它当
+   * `can-undo` 传给 BatchImportModal）。原来窗口到期只在**点击时**判断
+   * （`Date.now() > undo.expiresAt` 直接 return），而 `lastImportUndo` 从不清空 ——
+   * 于是 30 秒后按钮还挂在面板上，点下去什么都不发生，也没有任何提示：
+   * 一次彻底静默的失效。这里补一个到期定时器，让按钮和状态一起消失。
+   */
+  let undoTimer = 0
+  function stopUndoTimer() {
+    if (!undoTimer) return
+    window.clearTimeout(undoTimer)
+    undoTimer = 0
+  }
+  function scheduleUndoExpiry() {
+    stopUndoTimer()
+    undoTimer = window.setTimeout(() => {
+      undoTimer = 0
+      lastImportUndo.value = null
+    }, IMPORT_UNDO_WINDOW_MS)
+  }
+  onBeforeUnmount(stopUndoTimer)
   const importSummary = computed(() => {
     const items = importDraft.value?.items || []
     return {
@@ -111,7 +138,8 @@ export function useScheduleImportReview({
       // Only accepted import results train the on-device correction memory.
       // OCR suggestions never leave this browser and never alter cloud data by themselves.
       void import('./ocrVocabulary.js').then(({ rememberOcrCourses }) => rememberOcrCourses(plan.courses))
-      lastImportUndo.value = { snapshot: draft.snapshot, expiresAt: Date.now() + 30000 }
+      lastImportUndo.value = { snapshot: draft.snapshot, expiresAt: Date.now() + IMPORT_UNDO_WINDOW_MS }
+      scheduleUndoExpiry()
       const summary = `新增 ${plan.added} 门，替换 ${plan.replaced} 门，跳过 ${plan.skipped} 门${plan.kept ? `，保留冲突 ${plan.kept} 门` : ''}`
       if (draft.source === 'manual') { showForm.value = false; showToast(`课程已保存：${summary}`) }
       else if (draft.source === 'template') { managerMessage.value = `模板导入完成：${summary}` }
@@ -126,7 +154,9 @@ export function useScheduleImportReview({
 
   function undoLastCourseImport() {
     const undo = lastImportUndo.value
-    if (!undo || Date.now() > undo.expiresAt) return
+    // 到期（含定时器还没跑到的那一瞬）都要把状态收干净，别留一个点了没反应的按钮。
+    if (!undo || Date.now() > undo.expiresAt) { stopUndoTimer(); lastImportUndo.value = null; return }
+    stopUndoTimer()
     domain.replaceCourses(JSON.parse(JSON.stringify(undo.snapshot)))
     lastImportUndo.value = null
     message.value = '已撤销本次导入，课表已恢复'

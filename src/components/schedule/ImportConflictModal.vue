@@ -14,12 +14,37 @@ const props = defineProps({
 
 const emit = defineEmits(['close', 'decision', 'decisions', 'commit', 'replace-all'])
 
+/**
+ * 课程占用的节次文案。
+ *
+ * 【修的是什么】`course.start` / `course.end` 存的是**节次 id**（`p0`、`p1`…，
+ * 见 domain/commands.js 的 createCourse 与 conflictDetection.js 的注释），
+ * 原来直接把 id 拼进界面，卡片上印出的是「新课程：高数 · 周一 · p0至p1 · 1-8周」——
+ * 同一张卡片下面那行「实际冲突」却用 `formatPeriods()` 走了标签
+ * （`periods[periodStart].label`），于是同一段信息两种写法并存，用户看不懂 p0 是什么。
+ * 这里改成和下面同一套：按 id 在 `periods` 里查出标签。
+ * 查不到时**不退回 id**，退回空串由模板决定不显示，避免再次把内部标识泄漏到界面。
+ */
+function periodTextById(id) {
+  return props.periods.find((period) => period.id === id)?.label || ''
+}
+
 function coursePeriodText(course) {
-  return course.start === course.end ? course.start : `${course.start}至${course.end}`
+  if (!course) return ''
+  const start = periodTextById(course.start)
+  const end = periodTextById(course.end)
+  if (!start && !end) return ''
+  if (!end || start === end) return start || end
+  return `${start}至${end}`
 }
 
 function weekLabel(course) {
   return `${course.startWeek}-${course.endWeek}周`
+}
+
+/** 名称 · 星期 · 节次 · 周次：节次查不到标签时整段略去，不留空的分隔符。 */
+function courseSummary(course) {
+  return [course.name, props.days[course.day], coursePeriodText(course), weekLabel(course)].filter(Boolean).join(' · ')
 }
 
 function formatWeeks(weeks) {
@@ -62,9 +87,9 @@ function formatPeriods(detail) {
       <div class="conflict-item-list">
         <article v-for="item in actionable" :key="item.index" class="conflict-item">
           <b>{{ item.type === 'duplicate' ? '疑似重复课程' : '时间冲突' }}</b>
-          <p>新课程：{{ item.course.name }} · {{ days[item.course.day] }} · {{ coursePeriodText(item.course) }} · {{ weekLabel(item.course) }}</p>
+          <p>新课程：{{ courseSummary(item.course) }}</p>
           <div v-for="match in item.matches" :key="match.existing.id" class="conflict-match">
-            当前课程：{{ match.existing.name }} · {{ days[match.existing.day] }} · {{ coursePeriodText(match.existing) }} · {{ weekLabel(match.existing) }}
+            当前课程：{{ courseSummary(match.existing) }}
             <small>实际冲突：第{{ formatWeeks(match.detail.weeks) }}周 · {{ formatPeriods(match.detail) }}</small>
           </div>
           <select :value="draft.decisions[item.index] || ''" :aria-label="`${item.course.name} 的处理方式`" @change="emit('decision', item.index, $event.target.value)">

@@ -3,7 +3,6 @@ import { beforeEach, describe, expect, it } from 'vitest'
 import { useDomainCommands } from '../src/composables/domain/commands.js'
 import { useQuickRecordAdapters } from '../src/composables/quickRecord/adapters.js'
 import { selectDayAgenda, selectReminders } from '../src/composables/domain/selectors.js'
-import { readSyncMetadata } from '../src/composables/syncMetadata.js'
 
 const domain = useDomainCommands()
 const quickRecord = useQuickRecordAdapters()
@@ -149,19 +148,14 @@ describe('QuickRecord 业务适配与撤销', () => {
   })
 
 
-  it('普通交易删除和撤销都通过领域命令并正确处理墓碑', () => {
+  it('普通交易删除和撤销都通过领域命令更新本机记录', () => {
     const transaction = domain.createTransaction({ id: 'tx-delete', name: '午饭', amount: 18 })
     const deleted = domain.deleteTransaction(transaction.id)
     expect(deleted).toMatchObject({ id: transaction.id })
     expect(domain.transactions.value).toHaveLength(0)
-    expect(readSyncMetadata().tombstones).toEqual(expect.arrayContaining([
-      expect.objectContaining({ entityType: 'Transaction', entityId: transaction.id }),
-    ]))
-
     const restored = domain.restoreDeletedTransaction(transaction)
     expect(restored).toMatchObject({ id: transaction.id, name: '午饭' })
     expect(domain.transactions.value).toHaveLength(1)
-    expect(readSyncMetadata().tombstones.some((item) => item.entityType === 'Transaction' && item.entityId === transaction.id)).toBe(false)
     expect(restored.updatedAt).not.toBe(transaction.createdAt)
   })
 

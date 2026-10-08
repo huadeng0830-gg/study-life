@@ -4,6 +4,9 @@ import Modal from '../components/Modal.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import TimeWheelSheet from '../components/TimeWheelSheet.vue'
 import EmptyState from '../components/EmptyState.vue'
+import DomainCsvImportButton from '../components/DomainCsvImportButton.vue'
+import IcsImportButton from '../components/IcsImportButton.vue'
+import SocialCalendarEvents from '../components/SocialCalendarEvents.vue'
 import { useDomainCommands } from '../composables/domain/commands.js'
 import { isArchived } from '../composables/domain/state.js'
 import { appToday, formatAppDate } from '../composables/timeContext.js'
@@ -12,6 +15,7 @@ import { useDebouncedRef } from '../composables/useDebouncedRef.js'
 
 
 const domain = useDomainCommands()
+const { events } = domain
 
 const FILTERS = [
   { key: 'upcoming', label: '即将到来' },
@@ -212,6 +216,24 @@ function confirmRemove() {
   domain.deleteEvent(target.id)
   showNotice('已删除')
 }
+
+function importCsvEvents(rows) {
+  rows.forEach((row) => domain.createEvent(row))
+  showNotice(`已导入 ${rows.length} 条日程`)
+}
+
+function importIcsEvents(rows) {
+  let imported = 0
+  try {
+    for (const row of rows) {
+      domain.createEvent(row)
+      imported += 1
+    }
+    showNotice(`已从日历文件导入 ${imported} 条日程`)
+  } catch (cause) {
+    showNotice(imported ? `已导入 ${imported} 条，后续保存失败：${cause?.message || '请重试'}` : cause?.message || '导入失败，请重试')
+  }
+}
 </script>
 
 <template>
@@ -222,8 +244,14 @@ function confirmRemove() {
         <h1>日程</h1>
         <p>集中查看、整理由快速记录或通知识别保存的日程安排。</p>
       </div>
-      <button type="button" class="btn btn-primary" @click="openCreate">＋ 新建日程</button>
+      <div class="events-header-actions">
+        <DomainCsvImportButton kind="events" :records="events" @import="importCsvEvents" />
+        <IcsImportButton :records="events" @import="importIcsEvents" />
+        <button type="button" class="btn btn-primary" @click="openCreate">＋ 新建日程</button>
+      </div>
     </header>
+
+    <SocialCalendarEvents scope="upcoming" />
 
     <section class="events-toolbar panel" aria-label="日程筛选">
       <div class="events-filters" role="group" aria-label="日程状态">
@@ -352,6 +380,7 @@ function confirmRemove() {
 
 <style scoped>
 .events-toolbar { display: flex; align-items: end; gap: 12px; margin-bottom: 14px; padding: 12px; flex-wrap: wrap; }
+.events-header-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .events-filters { display: flex; gap: 6px; }
 .filter-tab { min-height: 38px; padding: 0 13px; color: var(--ink-soft); font-size: var(--fs-12-5); font-weight: var(--fw-700); border: 1px solid var(--border); border-radius: var(--radius-pill); background: var(--bg); cursor: pointer; }
 .filter-tab.on { color: var(--on-primary, #fff); border-color: var(--primary); background: var(--primary); }
@@ -388,6 +417,8 @@ function confirmRemove() {
    深色 4.11:1（深色卡片上写死的深绿一直读不出来）。 */
 .notice-success { margin: 12px 0 0; color: var(--success); font-size: var(--fs-12); text-align: center; }
 @media (max-width: 520px) {
+  .events-header-actions { width: 100%; }
+  .events-header-actions > * { flex: 1; }
   .events-toolbar { align-items: stretch; }
   .search-field { flex-basis: 100%; }
   .event-card { align-items: flex-start; flex-direction: column; }

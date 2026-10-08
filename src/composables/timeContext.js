@@ -44,7 +44,7 @@ export function formatAppDate(value, { withWeekday = true, timezone = settingsPo
   if (Number.isNaN(source.getTime())) return ''
   // 复用 settingsPolicy 的 formatter 缓存：Intl.DateTimeFormat 的**构造**比
   // format 本身贵一个数量级，而这里的调用点有 5 个在 v-for / 列表行里
-  // （bills、EventsView、TasksView、TodayView、dataManagerStatus）。
+  // （bills、EventsView、TasksView、TodayView 等）。
   return cachedDateFormatter(timezone, {
     year: 'numeric',
     month: 'numeric',

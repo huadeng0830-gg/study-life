@@ -6,7 +6,7 @@
  * 多币种 / 分摊 都是纯函数，不依赖页面级命令对象（`domain.createTransaction` 等由页面注入）。
  */
 import { computed, ref, watch } from 'vue'
-import { activeCategories, catInfo, commonCategories, detectCategory, ledgerCategories, ledgerIndex, rememberCategoryOverride } from '../ledger.js'
+import { activeCategories, classifyTransaction, commonCategories, detectCategory, ledgerCategories, ledgerIndex, rememberCategoryOverride } from '../ledger.js'
 import { buildSplit, hasSplit, splitCentsEvenly } from '../ledgerSplit.js'
 import { moneyWithCurrency } from '../../utils/formatters.js'
 import { amountToCents, normalizeAmount } from '../ledger.js'
@@ -112,15 +112,25 @@ export function useQuickEntryForm({ baseCurrency, domain, notify, closeSwipe, le
   function openQuick(prefill = {}) {
     amountInput.value = prefill.amount ?? ''
     nameInput.value = prefill.name ?? ''
-    catInput.value = prefill.cat ?? ''
-    suggestedCategoryInput.value = ''
-    categoryInputManuallySelected.value = Boolean(prefill.cat)
-    showAllQuickCategories.value = false
     dateInput.value = prefill.date ?? appToday.value
     timeInput.value = prefill.time ?? ledgerNowHM()
     noteInput.value = prefill.note ?? ''
     accountInput.value = prefill.account ?? defaultAccount()
     directionInput.value = prefill.direction ?? prefill.type ?? 'expense'
+    const parsedName = parseNatural(nameInput.value).name || nameInput.value.trim()
+    const classification = parsedName ? classifyTransaction(parsedName, { direction: directionInput.value }) : null
+    suggestedCategoryInput.value = classification?.categoryId || ''
+    const learnedCategory = classification?.matchedBy === 'user' ? classification.categoryId : ''
+    const editingExisting = Boolean(prefill.id)
+    // 新建记录时，用户已经保存的纠正要优先于「常记」或“再记一笔”携带的旧分类。
+    // 编辑原记录则仍以该条记录现有分类为准，避免历史交易被新的名称规则意外改写。
+    catInput.value = editingExisting
+      ? prefill.cat ?? suggestedCategoryInput.value
+      : learnedCategory || prefill.cat || suggestedCategoryInput.value
+    categoryInputManuallySelected.value = editingExisting
+      ? Boolean(prefill.cat)
+      : !learnedCategory && Boolean(prefill.cat)
+    showAllQuickCategories.value = false
     sourceInput.value = prefill.source ?? 'manual'
     billIdInput.value = prefill.billId ?? ''
     currencyInput.value = normalizeCurrency(prefill.currency) || baseCurrency.value
@@ -161,23 +171,25 @@ export function useQuickEntryForm({ baseCurrency, domain, notify, closeSwipe, le
     if (categoryInputManuallySelected.value && validCategory) return
     categoryInputManuallySelected.value = false
     const name = parseNatural(nameInput.value).name || nameInput.value.trim()
-    suggestedCategoryInput.value = name ? detectCategory(name, { direction }) : ''
+    suggestedCategoryInput.value = name ? classifyTransaction(name, { direction }).categoryId : ''
     catInput.value = suggestedCategoryInput.value
   }
 
-  function onNameInput() {
+  function onNameInput(inputValue = nameInput.value) {
     dupWarn.value = false
     forceDup.value = false
-    const parsed = parseNatural(nameInput.value)
-    if (parsed.amount && amountInput.value === '' && parsed.name && parsed.name !== nameInput.value) {
+    const rawName = String(inputValue ?? '')
+    const parsed = parseNatural(rawName)
+    if (parsed.amount && amountInput.value === '' && parsed.name && parsed.name !== rawName) {
       nameInput.value = parsed.name
     }
     if (parsed.amount && amountInput.value === '') amountInput.value = parsed.amount
     if (parsed.cycle && !catInput.value) cycleSuggest.value = parsed.cycle
-    if (!catInput.value && parsed.name) {
-      suggestedCategoryInput.value = detectCategory(parsed.name || nameInput.value, { direction: directionInput.value })
+    if (!categoryInputManuallySelected.value) {
+      const name = parsed.name || rawName.trim()
+      const classification = name ? classifyTransaction(name, { direction: directionInput.value }) : null
+      suggestedCategoryInput.value = classification?.categoryId || ''
       catInput.value = suggestedCategoryInput.value
-      categoryInputManuallySelected.value = false
     }
   }
 
@@ -202,7 +214,8 @@ export function useQuickEntryForm({ baseCurrency, domain, notify, closeSwipe, le
   })
 
   function selectQuickCategory(key) {
-    catInput.value = catInput.value === key ? '' : key
+    if (catInput.value === key) return
+    catInput.value = key
     categoryInputManuallySelected.value = true
   }
 
@@ -232,7 +245,15 @@ export function useQuickEntryForm({ baseCurrency, domain, notify, closeSwipe, le
     const amount = normalizeAmount(amountInput.value)
     const name = nameInput.value.trim()
     try {
-      if (amount === null) { amountEl.value?.focus(); return false }
+      if (amount === null) {
+        // 【金额非法必须看得见】原来这里只有 `amountEl.value?.focus()`，而这个 ref 在
+        // 本页从未绑定到任何元素（LedgerView 没有解构它；弹窗里那个 ref 是同名的**另一个**
+        // 局部 ref），于是焦点回跳是空操作、也没有任何提示 —— 用户点「记下」只看到
+        // 按钮毫无反应，只能自己猜是漏了金额还是数字格式不对。
+        amountEl.value?.focus()
+        notify('请先填写有效金额，例如 12.50')
+        return false
+      }
       if (duplicateHit.value) { dupWarn.value = true; return false }
       let split = null
       // 【人数为 1 不是分摊】此前无条件 `draftSplit()`，于是 splitCount 默认 '1'
@@ -252,16 +273,21 @@ export function useQuickEntryForm({ baseCurrency, domain, notify, closeSwipe, le
       }
       const currency = currencyField(currencyInput.value, fx.value)
       if (editingId) {
+        const previous = domain.transactions?.value?.find((entry) => entry.id === editingId)
+        const previousCategory = previous?.cat || 'other'
         const target = domain.updateTransaction(editingId, {
-          name, amount, cat: catInput.value || detectCategory(name),
+          name, amount, cat: catInput.value || detectCategory(name, { direction: directionInput.value }),
           date: dateInput.value || appToday.value, time: timeInput.value || ledgerNowHM(),
           account: accountInput.value.trim(), note: noteInput.value.trim(),
           currency, split,
         })
-        if (target) notify(`已更新 ${moneyWithCurrency(target.amount, target.currency)} · ${target.name}`)
+        if (target) {
+          if (name && previousCategory !== target.cat) rememberCategoryOverride(name, target.cat, target.direction)
+          notify(`已更新 ${moneyWithCurrency(target.amount, target.currency)} · ${target.name}`)
+        }
       } else {
         const saved = domain.createTransaction({ name, amount,
-          cat: catInput.value || detectCategory(name),
+          cat: catInput.value || detectCategory(name, { direction: directionInput.value }),
           direction: directionInput.value,
           date: dateInput.value || appToday.value,
           time: timeInput.value || ledgerNowHM(),
@@ -294,8 +320,11 @@ export function useQuickEntryForm({ baseCurrency, domain, notify, closeSwipe, le
         keepAdding.value = true
         cycleSuggest.value = null
         currencyInput.value = normalizeCurrency(currencyInput.value) || baseCurrency.value
-        splitMine.value = ''
-        syncSplitMine()
+        // 【必须连人数一起复位】原来只清了 splitMine，splitCount 被静默继承下来：
+        // 上一笔按 3 人分摊，点「连续记」后下一笔只要填了金额就自动又按 3 人分摊，
+        // 而界面上没有任何东西提示它被继承了。resetSplitState 就是为这件事写的，
+        // 此前一直零调用。
+        resetSplitState()
         amountEl.value?.focus()
       }
       return true

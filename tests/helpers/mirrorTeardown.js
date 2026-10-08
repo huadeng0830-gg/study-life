@@ -15,11 +15,7 @@
  *      用一个 `EnvironmentTeardownError` 记进 unhandled error → `Errors 1 error`
  *      → 进程 exit 1。
  *
- * 实测（6 次全量运行，按 `globalThis.__vitest_worker__.filepath` 记录每次冲刷的
- * 归属）出现「用例之外冲刷」的文件是：`anniversaryAnimation`、`cloudSync`、
- * `festiveLunarAnniversaryHome`、`narrativeI18n`、`storageCorruptionResilience`、
- * `syncBootstrap`；命中的 error 归属（`This error originated in …`）也一直落在这个
- * 集合里。所以会写 store 的测试文件请在**文件顶层**登记一次收尾：
+ * 所以会写 store 的测试文件请在**文件顶层**登记一次收尾：
  *
  *   import { registerMirrorTeardown } from './helpers/mirrorTeardown.js'
  *   registerMirrorTeardown()

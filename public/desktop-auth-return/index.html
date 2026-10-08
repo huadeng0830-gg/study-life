@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="robots" content="noindex,nofollow">
+    <meta name="referrer" content="no-referrer">
+    <meta name="theme-color" content="#456fe8">
+    <title>三两事邮箱验证</title>
+    <style>
+      *{box-sizing:border-box}body{min-height:100vh;margin:0;display:grid;place-items:center;padding:24px;background:#f4f6fa;color:#1f2937;font-family:system-ui,-apple-system,"Segoe UI",sans-serif}.card{width:min(440px,100%);padding:32px;border:1px solid #e7ebf3;border-radius:22px;background:#fff;box-shadow:0 18px 54px #263b6612;text-align:center}.mark{display:block;width:56px;height:56px;object-fit:cover;margin:0 auto 18px;border-radius:17px;box-shadow:0 8px 20px rgba(23,76,66,.18)}.card h1{margin:0 0 10px;font-size:21px}.card p{margin:0;color:#68738a;font-size:14px;line-height:1.8}
+    </style>
+  </head>
+  <body>
+    <main class="card">
+      <img class="mark" src="../pwa-v2-192x192.png" alt="">
+      <h1 id="title">正在确认邮箱</h1>
+      <p id="message" role="status" aria-live="polite">验证完成后，请返回三两事桌面版并登录。</p>
+    </main>
+    <script>
+      (() => {
+        const params = new URLSearchParams(window.location.hash.slice(1))
+        const query = new URLSearchParams(window.location.search)
+        const failed = params.has('error') || query.has('error') || query.has('error_code')
+        if (failed) {
+          document.querySelector('#title').textContent = '验证链接无法使用'
+          document.querySelector('#message').textContent = '链接可能已过期或已使用。请返回桌面版重新发送验证邮件。'
+        } else {
+          document.querySelector('#title').textContent = '邮箱验证流程已完成'
+          document.querySelector('#message').textContent = '请返回三两事桌面版，使用该邮箱和密码登录。'
+        }
+        // Do not leave auth fragments or query values in browser history or referrers.
+        window.history.replaceState(window.history.state, '', window.location.pathname)
+      })()
+    </script>
+  </body>
+</html>

@@ -1,0 +1,86 @@
+import { socialRequest } from './social.js'
+import { accountUser } from '../composables/accountAuth.js'
+import { getSupabaseClient } from './supabase.js'
+
+const PROJECT_FILE_BUCKET = 'qixing-deliverables'
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
+export const PROJECT_TYPES = Object.freeze([
+  { value: 'course', label: '课程作业' },
+  { value: 'competition', label: '竞赛' },
+  { value: 'research', label: '科研' },
+  { value: 'software', label: '软件开发' },
+  { value: 'event', label: '活动筹备' },
+  { value: 'blank', label: '空白项目' },
+])
+
+export const PROJECT_TYPE_LABELS = Object.freeze(Object.fromEntries(PROJECT_TYPES.map((item) => [item.value, item.label])))
+export const PROJECT_TASK_STATUS = Object.freeze({ todo: '待开始', in_progress: '进行中', review: '待验收', completed: '已完成' })
+export const PROJECT_TASK_PRIORITY = Object.freeze({ low: '较低', normal: '普通', high: '较高', urgent: '紧急' })
+
+export function newProjectId() {
+  return globalThis.crypto?.randomUUID?.() || ''
+}
+
+export function normalizeProjectForm(value = {}) {
+  return {
+    name: String(value.name || '').trim(),
+    description: String(value.description || '').trim(),
+    type: PROJECT_TYPE_LABELS[value.type] ? value.type : 'blank',
+    startsOn: String(value.startsOn || ''),
+    targetEndOn: String(value.targetEndOn || ''),
+  }
+}
+
+export function validateProjectForm(value = {}) {
+  const form = normalizeProjectForm(value)
+  if (!form.name) return { ok: false, field: 'name', message: '请填写项目名称。' }
+  if (form.name.length > 120) return { ok: false, field: 'name', message: '项目名称不能超过 120 个字。' }
+  if (form.description.length > 2000) return { ok: false, field: 'description', message: '项目说明不能超过 2000 个字。' }
+  if (form.startsOn && !/^\d{4}-\d{2}-\d{2}$/.test(form.startsOn)) return { ok: false, field: 'startsOn', message: '开始日期格式不正确。' }
+  if (form.targetEndOn && !/^\d{4}-\d{2}-\d{2}$/.test(form.targetEndOn)) return { ok: false, field: 'targetEndOn', message: '预计结束日期格式不正确。' }
+  if (form.startsOn && form.targetEndOn && form.targetEndOn < form.startsOn) return { ok: false, field: 'targetEndOn', message: '预计结束日期不能早于开始日期。' }
+  return { ok: true, value: form }
+}
+
+export async function projectRequest(action, payload = {}) {
+  return socialRequest(`project_${action}`, payload)
+}
+
+async function verifiedProjectFileClient() {
+  const user = accountUser.value
+  if (!user?.id || !user.email_confirmed_at) throw new Error('请先登录并完成邮箱验证，再访问项目成果文件。')
+  const client = await getSupabaseClient()
+  const { data, error } = await client.auth.getSession()
+  if (error || data?.session?.user?.id !== user.id || accountUser.value?.id !== user.id) throw new Error('登录状态已变化，请重新打开项目。')
+  return { client, userId: user.id }
+}
+
+export async function uploadProjectDeliverableFile(projectId, deliverableId, file) {
+  if (!UUID_PATTERN.test(String(projectId || '')) || !UUID_PATTERN.test(String(deliverableId || '')) || !file?.name || !Number.isSafeInteger(file.size)) {
+    throw new Error('文件或交付项信息无效。')
+  }
+  if (file.size < 1 || file.size > 20 * 1024 * 1024) throw new Error('单个成果文件不能超过 20 MB。')
+  const { client, userId } = await verifiedProjectFileClient()
+  const safeName = String(file.name).normalize('NFKC').replace(/[^\p{L}\p{N}._-]+/gu, '_').slice(0, 120) || 'file'
+  const objectId = globalThis.crypto?.randomUUID?.()
+  if (!objectId) throw new Error('当前环境无法生成安全文件编号。')
+  const path = `${projectId}/${deliverableId}/${userId}/${objectId}-${safeName}`
+  const { error } = await client.storage.from(PROJECT_FILE_BUCKET).upload(path, file, {
+    upsert: false, contentType: file.type || 'application/octet-stream', cacheControl: '3600',
+  })
+  if (accountUser.value?.id !== userId) throw new Error('账号已切换，文件上传已取消。')
+  if (error) throw new Error('文件上传失败，请检查网络与项目权限后重试。')
+  return { path, name: String(file.name).slice(0, 200), size: file.size, mime: String(file.type || 'application/octet-stream').slice(0, 120) }
+}
+
+export async function getProjectDeliverableFileUrl(path) {
+  const objectPath = String(path || '')
+  if (!/^[0-9a-f-]{36}\/[0-9a-f-]{36}\/[0-9a-f-]{36}\/.{1,200}$/i.test(objectPath) || objectPath.includes('..')) {
+    throw new Error('成果文件路径无效。')
+  }
+  const { client, userId } = await verifiedProjectFileClient()
+  const { data, error } = await client.storage.from(PROJECT_FILE_BUCKET).createSignedUrl(objectPath, 60)
+  if (accountUser.value?.id !== userId || error || !data?.signedUrl) throw new Error('无法读取成果文件，请刷新项目成员权限后重试。')
+  return data.signedUrl
+}

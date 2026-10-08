@@ -1,12 +1,24 @@
 <div align="center">
 
-# 学习生活台
+# 三两事
 
 ### 把课程、待办、专注和日常记录放在同一条行动线上
 
 一个面向个人使用的 Local-first 学习生活工作台：打开就能看今天要做什么，想到什么可以快速记下，课程表可以从图片或 Excel 直接导入。
 
 [🌐 在线体验](https://study-life.pages.dev/) · [📦 GitHub](https://github.com/huadeng0830-gg/study-life)
+
+<!-- RELEASE_STATUS:START -->
+> **当前源码版本**：网页 / PWA `2026年10月08日-版本3` · Windows 桌面版 `1.0.4`
+> **最近更新**：
+> - Windows 更新器随包校验，缓存与临时文件跟随可选安装目录
+> - v* 标签自动构建 Windows 安装包并发布应用内更新元数据
+> - 桌面版本号和 README 版本区块随发布说明自动同步
+> - 齐行项目协作支持成员邀请、任务分配、成果评审、里程碑与会议
+> - 已安装 1.0.3 的用户需手动安装 1.0.4 一次，之后可在应用内更新
+> - 好友协作页完善确认、错误播报、标签切换与窄屏适配
+> [下载已发布的 Windows 安装包与版本说明](https://github.com/huadeng0830-gg/study-life/releases/latest)
+<!-- RELEASE_STATUS:END -->
 
 ![Vue 3](https://img.shields.io/badge/Vue-3-42b883?logo=vuedotjs&logoColor=white)
 ![Vite](https://img.shields.io/badge/Vite-8-646cff?logo=vite&logoColor=white)
@@ -19,14 +31,14 @@
 
 ## 30 秒了解
 
-| 问题 | 学习生活台的处理方式 |
+| 问题 | 三两事的处理方式 |
 | --- | --- |
 | 今天有哪些课和任务？ | 首页聚合当天课程、待办、日程、账单和近期节点。 |
 | 拿到新课表怎么录入？ | 支持粘贴文字、上传图片 OCR，或直接上传 XLS/XLSX/CSV/ODS 课程表；解析后先预览确认。 |
 | 收到一条群通知怎么办？ | 粘贴后先识别类型、标题、行动和关键时间，再按待办、作业、日程或仅保存通知处理；所有结论都可快速修改。 |
 | 临时想到一件事怎么办？ | 使用 `＋ 记录` 或 `Ctrl/Cmd + K`，输入一句话生成可编辑草稿。 |
 | 想开始复习但没有计划？ | 从倒计时或待办进入专注计时，并记录实际专注时长。 |
-| 换设备会丢数据吗？ | 可导出 JSON、使用加密二维码迁移，也可以手动选择云端推送或拉取。 |
+| 换设备会丢数据吗？ | 登录同一账号自动同步，也可导出 JSON 文件备份与恢复。 |
 
 ## 项目预览
 
@@ -35,11 +47,11 @@
 1. 今天页（桌面端，展示课程、待办和提醒）
 2. 课程表（校区 / 作息季切换，以及 Excel 导入预览）
 3. 快速记录（手机端，展示自然语言和语音输入）
-4. 数据管理（JSON 备份、二维码迁移、手动同步）
+4. 数据管理（JSON 备份、账号自动同步与恢复）
 
 ## 为什么做它
 
-课程群通知、作业截止时间、消费记录和考试日期通常散落在不同应用里。学习生活台把这些高频信息放进一个个人工作台：
+课程群通知、作业截止时间、消费记录和考试日期通常散落在不同应用里。三两事把这些高频信息放进一个个人工作台：
 
 ```text
 捕获 → 识别 → 确认 → 关联 → 安排 → 执行 → 回顾
@@ -51,12 +63,13 @@
 
 - **学习与生活一体化**：课程、作业、日程、考试、账单和清单共用一套数据关系。
 - **Local-first**：无需账号即可开始；核心数据保存在浏览器本地，并有 IndexedDB 设备内副本。
+- **可选邮箱账号**：桌面侧栏或手机“更多”中可注册、登录、重发验证邮件与退出；账号由 Supabase Auth 管理；登录后自动合并同步记录，离线时继续本机使用。
 - **自然语言快速录入**：一句“周五交高数作业”或“午饭 18 元”即可生成可修改的结构化草稿。
 - **通知理解与处理**：粘贴通知后展示“这是什么 / 讲什么 / 需要做什么 / 什么时候”，动态隐藏空字段；会议、考试、作业、缴费和普通公告分别推荐日程、作业、待办或仅保存。
 - **课程表导入更灵活**：图片 OCR、框选裁切、批量文字和 Excel 一键导入均提供确认预览，不直接覆盖正式数据。
 - **可配置的校园时间**：支持校区、作息季、自定义节次、单双周、学期模板和特殊日期。
 - **移动端优先**：手机底部导航、`＋记录` Bottom Sheet、Safe Area 和桌面侧栏分别优化。
-- **同步由用户掌控**：云同步是可选的手动能力，推送、拉取和冲突方向都需要明确确认。
+- **账号自动同步**：登录同一账号即可同步；内容冲突时暂停并确认，退出后保留本机数据。
 
 ## 🧩 核心功能
 
@@ -90,21 +103,32 @@
 - **专注**：常用时长、自定义时长、完成提醒、待办关联和专注记录。
 - **回顾**：按日、月、年汇总课程、待办、收支、日程、笔记、心情和节点。
 
+### 齐行项目协作
+
+- 项目数据模型、权限边界和发布步骤见[项目协作文档](docs/project-collaboration.md)。
+- 创建小组项目、邀请成员或生成可撤销的限额邀请链接，并处理加入申请。
+- 项目内支持任务分派、截止日期、优先级、依赖关系、里程碑和协作动态。
+- 交付项支持草稿、版本提交、清单验收与反馈；必需成果通过验收后才允许完成关联任务。
+- 会议可邀请项目成员、收集回应、提出改期，并在符合成员共同空闲时确认；已确认会议会进入个人日程。
+- 项目数据由 Supabase `campus-social` Edge Function 按登录身份处理；项目表启用 RLS，服务端 RPC 校验成员权限。成果文件存入私有 Storage bucket，上传与读取均检查项目成员关系。
+- 项目协作需要联网及已验证的账号。成员的个人课表、事件和账单不会展示给项目；共同空闲只返回可约时段。
+
 ### 数据管理与个性化
 
 - JSON 备份与恢复，支持可选携带本地壁纸。
-- 加密二维码在设备之间迁移数据，可选择合并或覆盖。
-- 可选的多设备云同步：用户创建或加入同步空间后明确确认；设备端加密、版本元数据、冲突保护和撤销上次拉取均保留。
+- 登录同一账号自动同步课程、待办、账本和笔记，支持离线修改、冲突确认与账号切换隔离。
+- 数据管理只提供本地备份导出、从备份恢复和账号同步。设备码、绑定码、同步空间与二维码迁移已停用。
+- 更新后会清除本机保存的旧同步凭据；旧同步空间中的远端数据不会由应用自动删除。
 - 主题色、页面壁纸、首页模块、课表皮肤、节日氛围和手机左右滑动操作均可配置；**节日与纪念日支持农历（含闰月）**，回顾叙事文案可切换语言。
-- PWA 可安装到桌面或手机主屏，并支持应用内检查更新。
+- 网页 / PWA 版可安装到桌面或手机主屏；Windows 原生桌面版另有安装包，并支持在应用内检查、下载和安装更新。
 - 更新说明按版本首次打开时提示一次；确认后不重复打扰，这是当前版本的设计行为。
 
 ## 🔐 Data & Privacy
 
 - **默认不需要账号**：课程、待办、账本、设置和识别结果都可以只留在当前设备。
 - **本地存储**：业务数据写入 `localStorage`，同时镜像到 IndexedDB；壁纸等较大资源也保存在本机。
-- **备份优先**：清理浏览器数据、删除 iOS 桌面应用或更换设备前，建议先导出 JSON 或完成迁移。
-- **云同步可选且需确认**：用户创建或加入同步空间并确认后，才会建立绑定；确认后可开启自动同步，联网时设备端加密数据会在已绑定设备之间同步，不会静默建立长期上传。同步前在浏览器端使用 PBKDF2 + AES-256-GCM 加密；服务端保存的是密文和版本元数据。
+- **备份优先**：清理浏览器数据、删除 iOS 桌面应用或更换设备前，建议先导出 JSON 或确认账号同步已完成。
+- **登录后自动同步**：账号业务快照经 HTTPS 传输，以 JSON 存储在 Supabase；RLS 限制每个用户只能访问自己的数据。账号同步未实现端到端加密，退出会停止同步并保留本机记录。
 - **OCR 本地完成**：课表图片和作息图片不上传服务器。
 - **仓库不收集用户数据**：运行时的 `sl_*` 本地数据、JSON 备份、账单、课程表、访问码、日志、缓存和构建产物均不应提交；提交前请检查 `git status` 和暂存区。
 
@@ -116,6 +140,32 @@
 | 课程、待办、账本等页面保持多列布局 | 低频入口收进“更多”，表格预览转为卡片 |
 | 大模块按需加载，减少首屏负担 | Safe Area、键盘区域和触控反馈单独处理 |
 
+## 🪟 Windows 桌面版
+
+Windows x64 桌面版使用 Electron + NSIS 安装向导。可从 [GitHub Releases](https://github.com/huadeng0830-gg/study-life/releases/latest) 下载已发布安装包，并在向导中选择安装目录，例如 `D:\三两事`。本机资料、登录会话、缓存、更新暂存文件、日志和默认备份跟随所选目录；覆盖安装会保留资料，卸载时默认保留本机数据。
+
+应用启动并联网时会自动检查更新，也可在“设置 → 应用更新”里手动检查。发现新版本后，用户选择下载，再选择重启安装；安装程序沿用原来的安装目录。网页与手机继续使用 Cloudflare Pages 和 PWA 更新流程，桌面发行不会改变在线版本。
+
+应用内更新依赖 GitHub Releases 中同一版本构建生成的 NSIS 安装包、`latest.yml` 和 `.blockmap` 文件。仓库按公开发布配置，客户端不包含发布令牌；如果仓库或发行资产不可匿名访问，应用内检查与下载就无法工作。更新失败时，可先从 Releases 下载完整安装包并覆盖安装。
+
+已安装的 `1.0.3` 版本内嵌的更新源指向一个已不存在的旧发行仓库，因此它无法自动发现新仓库中的版本。请从本仓库 Releases 下载 `1.0.4` 安装包并覆盖安装一次；之后安装的版本会从本仓库检查并应用更新。覆盖安装会保留所选安装目录中的本机资料。
+
+### 从源码构建桌面版
+
+需要 Windows x64、Node.js 22 或更高版本。根目录依赖和 Electron 应用依赖分开锁定；桌面命令会先按 `desktop-app/package-lock.json` 安装生产依赖，再构建安装包。
+
+```powershell
+npm ci
+npm run desktop:dir       # 生成未安装目录包供预览
+npm run desktop:installer # 生成 NSIS 安装程序并校验应用内更新配置
+```
+
+### 发布桌面更新
+
+每次新版本先运行 `npm run release:bump -- --notes "更新说明一|更新说明二"`。脚本会递增网页日期版本和 Windows 桌面 SemVer patch，更新源码签名，并同步本 README 中的版本号与最近更新内容。完成 `npm run check`、提交并推送到 `main` 后，为桌面版本创建同名标签（例如 `v1.0.5`）并推送；GitHub Actions 会在 Windows runner 上重跑质量检查、构建并校验安装包，然后把安装包和 electron-updater 所需的元数据发布到同仓库的 GitHub Release。用户可在桌面版“设置 → 应用更新”内检查、下载并安装新版本。
+
+标签必须与 `desktop-app/package.json` 中的版本完全一致。发布流水线只在收到 `v*` 标签时运行，日常网页部署仍走 Cloudflare Pages；本地构建使用 `--publish never`，不会意外创建公开发行版。README 版本区块由发布脚本维护，`npm run check` 会阻止版本说明漏同步。
+
 ## 🛠 技术栈
 
 | 层次 | 实际使用 |
@@ -126,7 +176,8 @@
 | OCR | Tesseract.js + `chi_sim` 语言模型 + Canvas 预处理 |
 | Excel 解析 | `@e965/xlsx`，支持 XLS/XLSX/CSV/ODS 输入 |
 | 质量检查 | ESLint、vue-tsc、Vitest、Vite production build |
-| 可选同步 | Cloudflare Pages Functions、KV、Durable Objects、Web Crypto |
+| 账号与同步 | Supabase Auth、Postgres、RLS |
+| 好友与项目协作 | Supabase Edge Functions、Postgres RPC、私有 Storage |
 
 ## 📁 项目结构
 
@@ -136,20 +187,25 @@ study-life/
 │  ├─ views/                 # 首页、课程表、待办、倒计时、清单、账本
 │  ├─ components/            # 通用面板、弹窗、快速记录、导入与设置
 │  ├─ composables/
+│  │  ├─ accountSyncSchema.js # 账号同步数据结构版本
 │  │  ├─ domain/             # 关系、状态、提醒和领域选择器
 │  │  ├─ quickRecord/        # 自然语言解析与快速记录适配器
 │  │  └─ store/              # 响应式本地存储、课表与作息配置
 │  ├─ types/                 # 领域类型定义
 │  └─ main.js                # 应用启动、路由和数据恢复
-├─ functions/api/            # Cloudflare Pages API：空间创建/绑定/配对/推送/拉取/校验/撤销
-├─ sync-coordinator/         # Durable Object 同步协调器（独立 worker，需单独部署）
+├─ functions/api/            # 旧设备同步端点统一返回 410
+├─ desktop-app/              # Electron 主进程、preload 与独立生产依赖
+├─ desktop/                  # Windows 图标、NSIS 安装向导资源
+├─ supabase/
+│  ├─ functions/campus-social/ # 好友课表与齐行项目协作 API
+│  ├─ migrations/            # 账号同步、好友及项目协作数据库结构
+│  └─ tests/                 # 数据库安全与同步约束验证
 ├─ public/ocr/               # 本地 OCR 语言模型 + 引擎（自托管，断网也能识课）
 ├─ scripts/                  # 发布、审计与质量门禁脚本（含 scripts/audit/ 四个自检）
 ├─ tests/                    # 解析、导入、同步、迁移和业务逻辑测试
 ├─ release.config.js         # 更新说明与源码签名（构建闸门会校验）
-├─ sync-protocol.js          # 前后端共用的同步协议常量
-├─ wrangler.jsonc            # Pages、KV 与 Durable Object 配置
-└─ .github/workflows/ci.yml  # main 分支的质量检查
+├─ wrangler.jsonc            # Cloudflare Pages 静态部署配置
+└─ .github/workflows/        # Web 质量检查、桌面包校验与 Windows Release 发布
 ```
 
 ## 🚀 本地运行
@@ -160,6 +216,8 @@ cd study-life
 npm install
 npm run dev
 ```
+
+启用注册与账号同步时，将 `.env.example` 复制为 `.env.local`，填写 Supabase 项目 URL 和 publishable key，再重启开发服务。数据库迁移、邮箱验证、SMTP 和 Cloudflare 构建变量的说明见 [账号接入说明](docs/supabase-auth.md)。
 
 > **需要 Node 22 或更高版本。** Node 22 起内置了实验性的 Web Storage 全局，
 > 会遮蔽测试环境里 happy-dom 的 `Storage`——这个项目踩过一次，导致约三分之一的
@@ -175,23 +233,24 @@ npm test                  # Vitest
 npm run build             # 构建到 dist/
 npm run check             # lint + typecheck + test + build（唯一的完整门禁）
 npm run preview           # 预览生产构建
+npm run check:release-readme # 检查 README、网页与桌面版本是否同步
+npm run desktop:installer # Windows NSIS 安装包（可选安装目录）
 
 npm run release:bump      # 发布必需：改了 src/ 后执行，写更新说明并同步源码签名
 npm run typecheck:ratchet # 类型债务棘轮：TS2304 必须为 0，总数不许超基线
 npm run typecheck:report  # 类型错误的分布报告（按错误码 / 按文件）
 npm run audit:contrast    # 6 套调色板 × 144 组配色 → WCAG AA
-npm run sync:health       # 同步后端健康检查
-npm run deploy:sync:production  # 完整发布路径，见下
+npm run deploy:production # 构建并发布 Cloudflare Pages
 ```
 
-> **改了 `src/` 之后必须跑 `npm run release:bump -- --notes "说明|说明"`**，
-> 否则生产构建会失败并提示新的源码签名。原因是发布闸门要求「源码变更」与
-> 「更新说明」在同一次提交里出现，`release:bump` 会替你把说明和签名一起写好。
+> **发布业务或桌面源码的新版本时必须跑 `npm run release:bump -- --notes "说明|说明"`**，
+> 否则生产构建会因源码签名不匹配而失败。发布脚本会把说明和签名一起写好，递增桌面版本并更新 README；
+> 对当前版本只修正文案时用 `--amend-notes`，它不会递增桌面版本或创建新发行版。
 > 详见 `release.config.js` 顶部注释。
 
 ## ☁️ 部署到 Cloudflare Pages
 
-静态页面可以直接发布 `dist/`。若要启用手动云同步，还需要在 Cloudflare 项目中配置 `wrangler.jsonc` 里的 KV 与 Durable Object 绑定。
+页面可以直接发布 `dist/`。账号同步需要 Supabase 环境变量及数据库迁移，不再需要 Cloudflare KV 或 Durable Object 同步服务。
 
 ```bash
 npx wrangler login
@@ -199,18 +258,31 @@ npm run build
 npx wrangler pages deploy dist --project-name=study-life --branch=main
 ```
 
-> **⚠️ 上面这条命令只发布静态页面，云同步用不了。** 同步协调器是一个独立的
-> Durable Object worker，必须单独部署。下面这条才是**完整发布路径**：
+> 账号同步直接使用 Supabase。页面部署不需要单独发布同步协调器。
 >
 > ```bash
-> npm run deploy:sync:production
+> npm run deploy:production
 > ```
->
-> 它依次执行 `npm run check`（完整门禁）→ 部署协调器 worker → 部署 Pages → `sync:health` 自检。
-> 只跑 `pages deploy` 的话，前端会连不上同步协调器（表现为绑定空间时一直失败）。
 
 仓库的 CI 会在 `main` 的提交和 Pull Request 上执行 lint、类型检查、测试、生产构建，
 以及类型债务棘轮（`npm run typecheck:ratchet`）。
+
+## 🗄 Supabase 服务端
+
+邮箱账号、自动同步、好友课表与齐行项目协作运行在独立的 Supabase 项目中。数据库结构按时间顺序保存在 `supabase/migrations/`；本次部署已应用账号同步、好友协作、项目协作和项目外键索引迁移。Edge Function `campus-social` 当前为 v2，JWT 验证保持开启，同时处理好友和项目操作。
+
+项目协作的 15 张表均开启 RLS，并撤销 `anon` 与 `authenticated` 的表权限；浏览器只能携带登录 JWT 调用 Edge Function，由服务端检查成员角色后使用 `service_role` 访问数据库。成果文件放在私有 `qixing-deliverables` Storage bucket，最大 20 MiB。不要把 `service_role` 密钥写入网页变量、客户端代码或仓库。
+
+首次使用 Supabase CLI 时，先准备有权访问目标项目的账号和数据库密码；`supabase/config.toml` 已保留函数 JWT 设置：
+
+```bash
+npx supabase login
+npx supabase link --project-ref xyuwjmswqmxfwtyzakan
+npx supabase db push
+npx supabase functions deploy campus-social --project-ref xyuwjmswqmxfwtyzakan
+```
+
+发布顺序是先数据库迁移，再部署 `campus-social`，最后发布 Cloudflare Pages 前端。新的项目协作功能需已验证的邮箱账号和网络连接；开放普通邮箱注册前，还要配置 Supabase Site URL、Redirect URLs 与 SMTP。当前 Supabase Auth 仍提示泄露密码保护未开启；启用该设置需要在项目 Auth 密码安全设置中处理。
 
 ## 🧪 发布自检（scripts/audit/）
 
@@ -267,7 +339,7 @@ stdout 始终是一段稳定 JSON（含版本号、各项检查条数、缺失�
 
 - [x] 今日页、课程表、作业与待办、倒计时、账本和清单
 - [x] 本地 OCR、课表裁切复核、Excel 课程表导入与冲突预览
-- [x] 本地备份、二维码迁移、PWA 和可选手动云同步
+- [x] 本地备份与恢复、PWA、邮箱账号与自动同步
 - [ ] 🚧 补充脱敏后的真实产品截图与演示数据
 - [ ] 🚧 针对更多教务系统版式补充 OCR 回归样例和浏览器端测试
 

@@ -5,9 +5,8 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createApp, h, nextTick } from 'vue'
 import AppearanceSettings from '../src/components/AppearanceSettings.vue'
-import LocalTransfer from '../src/components/LocalTransfer.vue'
 import TimeSettingsModal from '../src/components/schedule/TimeSettingsModal.vue'
-import { appearanceTab, transferTab, timeImportTab, timeSettingsTab } from '../src/composables/modalSections.js'
+import { appearanceTab, timeImportTab, timeSettingsTab } from '../src/composables/modalSections.js'
 import { registerMirrorTeardown } from './helpers/mirrorTeardown.js'
 
 // 收尾取消影子副本的待写盘：否则防抖/退避定时器会在环境拆除之后才触发，
@@ -15,12 +14,11 @@ import { registerMirrorTeardown } from './helpers/mirrorTeardown.js'
 registerMirrorTeardown()
 
 /**
- * 浮层内部分区的记忆（第五十四轮）。
+ * 浮层内部分区的记忆。
  *
  * 【被守住的需求】关闭再打开浮层 → 回到上次所在的分区。
- * 改造前的实际行为有三种：外观设置与本地迁移的父级用 `v-if` 销毁实例，组件内的 `ref`
- * 连同 `@open` watcher 里那行 `tab.value = '第一个分区'` 一起把状态清掉，用户每次打开
- * 都要重新点一遍；作息设置的父级没有 `v-if`，反而一直是保留的。
+ * 外观设置和作息设置都可能在父级重新挂载；把分区状态存在共享 ref 后，
+ * 关闭再打开仍会回到用户停留的位置。
  *
  * 【为什么用"挂载 → 切换 → 卸载 → 重新挂载"来测】
  * 只断言"模块级 ref 赋值后还在"是同义反复（ESM 模块本来就单例）。要证明的是
@@ -93,7 +91,6 @@ afterEach(() => {
   document.body.style.overflow = ''
   // 分区记忆刻意跨"组件生命周期"保留，但不该跨用例互相污染：每个用例自己先归位。
   appearanceTab.value = 'theme'
-  transferTab.value = 'send'
   timeSettingsTab.value = 'plans'
   timeImportTab.value = 'paste'
 })
@@ -132,30 +129,6 @@ describe('外观设置：关闭再打开回到上次的分区', () => {
   })
 })
 
-describe('本地迁移：关闭再打开回到上次的迁移方式', () => {
-  it('默认仍是"发送数据"', async () => {
-    mount(LocalTransfer, { open: true })
-    await nextTick()
-    expect(selectedIndex('二维码迁移方式')).toBe(0)
-  })
-
-  it('切到"扫码接收"后卸载再挂载，仍停在"扫码接收"', async () => {
-    mount(LocalTransfer, { open: true })
-    await nextTick()
-    clickSelector('#transfer-tab-receive')
-    await nextTick()
-    expect(selectedIndex('二维码迁移方式')).toBe(1)
-    expect(transferTab.value).toBe('receive')
-
-    unmountLast()
-    await nextTick()
-
-    mount(LocalTransfer, { open: true })
-    await nextTick()
-    expect(selectedIndex('二维码迁移方式')).toBe(1)
-  })
-})
-
 describe('作息设置：分区同样记得住（改造前靠"实例常驻"意外保留）', () => {
   const settingsProps = () => ({ show: true, courseCountByPeriodId: () => 0 })
 
@@ -190,7 +163,6 @@ describe('作息设置：分区同样记得住（改造前靠"实例常驻"意�
 
 const FILES = {
   'AppearanceSettings.vue': 'src/components/AppearanceSettings.vue',
-  'LocalTransfer.vue': 'src/components/LocalTransfer.vue',
   'TimeSettingsModal.vue': 'src/components/schedule/TimeSettingsModal.vue',
 }
 
@@ -201,13 +173,11 @@ function stripJsComments(text) {
 
 const RESET_PATTERNS = [
   { name: '外观设置又重置回第一分区', file: 'AppearanceSettings.vue', pattern: /tab\.value\s*=\s*'theme'/ },
-  { name: '本地迁移又重置回发送', file: 'LocalTransfer.vue', pattern: /tab\.value\s*=\s*'send'/ },
   { name: '作息导入又重置回粘贴', file: 'TimeSettingsModal.vue', pattern: /importTab\.value\s*=\s*'paste'/ },
 ]
 
 const LOCAL_REF_PATTERNS = [
   { name: '外观设置又用组件内 ref 装分区', file: 'AppearanceSettings.vue', pattern: /const\s+tab\s*=\s*ref\(/ },
-  { name: '本地迁移又用组件内 ref 装分区', file: 'LocalTransfer.vue', pattern: /const\s+tab\s*=\s*ref\(/ },
   { name: '作息设置又用组件内 ref 装分区', file: 'TimeSettingsModal.vue', pattern: /const\s+(settingsTab|importTab)\s*=\s*ref\(/ },
 ]
 
@@ -226,11 +196,11 @@ function readStripped() {
 }
 
 describe('分区记忆的静态棘轮', () => {
-  it('三个组件里都不再有"打开时重置分区"的行', () => {
+  it('两个仍在使用分区的组件里都不再有"打开时重置分区"的行', () => {
     expect(scan(readStripped(), RESET_PATTERNS)).toEqual([])
   })
 
-  it('三个组件都用模块级 ref 装分区，不再各自 new 一个', () => {
+  it('两个仍在使用分区的组件都用模块级 ref 装分区，不再各自 new 一个', () => {
     expect(scan(readStripped(), LOCAL_REF_PATTERNS)).toEqual([])
     for (const path of Object.values(FILES)) {
       expect(readFileSync(resolve(root, path), 'utf8')).toContain('composables/modalSections.js')
@@ -240,11 +210,10 @@ describe('分区记忆的静态棘轮', () => {
   it('判别力自证：同一套扫描对"改造前"的写法必须报红', () => {
     const before = {
       'AppearanceSettings.vue': "const tab = ref('theme')\nfunction open(){ tab.value = 'theme' }",
-      'LocalTransfer.vue': "const tab = ref('send')\nfunction open(){ tab.value = 'send' }",
       'TimeSettingsModal.vue': "const importTab = ref('paste')\nfunction toggle(){ importTab.value = 'paste' }",
     }
-    expect(scan(before, RESET_PATTERNS).length).toBe(3)
-    expect(scan(before, LOCAL_REF_PATTERNS).length).toBe(3)
+    expect(scan(before, RESET_PATTERNS).length).toBe(2)
+    expect(scan(before, LOCAL_REF_PATTERNS).length).toBe(2)
   })
 
   it('判别力自证：注释里的重置写法不算命中，而不剥注释时同一份文本会命中', () => {

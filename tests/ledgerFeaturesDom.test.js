@@ -86,7 +86,7 @@ const byText = (selector, text) => [...document.querySelectorAll(selector)].find
 const heroText = () => (document.querySelector('.hero-stat')?.textContent || '').replace(/\s+/g, ' ')
 
 describe('账本首页：折算行与预算预警真的渲染出来', () => {
-  it('有外币记录时显示 ≈ 折算行，超预算时显示 .pending-block.over 预警', async () => {
+  it('有外币记录时显示折算行，超预算时显示预算卡片预警', async () => {
     const today = appToday.value
     expenses.value = [
       { id: 'dom-cny', name: '午饭', amount: 300, cat: 'food', date: today, time: '12:00' },
@@ -101,15 +101,14 @@ describe('账本首页：折算行与预算预警真的渲染出来', () => {
     const expected = moneyWithCurrency(1020, 'CNY') // 300 + 100 × 7.2
     expect(heroText(), '没渲染出折算行').toContain(`≈ ${expected}`)
     expect(heroText()).toContain('按 2026-09-01 汇率')
-    const alert = document.querySelector('.hero-stat .pending-block')
-    expect(alert, '没渲染出预算预警').toBeTruthy()
-    expect(alert.classList.contains('over')).toBe(true)
-    expect(alert.textContent).toContain('已超预算')
-    expect(alert.textContent).toContain('已按手工汇率折算')
+    const budgetCard = document.querySelector('.budget-card')
+    expect(budgetCard, '没渲染出预算卡片').toBeTruthy()
+    expect(budgetCard.classList.contains('is-over')).toBe(true)
+    expect(budgetCard.textContent).toContain('已超出')
 
-    // 入口可达：汇率设置 / 预算设置 都是真按钮
+    // 入口可达：汇率和预算各自只有一个清晰入口
     expect(byText('.hero-stat button', '汇率设置')).toBeTruthy()
-    expect(byText('.hero-stat button', '预算设置')).toBeTruthy()
+    expect(byText('.budget-card button', '预算设置')).toBeTruthy()
   })
 
   it('未设预算、也没有外币记录时，hero-stat 里什么提示都不显示', async () => {
@@ -121,8 +120,8 @@ describe('账本首页：折算行与预算预警真的渲染出来', () => {
 
     expect(heroText()).not.toContain('≈')
     expect(document.querySelector('.hero-stat .pending-block'), '未设预算却渲染了预警').toBe(null)
-    // 入口仍然在（否则用户永远没法第一次设预算）
-    expect(byText('.hero-stat button', '设置预算')).toBeTruthy()
+    // 未设预算也只保留预算卡片里的一个设置入口。
+    expect(byText('.budget-card button', '设置预算')).toBeTruthy()
   })
 
   it('缺汇率的记录不出现在折算金额里，且文案如实说明未计入', async () => {
@@ -155,9 +154,11 @@ describe('账本首页：折算行与预算预警真的渲染出来', () => {
     mounted = await mountApp({ routes })
     await gotoRoute(mounted, '/bills')
 
-    byText('.hero-stat button', '设置预算').click()
+    byText('.budget-card button', '设置预算').click()
     const input = await waitFor(() => document.querySelector('input[aria-label^="月度预算金额"]'))
     expect(input, '预算弹窗没打开').toBeTruthy()
+    expect(document.body.textContent).toContain('日额度由系统按日期和实际支出自动计算')
+    expect(document.body.textContent).toContain('不重复计入今日额度')
     input.value = '500'
     input.dispatchEvent(new Event('input', { bubbles: true }))
     await settle()
@@ -165,8 +166,27 @@ describe('账本首页：折算行与预算预警真的渲染出来', () => {
     await settle()
 
     expect(budget.value.monthly).toBe(500)
-    expect(heroText()).toContain('本月预算')
-    expect(heroText()).toContain('已用 6%')
+    const budgetCard = document.querySelector('.budget-card')
+    expect(budgetCard, '已设置预算时应显示独立预算卡片').toBeTruthy()
+    expect(budgetCard.textContent).toContain('本月预算')
+    expect(budgetCard.textContent).toContain('6%')
+    expect(budgetCard.querySelector('[role="meter"]'), '预算卡片应展示使用比例').toBeTruthy()
+    expect(budgetCard.querySelector('.budget-daily')?.textContent, '已用比例提示同时存在时仍应显示后续日均额度').toContain('后续每天可用')
+    expect(budgetCard.querySelector('.budget-daily')?.textContent).toContain('不含今天')
+    expect(budgetCard.querySelector('.budget-pacing-note')?.textContent).toContain('未超过今日固定额度时，后续每天可用保持不变')
+  })
+
+  it('超预算后仍显示每日可用额为 0，而不是把预算信息隐藏', async () => {
+    expenses.value = [{ id: 'dom-budget-over', name: '支出', amount: 80, cat: 'food', date: appToday.value, time: '12:00' }]
+    budget.value = { monthly: 50, updatedAt: '' }
+
+    mounted = await mountApp({ routes })
+    await gotoRoute(mounted, '/bills')
+
+    const budgetCard = document.querySelector('.budget-card')
+    expect(budgetCard?.textContent).toContain('已超出')
+    expect(budgetCard?.querySelector('.budget-daily')?.textContent).toContain('后续每天可用')
+    expect(budgetCard?.querySelector('.budget-daily')?.textContent).toContain(moneyWithCurrency(0, 'CNY'))
   })
 })
 

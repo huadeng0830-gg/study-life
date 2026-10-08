@@ -202,7 +202,11 @@ function normalizeOverrideEntries(overrides, direction) {
  * @returns {{ term: string, key: string, direction: 'expense'|'income' } | null}
  */
 function findOverride(text, direction, overrides) {
-  return normalizeOverrideEntries(overrides, direction)
+  const normalizedText = String(text ?? '').normalize('NFKC').trim().replace(/\s+/gu, ' ').toLowerCase()
+  const candidates = normalizeOverrideEntries(overrides, direction)
+  const exact = candidates.find((item) => String(item.term).normalize('NFKC').trim().replace(/\s+/gu, ' ').toLowerCase() === normalizedText)
+  if (exact) return exact
+  return candidates
     .filter((item) => textIncludes(text, item.term))
     .sort((a, b) => String(b.term).length - String(a.term).length)[0] || null
 }

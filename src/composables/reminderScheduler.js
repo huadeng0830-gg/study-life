@@ -66,11 +66,6 @@ function pruneLog(nowMs) {
   logEntries = logEntries.filter((item) => Number(item.firedAt) > cutoff)
 }
 
-function alreadyFired(key, nowMs) {
-  pruneLog(nowMs)
-  return logEntries.some((item) => item.key === key)
-}
-
 function markFired(key, nowMs) {
   logEntries = [...logEntries.filter((item) => item.key !== key), { key, firedAt: nowMs }]
   writeLog()
@@ -111,6 +106,9 @@ export function collectDueReminders(nowMs = Date.now()) {
   const windowStart = nowMs - CATCH_UP_WINDOW_MS
   const horizon = nowMs + SCHEDULE_HORIZON_MS
   const due = []
+  pruneLog(nowMs)
+  const firedKeys = new Set(logEntries.map((item) => item.key))
+  const queuedKeys = new Set()
 
   const push = (kind, item, date, time, rawMinutes) => {
     // reminderMinutes 为 0 的语义是"到点才提醒"，不是"不提醒"。
@@ -124,9 +122,11 @@ export function collectDueReminders(nowMs = Date.now()) {
     if (!Number.isFinite(dueAt)) return
     const fireAt = dueAt - minutes * 60_000
     if (fireAt > horizon || fireAt < windowStart) return
-    if (alreadyFired(reminderKey(kind, item.id), nowMs)) return
+    const key = reminderKey(kind, item.id)
+    if (firedKeys.has(key) || queuedKeys.has(key)) return
+    queuedKeys.add(key)
     due.push({
-      key: reminderKey(kind, item.id),
+      key,
       kind,
       title: String(item.title || item.name || '').trim(),
       body: `${minutes > 0 ? `${minutes} 分钟后` : '就是现在'}：${String(item.title || item.name || '').trim()}`,
@@ -155,8 +155,8 @@ function fire(entry) {
   markFired(entry.key, Date.now())
   if (notifyPermission() !== 'granted') return false
   try {
-    const notification = new Notification(`学习生活台 · ${entry.kind === 'task' ? '待办' : entry.kind === 'event' ? '日程' : '重要节点'}提醒`, {
-      body: `${entry.title}${entry.body}`,
+    const notification = new Notification(`三两事 · ${entry.kind === 'task' ? '待办' : entry.kind === 'event' ? '日程' : '重要节点'}提醒`, {
+      body: entry.body,
       tag: entry.key,
     })
     try { notification.onclick = () => { try { window.focus() } catch {}; notification.close() } } catch {}

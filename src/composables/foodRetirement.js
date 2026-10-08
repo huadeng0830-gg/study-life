@@ -1,8 +1,12 @@
-import { downloadEmergencyBackup } from './emergencyExport.js'
 import { removeVaultKeys } from './dataVault.js'
 import { FOOD_RETIREMENT_MIGRATION, PACKAGE_RETIREMENT_MIGRATION, RETIRED_FOOD_KEYS, RETIRED_PACKAGE_KEYS, removeRetiredAppearanceFields } from './retiredData.js'
 
 const MIGRATIONS_KEY = 'sl_migrations'
+
+async function downloadEmergencyBackupOnDemand() {
+  const { downloadEmergencyBackup } = await import('./emergencyExport.js')
+  return downloadEmergencyBackup()
+}
 
 function readJson(key, fallback = null) {
   try {
@@ -49,7 +53,7 @@ async function createRequiredBackup(exportBackup) {
 
 // 退休流程必须先确认可恢复备份，再先清理 Vault，最后才移除 localStorage。
 // 这样任何失败都会保留原始业务数据，也不会在下次启动被 Vault 重新写回。
-export async function retireFoodData({ exportBackup = downloadEmergencyBackup, removeVault = removeVaultKeys } = {}) {
+export async function retireFoodData({ exportBackup = downloadEmergencyBackupOnDemand, removeVault = removeVaultKeys } = {}) {
   const foodDone = hasMigrationRun(FOOD_RETIREMENT_MIGRATION)
   const packageDone = hasMigrationRun(PACKAGE_RETIREMENT_MIGRATION)
   if (foodDone && packageDone) return { changed: false, alreadyRun: true }

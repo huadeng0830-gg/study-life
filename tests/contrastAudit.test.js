@@ -455,11 +455,25 @@ describe('跨规则对比度：底跟主题令牌、文字却写死', () => {
     const { stats } = crossRuleContrastOffenders(styles())
     expect(stats.families, '族数为 0 说明判据与实现脱节了').toBeGreaterThanOrEqual(400)
     expect(stats.tokenBackgrounds, '没有识别出任何令牌背景').toBeGreaterThanOrEqual(300)
-    expect(stats.hardCodedColors, '没有识别出任何写死的字色').toBeGreaterThanOrEqual(8)
-    // 低不是因为没跑，而是判据**刻意保守**：族里出现多个不同的令牌底时，
-    // 祖先链就不确定（`.multi` 与 `.multi .a` 都可能坐在同一个元素上面），
-    // 此时宁可漏报也不猜——猜错会把一个可读的界面判成缺陷。
-    expect(stats.pairsChecked, '一组配对都没算，守卫在守空气').toBeGreaterThanOrEqual(6)
+    // 移除旧同步面板后，扫描器仍在其余页面识别到 6 个真实组合；配对算法另有夹具验证。
+    expect(stats.hardCodedColors, '没有识别出任何写死的字色').toBeGreaterThanOrEqual(6)
+    // 【这条从 >= 6 改成了 === 0】
+    //
+    // 原来要求"至少算过 6 组配对"，本意是自证判据没跟实现脱节。但它实际
+    // 表达的是"全仓至少还剩 6 组『令牌底 + 写死字色』没处理"——也就是把
+    // **一笔未修的对比度欠账写成了硬性要求**：想把它清干净，这条就会先红。
+    //
+    // 而它长期只由一处撑着：DataManager 的 `.switch`（1 条写死字色 × 6 套主题 = 6 组）。
+    // 那个拨钮的白底绿字其实只有 3.22:1，本来是真实缺陷，只是一直藏在组件的
+    // scoped 样式里、审计扫的是全局表所以没看见。把它改成 --success 令牌之后，
+    // 全仓这类配对真的归零了 —— 于是正确的终态反而让旧断言失败。
+    //
+    // 现在断言"归零"：配合上面 `offenders` 为空，它等价于
+    // 「没有任何一处令牌底上压着写死字色」。这是一句**有内容**的断言，
+    // 重新引入一处就会红；而判据本身有没有脱节，由上面三条下限
+    // （families / tokenBackgrounds / hardCodedColors）以及本文件后面那几条
+    // 用合成夹具做的「该抓的抓、不该抓的不抓」负责证明。
+    expect(stats.pairsChecked, '不该再有令牌底 + 写死字色的组合；新加一处请改用令牌').toBe(0)
   })
 
   it('允许清单不许腐烂：登记过的每一条都必须仍然命中', () => {

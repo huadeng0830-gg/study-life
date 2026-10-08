@@ -173,26 +173,57 @@ describe('预算节奏：「今天还能花多少」（新增功能）', () => {
     expect(s.pacing.daysInMonth).toBe(30)
     expect(s.pacing.daysPassed).toBe(10)
     expect(s.pacing.daysLeft).toBe(21)
-    expect(s.pacing.dailyAllowance).toBeCloseTo(900 / 21, 2)
+    expect(s.pacing.daysAfterToday).toBe(20)
+    expect(s.pacing.dailyAllowance).toBe(42.85)
     expect(s.pacing.dailySpent).toBeCloseTo(100 / 10, 2)
+  })
+
+  it('今日额度单独预留，后续日均不再把今天算进天数或重复计算今日余额', () => {
+    const todayUnderLimit = budgetStatus({
+      spent: 950, todaySpent: 50, budget: 3000, today: '2026-09-10',
+    })
+    expect(todayUnderLimit.pacing.daysAfterToday).toBe(20)
+    expect(todayUnderLimit.pacing.todayAllowance).toBe(100)
+    expect(todayUnderLimit.pacing.todayRemaining).toBe(50)
+    expect(todayUnderLimit.pacing.futureDailyAllowance).toBe(100)
+    expect(todayUnderLimit.remaining).toBeCloseTo(
+      todayUnderLimit.pacing.todayRemaining + todayUnderLimit.pacing.futureDailyAllowance * todayUnderLimit.pacing.daysAfterToday,
+      2,
+    )
+
+    const moreTodaySpend = budgetStatus({
+      spent: 980, todaySpent: 80, budget: 3000, today: '2026-09-10',
+    })
+    expect(moreTodaySpend.pacing.todayRemaining).toBe(20)
+    expect(moreTodaySpend.pacing.futureDailyAllowance).toBe(100)
+
+    const exceededTodayLimit = budgetStatus({
+      spent: 1010, todaySpent: 110, budget: 3000, today: '2026-09-10',
+    })
+    expect(exceededTodayLimit.pacing.todayRemaining).toBe(-10)
+    expect(exceededTodayLimit.pacing.futureDailyAllowance).toBe(99.5)
   })
 
   it('31 天的月份用 31 而不是 30（判别力）', () => {
     const s = budgetStatus({ spent: 0, budget: 3100, today: '2026-01-01' })
     expect(s.pacing.daysInMonth).toBe(31)
     expect(s.pacing.daysLeft).toBe(31)
+    expect(s.pacing.daysAfterToday).toBe(30)
+    expect(s.pacing.futureDailyAllowance).toBe(100)
   })
 
-  it('月末 daysLeft=1 时 dailyAllowance === remaining（两句不矛盾）', () => {
+  it('月末今天仍单独显示今日额度，但后续没有日均额度可分', () => {
     const s = budgetStatus({ spent: 400, budget: 1000, today: '2026-09-30' })
     expect(s.pacing.daysLeft).toBe(1)
-    expect(s.pacing.dailyAllowance).toBeCloseTo(s.remaining, 2)
+    expect(s.pacing.daysAfterToday).toBe(0)
+    expect(s.pacing.futureDailyAllowance).toBe(null)
+    expect(s.pacing.todayRemaining).toBe(600)
   })
 
-  it('超支时 dailyAllowance 为负，不截断成 0', () => {
+  it('月度超支后，后续可用额度显示为 0，不继续给出负的可花金额', () => {
     const s = budgetStatus({ spent: 1200, budget: 1000, today: '2026-09-15' })
     expect(s.remaining).toBeLessThan(0)
-    expect(s.pacing.dailyAllowance).toBeLessThan(0)
+    expect(s.pacing.futureDailyAllowance).toBe(0)
   })
 
   it('未设预算时 pacing 为 null，文案为空（不显示 0/0）', () => {
@@ -204,7 +235,8 @@ describe('预算节奏：「今天还能花多少」（新增功能）', () => {
 
   it('pace 文案与 alert 文案是两句话，触发条件不同', () => {
     const ok = budgetStatus({ spent: 100, budget: 1000, today: '2026-09-10' })
-    expect(budgetPaceText(ok)).toContain('每天可花')
+    expect(budgetPaceText(ok)).toContain('后续')
+    expect(budgetPaceText(ok)).toContain('平均每天可用')
     expect(budgetAlertText(ok)).toContain('已用')
     // 超支时 alert 说超支，pace 不该同时出现
     const over = budgetStatus({ spent: 1200, budget: 1000, today: '2026-09-10' })

@@ -1,0 +1,9 @@
+{
+  "name": "study-life-desktop",
+  "version": "1.0.4",
+  "private": true,
+  "main": "main.cjs",
+  "dependencies": {
+    "electron-updater": "6.8.10"
+  }
+}

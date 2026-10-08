@@ -17,9 +17,6 @@ export const RETIRED_COURIER_KEYS = Object.freeze([
   'sl_courier_local_meta',
 ])
 
-export const RETIRED_IMPORT_KEYS = Object.freeze([...RETIRED_FOOD_KEYS, ...RETIRED_PACKAGE_KEYS, ...RETIRED_COURIER_KEYS])
-export const RETIRED_SYNC_KEYS = RETIRED_IMPORT_KEYS
-
 export const RETIRED_APPEARANCE_FIELDS = Object.freeze([
   'foodPickerMode',
 ])

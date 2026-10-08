@@ -87,9 +87,32 @@ export async function mountApp({ routes = STUB_ROUTES, hash = '/', markReleaseSe
   }
 }
 
-/** 当前 `#main-content` 里是否已经是真实视图（而不是加载占位）。 */
+/**
+ * `#main-content` 里的**视图根节点**。
+ *
+ * 【为什么不能用 firstElementChild】`#main-content` 里的子节点不只有视图：
+ * 外壳会往它前面插自己的节点 —— 全局告警占位 `.global-alert-reserve`
+ * （有同步/保存/备份告警时才在）与聚焦态的 `<FocusReturn>`。视图永远在**最后**。
+ *
+ * 原来的夹具取 `firstElementChild`，于是只要外壳在启动后插了一条告警占位
+ * （备份提醒、同步提示，都是几秒后才出现的定时器），"视图根"就变成了那个
+ * 常驻占位元素 —— 它的节点身份在切页面时**不变**。
+ * 而 `gotoRoute` 的判据正是"视图根必须换过"，于是每一次导航都等满 400 次轮询
+ * （约 4 秒）。一条要访问 9 个页面的守卫因此要跑 30 多秒，撞破测试超时 ——
+ * 而且是**整片一起红**，单跑却能过。实测每个页面其实 30~290ms 就绪了。
+ */
+function viewRootOf(main) {
+  const root = main?.lastElementChild ?? null
+  if (!root) return null
+  // 外壳节点永远不是"这一页的视图"。
+  if (root.classList.contains('global-alert-reserve') || root.classList.contains('focus-return')) return null
+  return root
+}
+
+/** 当前 `#main-content` 里是否已经是真实视图（而不是加载占位或外壳节点）。 */
 function isViewReady(main) {
-  return Boolean(main) && main.children.length > 0 && !main.querySelector('.route-fallback')
+  const root = viewRootOf(main)
+  return Boolean(root) && !main.querySelector('.route-fallback')
 }
 
 /**
@@ -132,14 +155,15 @@ export async function gotoRoute(app, path) {
   // ⚠ 必须**在 push 之前**抓旧视图的根节点。模块已被缓存时（同一测试文件里第二次
   // 导入同一个视图），视图会在 push 期间就同步换好；若在 push 之后才抓，
   // 抓到的"旧节点"其实已经是新视图，于是"根节点必须变过"永远不成立 →
-  // 每页跑满 400 次轮询 → 测试 5s 超时（第二十七轮实测）。
-  const before = document.querySelector('#main-content')?.firstElementChild ?? null
+  // 每页跑满 400 次轮询 → 测试超时（第二十七轮实测）。
+  // 取的是 viewRootOf（最后一个子节点）而不是 firstElementChild，理由见该函数注释。
+  const before = viewRootOf(document.querySelector('#main-content'))
   await app.router.push(path)
 
   for (let i = 0; i < 400; i++) {
     await settle()
     const main = document.querySelector('#main-content')
-    const root = main?.firstElementChild ?? null
+    const root = viewRootOf(main)
     if (isViewReady(main) && (alreadyThere || root !== before)) break
     await new Promise((resolveWait) => setTimeout(resolveWait, 10))
   }

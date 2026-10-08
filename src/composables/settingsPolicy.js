@@ -2,7 +2,6 @@ import { computed } from 'vue'
 // 只依赖 core，避免时间工具 -> 设置策略 -> store/index -> countdown 的循环依赖。
 import { clock, useStoredRef } from './store/core.js'
 import { currentCampusId, currentSeasonId } from './store/timeConfig.js'
-import { autoSyncEnabled as boundAutoSyncEnabled } from './syncSpace.js'
 
 export const DEFAULT_SETTINGS_POLICY = Object.freeze({
   clipboardHint: true,
@@ -34,7 +33,6 @@ export function resolveSettingsPolicy() {
   const raw = settings.value && typeof settings.value === 'object' ? settings.value : {}
   const reminders = raw.defaultReminders && typeof raw.defaultReminders === 'object' ? raw.defaultReminders : {}
   return {
-    autoSyncEnabled: boundAutoSyncEnabled.value,
     timezone: validTimezone(raw.timezone),
     campusId: currentCampusId(),
     seasonId: currentSeasonId(),
@@ -81,8 +79,8 @@ const formatterCache = new Map()
  *
  * 【为什么导出】timeContext.js 的 formatAppDate 也做同样的事，此前是每次
  * `new Intl.DateTimeFormat(...)` —— 同一份结论在仓库里漏了一处，而它的调用点
- * 有 5 个在 v-for / 列表行里（bills、EventsView、TasksView、TodayView、
- * dataManagerStatus），每次刷新都要重建几十个 ICU 格式器。
+ * 有 5 个在 v-for / 列表行里（bills、EventsView、TasksView、TodayView 等），
+ * 每次刷新都要重建几十个 ICU 格式器。
  * 导出这个函数是为了让两处共用**同一个缓存**，而不是各自再写一份。
  *
  * @param {string} timezone 'local' 或某个 IANA 时区名

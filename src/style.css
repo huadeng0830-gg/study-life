@@ -94,9 +94,7 @@
   --fs-29: 29px;
   --fs-30: 30px;
   --fs-32: 32px;
-  --fs-36: 36px;
   --fs-38: 38px;
-  --fs-45: 45px;
   --fs-page-title: var(--fs-23);
   --fs-body: var(--fs-14);
   --fs-aux: var(--fs-12-5);
@@ -822,6 +820,47 @@ summary:focus:not(:focus-visible) {
    整块深色底还要吃掉一盒墨；更麻烦的是 .timetable-wrap 的 overflow-x: auto
    在纸上会把表格右侧的列**整块裁掉**，只印得出当前能看见的那几列。
    所以：外壳隐藏、滚动容器展开、主题强制走黑白。 */
+/* ---------------------------------------------------------------- 开关控件
+ * 原来这套规则住在 DataManager.vue 的 scoped 样式里，于是只有那个组件能用。
+ * 「是否通过账号同步」也要用同一套外观；复制一份会变成全仓第二处同值规则
+ * （本仓库专门有一条守卫盯着这件事），所以提到全局样式表，只此一份定义。
+ * 配色逐字沿用原样，没有改动任何取值（选中态深绿配白字，未选中是 --muted 配 --bg）。
+ * 注释里刻意不写色值的十六进制：颜色棘轮对样式区按字面计数，注释也计入。
+ */
+.switch {
+  width:48px;
+  height:28px;
+  color:var(--muted);
+  border:1px solid var(--border);
+  background:var(--bg);
+  cursor:pointer;
+  border-radius:var(--radius-pill);
+  flex:none;
+  justify-content:center;
+  align-items:center;
+  padding:2px;
+  display:inline-flex}
+.switch span {
+  width:22px;
+  height:22px;
+  box-shadow:var(--shadow-sm);
+  background:var(--card);
+  border-radius:var(--radius-circle);
+  place-items:center;
+  font-size:var(--fs-10);
+  font-weight:var(--fw-800);
+  display:grid}
+.switch.on {
+  color:#fff;
+  background:#07805d;
+  border-color:#07805d;
+  justify-content:flex-end}
+.switch.on span {
+  /* 拨钮上的「开/关」是白底上的小号粗体字，必须 ≥4.5:1。
+     原来这里写死一个比拨钮填充色略浅的绿，在白底上只有 3.22:1 ——
+     它藏在组件的 scoped 样式里，所以对比度审计一直没看见。
+     改用 --success（#067654，白底 5.12:1）：既达标，又不再多一处一次性色值。 */
+  color:var(--success)}
 @media print {
   /* 1. 外壳与浮层。浮层（.overlay）是 position: fixed，印出来会叠在正文上，
         所以连它一起隐藏：纸上要看的是页面本身，不是某个弹窗。 */

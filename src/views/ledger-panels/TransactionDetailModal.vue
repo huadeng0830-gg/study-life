@@ -1,5 +1,5 @@
 <script setup>
-import { defineProps, defineEmits, computed } from 'vue'
+import { computed } from 'vue'
 import Modal from '../../components/Modal.vue'
 import { catInfo, isRefundTransaction, freqPrefs } from '../../composables/ledger.js'
 import { moneyRow, moneyWithCurrency } from '../../utils/formatters.js'
@@ -15,6 +15,8 @@ const props = defineProps({
   detailCategoryInput: { type: String, default: '' },
   detailDateInput: { type: String, default: '' },
   detailCurrencyInput: { type: String, default: '' },
+  applySameNameCategory: { type: Boolean, default: false },
+  sameNameCategoryCount: { type: Number, default: 0 },
   showRefund: { type: Boolean, default: false },
   refundItem: { type: Object, default: null },
   refundAmountInput: { type: String, default: '' },
@@ -31,12 +33,14 @@ const emit = defineEmits([
   'update:detailCategoryInput',
   'update:detailDateInput',
   'update:detailCurrencyInput',
+  'update:applySameNameCategory',
   'update:showRefund',
   'update:refundItem',
   'update:refundAmountInput',
   'update:refundDateInput',
   'update:refundNoteInput',
   'edit-from-detail',
+  'full-edit-from-detail',
   'save-detail-edit',
   'cancel-detail-edit',
   'again-from-detail',
@@ -83,9 +87,16 @@ const detailActions = computed(() => {
         <label>日期<input :value="detailDateInput" @input="e => $emit('update:detailDateInput', e.target.value)" type="date" aria-label="修改日期" /></label>
         <label>币种<select :value="detailCurrencyInput" @input="e => $emit('update:detailCurrencyInput', e.target.value)" aria-label="修改币种"><option v-for="code in currencyChoices(fx, [detailCurrencyInput])" :key="code" :value="code">{{ code }}</option></select></label>
       </div>
+      <label v-if="sameNameCategoryCount" class="detail-bulk-category">
+        <input type="checkbox" :checked="applySameNameCategory" @change="$emit('update:applySameNameCategory', $event.target.checked)" />
+        <span>
+          同时把另外 {{ sameNameCategoryCount }} 笔同名{{ detailExpense.direction === 'income' ? '收入' : '支出' }}改为「{{ catInfo(detailCategoryInput).name }}」
+          <small>只匹配相同名称和收支方向的历史记录；只改分类，不改金额、日期等信息。</small>
+        </span>
+      </label>
       <div class="detail-actions detail-edit-actions">
         <button class="btn" type="button" @click="$emit('cancel-detail-edit')">取消</button>
-        <button class="btn btn-primary" type="button" @click="$emit('save-detail-edit')">保存修改</button>
+        <button class="btn btn-primary" type="button" @click="$emit('save-detail-edit')">{{ applySameNameCategory && sameNameCategoryCount ? `保存并更新 ${sameNameCategoryCount} 笔分类` : '保存修改' }}</button>
       </div>
     </template>
     <template v-else>
@@ -166,6 +177,29 @@ const detailActions = computed(() => {
 .detail-edit-grid input,.detail-edit-grid select {
   width:100%;
   min-height:42px}
+.detail-bulk-category {
+  color:var(--ink-soft);
+  background:var(--bg-tint);
+  border:1px solid var(--border);
+  border-radius:var(--radius-10);
+  align-items:flex-start;
+  gap:9px;
+  padding:10px 12px;
+  font-size:var(--fs-12);
+  line-height:1.5;
+  display:flex}
+.detail-bulk-category input {
+  width:16px;
+  height:16px;
+  flex:none;
+  padding:0;
+  margin:2px 0 0;
+  accent-color:var(--primary)}
+.detail-bulk-category span {
+  min-width:0}
+.detail-bulk-category small {
+  color:var(--ink-faint);
+  display:block}
 .detail-edit-actions {
   justify-content:flex-end}
 .bill-field {

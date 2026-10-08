@@ -222,7 +222,7 @@ try {
 
   const failureMarkers = ['页面没有完整加载', '页面加载失败']
   const retryMarkers = ['重新加载', '重新打开']
-  const skeletonMarkers = ['data-startup-placeholder', '正在打开学习生活台']
+  const skeletonMarkers = ['data-startup-placeholder', '正在打开三两事']
   const countOf = (needles) => Object.fromEntries(needles.map((needle) => [needle, dom.split(needle).length - 1]))
   const failureFound = countOf(failureMarkers)
   const retryFound = countOf(retryMarkers)

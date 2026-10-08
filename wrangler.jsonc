@@ -1,24 +1,5 @@
 {
   "name": "study-life",
   "pages_build_output_dir": "./dist",
-  "compatibility_date": "2026-08-28",
-  "vars": {
-    "SYNC_REMOTE_MODE": "do",
-    // 是否回落到旧 KV 命名空间读取旧版数据。只影响存储后端，不控制鉴权。
-    "SYNC_LEGACY_MIGRATION": "disabled",
-    // 旧版 6 位数字访问码鉴权。默认关闭，需要显式设为 "enabled" 才接受。
-    // 密钥空间只有 10^6 且服务端不校验正确性，留着等于公开一个可爆破的口子。
-    "SYNC_LEGACY_CODE_AUTH": "disabled"
-  },
-  "kv_namespaces": [{
-    "binding": "STUDY_LIFE_SYNC",
-    "id": "81bcb55b6505465391dbb1c8860a886c"
-  }],
-  "durable_objects": {
-    "bindings": [{
-      "name": "SYNC_COORDINATOR",
-      "class_name": "SyncCoordinator",
-      "script_name": "study-life-sync-coordinator"
-    }]
-  }
+  "compatibility_date": "2026-08-28"
 }

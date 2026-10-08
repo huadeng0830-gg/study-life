@@ -6,7 +6,7 @@
  * 但具体动作的实现（updateTransaction、refundTransaction、freqPrefs 修改）搬到这里。
  */
 import { computed, ref } from 'vue'
-import { expenses, isRefundTransaction, freqPrefs } from '../ledger.js'
+import { expenses, isRefundTransaction, freqPrefs, rememberCategoryOverride } from '../ledger.js'
 import { amountToCents, normalizeAmount } from '../ledger.js'
 import { buildSplit, hasSplit, mySpendCents } from '../ledgerSplit.js'
 import { isBillPayment } from '../ledgerRelations.js'
@@ -23,6 +23,28 @@ export function useTransactionDetail({ domain, notify, closeSwipe, flashTransact
   const detailCategoryInput = ref('')
   const detailDateInput = ref('')
   const detailCurrencyInput = ref('')
+  const applySameNameCategory = ref(false)
+  const sameNameCategoryIds = computed(() => {
+    const current = detailExpense.value
+    if (!current || isRefundTransaction(current) || isBillPayment(current)) return []
+    const currentName = normalizeTransactionName(current.name)
+    if (!currentName) return []
+    const direction = current.direction === 'income' ? 'income' : 'expense'
+    const category = detailCategoryInput.value || 'other'
+    const entries = domain.transactions?.value || expenses.value
+    return entries
+      .filter((entry) => entry && String(entry.id) !== String(current.id)
+        && !entry.archivedAt && !entry.deletedAt && !entry.tombstone
+        && !isRefundTransaction(entry) && !isBillPayment(entry)
+        && (entry.direction === 'income' ? 'income' : 'expense') === direction
+        && normalizeTransactionName(entry.name) === currentName
+        && (entry.cat || 'other') !== category)
+      .map((entry) => entry.id)
+  })
+
+  function normalizeTransactionName(value) {
+    return String(value ?? '').normalize('NFKC').trim().replace(/\s+/gu, ' ').toLowerCase()
+  }
 
   // 退款
   const showRefund = ref(false)
@@ -34,11 +56,13 @@ export function useTransactionDetail({ domain, notify, closeSwipe, flashTransact
   function openDetail(id) {
     detailItem.value = id
     detailEdit.value = false
+    applySameNameCategory.value = false
   }
 
   function closeDetail() {
     detailItem.value = null
     detailEdit.value = false
+    applySameNameCategory.value = false
   }
 
   function editFromDetail() {
@@ -48,11 +72,13 @@ export function useTransactionDetail({ domain, notify, closeSwipe, flashTransact
     detailCategoryInput.value = e.cat || ''
     detailDateInput.value = e.date || ledgerToday()
     detailCurrencyInput.value = normalizeCurrency(e.currency) || baseCurrency.value
+    applySameNameCategory.value = false
     detailEdit.value = true
   }
 
   function cancelDetailEdit() {
     detailEdit.value = false
+    applySameNameCategory.value = false
   }
 
   function saveDetailEdit() {
@@ -67,6 +93,7 @@ export function useTransactionDetail({ domain, notify, closeSwipe, flashTransact
       notify('金额填写有误：不能为空，最多保留两位小数')
       return
     }
+    let primaryUpdated = false
     try {
       // 【分摊同步】总额变了而 split 停在旧值时，校验只查 Σ参与者===split.total，
       // 两者都没变所以**校验通过**，于是「我承担」永远按旧份额计入所有合计。
@@ -82,12 +109,32 @@ export function useTransactionDetail({ domain, notify, closeSwipe, flashTransact
       }
       const updated = domain.updateTransaction(e.id, patch)
       if (!updated) return
+      primaryUpdated = true
+      if (updated.name && (e.cat || 'other') !== updated.cat) {
+        rememberCategoryOverride(updated.name, updated.cat, updated.direction)
+      }
+      let previousCategories = []
+      if (applySameNameCategory.value && sameNameCategoryIds.value.length) {
+        previousCategories = domain.updateTransactionCategories(sameNameCategoryIds.value.map((id) => ({
+          id,
+          categoryId: updated.cat,
+        })))
+      }
       detailEdit.value = false
+      applySameNameCategory.value = false
       closeSwipe()
       flashTransaction(updated.id)
-      notify(`已更新 ${updated.direction === 'income' ? '+' : '-'}${moneyRow(updated.amount)} · ${updated.name}`)
+      const summary = `已更新 ${updated.direction === 'income' ? '+' : '-'}${moneyRow(updated.amount)} · ${updated.name}`
+      const message = previousCategories.length
+        ? `${summary}，并调整另外 ${previousCategories.length} 笔同名记录`
+        : summary
+      notify(message, previousCategories.length ? {
+        actionLabel: '撤销批量分类',
+        undoFn: () => domain.updateTransactionCategories(previousCategories),
+      } : undefined)
     } catch (cause) {
-      notify(cause?.message || '保存失败，请检查金额和日期')
+      const reason = cause?.message || '请检查金额和日期'
+      notify(primaryUpdated ? `当前记录已保存，但同名记录批量分类失败：${reason}` : `保存失败：${reason}`)
     }
   }
 
@@ -238,6 +285,8 @@ export function useTransactionDetail({ domain, notify, closeSwipe, flashTransact
     detailCategoryInput,
     detailDateInput,
     detailCurrencyInput,
+    applySameNameCategory,
+    sameNameCategoryCount: computed(() => sameNameCategoryIds.value.length),
     openDetail,
     closeDetail,
     editFromDetail,

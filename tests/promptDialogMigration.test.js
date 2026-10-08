@@ -211,9 +211,19 @@ function promptBindingIssues(sources) {
         // 内联箭头函数等写法不在本次改造里，跳过（留个出口而不是误报）
         if (!callName && !assignName) continue
         const name = callName ?? assignName
-        const ok = callName
-          ? new RegExp(`(?:async\\s+)?function\\s+${name}\\b`).test(code)
-          : new RegExp(`(?:const|let|var)\\s+${name}\\b`).test(code)
+        const isDeclared = (binding) => {
+          if (new RegExp(`(?:const|let|var)\\s+${binding}\\b`).test(code)) return true
+          for (const [, properties] of code.matchAll(/(?:const|let|var)\s*\{([^}]+)\}\s*=/g)) {
+            const names = properties.split(',').map((property) => {
+              const parts = property.trim().replace(/^\.\.\./, '').split(':')
+              const local = (parts.at(-1) ?? '').split('=')[0].trim()
+              return /^[A-Za-z_$][\w$]*$/.test(local) ? local : ''
+            })
+            if (names.includes(binding)) return true
+          }
+          return false
+        }
+        const ok = isDeclared(name) || new RegExp(`(?:async\\s+)?function\\s+${name}\\b`).test(code)
         if (!ok) issues.push(`${file}: @${attr}="${expr}" 指向的 ${name} 在本文件里没有声明`)
       }
     }
@@ -302,7 +312,7 @@ describe('静态层：原生弹窗已经全部退场', () => {
     expect(sourceOf('components/PromptDialog.vue'), 'PromptDialog 组件本身必须存在').toContain('defineProps')
     // 改名入口还在（不是靠把功能删掉来让棘轮变绿）
     expect(sourceOf('views/LedgerView.vue')).toMatch(/@click="renameCategory\(c\)">重命名/)
-    expect(sourceOf('views/LedgerView.vue')).toMatch(/function applyCategoryRename\(/)
+    expect(sourceOf('composables/ledgerView/useLedgerCategoryManager.js')).toMatch(/function applyCategoryRename\(/)
     // 本周回顾页的提示改成了页面内联提示，文案逐字保留
     expect(sourceOf('views/WeeklyReviewView.vue')).toMatch(/role="status"/)
     expect(sourceOf('views/WeeklyReviewView.vue')).toMatch(/reviewMessage\.value\s*=\s*'回顾笔记已生成，可在「笔记」页面查看'/)

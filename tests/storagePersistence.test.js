@@ -28,6 +28,7 @@ describe('本机持久化状态', () => {
 
     expect(state.value.value).toBe(1)
     expect(persistenceState.value.status).toBe('error')
+    expect(persistenceState.value.key).toBe(localKey)
     expect(persistenceState.value.message).toContain('本次修改未能保存到本机')
     setItem.mockRestore()
   })

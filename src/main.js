@@ -1,9 +1,9 @@
 import { createApp } from 'vue'
 import { createRouter, createWebHashHistory } from 'vue-router'
 import './style.css'
+import { initializeAccountAuth, prepareAccountCallback } from './composables/accountAuth.js'
 import { initializeDataVault, redirectPreviewOrigin } from './composables/dataVault.js'
-// 副作用导入：高对比度开关必须在应用启动时就生效，而不是等用户打开外观设置才注册。
-import './composables/contrast.js'
+// 高对比度开关在本机数据与账号提交恢复后加载，避免启动早期读取存储。
 import { installGlobalErrorHandling } from './composables/globalError.js'
 import { clearPwaStartupRecovery, recoverPwaStartupResources } from './composables/pwaStartupRecovery.js'
 import { prepareDomainData } from './composables/startupData.js'
@@ -14,9 +14,12 @@ import { animationsEnabled } from './composables/motion.js'
 import { enableLocalSafeMode } from './composables/localSafeMode.js'
 import { routes } from './router/routes.js'
 import { preloadRoute } from './router/routePreload.js'
-import { hasPendingSyncRecoveryMarker } from './composables/syncRecoveryMarker.js'
+import { retireLegacySyncState } from './composables/retireLegacySyncState.js'
 import { configureStartupDiagnostics, recordStartupTiming, startupElapsedMs, startupNow } from './composables/startupDiagnostics.js'
+import { configureOverlayHistory } from './composables/overlayStack.js'
 
+const isDesktopShell = window.studyLifeDesktop?.isDesktop === true
+retireLegacySyncState()
 const startupDebugEnabled = import.meta.env.DEV
   || new URLSearchParams(window.location.search).get('startupDebug') === '1'
 configureStartupDiagnostics(startupDebugEnabled)
@@ -59,6 +62,10 @@ function showStartupError() {
     </main>
   `
   document.querySelector('#startup-retry')?.addEventListener('click', () => {
+    if (isDesktopShell) {
+      window.location.reload()
+      return
+    }
     clearPwaStartupRecovery()
     recoverStartupResources()
   })
@@ -70,7 +77,7 @@ function showRecoveryRequired() {
   root.innerHTML = `
     <main class="startup-error">
       <h1>本机数据恢复未完成</h1>
-      <p>同步恢复失败，但本机数据仍可在安全模式中读取、修改和导出。安全模式会暂停自动同步和手动拉取/推送，直到恢复完成。</p>
+      <p>账号数据恢复失败，但本机数据仍可在安全模式中读取、修改和导出。安全模式会暂停账号同步，直到恢复完成。</p>
       <div class="startup-actions">
         <button type="button" class="btn btn-primary" id="startup-safe-mode">以本机安全模式继续</button>
         <button type="button" class="btn" id="startup-export">先导出本机数据</button>
@@ -98,6 +105,10 @@ function showRecoveryRequired() {
 
 // 此路径发生在 App.vue 动态导入之前；不能调用延后加载的 appUpdate 恢复逻辑。
 function recoverStartupResources() {
+  if (isDesktopShell) {
+    if (!appBooted) showStartupError()
+    return
+  }
   if (startupRecoveryInFlight) return
   startupRecoveryInFlight = true
   void recoverPwaStartupResources()
@@ -120,7 +131,7 @@ window.addEventListener('vite:preloadError', (event) => {
 async function bootstrap({ skipGate = false } = {}) {
   if (redirectPreviewOrigin()) return
 
-  // 本地 Vault 与中断同步恢复完成前不能导入 App：App 的模块依赖会读取本地设置。
+  // 本地 Vault 与账号数据恢复完成前不能导入 App：App 的模块依赖会读取本地设置。
   // 这两步完成后，App 外壳和首页分包就可以与业务数据迁移并行下载，避免手机端
   // 先等存储准备结束、再串行请求 App、最后再请求首页的网络瀑布。
   let appModulePromise = null
@@ -139,11 +150,18 @@ async function bootstrap({ skipGate = false } = {}) {
     const startup = await runStartupGate({
       initializeVault: () => initializeDataVault({ onTiming: startupTiming }),
       recoverSync: async () => {
-        if (!hasPendingSyncRecoveryMarker()) return { ok: true, recovered: false }
-        const { recoverInterruptedSync } = await import('./composables/cloudSync.js')
-        return recoverInterruptedSync()
+        if (localStorage.getItem('study-life-account-switch') || localStorage.getItem('study-life-account-sync-commit')) {
+          const { recoverAccountDataSwitch } = await import('./composables/accountLocalData.js')
+          const switched = await recoverAccountDataSwitch()
+          if (!switched.ok) return switched
+          const { recoverAccountSyncCommit } = await import('./composables/accountSyncEngine.js')
+          const recovered = await recoverAccountSyncCommit()
+          if (!recovered.ok) return recovered
+        }
+        return { ok: true, recovered: false }
       },
       prepareApp: async () => {
+        await import('./composables/contrast.js')
         // 首页一定是本次会话的首个路由；先发起请求，让它和数据准备共用等待时间。
         // routePreload 会吞掉预加载失败，真正导航时仍由路由自己的失败界面处理。
         void preloadRoute('/')
@@ -160,15 +178,21 @@ async function bootstrap({ skipGate = false } = {}) {
       return
     }
   } else {
-    // 初始化已完成但同步恢复失败时，安全模式仍需准备本机业务数据。
+    await import('./composables/contrast.js')
+    // 初始化已完成但账号数据恢复失败时，安全模式仍需准备本机业务数据。
     void preloadRoute('/')
     await Promise.all([prepareDomainData(), loadAppModule()])
   }
 
   const { default: App } = await loadAppModule()
 
+  await prepareAccountCallback()
+
+  let routerHistory = null
+  configureOverlayHistory({ pauseRouterListeners: () => routerHistory?.pauseListeners() })
+  routerHistory = createWebHashHistory()
   const router = createRouter({
-    history: createWebHashHistory(),
+    history: routerHistory,
     routes,
     // 记住上次浏览位置：列表页翻到一半跳走再回来，回到原来的位置。
     // 记录发生在导航生效之前，所以读到的 window.scrollY 仍是旧页面的位置。
@@ -197,6 +221,11 @@ async function bootstrap({ skipGate = false } = {}) {
   const routerStartedAt = startupNow()
   app.use(router).mount('#app')
   appBooted = true
+  // 普通启动不等待账号网络；邮箱验证回调已经在路由创建前消费。
+  void initializeAccountAuth()
+  void import('./composables/projectTaskBridge.js')
+    .then((module) => module.startProjectTaskBridge())
+    .catch((error) => console.warn('[projects] 待办关联未能启动', error))
   startupTiming({ label: 'mount', durationMs: startupNow() - mountStartedAt })
   void router.isReady().then(() => {
     startupTiming({ label: 'router-ready', durationMs: startupNow() - routerStartedAt })
@@ -233,8 +262,10 @@ async function bootstrap({ skipGate = false } = {}) {
  */
 function startOptionalWarmup() {
   // 更新检查不再阻塞手机首屏；浏览器空闲后再注册更新服务。
-  const startUpdater = () => void import('./composables/appUpdate.js')
-  whenIdle(startUpdater, { timeout: 5000, fallbackDelay: 5000, deferMs: 1200 })
+  if (!isDesktopShell) {
+    const startUpdater = () => void import('./composables/appUpdate.js')
+    whenIdle(startUpdater, { timeout: 5000, fallbackDelay: 5000, deferMs: 1200 })
+  }
 
   // 异步组件预加载：统一走 router/routePreload.js。
   //

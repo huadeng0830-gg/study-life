@@ -1,13 +1,12 @@
 <script setup>
-import { defineProps, defineEmits, ref, computed, watch, nextTick } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
 import Modal from '../../components/Modal.vue'
 import QuickRecordPanel from '../../components/QuickRecordPanel.vue'
-import { activeCategories, detectCategory, parseNatural, ledgerIndex, ledgerCategories, commonCategories } from '../../composables/ledger.js'
+import { activeCategories, catInfo, classifyTransaction, parseNatural, ledgerIndex, ledgerCategories, commonCategories } from '../../composables/ledger.js'
 import { splitCentsEvenly } from '../../composables/ledgerSplit.js'
 import { currencyChoices, normalizeCurrency, useLedgerFx } from '../../composables/ledgerFx.js'
 import { defaultAccount, policyTimeKey } from '../../composables/settingsPolicy.js'
 import { appNow, appToday, formatAppDate } from '../../composables/timeContext.js'
-import { moneyWithCurrency } from '../../utils/formatters.js'
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -30,6 +29,7 @@ const props = defineProps({
   currencyInput: { type: String, default: '' },
   splitCount: { type: String, default: '1' },
   splitMine: { type: String, default: '' },
+  splitPreview: { type: String, default: '' },
   dupWarn: { type: Boolean, default: false },
   forceDup: { type: Boolean, default: false },
   cycleSuggest: { type: Object, default: null },
@@ -38,6 +38,22 @@ const props = defineProps({
   categoryInputManuallySelected: { type: Boolean, default: false },
   suggestedCategoryInput: { type: String, default: '' },
   duplicateHit: { type: Boolean, default: false },
+  /**
+   * 是否显示内嵌的「⚡ 用一句话记」面板。
+   *
+   * 【必须声明成 prop，不能留在 $attrs 里读】原来模板写的是 `v-if="$attrs.showQuickRecord"`，
+   * 而父级（LedgerView）传的是**短横线**写法 `:show-quick-record="showQuickRecord"`。
+   * Vue 只会对**已声明的 prop** 做 camelize 匹配，非 prop 的属性进 `$attrs` 时**保留原键名** ——
+   * 于是 `$attrs.showQuickRecord` 恒为 `undefined`、`$attrs['show-quick-record']` 才是 true：
+   * 账本里点「⚡ 用一句话记」**什么都不会发生**（面板从未渲染，所以连"关不掉"都轮不到）。
+   * 声明成 prop 之后父级的 kebab 写法会被正确匹配，这一层才有真正的开与关。
+   */
+  showQuickRecord: { type: Boolean, default: false },
+})
+
+const categorySuggestion = computed(() => {
+  const name = parseNatural(props.nameInput).name || props.nameInput.trim()
+  return name ? classifyTransaction(name, { direction: props.directionInput }) : null
 })
 
 const emit = defineEmits([
@@ -68,6 +84,12 @@ const emit = defineEmits([
   'close',
   'open-quick-record',
   'quick-record-saved',
+  // 面板里「⚡ 用一句话记」那一层的关闭出口。
+  // 【原来整个出口是断的】模板 `@close="$emit('update:showQuickRecord', false)"` 而这里
+  // 没有登记，页面也没监听（LedgerView 只传了 `:show-quick-record`）：
+  // 于是那一层的 ✕ / 点遮罩 / Esc 三条关闭路径全都发出去了却没人接，
+  // 用户只能靠保存一笔才能离开。本组件与 LedgerView 必须成对保留这两处接线。
+  'update:showQuickRecord',
   'select-category',
   // 「创建固定账单」按钮（在识别出周期建议时出现）要交给页面打开账单表单。
   // 之前只在 createBillFromSuggest 里 emit 了它，却没登记进 defineEmits、页面也没监听，
@@ -93,23 +115,6 @@ watch(() => props.splitCount, v => { localSplitCount.value = v })
 watch(() => props.currencyInput, v => { localCurrencyInput.value = v })
 watch(() => props.splitMine, v => { localSplitMine.value = v })
 
-// 本地计算分摊预览（读取本地镜像状态，兼容测试直接设值的场景）
-const localSplitPreview = computed(() => {
-  const amountValue = localAmountInput.value
-  const splitCountValue = localSplitCount.value
-  const currencyValue = localCurrencyInput.value
-  
-  const totalCents = parseAmount(amountValue)
-  const people = Math.trunc(Number(splitCountValue)) || 1
-  if (totalCents === null || !Number.isFinite(people) || people < 1) return ''
-  const shares = splitCentsEvenly(totalCents, people)
-  const mine = shares[0] / 100
-  const others = (totalCents - shares[0]) / 100
-  return people === 1
-    ? `单人承担 ${moneyWithCurrency(mine, currencyValue || 'CNY')}`
-    : `共 ${people} 人：我承担 ${moneyWithCurrency(mine, currencyValue || 'CNY')}，其余 ${moneyWithCurrency(others, currencyValue || 'CNY')}`
-})
-
 function parseAmount(v) {
   const n = Number(String(v).replace(/[^0-9.-]/g, ''))
   return Number.isFinite(n) && n > 0 ? Math.round(n * 100) : null
@@ -133,31 +138,37 @@ function setDirection(direction) {
   if (props.categoryInputManuallySelected && validCategory) return
   emit('update:categoryInputManuallySelected', false)
   const name = parseNatural(props.nameInput).name || props.nameInput.trim()
-  const suggested = name ? detectCategory(name, { direction }) : ''
+  const classification = name ? classifyTransaction(name, { direction }) : null
+  const suggested = classification?.categoryId || ''
   emit('update:suggestedCategoryInput', suggested)
   emit('update:catInput', suggested)
 }
 
-function onNameInput() {
+function onNameInput(inputValue) {
   emit('update:dupWarn', false)
   emit('update:forceDup', false)
   if (props.editingId) return
-  const parsed = parseNatural(props.nameInput)
-  if (parsed.amount && props.amountInput === '' && parsed.name && parsed.name !== props.nameInput) {
+  const rawName = String(inputValue ?? '')
+  const parsed = parseNatural(rawName)
+  if (parsed.amount && props.amountInput === '' && parsed.name && parsed.name !== rawName) {
     emit('update:nameInput', parsed.name)
   }
   if (parsed.amount && props.amountInput === '') emit('update:amountInput', parsed.amount)
   if (parsed.cycle && !props.catInput) emit('update:cycleSuggest', parsed.cycle)
-  if (!props.catInput && parsed.name) {
-    const suggested = detectCategory(parsed.name || props.nameInput, { direction: props.directionInput })
+  // 自动分类要随着整段名称持续更新。以前只在 catInput 为空时判断，
+  // 输入第一个字后落到“其它”，后续输入就再也不会重新匹配。
+  if (!props.categoryInputManuallySelected) {
+    const name = parsed.name || rawName.trim()
+    const classification = name ? classifyTransaction(name, { direction: props.directionInput }) : null
+    const suggested = classification?.categoryId || ''
     emit('update:suggestedCategoryInput', suggested)
     emit('update:catInput', suggested)
-    emit('update:categoryInputManuallySelected', false)
   }
 }
 
 function selectQuickCategory(key) {
-  emit('update:catInput', props.catInput === key ? '' : key)
+  if (props.catInput === key) return
+  emit('update:catInput', key)
   emit('update:categoryInputManuallySelected', true)
 }
 
@@ -213,12 +224,20 @@ function createBillFromSuggest() {
     </div>
     <input
       :value="nameInput"
-      @input="e => { $emit('update:nameInput', e.target.value); onNameInput() }"
+      @input="e => { $emit('update:nameInput', e.target.value); onNameInput(e.target.value) }"
       class="name-input"
       aria-label="备注或用途"
       placeholder="买了什么？可不填"
       @keydown.enter="saveExpense(keepAdding)"
     />
+    <p v-if="!editingId && categorySuggestion" class="category-suggestion" :class="{ uncertain: categorySuggestion.uncertain }" role="status">
+      <template v-if="categoryInputManuallySelected && catInput">已选「{{ catInfo(catInput).name }}」，保存后会记住这个名称的分类。</template>
+      <template v-else>
+        {{ categorySuggestion.matchedBy === 'user' ? '按你上次的分类纠正建议' : '本机规则建议' }}「{{ catInfo(categorySuggestion.categoryId).name }}」
+        <span v-if="categorySuggestion.uncertain">，把握较低，请确认 <button type="button" class="category-suggestion-action" @click="$emit('update:moreOpen', true)">选择分类</button></span>
+        <span v-else>，可在“更多”里调整</span>
+      </template>
+    </p>
 
     <div v-if="dupWarn" class="dup-warn">
       <span>这笔可能和刚才的一样。</span>
@@ -268,7 +287,7 @@ function createBillFromSuggest() {
         <label>参与人数<input :value="localSplitCount" @input="e => { localSplitCount = e.target.value; onSplitChange(); $emit('update:splitCount', e.target.value) }" type="number" min="1" max="99" step="1" inputmode="numeric" /></label>
         <label>我承担<input :value="localSplitMine" type="text" inputmode="decimal" aria-label="我在这一笔里承担的份额（自动计算，可手改）" readonly /></label>
       </div>
-     <p v-if="localSplitPreview" class="form-note">{{ localSplitPreview }}</p>
+     <p v-if="splitPreview" class="form-note">{{ splitPreview }}</p>
     </div>
 
     <div class="quick-actions">
@@ -283,8 +302,8 @@ function createBillFromSuggest() {
 </Modal>
 
 <QuickRecordPanel
-  v-if="$attrs.showQuickRecord"
-  :open="$attrs.showQuickRecord"
+  v-if="showQuickRecord"
+  :open="showQuickRecord"
   :context="{ preferredType: 'expense' }"
   @saved="onQuickRecordSaved"
   @close="$emit('update:showQuickRecord', false)"
@@ -294,6 +313,7 @@ function createBillFromSuggest() {
 <style scoped>
 /* QuickEntryModal 样式：从 LedgerView.vue 迁移，保留原有注释 */
 .quick-form {
+  min-width:0;
   flex-direction:column;
   gap:10px;
   display:flex}
@@ -342,6 +362,21 @@ function createBillFromSuggest() {
   width:100%;
   padding:11px 13px;
   font-size:var(--fs-14-5)}
+.category-suggestion {
+  margin:-6px 0 0;
+  color:var(--ink-faint);
+  font-size:var(--fs-11-5);
+  line-height:1.45}
+.category-suggestion.uncertain { color:var(--warning) }
+.category-suggestion-action {
+  color:var(--primary);
+  cursor:pointer;
+  background:transparent;
+  border:0;
+  padding:0 2px;
+  font:inherit;
+  font-weight:var(--fw-700);
+  text-decoration:underline}
 .more-toggle {
   color:var(--ink-faint);
   cursor:pointer;
@@ -360,6 +395,8 @@ function createBillFromSuggest() {
   font-size:var(--fs-10);
   font-style:normal}
 .more-area {
+  min-width:0;
+  box-sizing:border-box;
   border:1px solid var(--border);
   background:var(--bg-tint);
   border-radius:var(--radius-12);
@@ -372,7 +409,8 @@ function createBillFromSuggest() {
   padding:0 12px;
   font-size:var(--fs-12)}
 .more-grid {
-  grid-template-columns:1fr 1fr;
+  min-width:0;
+  grid-template-columns:repeat(2,minmax(0,1fr));
   gap:10px;
   display:grid}
 .category-more-toggle {
@@ -385,11 +423,16 @@ function createBillFromSuggest() {
   padding:2px 8px;
   font-size:var(--fs-11-5)}
 .more-grid label {
+  min-width:0;
   color:var(--ink-soft);
   flex-direction:column;
   gap:5px;
   font-size:var(--fs-11-5);
   display:flex}
+.more-grid input,.more-grid select {
+  width:100%;
+  min-width:0;
+  box-sizing:border-box}
 .quick-actions {
   gap:8px;
   margin-top:4px;

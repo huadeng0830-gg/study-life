@@ -28,7 +28,7 @@ let nextMenuId = 0
 const titleId = `context-menu-title-${++nextMenuId}`
 
 const panelEl = ref(null)
-const entry = { modalEl: panelEl, previousFocus: null, active: false }
+const entry = { modalEl: panelEl, previousFocus: null, active: false, onBack: () => emit('close') }
 const placement = ref({ left: 0, top: 0 })
 const positioned = ref(false)
 

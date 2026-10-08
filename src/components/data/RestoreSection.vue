@@ -9,10 +9,10 @@ const { selectFile } = useDataManagerBackup()
     <div class="section-icon restore">↑</div>
     <div class="section-copy">
       <h4>从备份恢复</h4>
-      <p>选择此前导出的 JSON 文件。确认恢复前不会修改当前数据。</p>
+      <p>选择此前导出的 JSON 文件，先查看覆盖范围，再确认恢复；选文件时不会修改当前数据。</p>
       <label class="file-button">
         选择备份文件
-        <input type="file" accept="application/json,.json" @change="selectFile" />
+        <input type="file" accept="application/json,.json" aria-label="选择要恢复的备份文件" @change="selectFile" />
       </label>
     </div>
   </section>
@@ -45,16 +45,29 @@ const { selectFile } = useDataManagerBackup()
   font-size:var(--fs-12);
   line-height:1.55}
 .file-button {
+  position:relative;
   color:var(--primary);
   cursor:pointer;
   background:var(--primary-soft);
   border-radius:var(--radius-8);
+  min-height:44px;
+  box-sizing:border-box;
+  align-items:center;
   padding:8px 14px;
   font-size:var(--fs-13);
   font-weight:var(--fw-700);
   display:inline-flex}
 .file-button input {
-  display:none}
+  position:absolute;
+  inset:0;
+  width:100%;
+  height:100%;
+  cursor:pointer;
+  opacity:0}
+.file-button:focus-within {
+  outline:var(--focus-width) solid var(--focus-solid);
+  outline-offset:var(--focus-offset);
+  box-shadow:0 0 0 calc(var(--focus-width) + var(--focus-offset) + 1px) var(--focus-halo)}
 @media (max-width:520px) {
   .section-icon {
   flex-basis:32px;

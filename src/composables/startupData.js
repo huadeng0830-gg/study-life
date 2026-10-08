@@ -1,9 +1,9 @@
-import { migrateTaskCourseLinks, touchStoredRef, useStoredRef } from './store/index.js'
 import { DOMAIN_SCHEMA_VERSION, migrateDomainData } from './domain/migrations.js'
 import { retireFoodData } from './foodRetirement.js'
 
 // 必须在 App mount 前完成，避免恢复快照与 migration 同时写入业务 store。
 export async function prepareDomainData() {
+  const { migrateTaskCourseLinks, touchStoredRef, useStoredRef } = await import('./store/index.js')
   const retirement = await retireFoodData()
   if (retirement.aborted) throw new Error(retirement.error)
   const tasks = useStoredRef('sl_tasks', [])

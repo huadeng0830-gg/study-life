@@ -6,7 +6,6 @@ import { createRouter, createWebHashHistory } from 'vue-router'
 vi.mock('virtual:pwa-register', () => ({ registerSW: vi.fn(() => vi.fn()) }))
 
 import DataManager from '../src/components/DataManager.vue'
-import { clearSyncSpaceSettings } from '../src/composables/syncSpace.js'
 
 // 用户上报：手机版“从备份恢复”不可用。
 // 数据管理弹窗的移动端分区导航原本是 <a href="#data-restore">，而应用使用 hash 路由，
@@ -34,14 +33,13 @@ async function mountDataManager() {
 }
 
 function sectionButton(label) {
-  const nav = document.querySelector('.mobile-data-nav')
+  const nav = document.querySelector('.data-manager-nav')
   return [...nav.querySelectorAll('button')].find((button) => button.textContent.includes(label))
 }
 
-describe('数据管理移动端分区导航', () => {
+describe('数据管理分区导航', () => {
   beforeEach(() => {
     localStorage.clear()
-    clearSyncSpaceSettings()
     window.location.hash = ''
     vi.stubGlobal('fetch', vi.fn())
   })
@@ -57,7 +55,7 @@ describe('数据管理移动端分区导航', () => {
   it('不用 hash 锚点，点击“恢复”只滚动弹窗，不改写应用路由', async () => {
     const router = await mountDataManager()
 
-    expect(document.querySelectorAll('.mobile-data-nav a[href]')).toHaveLength(0)
+    expect(document.querySelectorAll('.data-manager-nav a[href]')).toHaveLength(0)
 
     const restoreSection = document.querySelector('#data-restore')
     const scrollIntoView = vi.fn()
@@ -71,14 +69,16 @@ describe('数据管理移动端分区导航', () => {
     expect(window.location.hash).not.toContain('data-restore')
   })
 
-  it('四个分区入口都能定位到各自的区块', async () => {
+  it('备份、账号同步与恢复入口都能定位到各自区块', async () => {
     await mountDataManager()
     const targets = [
       ['备份', '#data-backup'],
       ['同步', '#data-sync'],
-      ['迁移', '#data-transfer'],
       ['恢复', '#data-restore'],
     ]
+    expect(document.querySelector('#data-transfer')).toBeNull()
+    expect(document.body.textContent).not.toContain('创建同步空间')
+    expect(document.body.textContent).not.toContain('扫描绑定码')
     for (const [label, selector] of targets) {
       const section = document.querySelector(selector)
       const scrollIntoView = vi.fn()

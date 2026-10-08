@@ -1,5 +1,4 @@
 <script setup>
-import { defineProps } from 'vue'
 import EmptyState from '../../components/EmptyState.vue'
 
 defineProps({

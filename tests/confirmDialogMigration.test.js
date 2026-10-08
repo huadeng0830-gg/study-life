@@ -306,9 +306,19 @@ function confirmBindingIssues(sources) {
         // 内联箭头函数等写法不在本次改造里，跳过（留个出口而不是误报）
         if (!callName && !assignName) continue
         const name = callName ?? assignName
-        const ok = callName
-          ? new RegExp(`(?:async\\s+)?function\\s+${name}\\b`).test(code)
-          : new RegExp(`(?:const|let|var)\\s+${name}\\b`).test(code)
+        const isDeclared = (binding) => {
+          if (new RegExp(`(?:const|let|var)\\s+${binding}\\b`).test(code)) return true
+          for (const [, properties] of code.matchAll(/(?:const|let|var)\s*\{([^}]+)\}\s*=/g)) {
+            const declaredNames = properties.split(',').map((property) => {
+              const parts = property.trim().replace(/^\.\.\./, '').split(':')
+              const local = (parts.at(-1) ?? '').split('=')[0].trim()
+              return /^[A-Za-z_$][\w$]*$/.test(local) ? local : ''
+            })
+            if (declaredNames.includes(binding)) return true
+          }
+          return false
+        }
+        const ok = isDeclared(name) || new RegExp(`(?:async\\s+)?function\\s+${name}\\b`).test(code)
         if (!ok) issues.push(`${file}: @${attr}="${expr}" 指向的 ${name} 在本文件里没有声明`)
       }
     }
@@ -320,11 +330,10 @@ function confirmBlockCount(sources) {
   return sources.reduce((sum, { code }) => sum + (code.match(CONFIRM_BLOCK)?.length ?? 0), 0)
 }
 
-/** 本轮把原生确认换成 ConfirmDialog 的 7 个文件（共 23 处确认点）。 */
+/** 本轮把原生确认换成 ConfirmDialog 的页面文件。 */
 const MIGRATED_FILES = [
   'components/AppearanceSettings.vue',
   'components/DataManager.vue',
-  'components/LocalTransfer.vue',
   'components/schedule/TimeSettingsModal.vue',
   'views/EventsView.vue',
   'views/NotesView.vue',
@@ -388,8 +397,10 @@ describe('静态层：原生 confirm 已经全部退场', () => {
     expect(confirmBindingIssues([{ file: 'Fixture.vue', code: good }])).toEqual([])
     expect(confirmBindingIssues([{ file: 'Fixture.vue', code: bad }])).toHaveLength(1)
 
-    expect(confirmBlockCount(SOURCES), '全仓 ConfirmDialog 用法太少，判据没覆盖到东西').toBeGreaterThanOrEqual(26)
-    expect(confirmBindingIssues(SOURCES)).toEqual([])
+    // 旧同步/迁移弹窗下线后当前有 22 处；绑定解析和错误夹具仍逐项验证判据。
+    expect(confirmBlockCount(SOURCES), '全仓 ConfirmDialog 用法太少，判据没覆盖到东西').toBeGreaterThanOrEqual(22)
+    const issues = confirmBindingIssues(SOURCES)
+    expect(issues, issues.join('\n')).toEqual([])
   })
 })
 
@@ -463,6 +474,14 @@ function dialogButtons() {
 function setInput(el, value) {
   el.value = value
   el.dispatchEvent(new Event('input', { bubbles: true }))
+}
+
+async function chooseDefaultEventStartTime(formModal, settle) {
+  formModal().querySelector('.time-field').click()
+  await settle()
+  const wheelOverlay = [...document.querySelectorAll('.overlay')].find((overlay) => overlay.querySelector('.time-wheel'))
+  buttonByText(wheelOverlay, '确定').click()
+  await settle()
 }
 
 /**
@@ -577,10 +596,30 @@ describe('行为层：确认与取消都要真的分叉', () => {
     expect(readStored('sl_tasks'), '确认后必须真的删除').toEqual([])
   })
 
-  it('冲突继续保存：取消不写数据，确认才写入（且确认键是 primary 不是危险键）', async () => {
-    // 同一天、都没有时间 → 默认时长 60 分钟的两段直接重叠。
+  it('同一天的日期型待办不会阻止保存未安排时间的日程', async () => {
     localStorage.setItem('sl_tasks', JSON.stringify([
-      { id: 't1', title: '写高数作业', status: 'pending', done: false, dueDate: FUTURE, createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z' },
+      { id: 't1', title: '记下作业截止日', status: 'pending', done: false, dueDate: FUTURE, createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z' },
+    ]))
+    localStorage.setItem('sl_events', JSON.stringify([]))
+    const { main, settle } = await boot('/events')
+    const formModal = () => [...document.querySelectorAll('.overlay .modal')].find((modal) => modal.querySelector('.event-form'))
+
+    buttonByText(main, '＋ 新建日程').click()
+    await settle()
+    setInput(formModal().querySelector('.event-form input:not([type])'), '提交申请')
+    setInput(formModal().querySelector('.event-form input[type="date"]'), FUTURE)
+    buttonByText(formModal(), '添加').click()
+    await settle()
+
+    expect(dialogButtons(), '日期没有时间时不应出现虚假的时间冲突确认').toBeNull()
+    await flushWrites()
+    expect(readStored('sl_events').map((event) => event.title)).toEqual(['提交申请'])
+  })
+
+  it('冲突继续保存：取消不写数据，确认才写入（且确认键是 primary 不是危险键）', async () => {
+    // 只有显式安排了时间的事项才参与冲突检测；这里用重叠时段验证确认流程。
+    localStorage.setItem('sl_tasks', JSON.stringify([
+      { id: 't1', title: '写高数作业', status: 'pending', done: false, dueDate: FUTURE, dueTime: '09:00', createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z' },
     ]))
     localStorage.setItem('sl_events', JSON.stringify([]))
     const { main, settle } = await boot('/events')
@@ -598,6 +637,7 @@ describe('行为层：确认与取消都要真的分叉', () => {
     await settle()
     setInput(formTitle(), '开组会')
     setInput(formDate(), FUTURE)
+    await chooseDefaultEventStartTime(formModal, settle)
     submitForm().click()
     await settle()
     let keys = dialogButtons()
@@ -630,10 +670,10 @@ describe('行为层：确认与取消都要真的分叉', () => {
   })
 
   it('待办冲突继续保存：取消不改数据，确认才落盘（同样叠在表单之上）', async () => {
-    // 两条同一天的待办 → 改其中一条保存时必然撞上另一条。
+    // 两条同一天、明确安排在重叠时段的待办 → 编辑保存时应要求确认。
     localStorage.setItem('sl_tasks', JSON.stringify([
-      { id: 't1', title: '交作业', status: 'pending', done: false, dueDate: FUTURE, createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z' },
-      { id: 't2', title: '写报告', status: 'pending', done: false, dueDate: FUTURE, createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z' },
+      { id: 't1', title: '交作业', status: 'pending', done: false, dueDate: FUTURE, dueTime: '10:00', createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z' },
+      { id: 't2', title: '写报告', status: 'pending', done: false, dueDate: FUTURE, dueTime: '10:30', createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z' },
     ]))
     const { main, settle } = await boot('/tasks')
 
@@ -647,7 +687,6 @@ describe('行为层：确认与取消都要真的分叉', () => {
     await settle()
     expect(formModal(), '点卡片应当打开编辑表单').toBeTruthy()
     setInput(titleInput(), '交作业（改）')
-
     saveButton().click()
     await settle()
     let keys = dialogButtons()
@@ -676,7 +715,7 @@ describe('行为层：确认与取消都要真的分叉', () => {
 
   it('冲突确认框上按 Escape：只关最上层，表单不关、数据不动、页面锁不解除', async () => {
     localStorage.setItem('sl_tasks', JSON.stringify([
-      { id: 't1', title: '写高数作业', status: 'pending', done: false, dueDate: FUTURE, createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z' },
+      { id: 't1', title: '写高数作业', status: 'pending', done: false, dueDate: FUTURE, dueTime: '09:00', createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z' },
     ]))
     localStorage.setItem('sl_events', JSON.stringify([]))
     const { main, settle } = await boot('/events')
@@ -686,6 +725,7 @@ describe('行为层：确认与取消都要真的分叉', () => {
     const formModal = () => [...document.querySelectorAll('.overlay .modal')].find((modal) => modal.querySelector('.event-form'))
     setInput(formModal().querySelector('.event-form input:not([type])'), '开组会')
     setInput(formModal().querySelector('.event-form input[type="date"]'), FUTURE)
+    await chooseDefaultEventStartTime(formModal, settle)
     ;[...formModal().querySelectorAll('button')].find((button) => button.textContent.trim() === '添加').click()
     await settle()
     expect(dialogButtons(), '先要有确认框').toBeTruthy()
@@ -743,15 +783,14 @@ describe('ConfirmDialog：新增的 tone / cancelLabel 不改变默认观感', (
 
 describe('改造涉及的组件都能编译', () => {
   it('静态 import 成功即证明模板/脚本语法成立（含没有行为用例的几个文件）', async () => {
-    // 行为用例只挂载得到 NotesView / EventsView / TasksView；其余 5 个（外观设置、
-    // 数据管理、二维码迁移、作息设置、ScheduleView 的课程相关确认）在 happy-dom 里
+    // 行为用例只挂载得到 NotesView / EventsView / TasksView；其余 4 个（外观设置、
+    // 数据管理、作息设置、ScheduleView 的课程相关确认）在 happy-dom 里
     // 要么依赖 IndexedDB / 摄像头 / 网络，要么需要层层浮层配合，这里至少保证它们能被
     // Vue 编译：模板里少一个引号、v-if 写错，都会在这里直接抛出来。
     const modules = await Promise.all([
       import('../src/components/AppearanceSettings.vue'),
       import('../src/components/ConfirmDialog.vue'),
       import('../src/components/DataManager.vue'),
-      import('../src/components/LocalTransfer.vue'),
       import('../src/components/schedule/TimeSettingsModal.vue'),
       import('../src/views/ScheduleView.vue'),
     ])

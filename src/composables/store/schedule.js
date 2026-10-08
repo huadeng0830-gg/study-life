@@ -14,7 +14,7 @@ export const semester = useStoredRef('sl_semester', {
     const month = d.getMonth()
     const p = (n) => String(n).padStart(2, '0')
     const isAfterSep = month >= 8
-    return `${year + (isAfterSep ? 0 : -1)}-${p(isAfterSep ? 9 : 3)}-01`
+    return mondayOfDate(`${year + (isAfterSep ? 0 : -1)}-${p(isAfterSep ? 9 : 3)}-01`)
   })(),
 })
 
@@ -55,8 +55,11 @@ export function removeScheduleException(id) {
 }
 
 export function weekOf(dateStr) {
-  const start = new Date(semester.value.start + 'T00:00:00')
-  const d = new Date(dateStr + 'T00:00:00')
+  const weekStart = mondayOfDate(semester.value.start)
+  const targetWeekStart = mondayOfDate(dateStr)
+  if (!weekStart || !targetWeekStart) return NaN
+  const start = Date.parse(`${weekStart}T00:00:00Z`)
+  const d = Date.parse(`${targetWeekStart}T00:00:00Z`)
   return Math.floor((d - start) / (7 * 86400000)) + 1
 }
 
@@ -154,7 +157,8 @@ export function weekLabel(c) {
 }
 
 export function dateForWeekDay(week, day) {
-  const date = new Date(semester.value.start + 'T00:00:00')
+  const start = mondayOfDate(semester.value.start) || semester.value.start
+  const date = new Date(start + 'T00:00:00')
   date.setDate(date.getDate() + (Number(week) - 1) * 7 + Number(day))
   return dateString(date)
 }

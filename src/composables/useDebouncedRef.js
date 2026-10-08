@@ -38,5 +38,21 @@ export function useDebouncedRef(source, delay = 160) {
     stop()
   })
 
-  return debounced
+  /**
+   * 立刻同步到某个值，跳过防抖。
+   *
+   * 【为什么需要】关掉再打开一个搜索框时，只把 `query` 清空是不够的：
+   * 它要等 160ms 防抖走完才反映到真正驱动查询的那个 ref 上，于是这期间
+   * 面板显示的是**上一轮的结果**——输入框是空的、结果列表却还在，
+   * 读起来像"清不掉"。凡是把源值**整体替换**（而不是继续输入）的场合都该用这个。
+   */
+  function flush(value = source.value) {
+    if (timer !== null) {
+      clearTimeout(timer)
+      timer = null
+    }
+    debounced.value = value
+  }
+
+  return Object.assign(debounced, { flush })
 }

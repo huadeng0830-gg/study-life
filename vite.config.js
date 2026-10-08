@@ -1,9 +1,10 @@
 import vue from '@vitejs/plugin-vue'
-import { createHash } from 'node:crypto'
 import { env } from 'node:process'
-import { defineConfig } from 'vite'
+import { defineConfig, loadEnv } from 'vite'
+import { getSupabaseConfig } from './src/services/supabase.js'
+import { fileURLToPath } from 'node:url'
 import { VitePWA } from 'vite-plugin-pwa'
-import { RELEASE_NOTES, RELEASE_SOURCE_SIGNATURE, RELEASE_VERSION } from './release.config.js'
+import { RELEASE_SOURCE_SIGNATURE, RELEASE_VERSION } from './release.config.js'
 import { computeSourceSignature } from './scripts/source-signature.mjs'
 
 // 相同源码永远得到相同版本；任何 Agent 修改发布源码后都会自动得到新版本。
@@ -13,19 +14,37 @@ const sourceSignature = computeSourceSignature()
 // 开发与测试期间允许逐步修改；正式 build 必须通过说明一致性检查。
 if (env.NODE_ENV === 'production' && RELEASE_SOURCE_SIGNATURE !== sourceSignature) {
   throw new Error(
-    `发布源码已经变化，但更新说明尚未同步。请先修改 release.config.js 中的 RELEASE_NOTES，` +
-    `确认内容与本次修改一致后，将 RELEASE_SOURCE_SIGNATURE 更新为 '${sourceSignature}'。`
+    `发布源码已经变化，但更新说明尚未同步。请运行 npm run release:bump -- --notes "说明一|说明二"，` +
+    `再确认 README 中的版本和最近更新内容与本次改动一致。当前源码签名为 '${sourceSignature}'。`
   )
 }
-const notesSignature = createHash('sha256').update(JSON.stringify(RELEASE_NOTES)).digest('hex').slice(0, 4)
-const appRelease = env.VITE_APP_RELEASE?.trim() || RELEASE_VERSION
 
 // https://vite.dev/config/
-export default defineConfig({
+export default defineConfig(({ mode }) => {
+  const desktopBuild = mode === 'desktop'
+  const accountEnv = loadEnv(mode, '.', 'VITE_SUPABASE_')
+  if ((accountEnv.VITE_SUPABASE_URL || accountEnv.VITE_SUPABASE_PUBLISHABLE_KEY) && !getSupabaseConfig(accountEnv)) {
+    throw new Error('Supabase 账号配置不完整或密钥不安全：请使用有效项目 URL 与 publishable / anon key，禁止使用 secret / service_role key。')
+  }
+  // 【必须走 loadEnv，不能读 process.env】
+  // 原来这里用的是 `env.VITE_APP_RELEASE`（node:process.env）。于是同一条配置里
+  // VITE_SUPABASE_* 被 loadEnv 正常读到、VITE_APP_RELEASE 却被静默忽略 ——
+  // 在 .env.local 里改版本号不会有任何报错，只会让 version.txt 仍然是
+  // RELEASE_VERSION，客户端一比对就永远显示「已是最新版本」，
+  // 也就是**这个开关根本没法用来救急**。下面第 26 行才是对的写法。
+  const appRelease = accountEnv.VITE_APP_RELEASE?.trim() || RELEASE_VERSION
+  return {
+  base: desktopBuild ? './' : '/',
+  resolve: desktopBuild ? {
+    alias: {
+      'virtual:pwa-register': fileURLToPath(new URL('./desktop/pwa-register-shim.js', import.meta.url)),
+    },
+  } : undefined,
   define: {
     'globalThis.__STUDY_LIFE_RELEASE__': JSON.stringify(appRelease),
   },
   build: {
+    outDir: desktopBuild ? 'dist-desktop' : 'dist',
     target: 'es2019',
     cssTarget: 'safari13',
       rollupOptions: {
@@ -49,7 +68,7 @@ export default defineConfig({
       },
     },
     vue(),
-    VitePWA({
+    ...(desktopBuild ? [] : [VitePWA({
       registerType: 'autoUpdate',
       injectRegister: false,
       // 图标只在安装 PWA 时读取，不占用页面切换缓存带宽。
@@ -57,9 +76,9 @@ export default defineConfig({
       includeAssets: ['favicon-v2.png', 'apple-touch-icon-v2.png'],
       manifest: {
         id: '/',
-        name: '学习生活台',
-        short_name: '学习生活',
-        description: '个人的学习生活管理平台：课程表、待办、倒计时、清单、账单',
+        name: '三两事',
+        short_name: '三两事',
+        description: '把课程、待办、重要日期、生活记录与账目放在一起的个人工作台。',
         lang: 'zh-CN',
         start_url: '/',
         scope: '/',
@@ -106,6 +125,7 @@ export default defineConfig({
           'assets/transfer-vendor-*',
         ],
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
+        navigateFallbackDenylist: [/^\/desktop-auth-return(?:\/|$)/],
         skipWaiting: true,
         clientsClaim: true,
         // 旧懒加载资源保留一个发布周期，用户点击旧页面链接时仍有机会离线回退。
@@ -133,7 +153,7 @@ export default defineConfig({
           },
         ],
       },
-    }),
+    })]),
   ],
   // 测试配置放在 vite.config.js 里，而不是另建 vitest.config.js：
   // 用例中有 `vi.mock('virtual:pwa-register', ...)`，依赖 VitePWA 插件注册该虚拟模块。
@@ -145,4 +165,5 @@ export default defineConfig({
     // 把基准从 file:// 换成文档地址，导致读文件的用例报 "The URL must be of scheme file"。
     setupFiles: ['./tests/helpers/webStorage.js'],
   },
+  }
 })

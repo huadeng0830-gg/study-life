@@ -82,6 +82,7 @@ import {
   toggleSchemeSelected,
 } from '../../composables/recognitionSchemes.js'
 import {
+  importPlanOpen,
   lastImportResult,
   openImportPlan,
   undoLastImport,
@@ -108,7 +109,7 @@ function cancelPendingDraft() {
 }
 
 // 分区状态存在 composables/modalSections.js 的模块级 ref 里。这个浮层的父级没有 v-if，
-// 实例常驻，原本就已经"跨开关保留"；改成模块级 ref 是为了与外观/本地迁移统一语义。
+// 实例常驻，原本就已经"跨开关保留"；改成模块级 ref 是为了与外观设置统一语义。
 const settingsTab = timeSettingsTab
 // 设置分区的键盘模型。select 走 switchSettingsTab：它会先过草稿守卫，
 // 被否决时返回 false，useTabKeys 就不会把焦点移到一个并未选中的 tab 上。
@@ -126,9 +127,24 @@ function tabLabel(tab) {
   return TAB_ICONS[tab] ?? tab
 }
 
+/** 「恢复默认」的待确认状态（工具条与草稿条两个入口共用）：resetTimesToDefault() 重建
+ * **所有作息季 × 所有校区**的正式 times、没有撤销入口，所以点下去只挂起待确认状态，
+ * 改写交给 ConfirmDialog（原生 confirm 已全仓清零）。 */
+const resetTimesTarget = ref(false)
+
 function onResetTimes() {
+  resetTimesTarget.value = true
+}
+
+/** 确认后执行。必须重新加载草稿：编辑器渲染的是 draft，只改写 times 的话屏幕上毫无变化，
+ * 且旧草稿一点「保存」就会把刚恢复的默认值覆盖回去——这正是本条缺陷的现场，
+ * 所以确认框文案里写明"草稿里未保存的修改也会一并丢失"。 */
+function applyResetTimes() {
+  resetTimesTarget.value = false
   settingError.value = ''
   resetTimesToDefault()
+  if (planSeasonId.value && planCampusId.value) loadPlanDraft(planSeasonId.value, planCampusId.value)
+  showToast('已恢复默认作息时间：所有校区、所有作息季的节次时间都回到默认值')
 }
 
 
@@ -210,9 +226,7 @@ defineExpose({ stopBackgroundWork })
 <template>
   <Modal v-if="show" :open="show" title="🕐 作息与时间设置" @close="tryCloseTimeEditor">
     <div class="settings">
-      <!-- 同页另两个 tablist（AppearanceSettings 的「个性化设置分区」、LocalTransfer 的
-           「二维码迁移方式」）都带 aria-label，只有这里漏了；tablist 没有名称时读屏
-           只念「标签页列表」，说不出这是在切什么分区。 -->
+      <!-- 为标签分区提供明确名称，方便读屏用户识别当前设置范围。 -->
       <div class="tab-bar" role="tablist" aria-label="设置分区" @keydown="onSettingsTabKeydown">
         <!-- 这里原本是 v-for="(hint, tab) in tabHints"，id 只能动态生成。
              改成两个显式按钮是为了让 id 变成**静态**的：两个面板要用
@@ -244,7 +258,8 @@ defineExpose({ stopBackgroundWork })
       <p class="settings-hint">{{ tabHints[settingsTab] }}</p>
       <p v-if="settingError" class="error" role="alert">{{ settingError }}</p>
       <Transition name="toast">
-        <p v-if="settingsToast" class="settings-toast">✓ {{ settingsToast }}</p>
+        <!-- 成功提示同样要能被读屏播报（类名已并入 errorAnnouncement 的成功类名集合） -->
+        <p v-if="settingsToast" class="settings-toast" role="status">✓ {{ settingsToast }}</p>
       </Transition>
 
       <!-- OCR 进度与导入错误刻意放在**标签区之外**，与上面的 settingError 同级。
@@ -265,7 +280,8 @@ defineExpose({ stopBackgroundWork })
         @wait="scheduleOcrProgress.continueWaiting"
       />
 
-      <p v-if="importError && !(scheduleOcrProgress.state.active && scheduleOcrProgress.state.visible)" class="error" role="alert">{{ importError }}</p>
+      <!-- `!importPlanOpen`：计划弹窗里已有同一句失败的 role="alert"，两层都渲染会被读屏播两遍 -->
+      <p v-if="importError && !importPlanOpen && !(scheduleOcrProgress.state.active && scheduleOcrProgress.state.visible)" class="error" role="alert">{{ importError }}</p>
 
       <!-- ============ 作息方案 ============ -->
       <section v-show="settingsTab === 'plans'" id="time-settings-panel-plans" role="tabpanel" aria-labelledby="time-settings-tab-plans" class="setting-section plan-section">
@@ -517,6 +533,13 @@ defineExpose({ stopBackgroundWork })
     @close="cancelPendingDraft"
     @confirm="confirmDiscardDraft"
   />
+
+  <!-- 「恢复默认」的确认框：破坏性操作（所有季 × 校区的正式数据、无撤销入口）必须二次确认，
+       文案同时说清"它与当前正在编辑的草稿不是一件事"（草稿里未保存的修改会一起丢）。
+       v-if 随目标挂载，锚点在打开这一刻才创建，才排得到设置弹窗之后（见 ConfirmDialog 顶部说明）。 -->
+  <ConfirmDialog v-if="resetTimesTarget" :open="Boolean(resetTimesTarget)" title="恢复默认作息时间"
+    message="会把所有校区、所有作息季的节次时间都恢复为内置默认值（不只是当前正在编辑的那个方案）。草稿里未保存的修改也会一并丢失，且无法撤销。"
+    confirm-label="恢复默认" @close="resetTimesTarget = false" @confirm="applyResetTimes" />
 </template>
 
 <style scoped>

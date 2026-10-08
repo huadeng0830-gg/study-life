@@ -291,9 +291,32 @@ const RESIDUAL_PAIRS = new Map([
   ['views/ScheduleView.vue -> components/schedule/ScheduleGrid.vue', 3],
   ['views/ScheduleView.vue -> components/QuickRecordPanel.vue', 1],
   ['components/NoticeUnderstanding.vue -> components/Modal.vue', 1],
+  // TasksView 抽出了看板 / 日历两个子组件（components/task-views/）之后新增的一对。
+  //
+  // 【登记理由：这些类不是死规则，是本守卫看不见的动态类】
+  // `.due.today` / `.due.soon` / `.due.overdue` 三个类在 TasksView 的模板里**没有**字面量，
+  // 它们来自 `<span class="due" :class="dueInfo(task).cls">`，而 `dueInfo()` 在 script 里
+  // 返回 `{ cls: 'overdue' | 'today' | 'soon' | '' }`。守卫的判据是"这个类在父组件模板里
+  // 出现过没有"，跨不过一次函数调用 —— 于是它只在新子组件的模板里找到同名类，
+  // 判成"父引用子的内部类"。
+  //
+  // 三个子组件（TaskBoard / TaskCalendar）各自也定义了 `.today` / `.soon` / `.overdue`，
+  // 正好让"只有子组件才有"的表象成立。真实情况是两边各自有用：列表视图靠 dueInfo 的
+  // 动态 class 上色，看板/日历靠自己的静态 class 上色，删掉父组件那三条会让
+  // **列表视图**的截止日期徽标掉色。
+  //
+  // 正确的长期修法是让守卫认识"`:class` 绑定到函数调用结果时，该函数 script 里
+  // 返回的字符串字面量也算父组件在用"。本轮先按本文件既有的登记机制走，
+  // 并把条数钉死为 1（`due` 那三条共用一个 `.due` 根类，记一次）。
+  ['views/TasksView.vue -> components/task-views/TaskBoard.vue', 1],
+  ['views/TasksView.vue -> components/task-views/TaskCalendar.vue', 1],
 ])
-/** 全仓命中**条数**（不是每对相加）的上限：第五十四轮末（收尾补做）实测 5。 */
-const RESIDUAL_HITS = 5
+/**
+ * 全仓命中**条数**（不是每对相加）的上限。
+ * 第五十四轮末实测 5；本次 +1（TasksView → TaskCalendar，见上）= 6。
+ * TaskBoard 那一对与 TaskCalendar 共享同一批 `due*` 类，计入的是同一条命中。
+ */
+const RESIDUAL_HITS = 6
 
 /** 本轮清理的那一对：必须为 0，且不许再回来。 */
 const OWNED_PAIR = 'App.vue -> components/Sidebar.vue'

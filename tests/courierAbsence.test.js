@@ -4,7 +4,7 @@ import { resolve } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
 import { createEmergencyBackup } from '../src/composables/emergencyExport.js'
 import { initializeDataVault } from '../src/composables/dataVault.js'
-import { sanitizeSyncPayload, SYNC_KEYS, SYNC_MODULES } from '../src/composables/cloudSyncData.js'
+import { sanitizeSyncPayload, SYNC_KEYS } from '../src/composables/accountSyncData.js'
 import { buildEntityManifest } from '../src/composables/syncMetadata.js'
 
 const projectRoot = resolve(import.meta.dirname, '..')
@@ -20,7 +20,6 @@ describe('Courier absence regression', () => {
     expect(source('src/App.vue')).not.toMatch(/courier/i)
     expect(source('vite.config.js')).not.toMatch(/CourierView/i)
     expect(SYNC_KEYS).not.toContain('sl_courier_bookmarks')
-    expect(SYNC_MODULES.some((module) => module.key === 'courier')).toBe(false)
     expect(buildEntityManifest({ sl_courier_bookmarks: [{ id: 'legacy' }] }).entities.sl_courier_bookmarks).toBeUndefined()
   })
 

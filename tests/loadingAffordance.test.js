@@ -21,13 +21,10 @@ function source(path) {
 }
 
 // 提交期间会 disabled 的按钮所在的文件，以及各自期望的绑定数量。
-// SyncPairingModal 记 2 个：确认绑定（提交），以及打开摄像头
-// ——getUserMedia 要等用户权限弹窗，与提交同属「已经在等、不许连点」的状态。
 const BUTTONS = [
   ['components/QuickRecordPanel.vue', 4],
   ['components/AppearanceSettings.vue', 2],
   ['components/schedule/ImportConflictModal.vue', 2],
-  ['components/SyncPairingModal.vue', 2],
 ]
 
 describe('按钮加载态接线', () => {

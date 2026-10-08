@@ -285,7 +285,10 @@ function noteFrom(text, title, reminder) {
 function classifyNotice(text, title) {
   if (/缴费|交费|学费|收费|付款|支付/.test(text)) return '缴费'
   if (/考试|测验|期中|期末|模拟考|模拟考试|四六级|六级|四级/.test(text)) return '考试'
-  if (/班会|会议|开会|组会|答辩|面试|讲座|活动|签到|召开|举行/.test(text)) return '会议'
+  // 「开运动会彩排」「文艺汇演彩排」这类也是**有明确时间地点的事件**，
+  // 原先只认 开会/召开/举行，于是它掉到兜底的"通知"里 —— 用户拿到的是一条
+  // 没法加进日程的泛泛通知，而不是一条该出现在日历上的彩排。
+  if (/班会|会议|开会|组会|答辩|面试|讲座|活动|签到|召开|举行|运动会|彩排/.test(text)) return '会议'
   if (/调课|改到|换到|上课|课程/.test(text)) return '课程'
   if (/作业|实验报告|论文|习题|上交|提交|上传/.test(text)) return '作业'
   if (/截止|截至|最晚|逾期|之前|以前/.test(text)) return '截止'

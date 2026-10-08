@@ -4,9 +4,10 @@ import { useRoute, useRouter } from 'vue-router'
 import Modal from '../components/Modal.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import EmptyState from '../components/EmptyState.vue'
+import DomainCsvImportButton from '../components/DomainCsvImportButton.vue'
 import VirtualList from '../components/VirtualList.vue'
 import { useDomainCommands } from '../composables/domain/commands.js'
-import { filterNotes, noteText } from '../composables/notes.js'
+import { filterNotes, noteText, renderNoteMarkdown } from '../composables/notes.js'
 import { useDebouncedRef } from '../composables/useDebouncedRef.js'
 import { useQuickRecordAdapters } from '../composables/quickRecord/adapters.js'
 import { clearFocusFromRoute, focusLocation, readFocusQuery } from '../composables/focusNavigation.js'
@@ -15,6 +16,7 @@ import { flushStoredWrites, persistenceState } from '../composables/store/core.j
 const router = useRouter()
 const route = useRoute()
 const domain = useDomainCommands()
+const { notes } = domain
 const quickRecord = useQuickRecordAdapters()
 const query = ref('')
 const includeArchived = ref(false)
@@ -113,6 +115,11 @@ function restoreNote(note) {
   domain.restoreNote(note.id)
 }
 
+function importCsvNotes(rows) {
+  rows.forEach((row) => domain.createNote(row))
+  noteMessage.value = `已导入 ${rows.length} 条笔记`
+}
+
 // 删除确认沿用仓库既有的「state + 回调」惯例：先置目标，由 ConfirmDialog 决定是否真的删。
 // 存的是这条笔记对象本身（不是弹窗那一刻重新去 notes 里查），所以对话框期间列表怎么变
 // 都不会删错目标——id 从同一个对象上取。
@@ -156,7 +163,10 @@ watch(
   <div class="page notes-page">
     <header class="page-header compact-page-header">
       <div><span class="eyebrow">QUICK NOTES</span><h1>笔记</h1><p>快速记录的轻量入口：搜索、编辑、整理或删除。</p></div>
-      <button type="button" class="btn" @click="router.push('/')">返回首页</button>
+      <div class="notes-header-actions">
+        <DomainCsvImportButton kind="notes" :records="notes" @import="importCsvNotes" />
+        <button type="button" class="btn" @click="router.push('/')">返回首页</button>
+      </div>
     </header>
 
     <section class="notes-toolbar panel" aria-label="笔记筛选">
@@ -198,7 +208,7 @@ watch(
         <div class="note-detail-actions"><button type="button" class="btn" @click="cancelEdit">取消</button><button type="button" class="btn btn-primary" @click="saveNote">保存</button></div>
       </article>
       <article v-else class="note-detail">
-        <p>{{ noteText(selected) }}</p>
+        <div class="note-markdown" v-html="renderNoteMarkdown(noteText(selected))"></div>
         <small v-if="selected.tags?.length">{{ selected.tags.map(tag => `#${tag}`).join(' ') }}</small>
         <div class="note-relations">
           <strong>关联</strong>
@@ -229,7 +239,12 @@ watch(
 </template>
 
 <style scoped>
+/* 「已保存 / 已归档」这类成功反馈：模板用的是 .notice-success，但这条类只在**别的组件**的
+   scoped 块里定义过（TasksView / EventsView / WeeklyReviewView），scoped 样式不跨组件生效，
+   于是这里渲染成默认段落（正文黑字 + 默认外边距），和全站绿色成功提示不是一套东西。 */
+.notice-success { margin: 12px 0 0; color: var(--success); font-size: var(--fs-12); }
 .notes-toolbar { display: flex; align-items: end; gap: 12px; margin-bottom: 14px; padding: 12px; }
+.notes-header-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .search-field { display: grid; flex: 1; gap: 5px; color: var(--ink-soft); font-size: var(--fs-11); font-weight: var(--fw-700); }
 .search-field input { width: 100%; min-height: 38px; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-8); background: var(--bg); }
 .notes-archive-toggle { display: flex; align-items: center; gap: 6px; min-height: 38px; color: var(--ink-soft); font-size: var(--fs-11); white-space: nowrap; }
@@ -246,6 +261,18 @@ watch(
 .note-card-actions .danger-text { color: var(--danger); background: var(--danger-soft); }
 .note-detail { display: grid; gap: 12px; }
 .note-detail p { margin: 0; white-space: pre-wrap; line-height: 1.7; }
+.note-markdown { min-width: 0; overflow-wrap: anywhere; line-height: 1.7; }
+.note-markdown :deep(p) { margin: 0 0 9px; }
+.note-markdown :deep(h1), .note-markdown :deep(h2), .note-markdown :deep(h3), .note-markdown :deep(h4), .note-markdown :deep(h5), .note-markdown :deep(h6) { margin: 12px 0 6px; line-height: 1.35; }
+.note-markdown :deep(h1) { font-size: var(--fs-20); }
+.note-markdown :deep(h2) { font-size: var(--fs-17); }
+.note-markdown :deep(h3), .note-markdown :deep(h4), .note-markdown :deep(h5), .note-markdown :deep(h6) { font-size: var(--fs-14); }
+.note-markdown :deep(ul), .note-markdown :deep(ol) { margin: 4px 0 9px; padding-left: 22px; }
+.note-markdown :deep(li + li) { margin-top: 3px; }
+.note-markdown :deep(pre) { overflow: auto; margin: 0 0 9px; padding: 11px 12px; color: var(--text); background: var(--bg-tint); border: 1px solid var(--border); border-radius: var(--radius-8); }
+.note-markdown :deep(code) { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: .92em; }
+.note-markdown :deep(p code) { padding: 1px 4px; color: var(--primary); background: var(--primary-soft); border-radius: var(--radius-4); }
+.note-markdown :deep(strong) { font-weight: var(--fw-800); }
 .note-detail small { color: var(--primary); }
 .note-edit-field { display: grid; gap: 5px; color: var(--ink-soft); font-size: var(--fs-12); font-weight: var(--fw-700); }
 .note-edit-field input, .note-edit-field textarea { width: 100%; padding: 9px 10px; border: 1px solid var(--border); border-radius: var(--radius-8); background: var(--bg); font: inherit; color: var(--text); }

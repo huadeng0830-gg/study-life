@@ -1,15 +1,14 @@
 import { touchStoredRef, useStoredRef } from '../store/index.js'
-import { createNextWeeklyTask } from '../taskRecurrence.js'
+import { createNextRepeatingTask, normalizeTaskRepeat, repeatsTask } from '../taskRecurrence.js'
 import { classifyTask } from '../smartClassify.js'
-import { amountToCents, classifyTransaction, isRefundTransaction, normalizeAmount, normalizeLedgerTime } from '../ledger.js'
+import { amountToCents, categoriesForScope, classifyTransaction, isRefundTransaction, normalizeAmount, normalizeLedgerTime } from '../ledger.js'
 // 新增可选字段的来源：币种（多币种记账）与分摊（报销分摊）。
 // 两个模块都只做纯规范化，不反向依赖这里，所以不会形成循环导入。
 import { normalizeCurrency } from '../ledgerFx.js'
 import { mySpendCents, normalizeSplit, validateSplit } from '../ledgerSplit.js'
-import { transactionBillId } from '../ledgerRelations.js'
+import { isBillPayment, transactionBillId } from '../ledgerRelations.js'
 import { detachCourseRelations } from './relations.js'
 import { defaultAccount, defaultReminderMinutes, policyDateKey, policyTimeKey } from '../settingsPolicy.js'
-import { clearTombstone, recordTombstone } from '../syncMetadata.js'
 
 let lastStamp = 0
 function stamp() {
@@ -106,7 +105,7 @@ function restoreItem(list, id, { active = false } = {}) {
   return item
 }
 
-function restoreDeletedItem(list, entityType, entity) {
+function restoreDeletedItem(list, entity) {
   if (!entity?.id) return null
   const existing = list.value.find((item) => item.id === entity.id)
   if (existing) return existing
@@ -114,7 +113,6 @@ function restoreDeletedItem(list, entityType, entity) {
   delete restored.deletedAt
   delete restored.tombstone
   list.value.push(restored)
-  clearTombstone(entityType, restored.id)
   return restored
 }
 
@@ -128,31 +126,47 @@ export function useDomainCommands() {
   const commitBills = () => touchStoredRef('sl_bills')
   const commitFocusSessions = () => touchStoredRef('sl_focus_sessions')
   const commitCourses = () => touchStoredRef('sl_courses')
-  function createTask(value) { const now = stamp(); const task = classifyTask({ id: value.id || createId('t'), title: String(value.title || '').trim(), done: false, status: 'pending', createdAt: now, updatedAt: now, course: value.course || '', courseId: value.courseId || '', dueDate: value.dueDate || '', dueTime: value.dueTime || '', priority: value.priority || 'normal', note: value.note || '', sourceText: value.sourceText || '', estimateMinutes: Number(value.estimateMinutes) || 0, reminderMinutes: defaultReminderMinutes('task', value.reminderMinutes), repeat: value.repeat || 'none', kind: value.kind || 'todo', ...origin(value) }, courses.value); if (!task.title) throw new Error('请填写待办内容'); tasks.value.push(task); commitTasks(); return task }
-  // 生成周重复的下一期。
-  // 只有真的生成了才写 repeatGeneratedAt —— 原来先写标记再生成，
-  // 一旦 createNextWeeklyTask 返回 null（dueDate 非法等），这个待办
-  // 就带着"已生成"的标记永远不再尝试。
-  function spawnNextWeeklyTask(item) {
+  // 只有真的要重复时才把 repeatEndDate 写进记录：不重复的待办带一个空串字段，
+  // 会在导出的 JSON 与同步载荷里堆成纯噪声（与 currency 的「缺失即基准」同一套约定）。
+  function repeatEndField(repeat, endDate) {
+    return repeat === 'none' ? {} : { repeatEndDate: String(endDate || '').trim() }
+  }
+  function createTask(value) { const now = stamp(); const repeat = normalizeTaskRepeat(value.repeat); const task = classifyTask({ id: value.id || createId('t'), title: String(value.title || '').trim(), done: false, status: 'pending', createdAt: now, updatedAt: now, course: value.course || '', courseId: value.courseId || '', dueDate: value.dueDate || '', dueTime: value.dueTime || '', priority: value.priority || 'normal', note: value.note || '', sourceText: value.sourceText || '', estimateMinutes: Number(value.estimateMinutes) || 0, reminderMinutes: defaultReminderMinutes('task', value.reminderMinutes), repeat, ...repeatEndField(repeat, value.repeatEndDate), kind: value.kind || 'todo', ...origin(value) }, courses.value); if (!task.title) throw new Error('请填写待办内容'); tasks.value.push(task); commitTasks(); return task }
+  /**
+   * 生成重复待办的下一期（每天 / 工作日 / 每周 / 每两周 / 每月）。
+   *
+   * 只有真的生成了才写 repeatGeneratedAt —— 原来先写标记再生成，
+   * 一旦 createNextWeeklyTask 返回 null（dueDate 非法等），这个待办
+   * 就带着"已生成"的标记永远不再尝试。
+   *
+   * 判定从 `repeat === 'weekly'` 换成 `repeatsTask(item)`，这样新规则走的是**同一条**
+   * 生成路径而不是各写一份；`repeatsTask` 对未知规则值返回 false，
+   * 于是旧数据/脏数据不会凭空长出新待办。
+   */
+  function spawnNextRepeatTask(item) {
     const now = stamp()
-    const next = createNextWeeklyTask(item)
+    const next = createNextRepeatingTask(item)
     if (!next) return false
     item.repeatGeneratedAt = now
     tasks.value.push({ ...next, status: 'pending', updatedAt: now, createdFrom: item.createdFrom || 'manual', sourceType: 'task-repeat', sourceId: item.id })
     return true
   }
-  function updateTask(id, value) { const item = tasks.value.find((task) => task.id === id); if (!item) return null; Object.assign(item, value, { updatedAt: stamp() }); if (item.done === true && item.repeat === 'weekly' && item.dueDate && !item.repeatGeneratedAt) spawnNextWeeklyTask(item); commitTasks(); return item }
-  function toggleTask(id) { const item = tasks.value.find((task) => task.id === id); if (!item) return null; const now = stamp(); item.done = !item.done; item.status = item.done ? 'completed' : 'pending'; item.completedAt = item.done ? now : null; item.updatedAt = now; if (item.done && item.repeat === 'weekly' && item.dueDate && !item.repeatGeneratedAt) spawnNextWeeklyTask(item); commitTasks(); return item }
+  // 两条写路径（updateTask / toggleTask）共用这一句：重复规则或截止日期不合法时一律不生成。
+  function maybeSpawnNextRepeat(item) {
+    if (!repeatsTask(item) || !item.dueDate || item.repeatGeneratedAt) return
+    spawnNextRepeatTask(item)
+  }
+  function updateTask(id, value) { const item = tasks.value.find((task) => task.id === id); if (!item) return null; Object.assign(item, value, { updatedAt: stamp() }); if ('repeat' in value) { item.repeat = normalizeTaskRepeat(item.repeat); if (item.repeat === 'none') delete item.repeatEndDate } if (item.done === true) maybeSpawnNextRepeat(item); commitTasks(); return item }
+  function toggleTask(id) { const item = tasks.value.find((task) => task.id === id); if (!item) return null; const now = stamp(); item.done = !item.done; item.status = item.done ? 'completed' : 'pending'; item.completedAt = item.done ? now : null; item.updatedAt = now; if (item.done) maybeSpawnNextRepeat(item); commitTasks(); return item }
   function deleteTask(id) {
     const index = tasks.value.findIndex((item) => item.id === id)
     if (index < 0) return null
     const deleted = tasks.value.splice(index, 1)[0]
     commitTasks()
-    recordTombstone('Task', id, { entity: deleted })
     return deleted
   }
   function restoreDeletedTask(entity) {
-    const restored = restoreDeletedItem(tasks, 'Task', entity)
+    const restored = restoreDeletedItem(tasks, entity)
     if (restored) commitTasks()
     return restored
   }
@@ -173,11 +187,10 @@ export function useDomainCommands() {
       return { ...task, sourceType: '', sourceId: '', relationId: '', updatedAt: now }
     })
     commitTasks()
-    recordTombstone('Milestone', id, { entity: milestone })
     return milestone
   }
   function restoreDeletedMilestone(entity) {
-    const restored = restoreDeletedItem(milestones, 'Milestone', entity)
+    const restored = restoreDeletedItem(milestones, entity)
     if (!restored) return null
     const relations = milestoneRestoreRelations.get(restored.id) || []
     const now = stamp()
@@ -204,7 +217,6 @@ export function useDomainCommands() {
     events.value = events.value.map((event) => event.sourceType === 'note' && event.sourceId === id ? { ...event, sourceType: '', sourceId: '', relationId: '', updatedAt: now } : event)
     commitEvents()
     commitNotes()
-    recordTombstone('Note', id, { entity: note })
     return note
   }
   function createTransaction(value = {}) {
@@ -271,6 +283,42 @@ export function useDomainCommands() {
     commitTransactions()
     return item
   }
+  function updateTransactionCategories(changes = []) {
+    if (!Array.isArray(changes)) throw new Error('批量分类数据格式不正确')
+    const requested = new Map()
+    for (const change of changes) {
+      const id = String(change?.id ?? '').trim()
+      const categoryId = String(change?.categoryId ?? change?.cat ?? '').trim()
+      if (!id || !categoryId) throw new Error('批量分类缺少记录或分类')
+      requested.set(id, categoryId)
+    }
+    if (!requested.size) return []
+
+    const targets = [...requested.entries()].map(([id, categoryId]) => {
+      const item = transactions.value.find((entry) => String(entry.id) === id)
+      if (!item || item.archivedAt || item.deletedAt || item.tombstone) {
+        throw new Error('部分同名记录已不可用，请刷新后再试')
+      }
+      if (isRefundTransaction(item) || isBillPayment(item)) {
+        throw new Error('同名结果中包含退款或固定账单记录，未执行批量修改')
+      }
+      const scope = item.direction === 'income' ? 'income' : 'expense'
+      if (!categoriesForScope(scope, { includeHidden: true }).some((category) => category.key === categoryId)) {
+        throw new Error('所选分类与记录的收支方向不匹配')
+      }
+      return { item, categoryId }
+    }).filter(({ item, categoryId }) => (item.cat || 'other') !== categoryId)
+
+    if (!targets.length) return []
+    const previous = targets.map(({ item }) => ({ id: item.id, categoryId: item.cat || 'other' }))
+    const updatedAt = stamp()
+    for (const { item, categoryId } of targets) {
+      item.cat = categoryId
+      item.updatedAt = updatedAt
+    }
+    commitTransactions()
+    return previous
+  }
   function deleteTransaction(id) {
     const item = transactions.value.find((entry) => entry.id === id)
     if (!item) return null
@@ -281,11 +329,10 @@ export function useDomainCommands() {
     const index = transactions.value.findIndex((entry) => entry.id === id)
     const [deleted] = transactions.value.splice(index, 1)
     commitTransactions()
-    recordTombstone('Transaction', id, { entity: deleted })
     return deleted
   }
   function restoreDeletedTransaction(entity) {
-    const restored = restoreDeletedItem(transactions, 'Transaction', entity)
+    const restored = restoreDeletedItem(transactions, entity)
     if (restored) commitTransactions()
     return restored
   }
@@ -355,7 +402,6 @@ export function useDomainCommands() {
     const index = transactions.value.findIndex((entry) => entry.id === id)
     const [deleted] = transactions.value.splice(index, 1)
     commitTransactions()
-    recordTombstone('Transaction', id, { entity: deleted })
     if (bill && bill.nextDate > item.billingPeriodKey) {
       bill.nextDate = item.billingPeriodKey
       bill.updatedAt = stamp()
@@ -421,7 +467,6 @@ export function useDomainCommands() {
       }
     })
     commitTransactions()
-    recordTombstone('Bill', id, { entity: bill })
     return bill
   }
   function deleteCourse(id) {
@@ -434,7 +479,6 @@ export function useDomainCommands() {
     commitNotes()
     commitEvents()
     commitMilestones()
-    recordTombstone('Course', id, { entity: course })
     return course
   }
   function createCourse(value) {
@@ -479,10 +523,9 @@ export function useDomainCommands() {
     if (index < 0) return null
     const deleted = events.value.splice(index, 1)[0]
     commitEvents()
-    recordTombstone('Event', id, { entity: deleted })
     return deleted
   }
-  function restoreDeletedEvent(entity) { const item = restoreDeletedItem(events, 'Event', entity); if (item) commitEvents(); return item }
+  function restoreDeletedEvent(entity) { const item = restoreDeletedItem(events, entity); if (item) commitEvents(); return item }
   function archiveTask(id) { const item = archiveItem(tasks, id); if (item) commitTasks(); return item }
   function restoreTask(id) { const item = restoreItem(tasks, id); if (item) commitTasks(); return item }
   function archiveCourse(id) { const item = archiveItem(courses, id); if (item) commitCourses(); return item }
@@ -558,5 +601,5 @@ export function useDomainCommands() {
     if (session.todoId) recordTaskFocusSession(session.todoId, session)
     return session
   }
-  return { tasks, courses, milestones, bills, transactions, events, notes, focusSessions, createTask, updateTask, toggleTask, completeTask, deleteTask, restoreDeletedTask, archiveTask, restoreTask, createMilestone, updateMilestone, deleteMilestone, restoreDeletedMilestone, archiveMilestone, restoreMilestone, createEvent, updateEvent, deleteEvent, restoreDeletedEvent, archiveEvent, restoreEvent, createNote, updateNote, deleteNote, archiveNote, restoreNote, createTransaction, updateTransaction, deleteTransaction, restoreDeletedTransaction, refundTransaction, undoBillPayment, createBill, updateBill, deleteBill, archiveBill, restoreBill, setBillActive, skipBill, deleteCourse, createCourse, replaceCourses, archiveCourse, restoreCourse, recordTaskFocusSession, recordFocusSession, payBill }
+  return { tasks, courses, milestones, bills, transactions, events, notes, focusSessions, createTask, updateTask, toggleTask, completeTask, deleteTask, restoreDeletedTask, archiveTask, restoreTask, createMilestone, updateMilestone, deleteMilestone, restoreDeletedMilestone, archiveMilestone, restoreMilestone, createEvent, updateEvent, deleteEvent, restoreDeletedEvent, archiveEvent, restoreEvent, createNote, updateNote, deleteNote, archiveNote, restoreNote, createTransaction, updateTransaction, updateTransactionCategories, deleteTransaction, restoreDeletedTransaction, refundTransaction, undoBillPayment, createBill, updateBill, deleteBill, archiveBill, restoreBill, setBillActive, skipBill, deleteCourse, createCourse, replaceCourses, archiveCourse, restoreCourse, recordTaskFocusSession, recordFocusSession, payBill }
 }

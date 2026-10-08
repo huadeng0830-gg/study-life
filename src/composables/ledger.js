@@ -4,7 +4,7 @@ import { computed } from 'vue'
 import { useStoredRef } from './store'
 import { clock } from './store/core.js'
 // timestampOf 放在 settingsPolicy 里（时间语义的唯一出处）。
-// 依赖链 settingsPolicy → store/core + store/timeConfig + syncSpace 都不反向引用账本，
+// 依赖链 settingsPolicy → store/core + store/timeConfig 都不反向引用账本，
 // 所以这里不会形成循环导入。
 import { timestampOf } from './settingsPolicy.js'
 import {

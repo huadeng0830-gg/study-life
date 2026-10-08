@@ -24,12 +24,25 @@ export const importPlan = ref(null)
 export const importPlanOverrides = ref({})
 export const planDiffExpanded = ref({})
 export const importRunning = ref(false)
+
+/**
+ * 导入**失败**态：为 true 时计划弹窗留在原地渲染失败原因与出口，而不是切回计划列表。
+ *
+ * 【为什么不能只看 importError】它是导入与识别共用的暂存（timeSettingsShared.js:38-39）：
+ * 上一次 OCR/粘贴解析留下的失败文案可能还挂在那里，而计划弹窗每次打开都会读它——
+ * 只看"非空"会让正常打开计划弹窗变成一张莫名其妙的报错页。
+ * 【为什么不能只看 importProgress.state.status === 'failed'】下面 confirmImportPlan 的
+ * snapshot 守卫"识别引擎未就绪"根本没走到 importProgress.start()，进度状态还是 waiting，
+ * 而那条路径今天同样是"用户什么都看不到"（同一个缺陷的第二个入口）。
+ */
+export const importFailed = ref(false)
 export const importProgress = useTaskProgress()
 export const lastImportResult = ref(null)
 export const importPlanScope = ref(null)
 
 export function openImportPlan(scopeSchemeId = null) {
   if (!recognitionDraft.value?.schemes.length) return
+  importFailed.value = false
   importPlanScope.value = scopeSchemeId
   importPlanOverrides.value = {}
   planDiffExpanded.value = {}
@@ -70,6 +83,10 @@ export function editFromPlan(schemeId) {
 
 export function closeImportPlan() {
   if (importRunning.value) return
+  // 退出失败态：下一次打开回到计划列表。importError 刻意**不**清——
+  // 关闭之后下层弹窗（TimeSettingsModal 的 role="alert" 那行）仍要把失败原因显示给用户，
+  // 那正是"返回"这条出口的落点。
+  importFailed.value = false
   importPlanOpen.value = false
 }
 
@@ -86,6 +103,10 @@ const sleep = (ms) => new Promise((resolve) => window.setTimeout(resolve, ms))
 export async function confirmImportPlan() {
   const plan = importPlan.value
   if (!plan?.executable || importRunning.value) return
+  // 新一轮尝试：清掉上一轮的失败态与错误文案。"重试导入"这个出口每点一次都会走到这里，
+  // 不清 importError 的话，即使重试成功，下层弹窗仍会挂着上一次的「导入失败，已恢复原数据」。
+  importFailed.value = false
+  importError.value = ''
   const cfg = timeConfig.value
   const applied = plan.items.filter((item) => item.action !== 'skip')
   // 守卫必须在置 importRunning 之前。
@@ -96,6 +117,9 @@ export async function confirmImportPlan() {
   const snapshot = api?.snapshotTimeConfig(cfg)
   if (!snapshot) {
     importError.value = '识别引擎未就绪，请重新识别后再导入。'
+    // 这条早退同样要留在当前弹窗里报错：它没经过 importProgress，只在计划弹窗里
+    // 渲染错误态这一条路（见 importFailed 的注释）。
+    importFailed.value = true
     return
   }
   importRunning.value = true
@@ -144,6 +168,11 @@ export async function confirmImportPlan() {
     importProgress.fail('save', messageText)
     importRunning.value = false
     importError.value = messageText
+    // 失败**不能**表现为"回到计划列表"：原来只把 importRunning 置回 false，
+    // 计划弹窗立刻切回列表视图，而 importError 唯一的渲染点在下层弹窗（被盖住）——
+    // 用户看到的是"点确认 → 闪一下 → 又回到列表"，无从判断成没成。
+    // 置失败态后计划弹窗原地渲染原因与出口（重试 / 返回计划列表）。
+    importFailed.value = true
   }
 }
 

@@ -3,7 +3,7 @@
  * 外壳级提示的播报必须走常驻通道，且**文案与播报同源**（第二十四轮）。
  *
  * 【背景】上一轮（§1.34）修掉了全局错误提示，但 `App.vue` 里还有五处同样形状的提示：
- * 安全模式、持久化失败、持久化恢复、自动同步状态、7 天未备份——全都是
+ * 安全模式、持久化失败、持久化恢复、账号同步状态、7 天未备份——全都是
  * `v-if` 插入的新节点 + 行内 `role="alert"/"role="status"`，
  * 撞的正是 `liveRegion.js` 开头记的那条规律（VoiceOver 可能一个字都不播）。
  * 本轮把六处（含快速记录成功 toast）统一改由外壳里**常驻**的播报区发声：
@@ -11,23 +11,32 @@
  * 顺带避免「播报区 + 提示条」把同一句话念两遍。
  *
  * 【为什么必须挂载整个外壳】这几处提示由外壳自己的状态驱动（`localSafeMode`、
- * `persistenceState`、`autoSyncState`…），不挂载就没法把它们推到"该提示"的状态。
+ * `persistenceState`、`accountSyncStatus`…），不挂载就没法把它们推到"该提示"的状态。
  * 为此本轮新增了 `tests/helpers/mountApp.js`——它同时解开了
  * §4 里"渲染 DOM 级标题顺序守卫""真实 Tab 顺序守卫"缺的那件基础设施。
  *
  * 【刻意不做的部分】"7 天未备份"与自动同步状态这两处在挂载期由计时器/协调器驱动，
  * 测试里不去伪造它们的时序；它们的**标记与文案**由下面的守卫覆盖（无行内 role、
- * 文案取自常量），行为则由 `needsBackup`/`autoSyncState` 各自已有的测试覆盖。
+ * 文案取自常量），行为则由 `needsBackup`/`accountSyncStatus` 各自已有的测试覆盖。
  */
 import { afterEach, describe, expect, it } from 'vitest'
-import { autoSyncError, autoSyncState } from '../src/composables/autoSyncCoordinator.js'
+import { nextTick } from 'vue'
+import { accountSyncError, accountSyncStatus } from '../src/composables/accountSyncState.js'
 import { clearAnnouncement, liveAlert, liveMessage } from '../src/composables/liveRegion.js'
 import { localSafeMode } from '../src/composables/localSafeMode.js'
 import { persistenceState } from '../src/composables/store/core.js'
+import { setMirrorErrorHandler } from '../src/composables/dataVault.js'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { templateOf, walkElements } from './helpers/vueTemplate.js'
+import { registerMirrorTeardown } from './helpers/mirrorTeardown.js'
 import { mountApp, settle } from './helpers/mountApp.js'
+
+// This suite verifies the shell's announcement routing, not IndexedDB behavior.
+// happy-dom has no IndexedDB; an unrelated delayed mirror retry could otherwise
+// inject an assertive storage error while a test is checking the polite channel.
+setMirrorErrorHandler(() => {})
+registerMirrorTeardown()
 
 /** 播报写入是「先清空、下一拍（30ms）再写」，所以等一小会儿让内容落下。 */
 const TICK_MS = 40
@@ -45,8 +54,8 @@ afterEach(() => {
   clearAnnouncement()
   if (savedPersistence) persistenceState.value = savedPersistence
   if (savedSafeMode !== null) localSafeMode.value = savedSafeMode
-  if (savedSyncState !== null) autoSyncState.value = savedSyncState
-  if (savedSyncError !== null) autoSyncError.value = savedSyncError
+  if (savedSyncState !== null) accountSyncStatus.value = savedSyncState
+  if (savedSyncError !== null) accountSyncError.value = savedSyncError
   savedPersistence = null
   savedSafeMode = null
   savedSyncState = null
@@ -56,8 +65,8 @@ afterEach(() => {
 async function mountShell() {
   savedPersistence = persistenceState.value
   savedSafeMode = localSafeMode.value
-  savedSyncState = autoSyncState.value
-  savedSyncError = autoSyncError.value
+  savedSyncState = accountSyncStatus.value
+  savedSyncError = accountSyncError.value
   mounted = await mountApp()
 }
 
@@ -65,12 +74,18 @@ describe('外壳级提示的播报', () => {
   it('进入本机安全模式时以 assertive 播报（错误级别）', async () => {
     await mountShell()
     localSafeMode.value = true
-    await settle()
-
-    expect(liveAlert.value).toBe('')
+    // 【为什么这里只等一次微任务、不等 settle()】「先清空、下一拍（30ms）再写入」
+    // 里那个"下一拍"是**墙钟时间**，而 settle() 等的是两个 rAF —— 机器一忙（204 个
+    // 用例文件并行时就是这样）单帧就可能超过 30ms，于是写入已经落下、
+    // `toBe('')` 偶发变红。判据要盯的是"清空是同步发生的"，那就不能把它挂在
+    // 一个可能超过 30ms 的等待后面：watcher 是 pre-flush，nextTick() 之后
+    // 清空一定已经发生，而定时器不可能在微任务里跑掉。
+    await nextTick()
+    expect(liveAlert.value, '播报区应当先被同步清空').toBe('')
     await tick()
     expect(liveAlert.value).toContain('本机安全模式')
-    expect(liveAlert.value).toContain('自动同步、手动拉取和推送均已暂停')
+    expect(liveAlert.value).toContain('账号同步已暂停')
+    expect(liveAlert.value).toContain('导出备份和恢复')
     // 提示条本身不再自己声明实时区域（否则同一句会被念两遍）
     expect(document.querySelector('.global-safe-mode-alert')?.getAttribute('role')).toBeNull()
   })
@@ -96,12 +111,12 @@ describe('外壳级提示的播报', () => {
     expect(liveAlert.value).toBe('')
   })
 
-  it('自动同步状态变化时按文本播报，内容相同的重算不会重复播报', async () => {
+  it('账号同步状态变化时按文本播报，内容相同的重算不会重复播报', async () => {
     await mountShell()
-    autoSyncState.value = 'conflict'
+    accountSyncStatus.value = 'conflict'
     await settle()
     await tick()
-    expect(liveMessage.value).toContain('有修改需要确认')
+    expect(liveMessage.value).toContain('选择冲突记录保留的版本')
 
     // 触发一次重算但文案不变（离线文案依赖 isSyncSpaceBound，这里改一个无关状态）
     clearAnnouncement()

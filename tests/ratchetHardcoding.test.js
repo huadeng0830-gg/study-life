@@ -44,7 +44,7 @@
  *      App.vue 的三条全局告警条（报告 #9/#11 写死浅棕底）。
  *   2. **script 区的 148 处绝大多数是调色板真源**，不是可替换的样式色：theme.js 的令牌定义
  *      （69）、festive.js 节日色（16）、canvas 彩带/雪花（App.vue 13）、课程色映射与色选择器、
- *      二维码前景/背景（本地传输与配对弹窗，必须是固定黑白才扫得出）、OCR 画布的白底。
+ *      OCR 画布的白底。
  *      这些换成本地令牌会让「数据」依赖「样式」，方向是反的。
  *   3. **并行任务文件**：`components/DataManager.vue`（script 4 / style 30）属于阶段6d，
  *      本阶段不碰。
@@ -69,16 +69,28 @@ const srcDir = resolve(root, 'src')
 export const BASELINE = {
   /** 阶段7 迁移前 153：colorMap 的 primary 组改引令牌（-3），并删掉一条注释里的两个 hex（-2）。 */
   scriptColors: 148,
-  /** 阶段7 迁移前 384：两处勾选框未勾选态的写死白底改用 --card（-2）。 */
-  styleColors: 382,
+  /**
+   * 阶段7 迁移前 384：两处勾选框未勾选态的写死白底改用 --card（-2）。
+   *
+   * 385（+3）：SearchPanel 的筛选 chip、WeeklyReviewView 的热力图最深格、
+   * ReviewPanel 的趋势区间选中态，三处新写的「主色/成功色实底上的文字色」。
+   * 它们用的都是本仓库既有的 `var(--on-primary, #fff)` 写法 —— 全仓已有 12 处
+   * 同样写法（style.css、EventsView、SwipeActionItem、TaskCenter…），
+   * DESIGN_TOKENS.md §"为什么有 --on-primary" 也是这么示范的。
+   * 也就是说这 3 处是**沿用约定**而不是回潮：写死的是兜底值，
+   * 真正生效的是 --on-primary（:root 无条件定义，theme.js 还会按主题重写它）。
+   * 属于"合法升基线"，故在此登记理由，而不是把那 3 处改成另一种写法、
+   * 让同一份约定在仓库里出现两种长相。
+   */
+  styleColors: 385,
   templateColors: 3,
   offTierBreakpoints: 0,
   emptyMediaQueries: 0,
   distinctZIndex: 20,
   /** 未被 try 包住的 JSON.parse(localStorage…)：阶段7 当天实测 10/10 全部已有 try，基线 0。 */
   bareJsonParse: 0,
-  jsonParseOccurrences: 10,
-  filesOver800Lines: 11,
+  // 旧设备同步与本地迁移路径删除后，当前安全解析调用点为 5；每个裸调用仍必须为 0。
+  jsonParseOccurrences: 5,
 }
 
 /** 本项目的断点档位：520/760 是常规两档，900 与 901 是一组互补边界（见布局报告第 1 条）。 */
@@ -87,9 +99,41 @@ export const BREAKPOINT_TIERS = [520, 760, 900, 901]
 /** 超过这个行数的文件必须登记在册；登记过的文件另有自己的行数上限。 */
 export const GIANT_LINE_LIMIT = 1200
 export const GIANT_ALLOWLIST = {
-  'views/LedgerView.vue': 3800,
-  'components/DataManager.vue': 3800,
+  'views/LedgerView.vue': 1323,
+  'views/ProjectsView.vue': 1550,
 }
+
+/** 每个超过 800 行的文件单独设上限，避免只守总数时把瘦身空间转移给另一个文件。 */
+export const LARGE_FILE_LIMITS = Object.freeze({
+  'views/LedgerView.vue': 1323,
+  // 齐行把项目、任务、成果和团队时间的操作留在同一个路由视图中，避免多个页面之间丢失当前项目上下文；
+  // 本次按实测行数设上限，后续新增功能需要先拆分或压缩。
+  'views/ProjectsView.vue': 1550,
+  'components/AppearanceSettings.vue': 1115,
+  'views/TodayView.vue': 1012,
+  'views/TasksView.vue': 1011,
+  // 【一次性升基线，+16 行，理由是补一个"用户根本点不到"的入口】
+  // FestiveSettings.vue 从加进仓库起全 `src/` 只有测试直接 import 它，Sidebar 从未挂载：
+  // 「开关节日氛围 / 生日 / 开始使用日期 / 纪念日与农历纪念日」这一整块设置没有任何入口。
+  // 补入口必须落在 Sidebar（桌面按钮 + 手机「更多」格 + 懒加载预热 + 挂载点各一处），
+  // 与其把这段接线塞进别的文件变成跨文件隐式约定，不如就地写清楚。
+  // 上限按实测行数收口，仍然只准缩：后续再加东西必须先把别处减下来。
+  'components/Sidebar.vue': 1004,
+  'style.css': 947,
+  // 【一次性升基线，+25 行，理由是修一个 P1 外壳缺陷，不是回潮】
+  // 五条外壳级提示原来各自 `position:fixed` 在同一个 top/left 上，z-index 241 的保存/备份条
+  // 会把 240 的同步告警**整条**盖住（「重试同步」「打开数据管理」根本点不到）。改法是把它们收进
+  // 一个 fixed 纵向 flex 队列（放进来的：.global-alert-stack 与 `.global-alert-stack > *` 两条规则
+  // 连同取舍说明 18 行、预留高度改成按可见条数算 4 行、队列槽位在 JS 里算 7 行）。
+  // 已经先从别处减下来过：五份重复的 `<Transition name="global-sync">` 收成一个 TransitionGroup
+  // （-8 行）、`hasGlobalAlert` 并进 `alertCount`（-5 行）、删掉 `.global-alert-reserve` 上那条
+  // 死的 `flex:0 0 54px`。剩下的差额是"容器规则 + 它为什么这么写的注释"，没有再压的空间。
+  'App.vue': 969,
+  'components/FocusPanel.vue': 899,
+  'views/ExamsView.vue': 886,
+  'components/QuickRecordPanel.vue': 866,
+  'views/ledger-panels/LedgerHomePanel.vue': 812,
+})
 
 /** 剥 HTML 注释（等长替换，保留行号）。 */
 export function stripHtmlComments(text) {
@@ -151,7 +195,7 @@ export function isInsideTry(text, index) {
 /** 未被 try 包住的 `JSON.parse(localStorage…)`（含跨行写法），返回 `文件:行号`。 */
 export function unprotectedJsonParses(text) {
   const out = []
-  const re = /JSON\.parse\(\s*(?:window\.)?localStorage/g
+  const re = /JSON\.parse\(\s*(?:(?:window\.)?localStorage|[A-Za-z_$][\w$]*\.getItem(?=\s*\())/g
   let match
   while ((match = re.exec(text)) !== null) {
     if (isInsideTry(text, match.index)) continue
@@ -206,7 +250,7 @@ export function scan() {
     offTierBreakpoints: offTierBreakpoints(mediaText),
     emptyMediaQueries: (mediaText.match(/@media[^{]*\{\s*\}/g) ?? []).length,
     zIndexValues: [...zValues].sort((a, b) => Number(a) - Number(b)),
-    jsonParseTotal: files.reduce((total, entry) => total + (entry.text.match(/JSON\.parse\(\s*(?:window\.)?localStorage/g) ?? []).length, 0),
+    jsonParseTotal: files.reduce((total, entry) => total + (entry.text.match(/JSON\.parse\(\s*(?:(?:window\.)?localStorage|[A-Za-z_$][\w$]*\.getItem(?=\s*\())/g) ?? []).length, 0),
     // 用整文件文本而不是块：块是拼接出来的，行号会串位。
     bareJsonParse: files.flatMap((entry) => unprotectedJsonParses(entry.text).map((line) => `${entry.file}: ${line}`)),
     linesOf: Object.fromEntries(files.map((entry) => [entry.file, entry.text.split(/\r?\n/).length])),
@@ -247,12 +291,16 @@ describe('计数器本身的判别力', () => {
     const bare = 'function f() {\n  const v = JSON.parse(localStorage.getItem(k))\n  return v\n}'
     const bareAfterClosedTry = 'try { a() } catch { b() }\nconst v = JSON.parse(localStorage.getItem(k))'
     const bareWithTryLikeWord = 'const entry = { dirty: true }\nconst v = JSON.parse(localStorage.getItem(k))'
+    const protectedAdapter = 'function read(storage) {\n  try {\n    return JSON.parse(storage.getItem(k))\n  } catch { return null }\n}'
+    const bareAdapter = 'function read(storage) {\n  return JSON.parse(storage.getItem(k))\n}'
     expect(unprotectedJsonParses(protectedSameLine)).toEqual([])
     expect(unprotectedJsonParses(protectedNextLine)).toEqual([])
     expect(unprotectedJsonParses(protectedAfterStatement)).toEqual([])
     expect(unprotectedJsonParses(bare)).toHaveLength(1)
     expect(unprotectedJsonParses(bareAfterClosedTry)).toHaveLength(1)
     expect(unprotectedJsonParses(bareWithTryLikeWord), 'entry/dirty 里的 try 不该被当成 try').toHaveLength(1)
+    expect(unprotectedJsonParses(protectedAdapter)).toEqual([])
+    expect(unprotectedJsonParses(bareAdapter)).toHaveLength(1)
   })
 
   it('断点档位判别：900/901 合法，902/768 非法', () => {
@@ -372,9 +420,12 @@ describe('巨型文件棘轮（工程报告 #1）', () => {
     }
   })
 
-  it(`超过 800 行的文件数 ≤ ${BASELINE.filesOver800Lines}（防止"还差一点"的蔓延）`, () => {
-    const heavy = Object.entries(result.linesOf).filter(([, lines]) => lines > 800).map(([file, lines]) => `${file}=${lines}`)
-    expect(heavy.length).toBeLessThanOrEqual(BASELINE.filesOver800Lines)
-    expect(heavy.length).toBeGreaterThan(5)
+  it('超过 800 行的文件逐个受上限保护', () => {
+    const heavy = Object.entries(result.linesOf).filter(([, lines]) => lines > 800)
+    const unlisted = heavy.filter(([file]) => !(file in LARGE_FILE_LIMITS)).map(([file, lines]) => `${file}=${lines}`)
+    expect(unlisted, `未登记的大文件：${unlisted.join(', ')}`).toEqual([])
+    for (const [file, limit] of Object.entries(LARGE_FILE_LIMITS)) {
+      expect(result.linesOf[file], `${file} 超过登记上限 ${limit} 行`).toBeLessThanOrEqual(limit)
+    }
   })
 })

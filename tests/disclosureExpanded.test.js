@@ -176,9 +176,14 @@ describe('全仓原地翻转控件都有 aria-expanded', () => {
     // 扫描规模下限：正则或遍历写坏时这些数字会掉下来，避免「0 违规」的假绿。
     // 数值取当前实际值往下留余量（当前 53 个 .vue），跟键盘可达性守卫同一种做法。
     expect(files.length).toBeGreaterThan(45)
-    expect(allToggles.length).toBeGreaterThanOrEqual(10)
-    // 绝大多数翻转控件都在 button 上（aria-expanded 的正确落点）
-    expect(allToggles.filter((t) => t.tag === 'button').length).toBeGreaterThanOrEqual(10)
+    // 【这个下限只是"证明扫描器没空转"，不是覆盖率指标】
+    // 这只是防止扫描器空转的下限；页面拆分后控件会随模板移动，真实覆盖由上面的逐项断言保证。
+    // 真正的覆盖面由上面那条"每个原地翻转控件都有 aria-expanded"逐个断言，
+    // 这个下限只是防止有人把 findAllInPlaceToggles 写坏成永远返回 0。
+    expect(allToggles.length).toBeGreaterThanOrEqual(8)
+    // 绝大多数翻转控件都在 button 上（aria-expanded 的正确落点）。
+    // 旧同步控件下线后实测 8 个原地翻转控件，且都由 button 承载。
+    expect(allToggles.filter((t) => t.tag === 'button').length).toBeGreaterThanOrEqual(8)
   })
 
   it('已经说状态的占绝大多数，说明这条守卫守的是一个真实存在的约定', () => {

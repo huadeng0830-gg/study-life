@@ -45,11 +45,14 @@ const props = defineProps({
   inputType: { type: String, default: 'text' },
   // 不传就不设长度上限：原生 prompt 本来没有上限，别替调用方猜一个。
   maxlength: { type: [Number, String], default: null },
+  // 调用方校验失败时保留对话框并把错误就近关联到输入框。
+  error: { type: String, default: '' },
 })
 
-const emit = defineEmits(['confirm', 'close'])
+const emit = defineEmits(['confirm', 'close', 'input'])
 
 const inputId = `prompt-dialog-input-${++nextPromptId}`
+const errorId = `${inputId}-error`
 const draft = ref('')
 
 /** 每次打开都重新播种初值（`v-if` 挂载的实例本来就是新的，这条兜住"常驻实例"的用法）。 */
@@ -84,11 +87,14 @@ function submit() {
         :value="draft"
         :maxlength="maxlength ?? undefined"
         :aria-label="label ? undefined : title"
+        :aria-invalid="error ? 'true' : undefined"
+        :aria-describedby="error ? errorId : undefined"
         autocomplete="off"
         autofocus
-        @input="draft = $event.target.value"
+        @input="draft = $event.target.value; emit('input', draft)"
         @keydown.enter.prevent="submit"
       />
+      <p v-if="error" :id="errorId" class="prompt-error" role="alert">{{ error }}</p>
     </div>
     <template #foot>
       <div class="actions">
@@ -112,6 +118,12 @@ function submit() {
 .prompt-label {
   color: var(--ink-soft);
   font-size: var(--fs-aux);
+}
+.prompt-error {
+  margin: 0;
+  color: var(--danger);
+  font-size: var(--fs-11);
+  line-height: 1.45;
 }
 .prompt-input {
   width: 100%;

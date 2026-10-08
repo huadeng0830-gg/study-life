@@ -7,12 +7,14 @@ import { fileURLToPath } from 'node:url'
 
 export const PROJECT_ROOT = fileURLToPath(new URL('../', import.meta.url))
 
-export const RELEASE_INPUTS = ['src', 'functions', 'sync-coordinator', 'public', 'index.html', 'package.json', 'package-lock.json', 'vite.config.js', 'release.config.js', 'wrangler.jsonc', 'sync-protocol.js']
+export const RELEASE_INPUTS = ['src', 'functions', 'public', 'desktop', 'desktop-app', 'index.html', 'package.json', 'package-lock.json', 'vite.config.js', 'electron-builder.yml', 'release.config.js', 'wrangler.jsonc']
 
 export function collectReleaseFiles(target) {
   if (!existsSync(target)) return []
   if (!statSync(target).isDirectory()) return [target]
   return readdirSync(target, { withFileTypes: true })
+    // 安装后依赖不属于仓库源码；把它纳入签名会令本机和干净 CI 算出不同结果。
+    .filter((entry) => !['node_modules', '.git'].includes(entry.name))
     .flatMap((entry) => collectReleaseFiles(resolve(target, entry.name)))
 }
 
@@ -33,12 +35,13 @@ export function normalizeReleaseConfig(content) {
     .replace(/RELEASE_SOURCE_SIGNATURE = '[^']*'/, "RELEASE_SOURCE_SIGNATURE = '<source-signature>'")
 }
 
-// releaseConfigContent 允许传入“即将写入但尚未落盘”的 release.config.js 内容，
-// 供 bump-release 在写入前计算与最终文件一致的签名。
+// sourceFileContents 允许发布脚本对尚未落盘的发布文件计算签名，
+// 避免先写版本号、再补签名时留下部分更新的工作区。
 export function computeSourceSignature({
   projectRoot = PROJECT_ROOT,
   releaseInputs = RELEASE_INPUTS,
   releaseConfigContent = null,
+  sourceFileContents = {},
 } = {}) {
   const hash = createHash('sha256')
   const files = releaseInputs
@@ -47,7 +50,8 @@ export function computeSourceSignature({
   for (const file of files) {
     const relativePath = relative(projectRoot, file).replaceAll('\\', '/')
     hash.update(relativePath)
-    const buffer = readFileSync(file)
+    const sourceOverride = sourceFileContents[relativePath]
+    const buffer = sourceOverride === undefined ? readFileSync(file) : Buffer.from(sourceOverride, 'utf8')
     if (relativePath === 'release.config.js') {
       // 这个文件永远按文本处理，并且换行先归一化。
       let content = releaseConfigContent !== null ? releaseConfigContent : buffer.toString('utf8')

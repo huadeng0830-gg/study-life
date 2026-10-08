@@ -28,12 +28,22 @@ import { describe, expect, it } from 'vitest'
 // 这里只列「一旦在启动路径裸调就会让整个应用打不开」的那些。
 const GUARDED_APIS = ['requestIdleCallback', 'cancelIdleCallback']
 
-/** 去掉注释：注释里提到这些名字是正常的（本文档自己就在提），不能算命中。 */
+/**
+ * 去掉注释：注释里提到这些名字是正常的（本文档自己就在提），不能算命中。
+ *
+ * 【行注释必须用 [^\n]* 而不是 .*】
+ * JS 的 `.` 不匹配行终止符，**`\r` 就是行终止符**。于是 `/\/\/.*$/` 在
+ * CRLF 文件上一行都不匹配 —— 整条注释原样留在待扫描文本里，
+ * 注释里提到的 `requestIdleCallback` 就被当成裸调用报出来。
+ * 本仓库在 Windows 上签出（core.autocrlf）就是 CRLF，所以这条守卫曾长期
+ * 只在 Windows 上红。同一个错误也解释了为什么块注释那步必须用 `[\s\S]*?`：
+ * `.*?` 同样跨不过换行。
+ */
 function stripComments(text) {
   return text
     .replace(/\/\*[\s\S]*?\*\//g, ' ')
     .split('\n')
-    .map((line) => line.replace(/\/\/.*$/, ' '))
+    .map((line) => line.replace(/\/\/[^\n]*/g, ' '))
     .join('\n')
 }
 
@@ -105,6 +115,12 @@ describe('iOS Safari 缺失 API 的守卫', () => {
     expect(findUnguardedCalls('window.setTimeout(task, 1200)')).toEqual([])
     // 注释里提到名字不算命中（否则这份文档自己就会让测试变红）。
     expect(findUnguardedCalls('// 不能裸调 requestIdleCallback，Safari 没有它')).toEqual([])
+    // 判别力：CRLF 下也必须剥得掉。JS 的 `.` 不匹配 `\r`（它也是行终止符），
+    // 所以 `/\/\/.*$/` 在 Windows 签出的文件上一行都不匹配 —— 注释里的名字
+    // 会被当成裸调用。这条曾经让本守卫只在自己机器上红。
+    expect(findUnguardedCalls('  // 今天的 requestIdleCallback 事故就是这样升级的\r\n')).toEqual([])
+    // 而真正的裸调用在 CRLF 下仍然要被抓出来（别把守卫改成永远绿）。
+    expect(findUnguardedCalls('  requestIdleCallback(task)\r\n')).toHaveLength(1)
   })
 
   it('src/ 里不存在未守卫的调用', () => {

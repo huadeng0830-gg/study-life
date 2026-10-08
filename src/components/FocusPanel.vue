@@ -40,6 +40,8 @@ const lastSavedSession = ref(null)
 const tempTodoAdded = ref(false)
 const restMinutes = ref(0)
 const restEndsAt = ref(null)
+const roundNumber = ref(1)
+const lastCompletedRound = ref(0)
 const flashMessage = ref('')
 
 let ticker = 0
@@ -184,6 +186,8 @@ function start() {
   nextSettings = { ...nextSettings, lastUsedMinutes: Number(selectedMinutes.value) }
   if (!todoId && title) nextSettings = pushRecentTemporary(nextSettings, title)
   focusSettings.value = nextSettings
+  roundNumber.value = Math.min(roundNumber.value, nextSettings.pomodoroRounds)
+  lastCompletedRound.value = 0
   activeRef.value = {
     sessionId: createFocusSessionId(),
     focusType: todoId ? 'todo-linked' : title ? 'temporary' : 'free',
@@ -216,10 +220,21 @@ function requestEnd() {
     showEarly.value = true
     return
   }
-  saveFocus('completed')
+  saveFocus('completed', { autoRest: true })
 }
 
-function saveFocus(status = 'completed') {
+function startRoundRest() {
+  const totalRounds = settings.value.pomodoroRounds
+  const completedRound = Math.min(totalRounds, Math.max(1, roundNumber.value))
+  lastCompletedRound.value = completedRound
+  roundNumber.value = completedRound >= totalRounds ? 1 : completedRound + 1
+  restMinutes.value = completedRound >= totalRounds ? 10 : 5
+  now.value = Date.now()
+  restEndsAt.value = now.value + restMinutes.value * 60000
+  syncTicker()
+}
+
+function saveFocus(status = 'completed', { autoRest = false } = {}) {
   const session = buildFocusSession(activeRef.value, new Date().toISOString(), status)
   if (!session) return
   domain.recordFocusSession(session)
@@ -228,7 +243,8 @@ function saveFocus(status = 'completed') {
   lastSavedSession.value = session
   tempTodoAdded.value = false
   notifiedSessionId = ''
-  syncTicker()
+  if (autoRest && status === 'completed') startRoundRest()
+  else syncTicker()
 }
 
 function confirmEarlySave() {
@@ -325,7 +341,7 @@ function notifyCompletion(session) {
     try { navigator.vibrate(300) } catch { }
   }
   if (nextSettings.systemNotificationEnabled && 'Notification' in window && Notification.permission === 'granted') {
-    try { new Notification('学习生活台 · 专注完成', { body: `「${title}」已完成 ${session.plannedMinutes} 分钟` }) } catch { }
+    try { new Notification('三两事 · 专注完成', { body: `「${title}」已完成 ${session.plannedMinutes} 分钟` }) } catch { }
   }
 }
 
@@ -337,6 +353,7 @@ function tick() {
     if (state.hasCompletedPlan && notifiedSessionId !== session.sessionId) {
       notifiedSessionId = session.sessionId
       notifyCompletion(session)
+      saveFocus('completed', { autoRest: true })
     }
   }
 }
@@ -428,6 +445,7 @@ onActivated(() => {
         <strong>{{ active.title || '自由专注' }}</strong>
       </div>
       <b class="focus-clock" :class="{ overtime: display ? display.overtimeSeconds > 0 : false }">{{ clockText }}</b>
+      <p class="focus-round">第 {{ roundNumber }} 轮 / 共 {{ settings.pomodoroRounds }} 轮</p>
       <p class="focus-state-line">{{ activeStateLine }}</p>
       <div class="focus-actions">
         <button type="button" class="btn" :class="active.pausedAt ? 'btn-primary' : 'btn-ghost'" @click="active.pausedAt ? resume() : pause()">
@@ -439,6 +457,8 @@ onActivated(() => {
 
     <div v-else-if="restEndsAt" class="focus-rest">
       <b class="focus-clock">{{ restClockText }}</b>
+      <p class="focus-round">第 {{ lastCompletedRound }} 轮 / 共 {{ settings.pomodoroRounds }} 轮</p>
+      <p v-if="lastSavedSession" class="focus-rest-summary">{{ lastSavedSession.title || '自由专注' }} · 本次专注 {{ formatFocusDuration(lastSavedSession.actualFocusSeconds) }}</p>
       <p class="focus-state-line">{{ restRemainingSeconds > 0 ? `休息 ${restMinutes} 分钟` : '休息结束' }}</p>
       <button type="button" class="btn btn-primary" @click="finishRest">{{ restRemainingSeconds > 0 ? '结束休息' : '返回专注' }}</button>
     </div>
@@ -447,6 +467,7 @@ onActivated(() => {
       <div class="focus-done-mark" aria-hidden="true">✓</div>
       <p class="focus-done-title">{{ lastSavedSession.title || '自由专注' }}</p>
       <p class="focus-done-time">本次专注 {{ formatFocusDuration(lastSavedSession.actualFocusSeconds) }}</p>
+      <p v-if="lastCompletedRound" class="focus-round">第 {{ lastCompletedRound }} 轮 / 共 {{ settings.pomodoroRounds }} 轮</p>
       <div class="focus-done-actions">
         <button v-if="lastSavedSession.focusType === 'temporary' && !tempTodoAdded" type="button" class="btn btn-ghost" @click="addTempTodo">加入待办</button>
         <span v-else-if="lastSavedSession.focusType === 'temporary' && tempTodoAdded" class="focus-done-hint">✓ 已加入待办</span>
@@ -663,6 +684,17 @@ onActivated(() => {
 .focus-state-line {
   margin: 0;
   color: var(--ink-faint);
+  font-size: var(--fs-12-5);
+}
+.focus-round {
+  margin: 0;
+  color: var(--primary);
+  font-size: var(--fs-12);
+  font-weight: var(--fw-700);
+}
+.focus-rest-summary {
+  margin: 0;
+  color: var(--ink-soft);
   font-size: var(--fs-12-5);
 }
 .focus-actions {

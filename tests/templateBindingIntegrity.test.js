@@ -8,7 +8,7 @@
  *     ledgerSplit.js / ledgerFx.js 里 import 了并不存在的 `currencyField`
  *     → 记一笔、记录详情、固定账单在**点保存那一刻**才抛
  *     `currencyField is not a function`，界面上弹一条原始 JS 报错；
- *   - `ledgerNowHM`、`amountToCents`、`syncSpaceBootstrapPending` 同理，
+ *   - `ledgerNowHM`、`amountToCents` 同理，
  *     结果是 `npm run build` 直接失败（生产构建此前一直是坏的）。
  *
  * 共同点：纯函数用例只 import 真正用到的路径，永远走不到那行；
@@ -50,7 +50,7 @@ function resolveSpecifier(fromFile, specifier) {
 
 /**
  * 算出模块的导出名字集合。
- * `export * from './x.js'` 会递归展开——门面模块（cloudSync.js 等）大量用这种写法，
+ * `export * from './x.js'` 会递归展开——仓库里的再导出模块会大量用这种写法，
  * 不展开就会把它们全判成「导入了不存在的东西」，误报一大片。
  */
 function exportsOf(file, seen = new Set()) {

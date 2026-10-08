@@ -17,7 +17,7 @@
  *
  * 【二】每个有组件的路由都必须有标题，且互不相同（WCAG 2.4.2 Page Titled）。
  * SPA 里全部页面共用一个标题是常见缺陷：读屏与浏览器历史里分不清页面。
- * App.vue 用的是 `route.meta?.title || '学习生活台'`，所以缺 meta.title 的路由会**静默**
+ * App.vue 用的是 `route.meta?.title || '三两事'`，所以缺 meta.title 的路由会**静默**
  * 退回通用标题——这种"有兜底所以不报错"的写法最容易漏，得靠判据守。
  */
 import { describe, expect, it } from 'vitest'
@@ -182,7 +182,7 @@ describe('每个页面都有唯一标题（WCAG 2.4.2）', () => {
     const missing = routes.filter((route) => route.hasComponent && !route.title).map((route) => route.path)
     expect(
       missing,
-      '这些路由没有 meta.title，会静默退回通用标题"学习生活台"，读屏与浏览器历史里分不清页面',
+      '这些路由没有 meta.title，会静默退回通用标题"三两事"，读屏与浏览器历史里分不清页面',
     ).toEqual([])
   })
 

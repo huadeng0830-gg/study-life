@@ -18,20 +18,25 @@
     "typecheck": "vue-tsc --noEmit",
     "typecheck:ratchet": "node scripts/typecheck-ratchet.mjs",
     "typecheck:report": "node scripts/typecheck-ratchet.mjs --report",
-    "check": "npm run lint && npm run typecheck && npm test && npm run build",
+    "check": "npm run check:release-readme && npm run lint && npm run typecheck && npm test && npm run build",
     "release:bump": "node scripts/bump-release.mjs",
     "audit:contrast": "node scripts/audit-contrast.mjs",
     "audit:release": "node scripts/audit/release-integrity.mjs https://study-life.pages.dev",
     "audit:first-visit": "node scripts/audit/first-visit.mjs https://study-life.pages.dev",
     "audit:reload-loop": "node scripts/audit/reload-loop.mjs dist",
     "audit:iphone-boot": "node scripts/audit/iphone-boot.mjs https://study-life.pages.dev",
-    "sync:health": "node scripts/check-sync-health.mjs",
-    "deploy:sync:production": "npm run check && npx wrangler deploy --config sync-coordinator/wrangler.jsonc && npx wrangler pages deploy dist --project-name=study-life --branch=main && npm run sync:health"
+    "deploy:production": "npm run build && npx wrangler pages deploy dist --project-name=study-life --branch=main",
+    "build:desktop": "vite build --configLoader native --mode desktop",
+    "desktop:install-deps": "npm ci --prefix desktop-app",
+    "desktop:dev": "npm run desktop:install-deps && npm run build:desktop && electron .",
+    "desktop:dir": "npm run desktop:install-deps && npm run build:desktop && electron-builder --config electron-builder.yml --dir --win --x64 --publish never",
+    "desktop:verify": "node scripts/verify-desktop-package.mjs",
+    "desktop:installer": "npm run desktop:install-deps && npm run build:desktop && electron-builder --config electron-builder.yml --win nsis --x64 --publish never && npm run desktop:verify",
+    "check:release-readme": "node scripts/check-release-readme.mjs"
   },
   "dependencies": {
     "@e965/xlsx": "^0.20.3",
-    "jsqr": "^1.4.0",
-    "qrcode": "^1.5.4",
+    "@supabase/supabase-js": "2.117.2",
     "tesseract.js": "^7.0.0",
     "vue": "^3.5.41",
     "vue-router": "^4.6.4"
@@ -40,6 +45,8 @@
     "@types/node": "^26.4.0",
     "@vitejs/plugin-vue": "^6.0.8",
     "@vitest/coverage-v8": "^4.1.11",
+    "electron": "44.6.0",
+    "electron-builder": "26.17.0",
     "eslint": "^10.9.1",
     "eslint-plugin-vue": "^10.10.0",
     "happy-dom": "^20.11.6",
@@ -49,5 +56,6 @@
     "vitest": "^4.1.11",
     "vue-tsc": "^3.3.11",
     "wrangler": "^4.144.0"
-  }
+  },
+  "main": "desktop-app/main.cjs"
 }

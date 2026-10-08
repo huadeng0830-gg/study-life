@@ -7,9 +7,9 @@
 import { computed, ref } from 'vue'
 import { useLedgerFx } from '../ledgerFx.js'
 import { useLedgerBudget } from '../ledgerBudget.js'
-import { sumLedgerMonthInBase, COMMON_LEDGER_CURRENCIES, normalizeCurrency, normalizeLedgerFx, fxRateNote, currencyField as currencyFieldFor } from '../ledgerFx.js'
+import { summarizeLedgerInBase, sumLedgerMonthInBase, COMMON_LEDGER_CURRENCIES, normalizeCurrency, normalizeLedgerFx, fxRateNote, currencyField as currencyFieldFor } from '../ledgerFx.js'
 import { mySpendYuan } from '../ledgerSplit.js'
-import { budgetStatus, budgetAlertText, budgetPaceText } from '../ledgerBudget.js'
+import { budgetStatus } from '../ledgerBudget.js'
 import { moneyWithCurrency } from '../../utils/formatters.js'
 
 export function useLedgerFxBudget({ expenses, ledgerToday, baseMonthSummary }) {
@@ -36,23 +36,21 @@ export function useLedgerFxBudget({ expenses, ledgerToday, baseMonthSummary }) {
   // 以及下面的预算预警永远同一个口径（外币 + 分摊同时存在时也不会各算各的）。
   const fxRateLine = computed(() => fxRateNote(baseMonthSummary.value))
 
-  // 只做月度总额预算（见 ledgerBudget.js 的说明），落点是 hero-stat 里紧邻 hero-compare 的一行提示。
-  const budgetAlert = computed(() => {
-    const status = budgetStatus({ spent: baseMonthSummary.value.expenseTotal, budget: budget.value.monthly, today: ledgerToday() })
-    if (!status.set) return null
-    return {
-      ...status,
-      text: budgetAlertText(status, { base: baseMonthSummary.value.base, converted: baseMonthSummary.value.hasForeign }),
-    }
-  })
+  // 今天的支出沿用汇率与「我承担」口径，供固定今日额度扣除当天实际花费。
+  const baseTodaySummary = computed(() => summarizeLedgerInBase(expenses.value, fx.value, {
+    dateFilter: (date) => date === ledgerToday(),
+    amountOf: mySpendYuan,
+  }))
 
-  // 「今天还能花多少」：与 budgetAlert 分开成一行，因为触发条件不同——
-  // 那条只在接近/超出预算时说话，这条在预算充裕时也有意义（月初「还剩 5000」不可参考，
-  // 「按 31 天算每天 161」才可参考）。两者同时存在也不矛盾。
-  const budgetPaceLine = computed(() => {
-    const status = budgetStatus({ spent: baseMonthSummary.value.expenseTotal, budget: budget.value.monthly, today: ledgerToday() })
-    const text = budgetPaceText(status, { base: baseMonthSummary.value.base })
-    return text ? `本月${text}` : ''
+  // 只做月度总额预算（见 ledgerBudget.js 的说明），落点是首页独立预算卡片。
+  const budgetAlert = computed(() => {
+    const status = budgetStatus({
+      spent: baseMonthSummary.value.expenseTotal,
+      todaySpent: baseTodaySummary.value.expenseTotal,
+      budget: budget.value.monthly,
+      today: ledgerToday(),
+    })
+    return status.set ? status : null
   })
 
   return {
@@ -64,7 +62,6 @@ export function useLedgerFxBudget({ expenses, ledgerToday, baseMonthSummary }) {
     fxRateLine,
     budget,
     budgetAlert,
-    budgetPaceLine,
     showFxSettings,
     showBudgetSettings,
   }

@@ -108,7 +108,7 @@ const COLUMN_ALIASES = {
 }
 
 /** 在前若干行里找到表头行；groups 里每一组别名至少命中一个才算匹配。 */
-function findHeader(rows, groups) {
+export function findHeader(rows, groups) {
   const limit = Math.min(rows.length, 40)
   for (let index = 0; index < limit; index += 1) {
     const cells = rows[index].map((cell) => String(cell).trim())

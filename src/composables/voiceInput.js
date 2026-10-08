@@ -41,6 +41,12 @@ export function voiceErrorMessage(errorCode) {
 
 // 返回可 start/stop/abort 的控制器；不支持时返回 null。
 // 新增 onStateChange 状态回调与 maxSeconds 安全超时，兼容原 onResult/onError/onEnd 参数。
+//
+// 【joinWith 为什么默认是空串】Web Speech 的多个 final 结果之间**没有可靠标点**：
+// 连续说话时浏览器可能只给"周三下午三点图书馆还书"和"周五交报告"两段，直接首尾相接
+// 会读成一句连写的话。要在语音侧支持"一次说多件事"，调用方需要能在两段之间放一个
+// 可被下游识别的分界（通知侧用逗号）。但**默认必须保持空串**：既有调用方
+// （QuickRecordPanel）依赖"原样拼接"的既有行为，改默认等于悄悄改变它的产物。
 export function transcribe(options = {}) {
   const API = speechRecognitionAPI()
   if (!API) return null
@@ -50,6 +56,7 @@ export function transcribe(options = {}) {
     interimResults = true,
     continuous = false,
     maxSeconds = 30,
+    joinWith = '',
     onResult = () => {},
     onError = () => {},
     onEnd = () => {},
@@ -73,8 +80,8 @@ export function transcribe(options = {}) {
 
   function snapshot() {
     return {
-      finalText: finalSegments.join(''),
-      interimText: interimSegments.join(''),
+      finalText: finalSegments.join(joinWith),
+      interimText: interimSegments.join(joinWith),
     }
   }
 

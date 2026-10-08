@@ -1,10 +1,8 @@
 // @vitest-environment happy-dom
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { encryptData, decryptData } from '../src/utils/crypto.js'
 import { restoreStoredValues } from '../src/composables/store/index.js'
 import { mergeSyncPayload } from '../src/composables/syncMerge.js'
 import { buildSyncManifest, validateStableEntityIds, validateSyncManifest } from '../src/composables/syncMetadata.js'
-import { sanitizeSyncPayload } from '../src/composables/cloudSyncData.js'
 import { createSyncSandbox } from './helpers/syncSandbox.js'
 
 function task(id, title = id, updatedAt = '2026-09-01T00:00:00.000Z', extra = {}) {
@@ -337,14 +335,7 @@ describe('P2-B.5 isolated sync sandbox', () => {
     expect(sandbox.integrity(b)).toEqual([])
   })
 
-  it('reads an encrypted legacy payload and accepts a manifest-backed upgraded payload', async () => {
-    const legacyValues = { sl_tasks: [task('legacy', '旧版任务')] }
-    const encrypted = await encryptData(legacyValues, '123456')
-    const decoded = await decryptData(encrypted, '123456')
-    const sanitized = sanitizeSyncPayload(decoded)
-    const legacyMerge = mergeSyncPayload({ localValues: {}, remoteValues: sanitized.values, keys: ['sl_tasks'], legacy: true })
-    expect(legacyMerge.values.sl_tasks).toEqual(legacyValues.sl_tasks)
-
+  it('accepts a manifest-backed account sync payload and detects tampering', () => {
     const upgraded = { sl_tasks: [task('upgraded', '新版任务')] }
     const manifest = buildSyncManifest(upgraded, { tombstones: [] })
     expect(validateSyncManifest(upgraded, manifest)).toEqual([])

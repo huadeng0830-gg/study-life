@@ -4,6 +4,7 @@ export const DEFAULT_FOCUS_SETTINGS = Object.freeze({
   quickTimes: [15, 25, 45, 60],
   lastUsedMinutes: 25,
   recentTemporaries: [],
+  pomodoroRounds: 4,
   soundEnabled: true,
   vibrationEnabled: true,
   systemNotificationEnabled: true,
@@ -37,10 +38,19 @@ export function normalizeFocusSettings(raw) {
     quickTimes,
     lastUsedMinutes,
     recentTemporaries,
+    pomodoroRounds: normalizePomodoroRounds(base.pomodoroRounds),
     soundEnabled: base.soundEnabled !== false,
     vibrationEnabled: base.vibrationEnabled !== false,
     systemNotificationEnabled: base.systemNotificationEnabled !== false,
   }
+}
+
+/** 读取本地设置时钳制番茄组轮数，并兼容没有此字段的旧记录。 */
+export function normalizePomodoroRounds(value) {
+  const rounds = Number(value)
+  return Number.isInteger(rounds) && rounds >= 1 && rounds <= 12
+    ? rounds
+    : DEFAULT_FOCUS_SETTINGS.pomodoroRounds
 }
 
 export function pushRecentTemporary(settings, title) {

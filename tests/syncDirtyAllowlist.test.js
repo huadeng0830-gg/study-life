@@ -1,20 +1,16 @@
 // @vitest-environment happy-dom
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { nextTick } from 'vue'
-import { localChanged, markLocalChanged } from '../src/composables/cloudSync.js'
-import { cloneValue, SYNC_DEFAULTS, SYNC_KEYS } from '../src/composables/cloudSyncData.js'
+import { cloneValue, SYNC_DEFAULTS, SYNC_KEYS } from '../src/composables/accountSyncData.js'
 import { flushStoredWrites, useStoredRef } from '../src/composables/store/index.js'
 
 const LOCAL_ONLY_KEYS = [
   'sl_focus_active',
   'sl_last_backup_at',
   'sl_domain_schema',
-  'sl_sync_status',
-  'sl_leader_lease',
-  'sl_last_checked_at',
-  'sl_sync_retry',
-  'sl_pairing_ui',
   'sl_runtime_cache',
+  'study_life_account_sync_mode',
+  'study-life-account-sync-commit',
 ]
 
 function changedValue(key) {
@@ -26,20 +22,25 @@ function changedValue(key) {
   return `matrix-${key}`
 }
 
-describe('同步 dirty allowlist', () => {
+let dirtyEvents = []
+const collectDirtyEvent = (event) => dirtyEvents.push(event.detail)
+
+describe('账号同步本机变更信号', () => {
   beforeEach(() => {
     localStorage.clear()
-    localChanged.value = false
+    dirtyEvents = []
+    window.addEventListener('study-life:sync-dirty', collectDirtyEvent)
     vi.restoreAllMocks()
   })
+  afterEach(() => window.removeEventListener('study-life:sync-dirty', collectDirtyEvent))
 
-  it('本地 UI 状态写入不会标记业务同步 dirty', () => {
+  it('本机界面状态写入不会触发账号同步', () => {
     const state = useStoredRef('sl_test_ui_state', { open: false })
     state.value = { open: true }
     flushStoredWrites()
 
     expect(JSON.parse(localStorage.getItem('sl_test_ui_state'))).toEqual({ open: true })
-    expect(localChanged.value).toBe(false)
+    expect(dirtyEvents).toEqual([])
   })
 
   it('真实同步键写入仍会标记 dirty', () => {
@@ -47,23 +48,24 @@ describe('同步 dirty allowlist', () => {
     tasks.value = [{ id: 'dirty-task', title: '需要同步' }]
     flushStoredWrites()
 
-    expect(localChanged.value).toBe(true)
+    expect(dirtyEvents).toHaveLength(1)
+    expect(dirtyEvents[0].key).toBe('sl_tasks')
   })
 
   it.each(SYNC_KEYS)('SYNC_KEYS 全矩阵：%s 写入会标记 dirty', async (key) => {
-    localChanged.value = false
+    dirtyEvents = []
     const state = useStoredRef(key, SYNC_DEFAULTS[key])
     state.value = changedValue(key)
     await nextTick()
     flushStoredWrites()
 
-    expect(localChanged.value).toBe(true)
+    expect(dirtyEvents.some((event) => event.key === key)).toBe(true)
   })
 
   it.each(LOCAL_ONLY_KEYS)('Local-only key %s 不得直接标记 dirty', (key) => {
-    localChanged.value = false
-    markLocalChanged(key, JSON.stringify({ runtime: true }))
-
-    expect(localChanged.value).toBe(false)
+    const state = useStoredRef(key, null)
+    state.value = { runtime: true }
+    flushStoredWrites()
+    expect(dirtyEvents).toEqual([])
   })
 })

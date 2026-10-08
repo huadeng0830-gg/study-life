@@ -56,6 +56,13 @@ async function openSchedule() {
   mounted = await mountApp({ routes })
   const main = await gotoRoute(mounted, SCHEDULE_PATH)
   expect(main, `路由 ${SCHEDULE_PATH} 没有渲染出 main 内容`).toBeTruthy()
+  // happy-dom 默认视口为 1024px，课程表因此按手机单日模式启动；
+  // 本组测试专门验证周网格，先通过页面控件切到整周模式。
+  if (!cells().length) {
+    const weekButton = [...main.querySelectorAll('button')].find((button) => button.textContent.trim() === '整周')
+    weekButton?.click()
+    await settle()
+  }
   expect(cells().length, '课程表没有渲染出空格，守卫在守空气').toBeGreaterThanOrEqual(40)
   return main
 }

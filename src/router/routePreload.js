@@ -2,6 +2,7 @@
 export const routeLoaders = Object.freeze({
   '/': () => import('../views/TodayView.vue'),
   '/schedule': () => import('../views/ScheduleView.vue'),
+  '/course': () => import('../views/CourseArchiveView.vue'),
   '/tasks': () => import('../views/TasksView.vue'),
   '/exams': () => import('../views/ExamsView.vue'),
   '/events': () => import('../views/EventsView.vue'),
@@ -9,6 +10,8 @@ export const routeLoaders = Object.freeze({
   '/bills': () => import('../views/LedgerView.vue'),
   '/review': () => import('../views/WeeklyReviewView.vue'),
   '/notes': () => import('../views/NotesView.vue'),
+  '/together': () => import('../views/TogetherView.vue'),
+  '/projects': () => import('../views/ProjectsView.vue'),
 })
 
 function connectionAllowsPrefetch() {

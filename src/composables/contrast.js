@@ -1,5 +1,5 @@
 import { watchEffect } from 'vue'
-import { useStoredRef } from './store'
+import { useStoredRef } from './store/core.js'
 
 /**
  * 高对比度模式。

@@ -1,9 +1,13 @@
 import { computed, ref } from 'vue'
+import {
+  BACKUP_STORAGE_KEYS,
+  completeBackupArchive,
+  createBackupSnapshot,
+  parseBackupArchive,
+  restoreBackupModuleLabels,
+} from './backupArchive.js'
 import { markBackedUp } from './backupReminder.js'
-import { backupProvidedFields, buildBackupRestoreValues } from './backupRestore.js'
-import { normalizeFocusSettings } from './focusTimer.js'
-import { normalizePerformanceMode } from './performanceMode.js'
-import { SYNC_MODULES, moduleKeysFor } from './cloudSyncData.js'
+import { buildBackupRestoreValues } from './backupRestore.js'
 import {
   backupWallpapersForUndo,
   discardWallpaperUndo,
@@ -14,9 +18,7 @@ import {
 import { restoreStoredValues } from './store'
 import { getAppToday } from './timeContext.js'
 import { useTaskProgress } from './taskProgress.js'
-import { useDataManagerStatus } from './dataManagerStatus.js'
-
-const { error, message } = useDataManagerStatus()
+import { backupError, backupMessage, restoreError } from './dataManagerFeedback.js'
 
 // 进度条等第一次被用到时才创建：useTaskProgress 会挂 onScopeDispose，
 // 只有在主面板 setup 期间首次调用，才会挂到主面板的 scope 上、随它一起停表。
@@ -28,131 +30,10 @@ const selectedName = ref('')
 
 const includeWallpapers = ref(false)
 
-// 选择性备份导出：默认全选所有模块；未全选时仅导出勾选范围内的数据字段。
-const selectedBackupModules = ref(SYNC_MODULES.map((mod) => mod.key))
-const backupScopeKeys = computed(() => moduleKeysFor(selectedBackupModules.value))
-const allBackupModulesSelected = computed(() => selectedBackupModules.value.length === SYNC_MODULES.length)
-function toggleAllBackupModules() {
-  selectedBackupModules.value = allBackupModulesSelected.value ? [] : SYNC_MODULES.map((mod) => mod.key)
-}
-
-const STORAGE_KEYS = {
-  courses: 'sl_courses',
-  countdowns: 'sl_exams',
-  tasks: 'sl_tasks',
-  events: 'sl_events',
-  quickNotes: 'sl_quick_notes',
-  quickRecordSettings: 'sl_quick_record_settings',
-  captureEnabled: 'sl_capture_enabled',
-  focusSessions: 'sl_focus_sessions',
-    focusSettings: 'sl_focus_settings',
-  courseCheckins: 'sl_course_checkins',
-  courseTemplates: 'sl_course_templates',
-  checklists: 'sl_checklists',
-  bills: 'sl_bills',
-  expenses: 'sl_expenses',
-  ledgerCategories: 'sl_ledger_categories',
-  ledgerFreq: 'sl_ledger_freq',
-  ledgerFx: 'sl_ledger_fx',
-  ledgerBudget: 'sl_ledger_budget',
-  ledgerTemplates: 'sl_ledger_templates',
-  timeConfig: 'sl_timecfg',
-  semester: 'sl_semester',
-  scheduleExceptions: 'sl_schedule_exceptions',
-  scheduleNote: 'sl_schedule_note',
-  theme: 'sl_theme',
-  customThemeColor: 'sl_custom_theme_color',
-  countdownShowPast: 'sl_countdown_show_past',
-  ocrVocabulary: 'sl_ocr_vocabulary',
-  appearance: 'sl_appearance',
-  wallpaperConfig: 'sl_wallpaper_config',
-  autoWallpaperColor: 'sl_auto_wallpaper_color',
-  wallpaperAccent: 'sl_wallpaper_accent',
-  performanceMode: 'sl_performance_mode',
-  festiveConfig: 'sl_festive_config',
-  festiveBirthdayFull: 'sl_festive_birthday_full',
-  festiveLunar: 'sl_festive_lunar',
-  uiLanguage: 'sl_ui_language',
-  moodLog: 'sl_mood_log',
-  reminderLog: 'sl_reminder_log',
-}
-
-function readStored(key, fallback) {
-  try {
-    return JSON.parse(localStorage.getItem(key)) ?? fallback
-  } catch {
-    return fallback
-  }
-}
-
-function makeBackup() {
-  const backup = {
-    app: 'study-life',
-    version: 9,
-    schema: 'study-life.backup/v1',
-    exportedAt: new Date().toISOString(),
-    data: {
-      courses: readStored(STORAGE_KEYS.courses, []),
-      countdowns: readStored(STORAGE_KEYS.countdowns, []),
-      tasks: readStored(STORAGE_KEYS.tasks, []),
-      events: readStored(STORAGE_KEYS.events, []),
-      quickNotes: readStored(STORAGE_KEYS.quickNotes, []),
-      quickRecordSettings: readStored(STORAGE_KEYS.quickRecordSettings, { clipboardHint: true, recentTypes: [] }),
-      captureEnabled: readStored(STORAGE_KEYS.captureEnabled, true),
-      focusSessions: readStored(STORAGE_KEYS.focusSessions, []),
-        focusSettings: readStored(STORAGE_KEYS.focusSettings, { quickTimes: [15, 25, 45, 60], lastUsedMinutes: 25, recentTemporaries: [], soundEnabled: true, vibrationEnabled: true, systemNotificationEnabled: true }),
-      courseCheckins: readStored(STORAGE_KEYS.courseCheckins, []),
-      courseTemplates: readStored(STORAGE_KEYS.courseTemplates, []),
-      checklists: readStored(STORAGE_KEYS.checklists, []),
-      bills: readStored(STORAGE_KEYS.bills, []),
-      expenses: readStored(STORAGE_KEYS.expenses, []),
-      ledgerCategories: readStored(STORAGE_KEYS.ledgerCategories, null),
-      ledgerFreq: readStored(STORAGE_KEYS.ledgerFreq, null),
-      ledgerFx: readStored(STORAGE_KEYS.ledgerFx, null),
-      ledgerBudget: readStored(STORAGE_KEYS.ledgerBudget, null),
-      ledgerTemplates: readStored(STORAGE_KEYS.ledgerTemplates, []),
-      timeConfig: readStored(STORAGE_KEYS.timeConfig, null),
-      semester: readStored(STORAGE_KEYS.semester, null),
-      scheduleExceptions: readStored(STORAGE_KEYS.scheduleExceptions, []),
-      scheduleNote: readStored(STORAGE_KEYS.scheduleNote, ''),
-      theme: readStored(STORAGE_KEYS.theme, 'blue'),
-      customThemeColor: readStored(STORAGE_KEYS.customThemeColor, '#456fe8'),
-      countdownShowPast: readStored(STORAGE_KEYS.countdownShowPast, false),
-      ocrVocabulary: readStored(STORAGE_KEYS.ocrVocabulary, { courses: [], teachers: [], rooms: [], campuses: [] }),
-      appearance: readStored(STORAGE_KEYS.appearance, null),
-      wallpaperConfig: readStored(STORAGE_KEYS.wallpaperConfig, null),
-      autoWallpaperColor: readStored(STORAGE_KEYS.autoWallpaperColor, false),
-      wallpaperAccent: readStored(STORAGE_KEYS.wallpaperAccent, '#456fe8'),
-      performanceMode: readStored(STORAGE_KEYS.performanceMode, 'auto'),
-      festiveConfig: readStored(STORAGE_KEYS.festiveConfig, { enabled: true, birthday: '', installDate: '', anniversaries: [] }),
-      festiveBirthdayFull: readStored(STORAGE_KEYS.festiveBirthdayFull, ''),
-      festiveLunar: readStored(STORAGE_KEYS.festiveLunar, []),
-      uiLanguage: readStored(STORAGE_KEYS.uiLanguage, 'zh'),
-      moodLog: readStored(STORAGE_KEYS.moodLog, {}),
-    },
-  }
-  // 未全选时只保留勾选模块对应的数据字段，其余字段不进入备份文件（恢复时保持原样）。
-  if (!allBackupModulesSelected.value) {
-    const allowed = new Set(backupScopeKeys.value)
-    backup.data = Object.fromEntries(
-      Object.entries(backup.data).filter(([field]) => allowed.has(STORAGE_KEYS[field]))
-    )
-  }
-  return backup
-}
-
-// 校验和固定基于**紧凑** JSON：历史备份都是这么算的，改成缩进格式会让
-// 所有旧备份导入时校验失败。这里的两次序列化无法合并——文件体还要带上
-// checksum 本身，是 backup 的超集——所以保持原样，不做半吊子优化。
-async function backupChecksum(data) {
-  const bytes = new TextEncoder().encode(JSON.stringify(data))
-  const digest = await crypto.subtle.digest('SHA-256', bytes)
-  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')
-}
-
 async function exportBackup() {
-  error.value = ''
-  const backup = makeBackup()
+  backupError.value = ''
+  backupMessage.value = ''
+  const backup = createBackupSnapshot()
   const includeImages = includeWallpapers.value
   const controller = new AbortController()
   backupController = controller
@@ -184,12 +65,12 @@ async function exportBackup() {
       if (backupController === controller) backupController = null
       return
     }
-    error.value = '壁纸导出失败，已改为仅备份文字数据。'
+    backupError.value = '壁纸导出失败，已改为仅备份文字数据。'
     backupProgress.setStep('wallpapers', 'warning', '壁纸处理失败，将导出文字数据')
   }
   if (includeImages) backupProgress.setStep('file', 'running', '正在生成 JSON 备份文件')
-  backup.checksum = await backupChecksum(backup.data)
-  const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' })
+  const archive = await completeBackupArchive(backup)
+  const blob = new Blob([JSON.stringify(archive, null, 2)], { type: 'application/json' })
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
   const date = getAppToday()
@@ -199,13 +80,13 @@ async function exportBackup() {
   link.click()
   link.remove()
   window.setTimeout(() => URL.revokeObjectURL(url), 0)
-  message.value = backup.data.__wallpaper_images
+  backupMessage.value = backup.data.__wallpaper_images
     ? `备份文件已导出（含 ${Object.keys(backup.data.__wallpaper_images).length} 张壁纸），请妥善保存。`
     : '备份文件已导出，请妥善保存。'
   markBackedUp()
   if (includeImages) {
     backupProgress.setStep('file', 'completed', '备份文件已交给浏览器下载')
-    backupProgress.finish(error.value ? '文字数据已导出，壁纸需要稍后重试' : '备份文件已生成', error.value ? 'warning' : 'completed')
+    backupProgress.finish(backupError.value ? '文字数据已导出，壁纸需要稍后重试' : '备份文件已生成', backupError.value ? 'warning' : 'completed')
   }
   if (backupController === controller) backupController = null
 }
@@ -218,92 +99,16 @@ function continueBackupResult() {
   backupProgress.reset()
 }
 
-function sanitizeWallpaperImages(value) {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
-  const entries = Object.entries(value).filter(
-    ([target, dataUrl]) => typeof target === 'string' && /^data:image\//.test(String(dataUrl))
-  )
-  return entries.length ? Object.fromEntries(entries) : null
-}
-
-async function validateBackup(value) {
-  if (!value || value.app !== 'study-life' || ![1, 2, 3, 4, 5, 6, 7, 8, 9].includes(value.version) || !value.data) {
-    throw new Error('这不是有效的控制台备份文件')
-  }
-  if (value.version >= 7 && value.schema !== 'study-life.backup/v1') {
-    throw new Error('备份文件版本不受支持')
-  }
-  // v7 起的导出都会写入 checksum。导入侧原来只在"checksum 存在"时才校验，
-  // 于是把 checksum 字段整段删掉就能绕过完整性检查 —— 校验和成了摆设。
-  // 现在 v7+ 必须带校验和；v1–v6 的老备份（含应急导出）仍然可以不带。
-  const checksum = typeof value.checksum === 'string' ? value.checksum : ''
-  if (value.version >= 7 && !checksum) {
-    throw new Error('备份文件缺少校验和，无法确认文件完整性')
-  }
-  if (checksum && checksum !== await backupChecksum(value.data)) {
-    throw new Error('备份文件校验失败，文件可能已损坏或被修改')
-  }
-  const data = value.data
-  if (!Array.isArray(data.courses) || !Array.isArray(data.countdowns)) {
-    throw new Error('备份文件中的课程或重要日期数据不完整')
-  }
-  return {
-    ...value,
-    providedFields: [...backupProvidedFields(data)],
-    data: {
-      courses: data.courses,
-      countdowns: data.countdowns,
-      tasks: Array.isArray(data.tasks) ? data.tasks : [],
-      events: Array.isArray(data.events) ? data.events : [],
-      quickNotes: Array.isArray(data.quickNotes) ? data.quickNotes : [],
-      quickRecordSettings: data.quickRecordSettings && typeof data.quickRecordSettings === 'object' ? data.quickRecordSettings : { clipboardHint: true, recentTypes: [] },
-      captureEnabled: typeof data.captureEnabled === 'boolean' ? data.captureEnabled : true,
-      focusSessions: Array.isArray(data.focusSessions) ? data.focusSessions : [],
-        focusSettings: data.focusSettings && typeof data.focusSettings === 'object' ? normalizeFocusSettings(data.focusSettings) : { quickTimes: [15, 25, 45, 60], lastUsedMinutes: 25, recentTemporaries: [], soundEnabled: true, vibrationEnabled: true, systemNotificationEnabled: true },
-      courseCheckins: Array.isArray(data.courseCheckins) ? data.courseCheckins : [],
-      courseTemplates: Array.isArray(data.courseTemplates) ? data.courseTemplates : [],
-      checklists: Array.isArray(data.checklists) ? data.checklists : [],
-      bills: Array.isArray(data.bills) ? data.bills : [],
-      expenses: Array.isArray(data.expenses) ? data.expenses : [],
-      ledgerCategories: Array.isArray(data.ledgerCategories) ? data.ledgerCategories : null,
-      ledgerFreq: data.ledgerFreq && typeof data.ledgerFreq === 'object' ? data.ledgerFreq : null,
-      ledgerFx: data.ledgerFx && typeof data.ledgerFx === 'object' ? data.ledgerFx : null,
-      ledgerBudget: data.ledgerBudget && typeof data.ledgerBudget === 'object' ? data.ledgerBudget : null,
-      ledgerTemplates: Array.isArray(data.ledgerTemplates) ? data.ledgerTemplates : [],
-      timeConfig: data.timeConfig && typeof data.timeConfig === 'object' ? data.timeConfig : null,
-      semester: data.semester && typeof data.semester === 'object' ? data.semester : null,
-      scheduleExceptions: Array.isArray(data.scheduleExceptions) ? data.scheduleExceptions : [],
-      scheduleNote: typeof data.scheduleNote === 'string' ? data.scheduleNote : '',
-      theme: typeof data.theme === 'string' ? data.theme : 'blue',
-      customThemeColor: typeof data.customThemeColor === 'string' ? data.customThemeColor : '#456fe8',
-      countdownShowPast: Boolean(data.countdownShowPast),
-      ocrVocabulary: data.ocrVocabulary && typeof data.ocrVocabulary === 'object' ? data.ocrVocabulary : { courses: [], teachers: [], rooms: [], campuses: [] },
-      appearance: data.appearance && typeof data.appearance === 'object' ? data.appearance : null,
-      wallpaperConfig: data.wallpaperConfig && typeof data.wallpaperConfig === 'object' ? data.wallpaperConfig : null,
-      autoWallpaperColor: Boolean(data.autoWallpaperColor),
-      wallpaperAccent: typeof data.wallpaperAccent === 'string' ? data.wallpaperAccent : '#456fe8',
-      performanceMode: normalizePerformanceMode(data.performanceMode),
-      festiveConfig: data.festiveConfig && typeof data.festiveConfig === 'object' ? data.festiveConfig : { enabled: true, birthday: '', installDate: '', anniversaries: [] },
-      festiveBirthdayFull: typeof data.festiveBirthdayFull === 'string' ? data.festiveBirthdayFull : '',
-      festiveLunar: Array.isArray(data.festiveLunar) ? data.festiveLunar : [],
-      uiLanguage: typeof data.uiLanguage === 'string' ? data.uiLanguage : 'zh',
-      moodLog: data.moodLog && typeof data.moodLog === 'object' ? data.moodLog : {},
-      __wallpaper_images: sanitizeWallpaperImages(data.__wallpaper_images),
-    },
-  }
-}
-
 async function selectFile(event) {
-  error.value = ''
-  message.value = ''
+  restoreError.value = ''
   selectedBackup.value = null
   const file = event.target.files?.[0]
   if (!file) return
   selectedName.value = file.name
   try {
-    selectedBackup.value = await validateBackup(JSON.parse(await file.text()))
+    selectedBackup.value = await parseBackupArchive(JSON.parse(await file.text()))
   } catch (reason) {
-    error.value = reason instanceof Error ? reason.message : '无法读取这个备份文件'
+    restoreError.value = reason instanceof Error ? reason.message : '无法读取这个备份文件'
   } finally {
     event.target.value = ''
   }
@@ -313,16 +118,6 @@ const summary = computed(() => {
   const data = selectedBackup.value?.data
   if (!data) return null
   return {
-    courses: data.courses.length,
-    countdowns: data.countdowns.length,
-    tasks: data.tasks.length,
-    events: data.events.length,
-    quickNotes: data.quickNotes.length,
-    courseTemplates: data.courseTemplates.length,
-    checklists: data.checklists.length,
-    bills: data.bills.length,
-        expenses: data.expenses.length,
-    scheduleExceptions: data.scheduleExceptions.length,
     wallpapers: data.__wallpaper_images ? Object.keys(data.__wallpaper_images).length : 0,
   }
 })
@@ -330,6 +125,30 @@ const summary = computed(() => {
 // 恢复备份的确认。快照必须在打开对话框**之前**取：恢复预览里可以换文件，
 // 若确认后才去读 selectedBackup，用户中途换了备份就会写错目标（弹窗套弹窗）。
 const restoreBackupTarget = ref(null)
+
+/**
+ * 「这份备份会覆盖哪些模块」的**纯函数**版本（人话标签数组）。
+ *
+ * 【为什么必须算、不能写死】确认框原来写死的是"课程、重要日期和待办数据"，
+ * 而 `applyRestoreBackup` 走的是 `buildBackupRestoreValues(data, providedFields, BACKUP_STORAGE_KEYS)`——
+ * 按**备份携带的字段**恢复存储键：日程、专注记录、课程打卡、
+ * 账本（账单/消费/分类/汇率/预算/模板）、清单、笔记、外观、壁纸、心情、氛围与提醒去重全都在内。
+ * 写死的清单一定会随存储映射漂移，所以范围计算从三个真源反推：
+ * `providedFields`（备份实际有哪些字段）× `BACKUP_STORAGE_KEYS`（字段→存储键）× `BACKUP_MODULES`（键→人话标签）。
+ * 落在 `BACKUP_MODULES` 之外、但确实会被写回的键，统一归为「其它本机设置」，而不是假装没有。
+ * 抽成纯函数是为了能直接对这张表写守卫（不必挂载组件）。
+ */
+const restoreBackupModules = computed(() => restoreBackupModuleLabels(restoreBackupTarget.value))
+const restoreBackupPreviewModules = computed(() => restoreBackupModuleLabels(selectedBackup.value))
+
+/** 恢复确认框的文案：与 `restoreBackupModules` 同源，改一处不会两处对不上。 */
+const restoreBackupMessage = computed(() => {
+  const labels = restoreBackupModules.value
+  const scope = labels.length ? labels.join('、') : '这份备份实际携带的模块'
+  const wallpaperCount = Object.keys(restoreBackupTarget.value?.data?.__wallpaper_images || {}).length
+  const wallpapers = wallpaperCount ? `，另含 ${wallpaperCount} 张壁纸图片` : ''
+  return `恢复会用这份备份里的内容覆盖当前浏览器中的本机数据，范围是：${scope}${wallpapers}。备份里没有的模块保持原样；本机现有数据会被替换，且无法撤销。是否继续？`
+})
 
 function restoreBackup() {
   const backup = selectedBackup.value
@@ -345,7 +164,7 @@ async function applyRestoreBackup() {
   const { data } = backup
   // 校验层会为旧备份补齐显示用默认值；恢复时只能写入原文件实际携带的字段，
   // 避免用空默认值覆盖当前版本后来新增的模块。
-  const restoredValues = buildBackupRestoreValues(data, backup.providedFields, STORAGE_KEYS)
+  const restoredValues = buildBackupRestoreValues(data, backup.providedFields, BACKUP_STORAGE_KEYS)
   const previous = Object.fromEntries(
     Object.keys(restoredValues).map((key) => [key, localStorage.getItem(key)])
   )
@@ -396,10 +215,10 @@ async function applyRestoreBackup() {
     if (wallpaperUndoReady) {
       try { await restoreWallpaperUndo() } catch {}
     }
-    error.value = '恢复失败，浏览器可能已禁止本地存储或存储空间不足'
+    restoreError.value = '恢复失败，浏览器可能已禁止本地存储或存储空间不足'
     if (hasWallpapers) {
       const running = backupProgress.state.steps.find((step) => step.status === 'running')?.id
-      backupProgress.fail(running, reason instanceof Error ? reason.message : error.value, { retry: false })
+      backupProgress.fail(running, reason instanceof Error ? reason.message : restoreError.value, { retry: false })
     }
   }
 }
@@ -411,6 +230,6 @@ function abortBackup() {
 export function useDataManagerBackup() {
   if (!backupProgress) backupProgress = useTaskProgress()
   return {
-    selectedBackup, selectedName, includeWallpapers, selectedBackupModules, backupScopeKeys, allBackupModulesSelected, toggleAllBackupModules, backupProgress, exportBackup, retryBackup, continueBackupResult, abortBackup, selectFile, summary, restoreBackup, restoreBackupTarget, applyRestoreBackup, readStored, makeBackup, backupChecksum, sanitizeWallpaperImages, validateBackup,
+    selectedBackup, selectedName, includeWallpapers, backupProgress, exportBackup, retryBackup, continueBackupResult, abortBackup, selectFile, summary, restoreBackup, restoreBackupTarget, restoreBackupModules, restoreBackupPreviewModules, restoreBackupMessage, applyRestoreBackup,
   }
 }

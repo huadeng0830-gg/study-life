@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, ref, watch } from 'vue'
+import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, ref, useId, watch } from 'vue'
 import {
   createScrollLock,
   initialFocusTarget,
@@ -18,8 +18,6 @@ import {
   resolveSheetRelease,
   sheetDetentHeights,
 } from '../composables/sheetDrag.js'
-
-let nextModalId = 0
 
 const emit = defineEmits(['close'])
 
@@ -50,8 +48,8 @@ const props = defineProps({
 
 const modalEl = ref(null)
 const overlayEl = ref(null)
-const titleId = `modal-title-${++nextModalId}`
-const entry = { modalEl, previousFocus: null, active: false }
+const titleId = 'modal-title-' + useId()
+const entry = { modalEl, previousFocus: null, active: false, onBack: () => emit('close') }
 const scrollLock = createScrollLock()
 
 /**

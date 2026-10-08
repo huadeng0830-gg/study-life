@@ -12,11 +12,11 @@
  * 余量判断"要不要滚"，但 `scrollIntoView({ block: 'nearest' })` **没有"滚多少余量"这个参数**
  * ——余量只能来自 CSS 的 `scroll-margin`。所以 12px 只决定"要不要滚"，不决定"滚到哪"，
  * 元素最终仍然贴边。这也是 `DataManager` 的 `.data-section` 当初要单独写
- * `scroll-margin-top:58px` 的原因（它用的是 `block:'start'`，更是直接贴顶）。
+ * `scroll-margin-top:64px` 的原因（它用的是 `block:'start'`，更是直接贴顶）。
  *
  * 【判据分工】
  *   1. 全站 `scroll-margin` 约定必须在，且**特异性为 0**（`:where()`）——这样局部写法
- *      （如 `.data-section` 的 58px）能覆盖它，不会把已有的修正压掉；
+ *      （如 `.data-section` 的 64px）能覆盖它，不会把已有的修正压掉；
  *   2. `block:'start'|'end'` 的 `scrollIntoView` 是最危险的一种（直接贴顶/贴底），
  *      每一处都必须在 OFFSETS 里写明它的余量声明在哪，且那条声明必须仍然存在；
  *   3. 遮挡面清单**反向**守：清单里的每个 sticky 面必须还在（被删掉就该有人来更新清单
@@ -64,7 +64,7 @@ export const EDGE_BLOCKS = ['start', 'end']
 /**
  * 去掉 CSS 注释再扫。
  *
- * 这不是洁癖：这段约定自己的注释里就写着 `scroll-margin-top:58px` 与 `:where()`，
+ * 这不是洁癖：这段约定自己的注释里就写着 `scroll-margin-top:64px` 与 `:where()`，
  * 不剥注释的话会**造出幽灵规则**（注释里的属性声明被当成一条真规则，选择器则是被注释
  * 文本污染的垃圾串），而且真实那条规则的"选择器"也会被注释污染——于是把 `:where()`
  * 从代码里删掉之后，测试**照样绿**（污染串里带着注释里的 `:where()`）。
@@ -130,9 +130,9 @@ const OFFSETS = [
     offsetFile: 'components/DataManager.vue',
     offsetSelector: '.data-section',
     offsetProperty: 'scroll-margin-top',
-    reason: '移动端「跳到此段」用 block:"start"，直接把目标滚到顶部；'
-      + '上方有 sticky 的 .mobile-data-nav（top:-14px）。第五轮就在这里单独加了 '
-      + '.data-section{scroll-margin-top:58px}——本条记录的正是那处先例，'
+    reason: '数据管理「跳到此段」用 block:"start"，直接把目标滚到顶部；'
+      + '上方有 sticky 的 .data-manager-nav（top:0）。本处用 '
+      + '.data-section{scroll-margin-top:64px} 为导航留出空间，'
       + '全站 :where() 约定（48px）特异性为 0，不会覆盖它。',
   },
 ]
@@ -228,7 +228,7 @@ describe('全站焦点不被遮挡的约定', () => {
     const classSelectors = withMargin.filter((rule) => rule.selector.startsWith('.'))
     expect(
       classSelectors.map((rule) => rule.selector),
-      '全站的 scroll-margin 约定必须是 :where()（特异性 0），否则会盖掉 .data-section 的 58px 这类局部修正',
+      '全站的 scroll-margin 约定必须是 :where()（特异性 0），否则会盖掉 .data-section 的 64px 这类局部修正',
     ).toEqual([])
   })
 

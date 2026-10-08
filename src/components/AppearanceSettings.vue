@@ -11,6 +11,7 @@ import { originFromEvent, revealChange } from '../composables/motion.js'
 import { clearAllWallpapers, compressWallpaper, getWallpaper, removeWallpaper, setWallpaper, wallpaperRevision } from '../composables/wallpaperStorage.js'
 import { useTabKeys } from '../composables/tabKeys.js'
 import { appearanceTab } from '../composables/modalSections.js'
+import { reorderHomeModules, resetHomeModuleOrder as resetHomeModuleOrderValue } from '../composables/homeModules.js'
 
 // 高对比度开关（与 style.css 的 :root[data-contrast='high'] 对应）。
 // 用 computed 双向绑定，select 才能用布尔值当 v-model。
@@ -151,11 +152,9 @@ function moduleIndexOf(id) {
   return appearance.value.homeModules.findIndex((item) => item.id === id)
 }
 function moveHomeModule(from, to) {
-  if (from === to || from < 0 || to < 0 || to >= appearance.value.homeModules.length) return
-  const arr = [...appearance.value.homeModules]
-  const [moved] = arr.splice(from, 1)
-  arr.splice(to, 0, moved)
-  appearance.value.homeModules = arr
+  const current = appearance.value.homeModules
+  const reordered = reorderHomeModules(current, from, to)
+  if (reordered !== current) appearance.value.homeModules = reordered
 }
 function startModuleDrag(id, event) {
   if (event.pointerType === 'mouse' && event.buttons !== 1) return
@@ -204,8 +203,7 @@ function onModuleDragKeydown(event, id) {
   })
 }
 function resetHomeModuleOrder() {
-  const byVisible = new Map(appearance.value.homeModules.map((item) => [item.id, item.visible]))
-  appearance.value.homeModules = HOME_MODULES.map((item) => ({ id: item.id, visible: byVisible.get(item.id) ?? true }))
+  appearance.value.homeModules = resetHomeModuleOrderValue(appearance.value.homeModules, HOME_MODULES)
 }
 
 async function loadPreview() {
@@ -458,7 +456,7 @@ const previewStyle = computed(() => ({
         </div>
 
         <div class="color-row"><label><input v-model="autoWallpaperColor" type="checkbox" /> 使用壁纸自动取色</label><span class="color-swatch" :style="{ background: wallpaperAccent }"></span><input v-model="wallpaperAccent" type="color" aria-label="壁纸主题色" /></div>
-        <p class="privacy-note">图片会先在本机压缩，再保存到当前设备；不会上传服务器。二维码迁移时可单独选择是否携带壁纸。</p>
+        <p class="privacy-note">图片会先在本机压缩，再保存到当前设备；账号同步不会上传图片。需要迁移壁纸时，请在数据管理的完整备份中选择携带图片。</p>
       </section>
     </div>
 
@@ -1108,7 +1106,4 @@ const previewStyle = computed(() => ({
   font-size:var(--fs-12)}
 
 </style>
-
-
-
 

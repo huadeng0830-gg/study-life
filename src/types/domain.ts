@@ -56,11 +56,14 @@ export interface Task {
   completedAt?: string | null
   createdAt?: string
   updatedAt?: string
-  repeat?: 'none' | 'weekly'
   estimateMinutes?: number
   note?: string
   kind?: 'todo' | 'homework' | 'review' | 'exam-prep'
   status?: 'pending' | 'in_progress' | 'completed' | 'cancelled' | 'archived'
+  /** 重复规则。`'weekly'` 是既有值；其余由 taskRecurrence.js 的 TASK_REPEATS 定义。 */
+  repeat?: 'none' | 'daily' | 'weekdays' | 'weekly' | 'biweekly' | 'monthly'
+  /** 重复截止日期（含当天），`YYYY-MM-DD`。缺省 / 空串 = 一直重复。只在 `repeat !== 'none'` 时有意义。 */
+  repeatEndDate?: string
   createdFrom?: 'manual' | 'quick-record' | 'ocr' | 'clipboard' | 'import'
   sourceType?: string
   sourceId?: string

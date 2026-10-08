@@ -1,0 +1,45 @@
+appId: com.study-life.desktop
+productName: 三两事
+publish:
+  provider: github
+  owner: huadeng0830-gg
+  repo: study-life
+  releaseType: release
+directories:
+  app: desktop-app
+  output: release-desktop
+  buildResources: desktop
+files:
+  - main.cjs
+  - preload.cjs
+  - updaterController.cjs
+  - cachePaths.cjs
+  - package.json
+extraResources:
+  - from: dist-desktop
+    to: dist-desktop
+    filter:
+      - "**/*"
+asar: true
+npmRebuild: false
+win:
+  icon: desktop/sanliangshi.ico
+  target:
+    - target: nsis
+      arch:
+        - x64
+nsis:
+  artifactName: study-life-desktop-setup-${version}.${ext}
+  oneClick: false
+  perMachine: false
+  packElevateHelper: false
+  allowElevation: false
+  allowToChangeInstallationDirectory: true
+  deleteAppDataOnUninstall: false
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  runAfterFinish: true
+  installerLanguages:
+    - zh_CN
+  language: 2052
+  include: desktop/installer.nsh

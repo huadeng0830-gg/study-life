@@ -78,6 +78,8 @@ describe('提醒调度器', () => {
     expect(scheduler.collectDueReminders(now).map((item) => item.key)).toContain('task:t3')
     // 模拟 fire 之后：startReminderScheduler 会从 localStorage 重读去重集合。
     localStorage.setItem('sl_reminder_log', JSON.stringify([{ key: 'task:t3', firedAt: now }]))
+    const { clock } = await import('../src/composables/store/core.js')
+    clock.value = new Date(now)
     scheduler.startReminderScheduler()
     try {
       expect(scheduler.collectDueReminders(now).map((item) => item.key)).not.toContain('task:t3')

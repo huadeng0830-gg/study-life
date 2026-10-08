@@ -71,7 +71,7 @@ describe('动效令牌一致性', () => {
         }
       }
     }
-    expect(offenders).toEqual([])
+    expect(offenders, offenders.join('\n')).toEqual([])
   })
 
   it('CSS 令牌的值与 motion.js 的 JS 常量一致', () => {

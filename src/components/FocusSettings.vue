@@ -2,44 +2,29 @@
 import { ref, watch } from 'vue'
 import Modal from './Modal.vue'
 import { useStoredRef } from '../composables/store/index.js'
-import { DEFAULT_FOCUS_SETTINGS, normalizeFocusSettings } from '../composables/focusTimer.js'
+import { DEFAULT_FOCUS_SETTINGS } from '../composables/focusTimer.js'
+import { focusSettingsDraftOf, prepareFocusSettingsSave } from '../composables/focusSettingsEditor.js'
 
 const props = defineProps({ open: Boolean })
 const emit = defineEmits(['close'])
 
 const settings = useStoredRef('sl_focus_settings', DEFAULT_FOCUS_SETTINGS)
-const draft = ref({
-  quickTimes: [...normalizeFocusSettings(DEFAULT_FOCUS_SETTINGS).quickTimes],
-  soundEnabled: true,
-  vibrationEnabled: true,
-  systemNotificationEnabled: true,
-})
+const draft = ref(focusSettingsDraftOf(DEFAULT_FOCUS_SETTINGS))
 const error = ref('')
 
 watch(
   () => props.open,
   (open) => {
     if (!open) return
-    const value = normalizeFocusSettings(settings.value)
-    draft.value = {
-      quickTimes: [...value.quickTimes],
-      soundEnabled: value.soundEnabled,
-      vibrationEnabled: value.vibrationEnabled,
-      systemNotificationEnabled: value.systemNotificationEnabled,
-    }
+    draft.value = focusSettingsDraftOf(settings.value)
     error.value = ''
   }
 )
 
 async function save() {
-  const quickTimes = draft.value.quickTimes.map((value) => Number(value))
-  if (quickTimes.some((value) => !Number.isFinite(value) || value < 5 || value > 180)) {
-    error.value = '常用时间必须是 5～180 之间的整数'
-    return
-  }
-  const unique = [...new Set(quickTimes.map((value) => Math.round(value)))]
-  if (unique.length !== 4) {
-    error.value = '4 个常用时间不能重复'
+  const result = prepareFocusSettingsSave(settings.value, draft.value)
+  if (!result.ok) {
+    error.value = result.error
     return
   }
   if (draft.value.systemNotificationEnabled) {
@@ -65,13 +50,7 @@ async function save() {
       return
     }
   }
-  settings.value = normalizeFocusSettings({
-    ...normalizeFocusSettings(settings.value),
-    quickTimes: unique,
-    soundEnabled: draft.value.soundEnabled,
-    vibrationEnabled: draft.value.vibrationEnabled,
-    systemNotificationEnabled: draft.value.systemNotificationEnabled,
-  })
+  settings.value = result.settings
   emit('close')
 }
 </script>
@@ -90,6 +69,15 @@ async function save() {
           </label>
         </div>
         <button class="btn btn-ghost reset-btn" type="button" @click="draft.quickTimes = [...DEFAULT_FOCUS_SETTINGS.quickTimes]">恢复默认 15/25/45/60</button>
+      </section>
+
+      <section>
+        <h4>番茄轮次</h4>
+        <label class="rounds-setting" for="focus-rounds">每组轮数
+          <input id="focus-rounds" v-model.number="draft.pomodoroRounds" type="number" min="1" max="12" step="1" inputmode="numeric" />
+          <span>轮</span>
+        </label>
+        <p class="hint">专注计时结束后自动开始休息；每组最后一轮休息 10 分钟，其余轮次休息 5 分钟。</p>
       </section>
 
       <section>
@@ -154,6 +142,8 @@ async function save() {
   color: var(--ink-faint);
   font-size: var(--fs-12);
 }
+.rounds-setting { display: flex; align-items: center; gap: 8px; color: var(--ink-soft); font-size: var(--fs-12); }
+.rounds-setting input { width: 72px; min-height: 38px; padding: 7px 8px; text-align: center; }
 .reset-btn {
   align-self: flex-start;
   padding: 6px 12px;

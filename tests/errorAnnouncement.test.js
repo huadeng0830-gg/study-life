@@ -34,8 +34,17 @@ const srcDir = resolve(import.meta.dirname, '..', 'src')
 
 /** 整体播报的错误消息类名。内层零件与逐行标记刻意不在内（见文件头）。 */
 export const FEEDBACK_ERROR_CLASSES = ['error', 'task-error', 'custom-error', 'form-error', 'note-error']
-/** 整体播报的成功消息类名。 */
-export const FEEDBACK_SUCCESS_CLASSES = ['success', 'notice-success']
+/**
+ * 整体播报的成功消息类名。
+ *
+ * `settings-toast` 是**后补进来的**：作息弹窗的轻量成功提示（保存草稿 / 复制方案 /
+ * 导入 / 撤销 / 恢复默认都走它）一直用这个类名，而它原先不在集合里——于是那条
+ * `v-if` 插入的成功提示既没有 `role="status"` 也不被这条守卫覆盖（同仓 AppearanceSettings
+ * 的成功提示反而是合规的，两份提示两种待遇）。补类名之前先给 `TimeSettingsModal.vue`
+ * 的那个 `<p>` 加上 `role="status"`，否则补完集合会立刻报红——这是预期的：
+ * 集合是"必须礼貌播报的成功提示"的名册，新类名进来就要连带满足角色要求。
+ */
+export const FEEDBACK_SUCCESS_CLASSES = ['success', 'notice-success', 'settings-toast']
 
 /** 只有静态 class="…" 才算；:class 是绑定，不进判据。 */
 function staticClasses(attrs) {
@@ -91,6 +100,42 @@ const REF_ATTRS = ['aria-describedby', 'aria-labelledby', 'aria-errormessage', '
  * 早期版本没区分这两者，于是 `:aria-labelledby="titleId"` 被当成「id 叫 titleId」而误报悬空——
  * 是夹具里那条「写变量应跳过」的用例把它抓出来的。
  */
+/**
+ * 从绑定表达式的**取值分支**里取出字符串字面量。
+ *
+ * 【为什么要跳过条件部分】`:aria-describedby="errorField === 'title' ? 'x' : undefined"`
+ * 里有两个字符串字面量，但只有 'x' 是 id —— 'title' 是条件里的字段名。
+ * 原实现把两者都拿去查 id，于是任何"条件里带引号比较"的正确写法都会被误判成悬空引用
+ * （本仓库真实踩到过：TasksView 的 errorField === 'title' 被报成
+ * `<input aria-describedby="title"> 找不到该 id`）。
+ *
+ * 做法：按顶层（引号外的）`?` / `:` 切段，丢掉第 0 段（条件），只从取值分支取字面量。
+ * 这覆盖了本项目实际用到的写法；复杂表达式取不到字面量时退化为不检查，
+ * 宁可漏报也不误报 —— 误报会让人开始整体忽略这条守卫。
+ */
+export function idLiteralsFromBinding(raw) {
+  const segments = []
+  let current = ''
+  let quote = null
+  let depth = 0
+  for (let i = 0; i < raw.length; i++) {
+    const ch = raw[i]
+    if (quote) {
+      current += ch
+      if (ch === quote) quote = null
+      continue
+    }
+    if (ch === "'" || ch === '"') { quote = ch; current += ch; continue }
+    if (ch === '(' || ch === '[' || ch === '{') depth++
+    if (ch === ')' || ch === ']' || ch === '}') depth--
+    if (depth === 0 && (ch === '?' || ch === ':')) { segments.push(current); current = ''; continue }
+    current += ch
+  }
+  segments.push(current)
+  // segments[0] 是条件，从 segments[1] 起才是取值分支。
+  return segments.slice(1).flatMap((segment) => [...segment.matchAll(/'([^']+)'|"([^"]+)"/g)].map((mm) => mm[1] ?? mm[2]))
+}
+
 export function findDanglingAriaRefs(template) {
   const ids = declaredIds(template)
   const out = []
@@ -100,9 +145,12 @@ export function findDanglingAriaRefs(template) {
       if (!m) continue
       const bound = m[1] === ':'
       const raw = m[2]
-      const candidates = bound
-        ? [...raw.matchAll(/'([^']+)'|"([^"]+)"/g)].map((mm) => mm[1] ?? mm[2])
-        : raw.trim().split(/\s+/)
+      const candidates = (bound ? idLiteralsFromBinding(raw) : [raw.trim()])
+        // 【每个候选都要按空白再切一次】ARIA 的 IDREF 列表本身就是空格分隔的，
+        // 所以 `:aria-describedby="cond ? 'a b' : 'a'"` 里的字面量同样可能含多个 id。
+        // 原先只在**非绑定**分支切分，于是绑定写法会被当成一个叫 "a b" 的 id 去查 ——
+        // 正确写法反而被判成悬空引用。
+        .flatMap((part) => String(part).trim().split(/\s+/)).filter(Boolean)
       for (const id of candidates) {
         if (!id || id === 'undefined') continue
         if (!ids.has(id)) out.push({ tag, attr, id })
@@ -208,5 +256,21 @@ describe('ARIA 引用不得悬空', () => {
     expect(findDanglingAriaRefs('<input aria-describedby="a b"><p id="a"></p>')).toHaveLength(1)
     // 写变量时无法静态解出 → 跳过，不是漏报
     expect(findDanglingAriaRefs('<input :aria-labelledby="titleId"><h2 :id="titleId"></h2>')).toEqual([])
+  })
+
+  it('夹具：条件里的字段名不是 id，取值分支里的才是', () => {
+    // `errorField === 'title' ? 'form-err' : undefined` 只有一个 id（'form-err'）。
+    // 原实现把两个字符串字面量都当 id，于是把 'title' 报成悬空引用 ——
+    // TasksView 上真的这么误报过。误报比漏报更糟：它会训练人忽略这条守卫。
+    expect(findDanglingAriaRefs('<input :aria-describedby="errorField === \'title\' ? \'form-err\' : undefined"><p id="form-err">x</p>')).toEqual([])
+    // 但取值分支里真的悬空，仍然要报出来。
+    expect(findDanglingAriaRefs('<input :aria-describedby="errorField === \'title\' ? \'gone\' : undefined"><p id="form-err">x</p>')).toHaveLength(1)
+  })
+
+  it('夹具：绑定写法里的空格分隔 IDREF 列表要逐个核对', () => {
+    // AccountPanel 就是这种写法：`:aria-describedby="err ? 'account-email-error account-form-error' : 'account-form-error'"`。
+    // 不切分的话它会被当成一个叫 "a b" 的 id，于是**正确写法被判成悬空**。
+    expect(findDanglingAriaRefs('<input :aria-describedby="e ? \'a b\' : \'a\'"><p id="a"></p><p id="b"></p>')).toEqual([])
+    expect(findDanglingAriaRefs('<input :aria-describedby="e ? \'a b\' : \'a\'"><p id="a"></p>')).toHaveLength(1)
   })
 })

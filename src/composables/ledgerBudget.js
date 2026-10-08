@@ -72,7 +72,7 @@ function minorOf(value) {
  * `level`：`over`（超出预算）/ `near`（≥80%）/ `ok`（在预算内）/ `none`（未设置预算）。
  * 比较全部在「分」上做，负的 spent（退款冲抵后为负）也会如实算出剩余额度。
  */
-export function budgetStatus({ spent = 0, budget = null, nearRatio = BUDGET_NEAR_RATIO, today = null } = {}) {
+export function budgetStatus({ spent = 0, todaySpent = 0, budget = null, nearRatio = BUDGET_NEAR_RATIO, today = null } = {}) {
   const limit = normalizeMonthlyBudget(budget)
   const spentCents = minorOf(spent)
   if (limit === null) {
@@ -90,27 +90,30 @@ export function budgetStatus({ spent = 0, budget = null, nearRatio = BUDGET_NEAR
     set: true, level, budget: limit, spent: spentCents / 100,
     spentCents, budgetCents, remaining: remainingCents / 100, remainingCents,
     ratio, pct: Math.round(ratio * 100),
-    pacing: budgetPacing({ remainingCents, budgetCents, spentCents, today }),
+    pacing: budgetPacing({ remainingCents, budgetCents, spentCents, todaySpentCents: minorOf(todaySpent), today }),
   }
 }
 
 /**
- * 预算节奏：「今天还能花多少」。
+ * 预算节奏：把「今天还能花多少」和「后续每天平均能花多少」拆开。
  *
  * 【为什么需要】预算此前只回答「还剩多少钱」，而这个数在月初毫无参考价值
  * （每月 1 号总是显示「还剩 5000」）。用户真正要的是**按天摊**之后还能花多少。
  * 这个除法是每个记账 App 首屏都有的一行字，而 `remaining` 早就在返回值里了。
  *
  * 口径：按当月真实天数摊，不是 1/30。
- *   - `daysLeft`：含今天在内的剩余天数；
- *   - `dailyAllowance`：`remaining / daysLeft`（还剩的钱平均到剩余每一天）；
- *   - `dailySpent`：`spent / daysPassed`（已经花的日均，用于对比）；
- *   - 超支时 dailyAllowance 为负 —— 那是真实含义（「今天已经超了 X」），不截断成 0。
+ *   - `daysLeft`：含今天在内的剩余天数，只用于计算今日固定额度；
+ *   - `todayRemaining`：今日固定额度减去今日净支出，今天的新增消费只会让它减少；
+ *   - `daysAfterToday`：今天之后到月底的天数，不含今天；
+ *   - 后续日均 = (本月剩余预算 - 今日尚未用完的额度) / daysAfterToday；
+ *     今日额度已单独展示，因此先从未来可分配的预算中扣除，避免把它重复分给未来日期。
+ *     今天超出固定额度时，超出部分已反映在本月剩余预算里，会压低后续日均。
+ *   - `dailySpent`：`spent / daysPassed`（已过去日期的日均，用于对比）。
  *
- * 月末（daysLeft = 1）时 dailyAllowance === remaining，行为自然退化成「还剩多少」，
- * 所以任何时候展示都不会自相矛盾。
+ * 每日额度按分向下取整，展示的「可用」数不会把可分配总额多算几分钱。
+ * 月末没有今天之后的日期，后续日均为 `null`，今日额度仍正常显示。
  */
-function budgetPacing({ remainingCents, budgetCents, spentCents, today }) {
+function budgetPacing({ remainingCents, budgetCents, spentCents, todaySpentCents = 0, today }) {
   const date = today ? String(today).slice(0, 10) : policyDateKey()
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(date)
   if (!match) return null
@@ -121,16 +124,34 @@ function budgetPacing({ remainingCents, budgetCents, spentCents, today }) {
   if (!daysInMonth) return null
   const daysPassed = Math.min(Math.max(day, 1), daysInMonth)
   const daysLeft = daysInMonth - daysPassed + 1
-  const dailyAllowanceCents = Math.round(remainingCents / daysLeft)
+  const daysAfterToday = daysInMonth - daysPassed
   const dailySpentCents = Math.round(spentCents / daysPassed)
+  // 今日额度以「今天之外的本月净支出」为基准，今天新记的消费只会扣减今日余额。
+  // 向下取整，确保固定额度不因分钱舍入而高于剩余预算。
+  const todayAllowanceCents = Math.max(0, Math.floor((remainingCents + todaySpentCents) / daysLeft))
+  // 退款可抵回当天实际支出，但当日可用额最多恢复到固定额度本身。
+  const todayRemainingCents = Math.min(todayAllowanceCents, todayAllowanceCents - todaySpentCents)
+  // 今日余额为正时，它仍然只属于今天，必须从未来额度池中扣除。
+  // 若今日已超固定额度，月剩余预算已包含这笔超额，取 0 避免反向加回。
+  const futureBudgetCents = Math.max(0, remainingCents - Math.max(0, todayRemainingCents))
+  const futureDailyAllowanceCents = daysAfterToday > 0
+    ? Math.floor(futureBudgetCents / daysAfterToday)
+    : null
+  const futureDailyAllowance = futureDailyAllowanceCents === null ? null : futureDailyAllowanceCents / 100
   return {
     daysPassed,
     daysLeft,
+    daysAfterToday,
     daysInMonth,
-    dailyAllowance: dailyAllowanceCents / 100,
+    // dailyAllowance 保留为兼容字段，语义现在明确为「后续日均可用」。
+    dailyAllowance: futureDailyAllowance,
+    futureDailyAllowance,
     dailySpent: dailySpentCents / 100,
+    todayAllowance: todayAllowanceCents / 100,
+    todayRemaining: todayRemainingCents / 100,
+    futureBudgetRemaining: futureBudgetCents / 100,
     // 供文案判断是否值得提醒：当前日均已经超过「还能花」的额度时值得说。
-    overspending: dailySpentCents > dailyAllowanceCents && dailyAllowanceCents >= 0,
+    overspending: futureDailyAllowanceCents !== null && dailySpentCents > futureDailyAllowanceCents,
     // 预算按天摊：已过去的这些天「本来应该花掉多少」，用来判断节奏是否超前。
     expectedSpent: Math.round(budgetCents * daysPassed / daysInMonth) / 100,
   }
@@ -144,12 +165,13 @@ function budgetPacing({ remainingCents, budgetCents, spentCents, today }) {
  */
 export function budgetPaceText(status, { base = 'CNY' } = {}) {
   if (!status || !status.set || !status.pacing || status.remaining <= 0) return ''
-  const { dailyAllowance, daysLeft, overspending } = status.pacing
-  const money = moneyWithCurrency(dailyAllowance, base)
+  const { futureDailyAllowance, daysAfterToday, overspending } = status.pacing
+  if (daysAfterToday <= 0 || futureDailyAllowance === null) return ''
+  const money = moneyWithCurrency(futureDailyAllowance, base)
   const remain = moneyWithCurrency(status.remaining, base)
   return overspending
-    ? `${remain}，按剩余 ${daysLeft} 天算每天可花 ${money}，但当前日均已经超了它`
-    : `${remain}，按剩余 ${daysLeft} 天算每天可花 ${money}`
+    ? `${remain}，今日额度已单独计算；后续 ${daysAfterToday} 天平均每天可用 ${money}，但当前月日均已高于它`
+    : `${remain}，今日额度已单独计算；后续 ${daysAfterToday} 天平均每天可用 ${money}`
 }
 
 /** 预警文案的唯一出处。未设预算返回空字符串；超支与接近预算必须是两句不同的话。 */

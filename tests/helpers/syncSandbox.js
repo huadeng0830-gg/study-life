@@ -1,11 +1,10 @@
-import { sanitizeSyncPayload } from '../../src/composables/cloudSyncData.js'
+import { sanitizeSyncPayload } from '../../src/composables/accountSyncData.js'
 import {
   buildEntityManifest,
   buildSyncManifest,
   cloneSyncValue,
   hashSyncValue,
   mergeRestoreMarkers,
-  removeSupersededTombstones,
   validateStableEntityIds,
   validateSyncManifest,
 } from '../../src/composables/syncMetadata.js'
@@ -185,10 +184,7 @@ export function createSyncSandbox({ initialValues = {}, namespace = runId() } = 
     }
 
     target.local = cloneSyncValue({ ...target.local, ...merge.values })
-    const mergedTombstones = removeSupersededTombstones(
-      merge.values,
-      mergeTombstones(target.tombstones, envelope.manifest.tombstones || [])
-    )
+    const mergedTombstones = mergeTombstones(target.tombstones, envelope.manifest.tombstones || [])
     target.restoreMarkers = mergeRestoreMarkers(target.restoreMarkers, envelope.manifest.restoreMarkers || [])
     const restored = new Set(target.restoreMarkers.map((item) => `${item.entityType}:${item.entityId}:${item.tombstoneId}`))
     target.tombstones = mergedTombstones.filter((item) => !restored.has(`${item.entityType}:${item.entityId}:${item.tombstoneId}`))

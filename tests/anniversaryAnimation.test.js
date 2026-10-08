@@ -153,10 +153,11 @@ describe('对照：不是周年时不该出现', () => {
 describe('源码层：动画确实是分叉的，且没有新增动效令牌', () => {
   const css = readFileSync(resolve(root, 'src/style.css'), 'utf8')
   const appSource = readFileSync(resolve(root, 'src/App.vue'), 'utf8')
+  const atmosphereSource = readFileSync(resolve(root, 'src/composables/festiveAtmosphere.js'), 'utf8')
   const body = (regex) => (regex.exec(css)?.[1] ?? '').trim()
 
-  /** JS 侧认定的周年 key（从 App.vue 源码里解析，不另抄一份清单）。 */
-  const anniversaryKeys = [...(/const ANNIVERSARY_KEYS = \[([^\]]*)\]/.exec(appSource)?.[1] ?? '')
+  /** JS 侧认定的周年 key（从氛围投影模块解析，不另抄一份清单）。 */
+  const anniversaryKeys = [...(/const ANNIVERSARY_KEYS = \[([^\]]*)\]/.exec(atmosphereSource)?.[1] ?? '')
     .matchAll(/'([^']+)'/g)].map((match) => match[1])
 
   /** 两边清单对账：返回 CSS 里没有专属规则的周年 key。 */
@@ -196,6 +197,6 @@ describe('源码层：动画确实是分叉的，且没有新增动效令牌', (
 
   it('外壳按 key 打标记，而不是改动装饰名', () => {
     expect(appSource).toContain(':data-festive="festiveToday.key"')
-    expect(appSource).toContain('ANNIVERSARY_KEYS')
+    expect(atmosphereSource).toContain('ANNIVERSARY_KEYS')
   })
 })

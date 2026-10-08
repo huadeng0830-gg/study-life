@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, onMounted, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   MAX_WEEK,
@@ -8,14 +8,8 @@ import {
 } from '../composables/store'
 import {
   campusName,
-  currentTimes,
-  periodIndex,
   seasonName,
-  courseTimeRange,
 } from '../composables/store/timeConfig.js'
-import {
-  coursesForDates,
-} from '../composables/store/schedule.js'
 import { appearance, HOME_MODULES } from '../composables/appearance.js'
 import { festiveConfig, moodLog } from '../composables/atmosphereStore.js'
 import { festiveFor } from '../composables/festive.js'
@@ -23,23 +17,30 @@ import { narrativeFor, narrativeLang } from '../composables/narrative.js'
 import MemoryView from '../components/MemoryView.vue'
 import FocusPanel from '../components/FocusPanel.vue'
 import InboxPanel from '../components/InboxPanel.vue'
+import SocialCalendarEvents from '../components/SocialCalendarEvents.vue'
 import Modal from '../components/Modal.vue'
 import { useStoredRef } from '../composables/store/index.js'
 import { useDomainCommands } from '../composables/domain/commands.js'
 import { useQuickRecordAdapters } from '../composables/quickRecord/adapters.js'
 import { selectTodayActionPanels, reminderAction } from '../composables/domain/selectors.js'
+import { selectWeeklyBillSummary, weekRange } from '../composables/domain/weeklySelectors.js'
+import { normalizeLedgerFx, summarizeLedgerInBase, useLedgerFx } from '../composables/ledgerFx.js'
+import { mySpendYuan } from '../composables/ledgerSplit.js'
+import { moneyWithCurrency } from '../utils/formatters.js'
 import { isArchived, isBillDueSoon, isTaskActionable, taskPlanningState, taskStatus } from '../composables/domain/state.js'
 import { weeklyPulse } from '../composables/experience.js'
 import { schedulePolicy } from '../composables/settingsPolicy.js'
-import { addAppDays, appCalendarDaysBetween, appDateTime, appNow, appToday, currentDayIndex, currentWeek, getAppTime, formatAppDate } from '../composables/timeContext.js'
-import { courseTiming } from '../composables/courseTime.js'
+import { addAppDays, appCalendarDaysBetween, appNow, appToday, currentDayIndex, currentWeek, getAppTime, formatAppDate } from '../composables/timeContext.js'
+import { selectHomeNextUp } from '../composables/home/nextUp.js'
 import { MOOD_OPTIONS, logMood, moodOf } from '../composables/mood.js'
 import { focusLocation } from '../composables/focusNavigation.js'
 import { clearFocusFromRoute, focusElementWhenReady, readFocusQuery } from '../composables/focusNavigation.js'
 import { recordStartupTiming, reportStartupAssetSummary, startupNow } from '../composables/startupDiagnostics.js'
 
+const HomeProductivityPanel = defineAsyncComponent(() => import('../components/HomeProductivityPanel.vue'))
 const domain = useDomainCommands()
-const { courses, tasks, milestones: exams, bills, events, notes: quickNotes } = domain
+const { courses, tasks, milestones: exams, bills, transactions, events, notes: quickNotes } = domain
+const { fx: ledgerFx } = useLedgerFx()
 const router = useRouter()
 const route = useRoute()
 const focusSessions = useStoredRef('sl_focus_sessions', [])
@@ -149,78 +150,49 @@ const currentQuote = computed(() => {
   return quotes[Number(todayKey().replace(/-/g, '')) % quotes.length]
 })
 
-function minutesOf(value) {
-  if (!value) return null
-  const [hour, minute] = value.split(':').map(Number)
-  return hour * 60 + minute
-}
-
 /* ---------- 接下来：首页最高优先级 ---------- */
-function dateAfter(offset) {
-  return addAppDays(todayKey(), offset)
-}
-
-function itemAt(date, time = '23:59') {
-  return appDateTime(date, time || '23:59')
-}
-
-const nextUp = computed(() => {
-  const nowTs = now.value.getTime()
-  const candidates = []
-  const times = currentTimes()
-  // 同一轮首页投影会检查未来 8 天；活动课程只需过滤一次，避免每一天
-  // 都重新扫描整张课程表。
-  const activeCourses = courses.value.filter((course) => !isArchived(course))
-  const dates = Array.from({ length: 8 }, (_, offset) => dateAfter(offset))
-  const dailyCourses = coursesForDates(activeCourses, dates)
-  for (let offset = 0; offset <= 7; offset++) {
-    const date = dates[offset]
-    const dayCourses = dailyCourses[offset]
-    for (const course of dayCourses) {
-      const start = times[periodIndex(course.start)]?.start || '23:59'
-      const end = times[periodIndex(course.end)]?.end || start
-      const startAt = itemAt(date, start)
-      const endAt = itemAt(date, end)
-      const timing = courseTiming(startAt, endAt, now.value)
-      if (timing.state !== 'ended') candidates.push({ kind: 'course', entity: course, date, time: start, endAt, dueAt: Math.max(startAt, nowTs), state: timing.state, timing })
-    }
-  }
-  const add = (kind, entity, date, time = '') => {
-    if (!entity || !date) return
-    const dueAt = itemAt(date, time || '23:59')
-    if (dueAt >= nowTs && dueAt <= nowTs + 7 * 86400000) candidates.push({ kind, entity, date, time, dueAt, state: 'upcoming' })
-  }
-  events.value.filter((item) => !isArchived(item)).forEach((item) => add('event', item, item.date, item.time))
-  tasks.value.filter((item) => isTaskActionable(item, now.value)).forEach((item) => add('task', item, item.dueDate, item.dueTime))
-  bills.value.filter((item) => isBillDueSoon(item, now.value)).forEach((item) => add('bill', item, item.nextDate))
-  exams.value.filter((item) => !isArchived(item) && !item.countdown?.isPast).forEach((item) => add('milestone', item, item.date, item.time))
-  const next = candidates.sort((a, b) => a.dueAt - b.dueAt)[0]
-  return next || { kind: 'none' }
-})
-
-const nextUpTimeRange = computed(() => {
-  if (nextUp.value.kind !== 'course') return ''
-  return courseTimeRange(nextUp.value.entity)
-})
-
-const nextDeparture = computed(() => {
-  const course = nextUp.value.kind === 'course' ? nextUp.value.entity : null
-  const travelMinutes = Math.max(0, Number(course?.travelMinutes) || 0)
-  if (!course || !travelMinutes) return ''
-  const start = currentTimes()[periodIndex(course.start)]?.start
-  const startMinutes = minutesOf(start)
-  if (startMinutes === null || startMinutes === undefined) return ''
-  const leave = (startMinutes - travelMinutes + 1440) % 1440
-  const prefix = course.campusId ? `${campusName(course.campusId)} · ` : ''
-  return `${prefix}建议 ${String(Math.floor(leave / 60)).padStart(2, '0')}:${String(leave % 60).padStart(2, '0')} 出发`
-})
-
-const nextTimingLabel = computed(() => {
-  if (nextUp.value.kind !== 'course') return ''
-  return courseTiming(itemAt(nextUp.value.date, nextUp.value.time), nextUp.value.endAt, now.value).text
-})
+const nextProjection = computed(() => selectHomeNextUp({
+  courses: courses.value,
+  tasks: tasks.value,
+  events: events.value,
+  bills: bills.value,
+  milestones: exams.value,
+  now: now.value,
+  today: todayKey(),
+}))
+const nextUp = computed(() => nextProjection.value.nextUp)
+const nextUpTimeRange = computed(() => nextProjection.value.nextUpTimeRange)
+const nextDeparture = computed(() => nextProjection.value.nextDeparture)
+const nextTimingLabel = computed(() => nextProjection.value.nextTimingLabel)
 
 const pulse = computed(() => weeklyPulse({ tasks: tasks.value, focusSessions: focusSessions.value, moodLog: moodLog.value }, now.value))
+const weeklyFinance = computed(() => {
+  const range = weekRange(now.value)
+  return summarizeLedgerInBase(transactions.value, ledgerFx.value, {
+    dateFilter: (date) => date >= range.startDate && date < range.endDate,
+    amountOf: mySpendYuan,
+  })
+})
+const weeklyBills = computed(() => selectWeeklyBillSummary({ bills: bills.value, transactions: transactions.value }, now.value))
+const weeklyBillFinance = computed(() => {
+  const range = weekRange(now.value)
+  const paidBills = transactions.value.filter((item) => item?.source === 'bill')
+  return summarizeLedgerInBase(paidBills, ledgerFx.value, {
+    dateFilter: (date) => date >= range.startDate && date < range.endDate,
+    amountOf: mySpendYuan,
+  })
+})
+const ledgerCurrency = computed(() => normalizeLedgerFx(ledgerFx.value).base)
+function fxSummaryNote(summary) {
+  const prefix = summary.hasForeign
+    ? `已按 ${summary.ratesUpdatedAt || '未记录日期'} 手动汇率折算为 ${summary.base}`
+    : `金额单位 ${summary.base}`
+  return summary.hasMissing
+    ? `${prefix}；${summary.missingRates.join('、')} 缺少汇率，${summary.excludedCount} 笔未计入`
+    : prefix
+}
+const weeklyFinanceNote = computed(() => fxSummaryNote(weeklyFinance.value))
+const weeklyBillFinanceNote = computed(() => fxSummaryNote(weeklyBillFinance.value))
 const experienceMessage = ref('')
 let experienceMessageTimer = 0
 function showExperienceMessage(message) {
@@ -337,6 +309,7 @@ function countdownLabel(item) {
     <template v-if="entryReady">
       <p v-if="experienceMessage" class="experience-message" role="status">✓ {{ experienceMessage }}</p>
       <p v-if="focusMessage" class="experience-message" role="status">{{ focusMessage }}</p>
+      <HomeProductivityPanel />
 
       <template v-for="id in visibleHomeModuleIds" :key="id">
         <section v-if="id === 'next'" class="next-panel" :class="nextUp.kind" aria-label="接下来">
@@ -381,8 +354,20 @@ function countdownLabel(item) {
           <p>{{ pulse.done }} 项完成 · 专注 {{ pulse.minutes ? `${pulse.minutes} 分钟` : '暂无记录' }}<template v-if="inboxCount"> · 待整理 {{ inboxCount }} 条笔记</template></p>
         </section>
 
+        <section v-else-if="id === 'finance'" class="week-finance panel" aria-label="本周收支">
+          <div class="panel-head"><div><h2>本周收支</h2><span class="panel-subtitle">按本周账本记录汇总</span></div><router-link class="panel-link" to="/bills">打开账本 →</router-link></div>
+          <div class="week-finance-stats">
+            <div><small>支出</small><b>{{ moneyWithCurrency(weeklyFinance.expenseTotal, ledgerCurrency) }}</b></div>
+            <div><small>收入</small><b>{{ moneyWithCurrency(weeklyFinance.incomeTotal, ledgerCurrency) }}</b></div>
+            <div><small>结余</small><b :class="{ negative: weeklyFinance.incomeTotal - weeklyFinance.expenseTotal < 0 }">{{ moneyWithCurrency(weeklyFinance.incomeTotal - weeklyFinance.expenseTotal, ledgerCurrency) }}</b></div>
+          </div>
+          <p class="week-finance-note">{{ weeklyFinance.count }} 笔收支记录 · {{ weeklyFinanceNote }}<template v-if="weeklyBills.due || weeklyBills.paid"> · 固定账单已付 {{ weeklyBills.paid }} 笔（{{ moneyWithCurrency(weeklyBillFinance.expenseTotal, ledgerCurrency) }}；{{ weeklyBillFinanceNote }}），本周应付 {{ weeklyBills.due }} 项</template><template v-else> · 本周没有应付固定账单</template></p>
+        </section>
+
         <FocusPanel v-else-if="id === 'focus'" />
       </template>
+
+      <SocialCalendarEvents scope="today" />
 
       <section v-if="unscheduledCount" class="compact-link-row"><span>待安排 <b>{{ unscheduledCount }}</b></span><small>还没有日期的事项</small><router-link to="/tasks">去安排 →</router-link></section>
 
@@ -728,6 +713,29 @@ function countdownLabel(item) {
 .week-progress p {
   color:var(--ink-soft);
   font-size:var(--fs-12)}
+.week-finance-stats {
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:8px;
+  display:grid}
+.week-finance-stats>div {
+  background:var(--bg-tint);
+  border-radius:var(--radius-8);
+  flex-direction:column;
+  gap:4px;
+  min-width:0;
+  padding:10px;
+  display:flex}
+.week-finance-stats small {
+  color:var(--ink-faint);
+  font-size:var(--fs-10-5)}
+.week-finance-stats b {
+  overflow:hidden;
+  font-size:var(--fs-12-5);
+  font-variant-numeric:tabular-nums;
+  text-overflow:ellipsis;
+  white-space:nowrap}
+.week-finance-stats b.negative { color:var(--danger); }
+.week-finance-note { color:var(--ink-soft); margin-top:8px; font-size:var(--fs-11-5); }
 .today-mood-lower {
   padding:3px 4px}
 .mood-toolbar {
@@ -941,6 +949,19 @@ function countdownLabel(item) {
   grid-area:3/1/auto/-1;
   width:100%;
   max-width:none}
+}
+
+@media (min-width:901px) {
+  .today-page {
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  align-items:start;
+  gap:16px 18px;
+  display:grid}
+.today-page>.page-head,.today-page>.experience-message,.today-page>.home-productivity,.today-page>.next-panel,.today-page>.compact-link-row,.today-page>.today-mood-lower,.today-page>.inbox-entry {
+  grid-column:1/-1}
+.today-page>.home-productivity {
+  grid-template-columns:repeat(auto-fit,minmax(min(100%,430px),1fr));
+  margin:0}
 }
 
 </style>

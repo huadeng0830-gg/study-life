@@ -6,6 +6,7 @@ import { monthMoodSummary } from './mood.js'
 import { summarizeLedgerTransactions } from './ledger.js'
 import { mySpendCents } from './ledgerSplit.js'
 import { createdDateKey } from './settingsPolicy.js'
+import { taskRatePercent } from './reviewCharts.js'
 
 const number = (value) => {
   const n = Number(value)
@@ -65,7 +66,7 @@ export function daySnapshot(dateStr, data) {
       courses: courses.length,
       tasks: total,
       tasksDone: doneTasks.length,
-      taskRate: total ? Math.round((doneTasks.length / total) * 100) : 0,
+      taskRate: taskRatePercent(total, doneTasks.length),
       exams: exams.length,
       bills: bills.length,
       expensesCount: ledger.count,
@@ -137,7 +138,9 @@ export function monthReport(month, data) {
   const stats = {
     tasks: total,
     tasksDone: doneTasks.length,
-    taskRate: total ? Math.round((doneTasks.length / total) * 100) : 0,
+    // 完成率公式已抽到 reviewCharts.taskRatePercent：周度折线图要用同一个定义，
+    // 否则同一个页面里两个同名数字含义不同。公式逐字未改（分母 0 仍返回 0）。
+    taskRate: taskRatePercent(total, doneTasks.length),
     expensesCount: ledger.count,
     expensesTotal: ledger.expenseTotal,
     incomeTotal: ledger.incomeTotal,
@@ -194,7 +197,7 @@ export function yearReport(year, data) {
   const stats = {
     tasks: total,
     tasksDone: doneTasks.length,
-    taskRate: total ? Math.round((doneTasks.length / total) * 100) : 0,
+    taskRate: taskRatePercent(total, doneTasks.length),
     expensesCount: ledger.count,
     expensesTotal: ledger.expenseTotal,
     incomeTotal: ledger.incomeTotal,

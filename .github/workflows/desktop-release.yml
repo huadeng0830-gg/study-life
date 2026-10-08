@@ -1,0 +1,63 @@
+name: Windows desktop release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: windows-desktop-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: |
+            package-lock.json
+            desktop-app/package-lock.json
+
+      - name: Install root and Electron app dependencies
+        run: |
+          npm ci
+          npm ci --prefix desktop-app
+
+      - name: Verify tag and README release metadata
+        shell: pwsh
+        run: |
+          $version = node -p "require('./desktop-app/package.json').version"
+          $expectedTag = "v$version"
+          if ($env:GITHUB_REF_NAME -ne $expectedTag) {
+            throw "Tag $env:GITHUB_REF_NAME does not match desktop-app version $version (expected $expectedTag)."
+          }
+          npm run check:release-readme
+
+      - name: Run release quality gates
+        run: |
+          npm run check
+          npm run typecheck:ratchet
+
+      - name: Verify packaged updater before publishing
+        run: |
+          npm run build:desktop
+          npx electron-builder --config electron-builder.yml --win nsis --x64 --publish never
+          npm run desktop:verify
+
+      - name: Build and publish Windows installer and update metadata
+        run: npx electron-builder --config electron-builder.yml --win nsis --x64 --publish always
+        env:
+          GH_TOKEN: ${{ github.token }}

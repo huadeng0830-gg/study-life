@@ -7,9 +7,9 @@ import TaskCenter from './components/TaskCenter.vue'
 import WallpaperLayer from './components/WallpaperLayer.vue'
 import { useStoredRef } from './composables/store'
 import { isIOSDevice, reducedEffects } from './composables/performanceMode.js'
-import { festiveFor, applyAtmosphere } from './composables/festive.js'
-import { festiveConfig } from './composables/atmosphereStore.js'
-import { appNow, appToday } from './composables/timeContext.js'
+import { appNow } from './composables/timeContext.js'
+import { useFestiveAtmosphere } from './composables/festiveAtmosphere.js'
+import { useToastQueue } from './composables/useToastQueue.js'
 import { focusLocation } from './composables/focusNavigation.js'
 import {
   RELEASE_HISTORY_KEY,
@@ -24,16 +24,15 @@ import {
   reloadAfterError,
 } from './composables/globalError.js'
 import { isTaskActionable } from './composables/domain/state.js'
-// cloudSync.js **刻意不做静态导入**：它会把约 50KB 同步逻辑拉进首屏闭包，
-// 而绝大多数用户没有绑定同步空间。挂在 onMounted 里按需 import。
-import { isSyncSpaceBound, syncSpaceSettings } from './composables/syncSpace.js'
-import { autoSyncError, autoSyncState, startAutoSyncCoordinator, stopAutoSyncCoordinator } from './composables/autoSyncCoordinator.js'
+import { initializeAccountAuth } from './composables/accountAuth.js'
+import { accountSyncStatus, accountSyncError } from './composables/accountSyncState.js'
 import { localSafeMode } from './composables/localSafeMode.js'
 import { persistenceState, dismissPersistenceNotice } from './composables/store/core.js'
-import { needsBackup } from './composables/backupReminder.js'
+import { backupReminderTitle, needsBackup } from './composables/backupReminder.js'
 import { attachFloatingSlot, createFloatingSlot, detachFloatingSlot, useFloatingOffset } from './composables/floatingStack.js'
 import { announce, announceAlert, clearAnnouncement, liveAlert, liveMessage } from './composables/liveRegion.js'
 import { openSearch, searchOpen } from './composables/globalSearch.js'
+import { desktopShortcutRoutes } from './router/navigation.js'
 
 const UpdateNotes = defineAsyncComponent(() => import('./components/UpdateNotes.vue'))
 const QuickRecordPanel = defineAsyncComponent(() => import('./components/QuickRecordPanel.vue'))
@@ -47,9 +46,10 @@ let tasks = null
 let courses = null
 let stopTitleWatcher = null
 let stopRouteAnnouncer = null
+let accountSyncLifecycle = null
+let appUnmounted = false
 const showReleaseNotes = ref(false)
 const showQuickRecord = ref(false)
-const quickRecordToast = ref(null)
 const showBackupNudge = ref(false)
 let releaseTimer = 0
 let quickRecordToastTimer = 0
@@ -63,36 +63,7 @@ const quickToastOffset = useFloatingOffset(quickToastSlot, 56)
 const errorToastSlot = createFloatingSlot()
 const errorToastOffset = useFloatingOffset(errorToastSlot, 56)
 
-/* Toast 优先级队列：error > warning > success > info
-   同一时刻只显示最高优先级的 1 条，其余入队等待 */
-const PRIORITY_ORDER = { error: 4, warning: 3, success: 2, info: 1 }
-const toastQueue = ref([])
-let toastQueueTimer = 0
-
-function enqueueToast(message, { type = 'info', actionLabel = '', undoFn = null, viewFn = null, duration = 3200 } = {}) {
-  const priority = PRIORITY_ORDER[type] ?? 1
-  const id = Date.now() + Math.random()
-  toastQueue.value.push({ id, message, type, actionLabel, undoFn, viewFn, duration, priority })
-  toastQueue.value.sort((a, b) => b.priority - a.priority)
-  processToastQueue()
-}
-
-function processToastQueue() {
-  if (!toastQueue.value.length) return
-  const next = toastQueue.value[0]
-  quickRecordToast.value = { message: next.message, type: next.type, actionLabel: next.actionLabel, undoFn: next.undoFn, viewFn: next.viewFn, duration: next.duration }
-  window.clearTimeout(toastQueueTimer)
-  toastQueueTimer = window.setTimeout(() => {
-    toastQueue.value.shift()
-    if (toastQueue.value.length) processToastQueue()
-    else quickRecordToast.value = null
-  }, next.duration)
-}
-
-// 保留原有 showToast 兼容性
-function showToast(message, { type = 'info', actionLabel = '', undoFn = null, viewFn = null, duration = 3200 } = {}) {
-  enqueueToast(message, { type, actionLabel, undoFn, viewFn, duration })
-}
+const { toast: quickRecordToast, showToast } = useToastQueue()
 
 watch(() => Boolean(quickRecordToast.value), (open) => {
   if (open) attachFloatingSlot(quickToastSlot)
@@ -122,12 +93,11 @@ watch(() => persistenceState.value.status, (status) => {
 // 文案集中成常量/计算属性，模板与播报共用同一份，视觉与听觉不可能各说一套。
 const SAFE_MODE_NOTICE = {
   title: '本机安全模式',
-  body: '同步恢复完成前，自动同步、手动拉取和推送均已暂停；本机仍可读写和导出。',
+  body: '账号同步已暂停；本机仍可读写、导出备份和恢复。',
 }
 const PERSISTENCE_ERROR_TITLE = '本机保存需要注意'
 const PERSISTENCE_RECOVERED_TEXT = '✓ 本机保存已恢复'
 const BACKUP_NUDGE_NOTICE = {
-  title: '已有 7 天未备份',
   body: '清理浏览器数据或删除桌面应用可能清空本地记录，建议现在导出一份备份。',
 }
 
@@ -137,24 +107,62 @@ const BACKUP_NUDGE_NOTICE = {
  * 原先标题与正文各写一遍同样的嵌套三元表达式（改一处漏一处），现在集中成一份，
  * 且模板与播报共用——顺带把两个重复的三元链删掉了。
  */
-const autoSyncNotice = computed(() => {
-  const state = autoSyncState.value
-  if (state === 'conflict') return { title: '⚠ 有修改需要确认', body: '请打开“数据管理”处理冲突。' }
-  if (state === 'offline') {
-    return {
-      title: '☁ 当前离线',
-      body: isSyncSpaceBound.value
-        ? '本机修改已保存，联网后会继续同步。'
-        : '当前离线，本机数据可正常读写，不影响使用。',
-    }
-  }
-  if (state === 'recovery-required') return { title: '⚠ 自动同步已暂停', body: '请先恢复同步前数据。' }
-  if (state === 'error') return { title: '☁ 云端暂时不可用', body: autoSyncError.value || '本机修改已保存，稍后会继续尝试。' }
+const accountSyncNotice = computed(() => {
+  if (accountSyncStatus.value === 'offline') return { title: '☁ 账号同步等待联网', body: '本机修改已保存，联网后会继续同步。' }
+  if (accountSyncStatus.value === 'conflict') return { title: '☁ 账号同步需要确认', body: '请打开账号同步面板，选择冲突记录保留的版本。' }
+  if (accountSyncStatus.value === 'error') return { title: '☁ 账号同步暂未完成', body: accountSyncError.value || '本机记录已保留，请稍后重试。' }
   return null
 })
+/* 五条外壳级提示的排队槽位（-1 = 当前不显示，0 起 = 第几个坑）与要预留的条数。
+   为什么在 JS 里算：CSS 要拿序号做**显式**定序（`.global-alert-stack > *` 的 order），
+   隐藏的条不占坑；"谁在前"由这份清单定义，不随模板里 5 个 v-if 的书写先后静默漂移。 */
+const alertSlots = computed(() => {
+  let slot = 0
+  return Object.fromEntries([
+    ['safeMode', localSafeMode.value], ['persistenceError', persistenceState.value.status === 'error'],
+    ['persistenceRecovered', persistenceState.value.status === 'recovered'],
+    ['accountSync', Boolean(accountSyncNotice.value)], ['backupNudge', showBackupNudge.value],
+  ].map(([key, on]) => [key, on ? slot++ : -1]))
+})
+const alertCount = computed(() => Object.values(alertSlots.value).filter((slot) => slot >= 0).length)
+const hasGlobalAlert = computed(() => alertCount.value > 0)
+
+/**
+ * 横幅上的「重试账号同步」。准备阶段失败必须走 retryAccountSyncPreparation：
+ * 那时 accountSyncActive 为
+ * false，直接调同步会被第一个守卫静默挡掉，按钮等于没按。
+ */
+const retryingSync = ref(false)
+let retrySyncTimer = 0
+
+async function retrySyncNow() {
+  if (retryingSync.value) return
+  retryingSync.value = true
+  window.clearTimeout(retrySyncTimer)
+  // 给一个上限：万一底层既不 resolve 也不 reject（例如锁排队），
+  // 按钮不能永远停在"正在重试…"，否则比没有按钮更糟。
+  retrySyncTimer = window.setTimeout(() => { retryingSync.value = false }, 20000)
+  try {
+    const identity = await import('./composables/accountSyncIdentity.js')
+    if (accountSyncStatus.value === 'error' || identity.accountSyncPreparationError.value) {
+      const { retryAccountSyncPreparation, waitForAccountSyncPreparation } = await import('./composables/accountSyncLifecycle.js')
+      await retryAccountSyncPreparation()
+      await waitForAccountSyncPreparation()
+      return
+    }
+    const { syncAccountNow } = await import('./composables/accountSyncState.js')
+    await syncAccountNow()
+  } catch {
+    // 失败信息由 accountSyncError 呈现，横幅本身已经会更新，这里不再叠一层提示。
+  } finally {
+    window.clearTimeout(retrySyncTimer)
+    retrySyncTimer = 0
+    retryingSync.value = false
+  }
+}
 // 监听**文本**而不是那个每次重算都是新对象的提示对象：否则同样的内容会被反复播报。
-const autoSyncNoticeText = computed(() => {
-  const notice = autoSyncNotice.value
+const accountSyncNoticeText = computed(() => {
+  const notice = accountSyncNotice.value
   return notice ? `${notice.title}：${notice.body}` : ''
 })
 
@@ -183,62 +191,15 @@ watch(() => persistenceState.value.status, (status) => {
   if (status === 'error') announceAlertOnce(`${PERSISTENCE_ERROR_TITLE}：${persistenceState.value.message}`)
   else if (status === 'recovered') announceOnce(PERSISTENCE_RECOVERED_TEXT)
 })
-watch(autoSyncNoticeText, (text) => {
+watch(accountSyncNoticeText, (text) => {
   if (text) announceOnce(text)
 })
 watch(() => Boolean(showBackupNudge.value), (open) => {
-  if (open) announceOnce(`${BACKUP_NUDGE_NOTICE.title}：${BACKUP_NUDGE_NOTICE.body}`)
+  if (open) announceOnce(`${backupReminderTitle.value}：${BACKUP_NUDGE_NOTICE.body}`)
 })
 
 /* ---------- 氛围与情绪引擎（模块 A） ---------- */
-const todayISO = appToday
-const festiveToday = computed(() => festiveFor(todayISO.value, festiveConfig.value))
-const atmosphereKey = computed(() => festiveToday.value?.key ?? 'none')
-const CONFETTI_COLORS = ['#ef4444', '#f59e0b', '#10b981', '#3b82f6', '#8b5cf6', '#ec4899']
-/* 个人周年的专属动画（第五十四轮）。氛围侧给"纪念日 / 使用周年"的装饰与情人节、
-   儿童节是同一个（彩带），所以分叉只能靠 key，不能靠装饰名 —— 否则会把情人节
-   一起改掉。颜色刻意选了一组彩带里没有的金色，动画时长也更短更密（庆典感），
-   但**不新增动效令牌**：粒子时长本来就是内联的，光环走 --dur-reveal。 */
-const ANNIVERSARY_KEYS = ['anniversary', 'anniversary-start']
-const ANNIVERSARY_COLORS = ['#fbbf24', '#fcd34d', '#fde68a', '#eab308', '#f59e0b', '#f97316']
-const ANNIVERSARY_DURATION = 4.2
-const isAnniversary = computed(() => ANNIVERSARY_KEYS.includes(festiveToday.value?.key ?? ''))
-// 每个粒子都是一个无限循环的 CSS 动画，并且各自提升为合成层。
-// 18 个在桌面端没问题，但在窄屏手机上就是 18 个铺满全屏高度的图层，
-// 光是 GPU 显存就上去了。这里按宽度收敛：小屏 8 个，中屏 12 个，宽屏 18 个。
-const decorCount = typeof window === 'undefined'
-  ? 18
-  : (window.innerWidth < 640 ? 8 : window.innerWidth < 1024 ? 12 : 18)
-const decorParticles = Array.from({ length: decorCount }, (_, id) => ({
-  id,
-  left: (id * 5.7 + 3) % 100,
-  delay: (id % 9) * -1.1,
-  dur: 6 + (id % 5),
-  size: 6 + (id % 3) * 3,
-}))
-
-function decorStyle(particle) {
-  const decor = festiveToday.value?.decor
-  const accent = festiveToday.value?.accentColor
-  let background = accent || 'var(--primary)'
-  const lantern = decor === 'lantern'
-  if (decor === 'snow') background = '#ffffff'
-  else if (decor === 'confetti') background = CONFETTI_COLORS[particle.id % CONFETTI_COLORS.length]
-  if (isAnniversary.value) background = ANNIVERSARY_COLORS[particle.id % ANNIVERSARY_COLORS.length]
-  return {
-    left: `${particle.left}%`,
-    width: lantern ? `${14 + (particle.id % 3) * 3}px` : `${particle.size}px`,
-    height: lantern ? `${18 + (particle.id % 3) * 3}px` : decor === 'snow' ? `${particle.size}px` : `${particle.size + 3}px`,
-    background,
-    animationDelay: `${particle.delay}s`,
-    animationDuration: isAnniversary.value ? `${ANNIVERSARY_DURATION}s` : `${particle.dur}s`,
-  }
-}
-
-// 天气/节日氛围若变化，及时写入根节点 CSS 变量；无氛围时清空。
-watchEffect(() => {
-  applyAtmosphere(festiveToday.value ? { accentColor: festiveToday.value.accentColor, decor: festiveToday.value.decor } : null)
-})
+const { festiveToday, atmosphereKey, isAnniversary, decorParticles, decorStyle } = useFestiveAtmosphere()
 
 /* ---------- 全局快速记录：仅通过明确入口打开，不遮挡页面正文 ---------- */
 const quickRecordContext = computed(() => {
@@ -297,8 +258,8 @@ function openDataManager() {
   sidebarRef.value?.openDataManager?.()
 }
 
-// 按 1-6 快速切换页面（输入框聚焦时忽略）
-const routeOrder = ['/', '/schedule', '/tasks', '/exams', '/lists', '/bills']
+// 按 1-9 快速切换页面（输入框聚焦时忽略）
+const routeOrder = desktopShortcutRoutes
 
 function isTypingTarget(el) {
   if (!el) return false
@@ -346,17 +307,13 @@ function onReleaseSeenInAnotherTab(event) {
 }
 
 onMounted(() => {
-  // main.js 已完成 recovery gate 与业务 migration；mount 后只验证空间并启动生命周期。
+  // main.js 已完成账号数据恢复与业务 migration；mount 后启动账号同步生命周期。
   void (async () => {
     if (localSafeMode.value) return
-    // cloudSync.js 改成动态导入。此前 App.vue 用静态 import 把它（约 50KB raw）
-    // 拉进首屏闭包，于是 main.js:143 那处 `await import(...)` 完全失效 ——
-    // 模块早已在首屏，加载器只是取缓存。用户没绑定同步空间时这50KB 是白付的。
-    if (isSyncSpaceBound.value) {
-      const sync = await import('./composables/cloudSync.js')
-      await sync.connectSyncSpace({ ...syncSpaceSettings.value, persist: false })
-    }
-    startAutoSyncCoordinator()
+    await initializeAccountAuth()
+    if (appUnmounted) return
+    accountSyncLifecycle = await import('./composables/accountSyncLifecycle.js')
+    if (!appUnmounted) accountSyncLifecycle.startAccountSyncLifecycle()
   })()
   tasks = useStoredRef('sl_tasks', [])
   courses = useStoredRef('sl_courses', [])
@@ -365,14 +322,15 @@ onMounted(() => {
   // 没有播报的话键盘/读屏用户察觉不到"已经换页了"。
   stopTitleWatcher = watchEffect(() => {
     const pending = tasks.value.filter((task) => isTaskActionable(task, appNow.value)).length
-    const pageTitle = route.meta?.title || '学习生活台'
-    document.title = pending > 0 ? `${pageTitle} · ${pending} 项待办` : pageTitle
+    const pageTitle = route.meta?.title || '三两事'
+    const brandedTitle = pageTitle === '三两事' ? pageTitle : `三两事 · ${pageTitle}`
+    document.title = pending > 0 ? `${brandedTitle} · ${pending} 项待办` : brandedTitle
   })
   stopRouteAnnouncer = watch(() => route.path, () => {
     // 只看 path，不看 fullPath：query 变化属于**页面内部状态**——
     // 账本分区（?tab=review）、深链高亮（?focus=…）都只改 query，页面并没有换。
     // 用 fullPath 的话，每切一次分区读屏就会再听到一遍"账本 已打开"。
-    announce(`${route.meta?.title || '学习生活台'} 已打开`)
+    announce(`${route.meta?.title || '三两事'} 已打开`)
   })
   window.addEventListener('keydown', onKeydown)
   window.addEventListener('storage', onReleaseSeenInAnotherTab)
@@ -399,7 +357,8 @@ function dismissBackupNudge() {
   showBackupNudge.value = false
 }
 onBeforeUnmount(() => {
-  stopAutoSyncCoordinator()
+  appUnmounted = true
+  accountSyncLifecycle?.stopAccountSyncLifecycle()
   stopTitleWatcher?.()
   stopRouteAnnouncer?.()
   clearAnnouncement()
@@ -409,6 +368,7 @@ onBeforeUnmount(() => {
   window.clearTimeout(quickRecordToastTimer)
   window.clearTimeout(persistenceRecoveryTimer)
   window.clearTimeout(backupNudgeTimer)
+  window.clearTimeout(retrySyncTimer)
 })
 
 // 按页面内容类型分配主区域宽度。
@@ -422,7 +382,7 @@ const WIDTH_BY_PATH = {
   '/bills': 'content-mid',
 }
 const widthClass = computed(() => WIDTH_BY_PATH[route.path] ?? '')
-const cachedPageNames = ['TodayView', 'ScheduleView', 'TasksView', 'ExamsView', 'EventsView', 'ListsView', 'LedgerView', 'NotesView']
+const cachedPageNames = ['TodayView', 'ScheduleView', 'CourseArchiveView', 'TasksView', 'ExamsView', 'EventsView', 'ListsView', 'LedgerView', 'NotesView']
 // 视觉降级与页面缓存分开处理。移动 Safari 保留“当前页 + 上一页”，
 // 避免每次返回都重建复杂页面；桌面保留更多常用页面以提高来回切换速度。
 const pageCacheSize = isIOSDevice() ? 2 : 4
@@ -461,6 +421,35 @@ function t(key) {
     <!-- tabindex="-1" 是为了让上面的 skip link 真的把焦点落到 main 上：
          只给 id 的话各浏览器行为不一致，有的只移动「顺序焦点起点」而不移动焦点。 -->
     <main id="main-content" class="content" :class="widthClass" tabindex="-1">
+      <div v-if="hasGlobalAlert" class="global-alert-reserve" :style="{ '--alert-count': `${alertCount}` }" aria-hidden="true" />
+      <header class="desktop-toolbar" aria-label="桌面常用操作">
+        <button
+          type="button"
+          class="desktop-search-trigger"
+          aria-label="打开全局搜索"
+          title="搜索（/）"
+          @click="openSearch()"
+        >
+          <svg class="desktop-search-icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+            <circle cx="10.8" cy="10.8" r="6.8" />
+            <path d="m16 16 4.5 4.5" />
+          </svg>
+          <span class="desktop-search-copy">搜索所有内容…</span>
+          <kbd aria-hidden="true">/</kbd>
+        </button>
+        <span class="desktop-toolbar-spacer" aria-hidden="true"></span>
+        <button
+          type="button"
+          class="btn btn-primary desktop-record-trigger"
+          aria-keyshortcuts="Control+K Meta+K"
+          title="快速记录（Ctrl/Cmd + K）"
+          @click="openQuickRecord()"
+        >
+          <span class="desktop-record-plus" aria-hidden="true">＋</span>
+          <span>快速记录</span>
+          <kbd aria-hidden="true">Ctrl/⌘ K</kbd>
+        </button>
+      </header>
       <!-- 聚焦态（`?focus=` / `?section=`）下的返回入口。放在 router-view **之外**，
           因为它是外壳级的一条出口，不属于任何单个页面；只在聚焦时渲染，
           所以平时对布局与焦点序都没有影响。 -->
@@ -479,41 +468,47 @@ function t(key) {
     </main>
   </div>
   <TaskCenter />
-  <Transition name="global-sync">
-    <!-- 外壳级提示（共五处）刻意都**不带** role="alert"/role="status"：
-         它们随状态插入，是「新节点带内容」，读屏可能一个字都不播（见 §1.34）。
-         发声由下方常驻播报区负责，文案与这里取自同一组常量。 -->
-    <div v-if="localSafeMode" class="global-safe-mode-alert">
-      <b>{{ SAFE_MODE_NOTICE.title }}</b>
-      <span>{{ SAFE_MODE_NOTICE.body }}</span>
-      <button type="button" class="text-button" @click="openDataManager">打开数据管理</button>
-    </div>
-  </Transition>
-  <Transition name="global-sync">
-    <div v-if="persistenceState.status === 'error'" class="global-persistence-alert">
-      <b>{{ PERSISTENCE_ERROR_TITLE }}</b>
-      <span>{{ persistenceState.message }}</span>
-      <button type="button" class="btn btn-sm" @click="exportCurrentData">导出当前数据</button>
-      <button type="button" class="global-error-close tap-target" aria-label="关闭本机保存提示" @click="dismissPersistenceNotice">×</button>
-    </div>
-  </Transition>
-  <Transition name="global-sync">
-    <div v-if="persistenceState.status === 'recovered'" class="global-persistence-alert recovered">{{ PERSISTENCE_RECOVERED_TEXT }}</div>
-  </Transition>
-  <Transition name="global-sync">
-    <div v-if="autoSyncNotice" class="global-sync-alert">
-      <b>{{ autoSyncNotice.title }}</b>
-      <span>{{ autoSyncNotice.body }}</span>
-    </div>
-  </Transition>
-  <Transition name="global-sync">
-    <div v-if="showBackupNudge" class="global-persistence-alert">
-      <b>{{ BACKUP_NUDGE_NOTICE.title }}</b>
-      <span>{{ BACKUP_NUDGE_NOTICE.body }}</span>
-      <button type="button" class="text-button" @click="openDataManager">去备份</button>
-      <button type="button" class="global-error-close tap-target" aria-label="关闭备份提醒" @click="dismissBackupNudge">×</button>
-    </div>
-  </Transition>
+  <!-- 五条外壳级提示共用**一个**队列容器（取舍见 .global-alert-stack 那条规则）；
+       TransitionGroup 只为收掉五份重复的 <Transition name="global-sync">，子条必须带 key。 -->
+  <div class="global-alert-stack">
+    <TransitionGroup name="global-sync">
+      <!-- 外壳级提示（共五处）刻意都**不带** role="alert"/role="status"：
+           它们随状态插入，是「新节点带内容」，读屏可能一个字都不播（见 §1.34）。
+           发声由下方常驻播报区负责，文案与这里取自同一组常量。 -->
+      <div v-if="localSafeMode" key="safe-mode" class="global-safe-mode-alert" :style="{ '--alert-slot': `${alertSlots.safeMode}` }">
+        <b>{{ SAFE_MODE_NOTICE.title }}</b>
+        <span>{{ SAFE_MODE_NOTICE.body }}</span>
+        <button type="button" class="text-button" @click="openDataManager">打开数据管理</button>
+      </div>
+      <div v-if="persistenceState.status === 'error'" key="persistence-error" class="global-persistence-alert" :style="{ '--alert-slot': `${alertSlots.persistenceError}` }">
+        <b>{{ PERSISTENCE_ERROR_TITLE }}</b>
+        <span>{{ persistenceState.message }}</span>
+        <button type="button" class="btn btn-sm" @click="exportCurrentData">导出当前数据</button>
+        <button type="button" class="global-error-close tap-target" aria-label="关闭本机保存提示" @click="dismissPersistenceNotice">×</button>
+      </div>
+      <div v-if="persistenceState.status === 'recovered'" key="persistence-recovered" class="global-persistence-alert recovered" :style="{ '--alert-slot': `${alertSlots.persistenceRecovered}` }">{{ PERSISTENCE_RECOVERED_TEXT }}</div>
+      <div v-if="accountSyncNotice" key="account-sync" class="global-sync-alert" :style="{ '--alert-slot': `${alertSlots.accountSync}` }">
+        <b>{{ accountSyncNotice.title }}</b>
+        <span>{{ accountSyncNotice.body }}</span>
+        <!-- 【这条横幅原来一个按钮都没有】旁边三条外壳级提示都带出口
+             （安全模式→打开数据管理、保存出错→导出数据、备份提醒→去备份），
+             唯独同步这条没有。同步失败的原因里有相当一部分需要用户动手
+             （去数据管理处理冲突、在本机安全模式下恢复、导出后重试账号同步），
+             没有按钮就等于只有一条死路 —— 用户看到红色横幅却无处可去。
+             重试放在最前面，因为它是最常见也最省事的那一个。 -->
+        <button type="button" class="btn btn-sm" :disabled="retryingSync" @click="retrySyncNow">
+          {{ retryingSync ? '正在重试…' : '重试账号同步' }}
+        </button>
+        <button type="button" class="text-button" @click="openDataManager">打开数据管理</button>
+      </div>
+      <div v-if="showBackupNudge" key="backup-nudge" class="global-persistence-alert" :style="{ '--alert-slot': `${alertSlots.backupNudge}` }">
+        <b>{{ backupReminderTitle }}</b>
+        <span>{{ BACKUP_NUDGE_NOTICE.body }}</span>
+        <button type="button" class="text-button" @click="openDataManager">去备份</button>
+        <button type="button" class="global-error-close tap-target" aria-label="关闭备份提醒" @click="dismissBackupNudge">×</button>
+      </div>
+    </TransitionGroup>
+  </div>
   <UpdateNotes v-if="showReleaseNotes" :open="showReleaseNotes" @close="showReleaseNotes = false" />
   <QuickRecordPanel
     v-if="showQuickRecord"
@@ -705,8 +700,92 @@ to {
   /* 横向也要让开刘海/灵动岛：index.html 是 viewport-fit=cover，横屏时左右会顶边。
      max(…, env(safe-area-inset-*)) 在无安全区时退回原固定值，桌面不受影响。 */
   padding:32px max(40px, env(safe-area-inset-right, 0px)) 48px max(40px, env(safe-area-inset-left, 0px))}
-.global-sync-alert {
+.desktop-toolbar { display:none; }
+.desktop-search-trigger,
+.desktop-record-trigger {
+  align-items:center;
+  gap:10px;
+  min-height:44px;
+  border-radius:var(--radius-10);
+  white-space:nowrap}
+.desktop-search-trigger {
+  min-width:0;
+  width:min(420px, 48%);
+  padding:0 13px;
+  color:var(--ink-soft);
+  background:var(--card);
+  border:1px solid var(--border);
+  display:flex;
+  text-align:left;
+  cursor:pointer;
+  transition:background var(--dur-fast) var(--ease-standard), border-color var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard)}
+.desktop-search-trigger:hover {
+  color:var(--text);
+  background:var(--bg-tint);
+  border-color:var(--border-strong)}
+.desktop-search-icon {
+  width:18px;
+  height:18px;
+  flex:none;
+  fill:none;
+  stroke:currentColor;
+  stroke-width:1.8}
+.desktop-search-copy {
+  flex:1;
+  overflow:hidden;
+  text-overflow:ellipsis}
+.desktop-toolbar kbd {
+  flex:none;
+  padding:3px 7px;
+  border:1px solid color-mix(in srgb, currentColor 18%, transparent);
+  border-radius:var(--radius-6);
+  color:inherit;
+  font-family:inherit;
+  font-size:var(--fs-10-5);
+  line-height:1.2;
+  opacity:.78}
+.desktop-toolbar-spacer { flex:1; }
+.desktop-record-trigger {
+  display:flex;
+  flex:none;
+  padding:0 13px}
+.desktop-record-plus {
+  font-size:var(--fs-19);
+  line-height:1}
+@media (min-width:901px) {
+  .desktop-toolbar {
+    position:sticky;
+    top:0;
+    z-index:18;
+    display:flex;
+    align-items:center;
+    gap:12px;
+    margin:0 0 14px;
+    padding:8px 0;
+    background:var(--bg)}
+  .desktop-search-trigger { width:min(340px, 48%); }
+  .desktop-record-trigger { gap:7px; padding-inline:10px; }
+}
+/* 五条外壳级提示的**队列**：它们原来各自 fixed 在同一个 top/left 上，z-index 241 的保存/备份条会把
+   240 的同步告警整条盖住（「重试同步」点不到）。定位与层级改由容器统一承担，间距交给 flex 流，
+   不看"哪条更高"，也不怕文案换行或大字号把某条撑高（固定步长的错位做不到这一点）。
+   子条改成 position:relative 是为了让 240/241 仍是**真实参与比较**的声明（静态定位下的 z-index 是
+   死声明）；容器占 240 这一档，不新增取值。pointer-events 一关一开是因为队列宽度由**最宽**那条定，
+   否则窄条两侧会多出一块点不到正文的死区。槽位序号用 order 真的参与定序，DOM 顺序只是渲染结果。 */
+.global-alert-stack {
+  z-index:240;
   top:calc(12px + env(safe-area-inset-top));
+  left:0;
+  right:0;
+  gap:8px;
+  align-items:center;
+  flex-direction:column;
+  display:flex;
+  position:fixed;
+  pointer-events:none}
+.global-alert-stack > * {
+  order:var(--alert-slot,0)}
+.global-sync-alert {
   z-index:240;
   color:#765b2b;
   max-width:min(620px,100vw - 28px);
@@ -719,13 +798,11 @@ to {
   padding:9px 12px;
   font-size:var(--fs-11);
   display:flex;
-  position:fixed;
-  left:50%;
-  transform:translate(-50%)}
+  position:relative;
+  pointer-events:auto}
 .global-sync-alert span {
   color:#836a44}
 .global-safe-mode-alert,.global-persistence-alert {
-  top:calc(12px + env(safe-area-inset-top));
   z-index:241;
   color:#6b4d16;
   max-width:min(760px,100vw - 28px);
@@ -738,9 +815,8 @@ to {
   padding:10px 12px;
   font-size:var(--fs-12);
   display:flex;
-  position:fixed;
-  left:50%;
-  transform:translate(-50%)}
+  position:relative;
+  pointer-events:auto}
 .global-safe-mode-alert {
   color:#8a351d;
   background:#fff3ef;
@@ -778,6 +854,15 @@ to {
   /* 底部与 Toast/任务胶囊同一 86px 档（原先 84px 会让 86px 高的浮层压到最后一行内容）。 */
   padding:calc(18px + env(safe-area-inset-top)) max(14px, env(safe-area-inset-right, 0px)) calc(86px + env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-left, 0px))}
 }
+/* 预留高度必须随**可见条数**增长：写死 54px 时第二条告警会整条压在正文首屏上（--alert-count 由 JS
+   统计后内联传入，样式侧只管"每条多高"）。末尾那个 8px 与 .global-alert-stack 的 gap 是同一个数。
+   原来那条 flex:0 0 54px 是死声明（.content 不是 flex 容器，高度一直由 height 说了算），顺手去掉。 */
+.global-alert-reserve {
+  --alert-count:1;
+  --alert-lane:54px;
+  height:calc(var(--alert-lane) * var(--alert-count) + 8px * (var(--alert-count) - 1))}
+@media (max-width:900px) { .global-alert-reserve { --alert-lane:72px; } }
+@media (max-width:760px) { .global-alert-reserve { --alert-lane:124px; } }
 .quick-record-toast {
   left:50%;
   bottom:calc(18px + env(safe-area-inset-bottom) + var(--stack-offset,0px));
@@ -814,7 +899,8 @@ to {
   transition:opacity var(--dur-fast) var(--ease-standard), transform var(--dur-fast) var(--ease-standard)}
 .global-sync-enter-from,.global-sync-leave-to {
   opacity:0;
-  transform:translate(-50%,-8px)}
+  /* 水平居中已由 .global-alert-stack 的 align-items:center 承担，进场位移只剩纵向那 8px。 */
+  transform:translateY(-8px)}
 @media (max-width:900px) {
   .quick-record-toast {
   bottom:calc(86px + env(safe-area-inset-bottom) + var(--stack-offset,0px))}

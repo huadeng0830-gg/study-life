@@ -37,6 +37,54 @@ export const overlayStackRevision = ref(0)
 export const OVERLAY_BASE_Z_INDEX = 100
 export const OVERLAY_MAX_DEPTH = 9
 
+const OVERLAY_HISTORY_KEY = '__studyLifeOverlay'
+let overlayHistoryAdapter = null
+let overlayHistoryActive = false
+let programmaticOverlayBack = false
+let overlayPopListenerInstalled = false
+
+function pushOverlayHistoryMarker(force = false) {
+  if (!overlayHistoryAdapter || typeof window === 'undefined' || !window.history?.pushState) return false
+  const current = window.history.state
+  // Do not make Back leave the app when an overlay opens on its first route.
+  if (!force && !current?.back) return false
+  try {
+    window.history.pushState({ ...(current && typeof current === 'object' ? current : {}), [OVERLAY_HISTORY_KEY]: true }, '', window.location.href)
+    return true
+  } catch {
+    return false
+  }
+}
+
+function onOverlayPopState() {
+  if (!overlayHistoryActive) return
+  overlayHistoryAdapter?.pauseRouterListeners?.()
+  if (programmaticOverlayBack) {
+    programmaticOverlayBack = false
+    overlayHistoryActive = false
+    if (stack.length) overlayHistoryActive = pushOverlayHistoryMarker(true)
+    return
+  }
+  const entry = stack.pop()
+  if (!entry) {
+    overlayHistoryActive = false
+    return
+  }
+  entry.backDismissed = true
+  overlayStackRevision.value += 1
+  if (stack.length) overlayHistoryActive = pushOverlayHistoryMarker(true)
+  else overlayHistoryActive = false
+  entry.onBack?.()
+}
+
+/** Install before Vue Router so same-route Back entries never change the route underneath an overlay. */
+export function configureOverlayHistory(adapter) {
+  overlayHistoryAdapter = adapter || null
+  if (!overlayPopListenerInstalled && typeof window !== 'undefined') {
+    window.addEventListener('popstate', onOverlayPopState)
+    overlayPopListenerInstalled = true
+  }
+}
 /** 给定栈深度算内联 z-index（纯函数；超深时夹在上界，不会继续往上爬）。 */
 export function overlayZIndexAtDepth(depth) {
   const level = Math.max(0, Math.trunc(Number(depth) || 0))
@@ -61,15 +109,30 @@ export function overlayZIndexFor(entry) {
 }
 
 export function pushOverlay(entry) {
+  if (stack.length === 0 && !overlayHistoryActive) {
+    overlayHistoryActive = pushOverlayHistoryMarker()
+  }
   stack.push(entry)
   overlayStackRevision.value += 1
 }
 
 export function removeOverlay(entry) {
+  if (entry.backDismissed) {
+    entry.backDismissed = false
+    return
+  }
   const index = stack.indexOf(entry)
   if (index >= 0) {
     stack.splice(index, 1)
     overlayStackRevision.value += 1
+  }
+  if (stack.length === 0 && overlayHistoryActive) {
+    if (window.history?.state?.[OVERLAY_HISTORY_KEY]) {
+      programmaticOverlayBack = true
+      window.history.back()
+    } else {
+      overlayHistoryActive = false
+    }
   }
 }
 

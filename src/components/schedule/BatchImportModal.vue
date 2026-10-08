@@ -1,5 +1,5 @@
 <script setup>
-import { computed, reactive, ref } from 'vue'
+import { computed, nextTick, reactive, ref } from 'vue'
 import Modal from '../Modal.vue'
 import TaskProgress from '../TaskProgress.vue'
 
@@ -44,6 +44,85 @@ const weekTypeLabel = { all: '每周', odd: '单周', even: '双周' }
 function onTextInput(event) {
   emit('update:text', event.target.value)
   emit('update:error', '')
+}
+
+function normalizeTableHeader(value) {
+  return String(value ?? '').normalize('NFKC').trim().toLowerCase().replace(/[\s_\-()[\]（）【】:：.]/g, '')
+}
+
+function normalizeTableDay(value) {
+  const text = String(value ?? '').normalize('NFKC').trim()
+  if (/(?:星期|周)[一二三四五六日天]/.test(text)) return text
+  const key = text.toLowerCase().replace(/[.\s]/g, '')
+  const englishDay = { monday: 0, mon: 0, tuesday: 1, tue: 1, tues: 1, wednesday: 2, wed: 2, thursday: 3, thu: 3, thur: 3, thurs: 3, friday: 4, fri: 4, saturday: 5, sat: 5, sunday: 6, sun: 6 }
+  if (key in englishDay) return `周${'一二三四五六日'[englishDay[key]]}`
+  if (/^[1-7]$/.test(key)) return `周${'一二三四五六日'[Number(key) - 1]}`
+  return text
+}
+
+function academicHtmlToText(html) {
+  if (!/<table\b/i.test(html) || typeof DOMParser !== 'function') return ''
+  const document = new DOMParser().parseFromString(html, 'text/html')
+  const rows = [...document.querySelectorAll('table tr')]
+    .map((row) => [...row.querySelectorAll('th,td')].map((cell) => cell.textContent.replace(/\s+/g, ' ').trim()))
+    .filter((row) => row.some(Boolean))
+  if (!rows.length) return ''
+
+  // 常见教务导出清单：课程、星期、节次为列，直接归一成批量导入器已有的行格式。
+  const columns = {
+    name: ['课程名称', '课程名', '课程', 'course name', 'course', 'class', 'subject'],
+    day: ['星期', '周几', '上课星期', 'weekday', 'day'],
+    period: ['节次', '上课节次', '课程节次', 'period', 'periods', 'class time'],
+    weeks: ['周次', '起止周', '上课周次', 'weeks', 'week'],
+    room: ['教室', '地点', '上课地点', 'room', 'location'],
+    teacher: ['教师', '任课教师', '老师', 'teacher', 'instructor'],
+  }
+  const normalizedRows = rows.map((row) => row.map(normalizeTableHeader))
+  const headerIndex = normalizedRows.findIndex((row) => (
+    columns.name.some((name) => row.includes(normalizeTableHeader(name)))
+    && columns.day.some((name) => row.includes(normalizeTableHeader(name)))
+    && columns.period.some((name) => row.includes(normalizeTableHeader(name)))
+  ))
+  if (headerIndex >= 0) {
+    const header = normalizedRows[headerIndex]
+    const indexOf = (field) => header.findIndex((cell) => columns[field].some((name) => cell === normalizeTableHeader(name)))
+    const fieldIndexes = Object.fromEntries(Object.keys(columns).map((field) => [field, indexOf(field)]))
+    const read = (row, field) => row[fieldIndexes[field]] || ''
+    const lines = rows.slice(headerIndex + 1).map((row) => {
+      const name = read(row, 'name')
+      const day = normalizeTableDay(read(row, 'day'))
+      let period = read(row, 'period')
+      let weeks = read(row, 'weeks')
+      if (/^\d{1,2}(?:\s*[-~至]\s*\d{1,2})?$/.test(period)) period = `${period}节`
+      if (/^\d{1,2}(?:\s*[-~至]\s*\d{1,2})?$/.test(weeks)) weeks = `${weeks}周`
+      const room = read(row, 'room')
+      const teacher = read(row, 'teacher')
+      if (!name && !day && !period) return ''
+      return [name, day, period, weeks, room ? `地点:${room}` : '', teacher ? `教师:${teacher}` : ''].filter(Boolean).join('\t')
+    }).filter(Boolean)
+    if (lines.length) return lines.join('\n')
+  }
+
+  // 没有标准列名时保留表格行列，只取文字节点；不会把粘贴的标签写进 textarea。
+  return rows.map((row) => row.join('\t')).join('\n')
+}
+
+function onTextPaste(event) {
+  const html = event.clipboardData?.getData('text/html') || ''
+  const pasted = academicHtmlToText(html)
+  if (!pasted) return // 普通纯文本粘贴沿用浏览器默认行为，原样进入现有批量解析通道。
+  event.preventDefault()
+  const textarea = event.currentTarget
+  const start = textarea.selectionStart ?? props.text.length
+  const end = textarea.selectionEnd ?? start
+  const value = `${props.text.slice(0, start)}${pasted}${props.text.slice(end)}`
+  emit('update:text', value)
+  emit('update:error', '')
+  nextTick(() => {
+    const caret = start + pasted.length
+    textarea.focus()
+    textarea.setSelectionRange(caret, caret)
+  })
 }
 
 function onFileChange(event) {
@@ -172,6 +251,7 @@ function daysLabel(day) {
           rows="7"
           placeholder="高等数学 周一 1-2节 1-16周 A201 张老师&#10;大学英语,星期三,3-4,1-16,单周,B305,李老师"
           @input="onTextInput"
+          @paste="onTextPaste"
           @keydown.stop
           @click.stop
           class="batch-textarea"

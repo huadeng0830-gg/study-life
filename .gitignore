@@ -66,3 +66,13 @@ sl_*.json
 *.njsproj
 *.sln
 *.sw?
+
+# Windows desktop build outputs and local app state
+/dist-desktop/
+/release-desktop/
+/desktop-app-data/
+
+/.desktop-build-tmp/
+/.vitest-tmp/
+/scratch-seg*.mjs
+/docs/brand-review/

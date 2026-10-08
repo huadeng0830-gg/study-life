@@ -11,7 +11,6 @@
  *
  * 【本轮补了什么】只补**面板容器已经存在**的那些分区（纯加属性，零结构改动）：
  *   - `AppearanceSettings.vue`：5 个分区面板全补齐 ✓
- *   - `LocalTransfer.vue`：发送 / 扫码接收 2 个面板 ✓
  *   - `LedgerView.vue` 账本分区：账本 / 固定账单 / 回顾 3 个面板 ✓
  *   - `TimeSettingsModal.vue` 作息导入方式：粘贴 / 图片 2 个面板 ✓
  *   - `ExceptionsModal.vue`：补上缺失的 `role="tab"` + `aria-selected`，并把 `.exception-form` 标成面板 ✓
@@ -26,7 +25,7 @@
  *   - 第二十九轮：给剩下的真标签页补完面板——`TimeSettingsModal` 的「设置分区」
  *     （`v-show` 的 plans 面板 + 原先是 `<template v-if>` 的 base 面板，换成了包裹层并复制了
  *     父级 `.settings` 的 flex 布局与 18px 间距，避免间距塌成 0），
- *     再把「回放时间范围」与「设备绑定方式」这两处**重塑内容 / 状态机**的控件也收敛掉。
+ *     再把「回放时间范围」这处**重塑内容 / 状态机**的控件也收敛掉。
  *   于是欠账归零，"存量清单棘轮"退役，判据升级为**零豁免**的关系完整性检查：
  *   每个 tab 带 `id`、每个面板带 `aria-labelledby`，且静态标签下每个 tab 的 id 都必须被面板引用到。
  *   现在全站只有 5 个 `tablist`，全部是真标签页、全部有面板（15 个 tab / 15 个面板）。
@@ -109,16 +108,14 @@ describe('标签页语义：关系完整性（零豁免）', () => {
     expect(checkedPairs, '一条 tab→面板引用都没核对到').toBeGreaterThanOrEqual(10)
   })
 
-  it('已经收敛为 group 的 5 个文件不得再出现 tab 语义', () => {
-    // 第二十八轮收敛了 3 个筛选控件（待办筛选、日程状态、清单分类），
-    // 第二十九轮又收敛了 2 个（回放时间范围、设备绑定方式）。
+  it('已经收敛为 group 的 4 个文件不得再出现 tab 语义', () => {
+    // 筛选与模式切换控件使用 group + aria-pressed，不冒充标签页。
     // 单独锁一条，是为了让"收敛被回退"有明确的失败信息。
     for (const file of [
       'src/views/TasksView.vue',
       'src/views/EventsView.vue',
       'src/views/ListsView.vue',
       'src/components/MemoryView.vue',
-      'src/components/SyncPairingModal.vue',
     ]) {
       const template = readTemplate(resolve(ROOT, file))
       expect(template, `${file} 不应再有 tab 语义`).not.toMatch(/role="tab(list)?"/)

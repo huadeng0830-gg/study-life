@@ -1,7 +1,7 @@
 // 同步键的轻量真源：SYNC_DEFAULTS / SYNC_KEYS / isSyncKey。
-// 【为什么单独拆出来】store/core.js 每次写盘都要判断 isSyncKey；若从 cloudSyncData 导入，
+// 【为什么单独拆出来】store/core.js 每次写盘都要判断 isSyncKey；若从 accountSyncData 导入，
 // 会连带 festive/mood/focusTimer 等规范化依赖，把整张云同步图打进 timeConfig 等业务 chunk。
-// 这里只依赖 ledgerCategories（纯数据），core 与 cloudSyncData 共用同一份键表。
+// 这里只依赖 ledgerCategories（纯数据），core 与 accountSyncData 共用同一份键表。
 import { DEFAULT_CATEGORIES } from './ledgerCategories.js'
 
 export const SYNC_DEFAULTS = {

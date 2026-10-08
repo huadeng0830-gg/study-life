@@ -22,6 +22,6 @@ describe('FINAL-2 首页行动中心', () => {
   })
 
   it('首页可配置模块已经收敛为少数主层级', () => {
-    expect(HOME_MODULES.map((item) => item.label)).toEqual(['接下来', '现在该做', '需要注意', '专注', '本周进展'])
+    expect(HOME_MODULES.map((item) => item.label)).toEqual(['接下来', '现在该做', '需要注意', '专注', '本周进展', '本周收支'])
   })
 })

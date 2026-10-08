@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { retireFoodData } from '../src/composables/foodRetirement.js'
-import { SYNC_KEYS, sanitizeSyncPayload } from '../src/composables/cloudSyncData.js'
+import { SYNC_KEYS, sanitizeSyncPayload } from '../src/composables/accountSyncData.js'
 import { DEFAULT_CATEGORIES } from '../src/composables/ledgerCategories.js'
 import { backupProvidedFields, buildBackupRestoreValues } from '../src/composables/backupRestore.js'
 

@@ -30,6 +30,7 @@ const itemNameInput = ref(null)
 const itemForm = ref(emptyItem())
 const deleteTarget = ref(null)
 const toast = ref({ open: false, message: '', type: 'info', actionLabel: '', undoFn: null, viewFn: null, duration: 3200 })
+const openSwipeItemId = ref('')
 
 const CATEGORIES = ['食品', '日用品', '学习用品', '数码', '衣物', '其他']
 const UNITS = ['件', '个', '份', '袋', '盒', '瓶', '斤', 'kg']
@@ -235,6 +236,11 @@ function swipeTone(direction) {
   return 'primary'
 }
 
+function setOpenSwipeItem(id, open) {
+  if (open) openSwipeItemId.value = id
+  else if (openSwipeItemId.value === id) openSwipeItemId.value = ''
+}
+
 function handleItemSwipe(direction, item) {
   const action = appearance.value.swipeActions.lists[direction]
   if (action === 'complete') toggleListItem(item)
@@ -378,7 +384,9 @@ function showToast(message, { type = 'info', actionLabel = '', undoFn = null, vi
             :right-label="swipeLabel(item, 'right')"
             :left-tone="swipeTone('left')"
             :right-tone="swipeTone('right')"
-            @swipe="handleItemSwipe($event, item)"
+            :open="openSwipeItemId === item.id"
+            @update:open="setOpenSwipeItem(item.id, $event)"
+            @action="handleItemSwipe($event, item)"
           >
             <article
               class="shopping-item"

@@ -29,9 +29,7 @@ const BASELINE_PATH = resolve(PROJECT_ROOT, 'scripts/typecheck-baseline.json')
 // 本仓库已经因为同族问题出过两次事故（currencyField 从不存在的导出 import、
 // ledgerNowHM 同样），而现有的 templateBindingIntegrity 守卫抓不到 ——
 // 它只校验「具名导入在目标模块里确实存在」，管不到「这个标识符压根没被导入」。
-// 本轮就是靠 checkJs 的 TS2304 抓到两个新的：
-//   dataManagerPairing.js 调 revokeSyncDevice 但没导入 → 点「移除设备」必炸；
-//   dataManagerSyncActions.js 引用 syncPreview 但没定义 → 点「关闭预览」必炸。
+// 这类错漏通常藏在深层操作路径里，页面模板的静态守卫未必覆盖得到。
 //
 // 只收TS2304（Cannot find name），**不收** TS2551（Did you mean）：后者大量是
 // 合法的厂商前缀探测，例如 FocusPanel 的 `window.AudioContext || window.webkitAudioContext`

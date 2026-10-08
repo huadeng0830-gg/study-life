@@ -6,7 +6,8 @@
         <span>月度预算 <em>单位：元</em></span>
         <input v-model="budgetInput" type="text" inputmode="decimal" placeholder="例如 2000" :aria-label="`月度预算金额（${baseCurrency}）`" />
       </label>
-      <p class="form-note">只做月度总额预算，不做分分类预算；达到 80% 时提醒「接近预算」，超出后提醒「已超预算」。存在外币记录时按手工汇率折算后再比较。</p>
+      <p class="form-note">只需设置月度上限，日额度由系统按日期和实际支出自动计算。达到 80% 时提醒「接近预算」，超出后提醒「已超预算」；外币按手工汇率折算后比较。</p>
+      <p class="form-note">首页把今天和后续日期分开：今日剩余额度单独保留；后续每天可用按今天之后的天数平均，不重复计入今日额度。今天没花完的部分会在次日重新分配，超出今日固定额度则会降低后续额度。</p>
       <p v-if="budgetError" class="bill-error" role="alert">{{ budgetError }}</p>
       <div class="bill-form-actions">
         <button v-if="budget.monthly !== null" class="btn btn-danger" type="button" @click="removeBudget">清除预算</button>

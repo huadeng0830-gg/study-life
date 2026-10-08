@@ -6,6 +6,38 @@ const INIT_TIMEOUT_MS = 45000
 const RECOGNIZE_TIMEOUT_MS = 120000
 const MAX_PIXELS = { fast: 6_500_000, auto: 8_500_000, accurate: 12_000_000 }
 
+// 【每种内容形态的版式模式，不是每个场景一份】
+// PSM（page segmentation mode）决定 Tesseract 怎么切版面。整页只有两个极端可用：
+//   SPARSE_TEXT(11) —— 「把能认的字都认出来，不保证阅读顺序」，适合**网格**：
+//     课表 / 作息表一格里有 3~5 行字还夹着表格线，任何"阅读顺序"都是错的，
+//     真正有意义的是每个词的坐标，所以必须用这个模式拿回词级位置。
+//   SINGLE_BLOCK(6) —— 「整页是一块排版均匀的文本，按行保序」，适合**记录行**：
+//     考试安排、作业分组表里「课程 → 日期 → 考场 → 座位」左右顺序本身就是语义，
+//     用 SPARSE_TEXT 会把相邻两行的字交错拼在一起。
+// 整页初值就是按这张表选的；worker 是模块级单例，会被课表/作息/考试/作业轮着复用，
+// 所以每次 performOCR 都要按当前 kind 重设一次，不能只在建 worker 时设。
+const KIND_PAGE_SEG = {
+  timetable: 'SPARSE_TEXT',
+  schedule: 'SPARSE_TEXT',
+  exam: 'SINGLE_BLOCK',
+  homework: 'SINGLE_BLOCK',
+}
+// 行复核时的裁切模式：
+//   SINGLE_LINE(7) —— 每个条带就是物理上的一行，适合一行一条记录（考试安排）。
+//   SINGLE_BLOCK(6) —— 条带内部可能还有换行（作业分组表一格里是一串组员名单），
+//     用 SINGLE_LINE 只会读到第一行，后面的组员会被静默丢掉。
+const KIND_ROW_SEG = {
+  schedule: 'SINGLE_LINE',
+  exam: 'SINGLE_LINE',
+  homework: 'SINGLE_BLOCK',
+}
+// 需要"逐行核对"的 kind。理由与课表/作息一致：整页即便每个字都读对了，
+// 记录仍可能被算到错误的行/列上。行复核只在真的检测到表格网格时才有开销。
+const RECORD_KINDS = new Set(['exam', 'homework'])
+// PSM 枚举的兜底值。tesseract.js 的 PSM 表理论上齐全，但测试替身只给了一个键；
+// 这里给 undefined 兜底，免得 setParameters 收到 undefined 把引擎参数写坏。
+const PSM_FALLBACK = { SPARSE_TEXT: '11', SINGLE_BLOCK: '6', SINGLE_LINE: '7' }
+
 // 本机自托管的 OCR 引擎。tesseract.js 的 corePath 若给目录，浏览器会按 SIMD
 // 能力在 relaxedsimd / simd / 无 SIMD 三个变体里挑，三个都得随包发（约 19.7MB）；
 // 给具体文件名则直接用它。这里只随包发 SIMD-LSTM 这一个变体（它把 wasm 以
@@ -78,6 +110,23 @@ function logError(message, error) {
   console.error(`[OCR] ${message}`, error)
 }
 
+// 取 PSM 常量并对 undefined 兜底（见 PSM_FALLBACK 的说明）。
+function psm(name) {
+  return ocrWorker.tesseractModule?.PSM?.[name] ?? PSM_FALLBACK[name]
+}
+
+// 整页与行复核的参数体。集中一处，避免各处手写 setParameters 时漏掉
+// preserve_interword_spaces —— 少了它表格里的列间距会被吃掉，
+// 后面按坐标分列就再也分不开了。
+function segParameters(name) {
+  return { tessedit_pageseg_mode: psm(name), preserve_interword_spaces: '1' }
+}
+
+// worker 是模块级单例、跨 kind 复用，所以整页版式模式必须每次调用重设。
+function applyPageSegmentation(instance, kind, name = KIND_PAGE_SEG[kind] || 'SINGLE_BLOCK') {
+  return instance.setParameters(segParameters(name))
+}
+
 function setStage(stage, progress) {
   ocrWorker.state.stage = stage
   if (progress !== undefined) ocrWorker.state.progress = Math.round(progress)
@@ -125,11 +174,9 @@ async function ensureWorker(signal = null) {
         logger: handleProgress,
         errorHandler: (error) => logError('worker error handler', error),
       })
-      await instance.setParameters({
-        tessedit_pageseg_mode: ocrWorker.tesseractModule.PSM.SPARSE_TEXT,
-        preserve_interword_spaces: '1',
-        user_defined_dpi: '220',
-      })
+      // 初值固定 SPARSE_TEXT：建 worker 时还不知道这次是哪一类内容，
+      // performOCR 拿到 kind 后会立刻按 KIND_PAGE_SEG 重设一次。
+      await instance.setParameters({ ...segParameters('SPARSE_TEXT'), user_defined_dpi: '220' })
       return instance
     })()
     created.then((instance) => { if (interrupted) void instance.terminate() }).catch(() => {})
@@ -346,6 +393,7 @@ function needsDetailPass(result, kind, mode, quality) {
   // 作息表的数字即使被全文 OCR 读到，仍可能归属到错误的“季节 × 校区”列。
   // 对它始终执行表格行核对，避免高置信度文本掩盖列错位。
   if (kind === 'schedule') return true
+  if (RECORD_KINDS.has(kind)) return true
   return Boolean(quality.needsEnhancement && result.confidence < 84)
 }
 
@@ -379,7 +427,7 @@ async function recognizeTimetableColumns(instance, source, bestResult, signal = 
   const usableCrops = crops.filter((crop) => crop.canvas)
   if (!usableCrops.length) return []
   const columns = []
-  await instance.setParameters({ tessedit_pageseg_mode: ocrWorker.tesseractModule.PSM.SINGLE_BLOCK, preserve_interword_spaces: '1' })
+  await applyPageSegmentation(instance, 'timetable', 'SINGLE_BLOCK')
   try {
     for (const [index, crop] of usableCrops.entries()) {
       const progress = 82 + (index / Math.max(1, usableCrops.length)) * 15
@@ -389,7 +437,7 @@ async function recognizeTimetableColumns(instance, source, bestResult, signal = 
       crop.canvas.height = 1
     }
   } finally {
-    await instance.setParameters({ tessedit_pageseg_mode: ocrWorker.tesseractModule.PSM.SPARSE_TEXT, preserve_interword_spaces: '1' }).catch(() => {})
+    await applyPageSegmentation(instance, 'timetable').catch(() => {})
   }
   return columns
 }
@@ -511,7 +559,7 @@ function cropGridRow(source, grid, top, bottom) {
   return canvas
 }
 
-async function recognizeScheduleRows(instance, source, signal = null) {
+async function recognizeRecordRows(instance, source, kind, signal = null) {
   const grid = detectTableGrid(source)
   if (!grid.valid) return { regions: [], grid }
   const bands = []
@@ -521,13 +569,15 @@ async function recognizeScheduleRows(instance, source, signal = null) {
     if (bottom - top >= Math.max(18, source.height * 0.025)) bands.push({ top, bottom })
   }
   const regions = []
-  await instance.setParameters({ tessedit_pageseg_mode: ocrWorker.tesseractModule.PSM.SINGLE_LINE, preserve_interword_spaces: '1' })
+  const rowSegmentation = KIND_ROW_SEG[kind] || 'SINGLE_LINE'
+  const label = kind === 'exam' ? '考试安排' : kind === 'homework' ? '作业分组' : '时间表'
+  await applyPageSegmentation(instance, kind, rowSegmentation)
   try {
     for (let index = 0; index < bands.length; index++) {
       const band = bands[index]
       const canvas = cropGridRow(source, grid, band.top, band.bottom)
       const progress = 82 + (index / Math.max(1, bands.length)) * 16
-      const data = await recognizeWithTimeout(instance, canvas, `正在逐行核对时间... ${index + 1}/${bands.length}`, progress, progress + 1, signal)
+      const data = await recognizeWithTimeout(instance, canvas, `正在逐行识别${label}... ${index + 1}/${bands.length}`, progress, progress + 1, signal)
       const text = correctOCRErrors(normalizeText(String(data.text || '').replace(/\r/g, ' ')))
       if (text.trim()) {
         regions.push({
@@ -541,7 +591,7 @@ async function recognizeScheduleRows(instance, source, signal = null) {
       canvas.height = 1
     }
   } finally {
-    await instance.setParameters({ tessedit_pageseg_mode: ocrWorker.tesseractModule.PSM.SPARSE_TEXT, preserve_interword_spaces: '1' }).catch(() => {})
+    await applyPageSegmentation(instance, kind).catch(() => {})
   }
   return { regions, grid }
 }
@@ -564,6 +614,9 @@ export async function performOCR(file, onProgress = null, options = {}) {
     setStage('正在检查图片方向与质量...', 3)
     prepared = await preprocessImage(file, mode, signal)
     const instance = await ensureWorker(signal)
+    // The worker is shared by lazy import, schedule, exam, and homework callers.
+    // Always set the page layout mode per request before recognizing this image.
+    await applyPageSegmentation(instance, kind)
     ocrState.status = 'recognizing'
     const originalData = await recognizeWithTimeout(instance, prepared.canvas, '正在识别原图...', 60, 75, signal)
     const variants = [normalizeResult(originalData, prepared.canvas, 'original')]
@@ -583,8 +636,8 @@ export async function performOCR(file, onProgress = null, options = {}) {
     const columns = kind === 'timetable' && detailPass
       ? await recognizeTimetableColumns(instance, sourceForColumns, best, signal)
       : []
-    const scheduleRows = kind === 'schedule' && detailPass
-      ? await recognizeScheduleRows(instance, sourceForColumns, signal)
+    const recordRows = (kind === 'schedule' || RECORD_KINDS.has(kind)) && detailPass
+      ? await recognizeRecordRows(instance, sourceForColumns, kind, signal)
       : { regions: [], grid: null }
     ocrState.status = 'completed'
     setStage('识别完成', 100)
@@ -594,12 +647,12 @@ export async function performOCR(file, onProgress = null, options = {}) {
       wordCount: best.text.split(/\s+/).filter(Boolean).length,
       layout: best.layout,
       columns,
-      regions: scheduleRows.regions,
+      regions: recordRows.regions,
       variants: variants.filter((variant) => variant !== best),
       quality: prepared.quality,
       strategy: best.name,
       detailPass,
-      structure: scheduleRows.grid,
+      structure: recordRows.grid,
       image: { width: prepared.width, height: prepared.height, sourceWidth: prepared.sourceWidth, sourceHeight: prepared.sourceHeight },
     }
     return result

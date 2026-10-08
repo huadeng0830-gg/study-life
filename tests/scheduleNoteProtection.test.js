@@ -1,9 +1,9 @@
 // @vitest-environment happy-dom
 import { beforeEach, describe, expect, it } from 'vitest'
 import { createEmergencyBackup } from '../src/composables/emergencyExport.js'
-import { SYNC_KEYS, sanitizeSyncPayload } from '../src/composables/cloudSyncData.js'
+import { SYNC_KEYS, sanitizeSyncPayload } from '../src/composables/accountSyncData.js'
 import { buildEntityManifest } from '../src/composables/syncMetadata.js'
-import { SYNC_DATA_SCHEMA_VERSION } from '../sync-protocol.js'
+import { ACCOUNT_SYNC_DATA_SCHEMA_VERSION } from '../src/composables/accountSyncSchema.js'
 
 describe('Schedule note protection', () => {
   beforeEach(() => localStorage.clear())
@@ -14,6 +14,6 @@ describe('Schedule note protection', () => {
     expect(SYNC_KEYS).toContain('sl_schedule_note')
     expect(sanitizeSyncPayload({ sl_schedule_note: '下周调课', sl_tasks: [] }).values).toEqual({ sl_schedule_note: '下周调课', sl_tasks: [] })
     expect(buildEntityManifest({ sl_schedule_note: '下周调课' }).singletons.sl_schedule_note).toBeTruthy()
-    expect(SYNC_DATA_SCHEMA_VERSION).toBe(4)
+    expect(ACCOUNT_SYNC_DATA_SCHEMA_VERSION).toBe(4)
   })
 })
