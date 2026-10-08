@@ -27,26 +27,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Trust the personal signing certificate in the ephemeral runner
-        shell: pwsh
-        run: |
-          $certificatePath = Join-Path $env:GITHUB_WORKSPACE 'desktop/certificates/study-life-code-signing.cer'
-          $certificate = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($certificatePath)
-          foreach ($storeName in @('Root', 'TrustedPublisher')) {
-            $store = [System.Security.Cryptography.X509Certificates.X509Store]::new(
-              $storeName,
-              [System.Security.Cryptography.X509Certificates.StoreLocation]::CurrentUser
-            )
-            try {
-              $store.Open([System.Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
-              if (-not ($store.Certificates | Where-Object Thumbprint -eq $certificate.Thumbprint)) {
-                $store.Add($certificate)
-              }
-            } finally {
-              $store.Close()
-            }
-          }
-
       - name: Setup Node
         uses: actions/setup-node@v4
         with:

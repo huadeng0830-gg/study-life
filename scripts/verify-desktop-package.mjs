@@ -1,4 +1,5 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
+import { X509Certificate } from 'node:crypto'
 import path from 'node:path'
 import { createRequire } from 'node:module'
 import { spawnSync } from 'node:child_process'
@@ -49,6 +50,9 @@ if (requireSignature) {
   if (process.platform !== 'win32') fail('签名校验必须在 Windows runner 上执行')
   const yaml = createRequire(path.join(ROOT, 'desktop-app/package.json'))('js-yaml')
   const publisherNames = yaml.load(updateConfig)?.publisherName
+  const publicCertificatePath = path.join(ROOT, 'desktop/certificates/study-life-code-signing.cer')
+  if (!existsSync(publicCertificatePath)) fail('缺少用于核对签名者身份的公钥证书')
+  const expectedThumbprint = new X509Certificate(readFileSync(publicCertificatePath)).fingerprint.replaceAll(':', '').toUpperCase()
   const executables = readdirSync(packageDirectory).filter((name) => name.toLowerCase().endsWith('.exe'))
   if (executables.length !== 1) fail(`预期在解包目录找到一个应用 exe，实际找到 ${executables.length} 个`)
   const executablePath = path.join(packageDirectory, executables[0])
@@ -56,7 +60,7 @@ if (requireSignature) {
   const script = [
     `$path = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('${encodedPath}'))`,
     '$signature = Get-AuthenticodeSignature -LiteralPath $path',
-    '[PSCustomObject]@{ status = [string]$signature.Status; subject = [string]$signature.SignerCertificate.Subject } | ConvertTo-Json -Compress',
+    '[PSCustomObject]@{ status = [string]$signature.Status; subject = [string]$signature.SignerCertificate.Subject; thumbprint = [string]$signature.SignerCertificate.Thumbprint; statusMessage = [string]$signature.StatusMessage } | ConvertTo-Json -Compress',
   ].join('; ')
   const signatureResult = spawnSync('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', script], {
     encoding: 'utf8', timeout: 15000,
@@ -64,9 +68,15 @@ if (requireSignature) {
   if (signatureResult.error || signatureResult.status !== 0) fail(`无法读取 Authenticode 签名：${signatureResult.stderr || signatureResult.error?.message || 'PowerShell 失败'}`)
   let signature
   try { signature = JSON.parse(signatureResult.stdout.trim()) } catch { fail('Windows 未返回可解析的 Authenticode 签名信息') }
-  if (signature.status !== 'Valid') fail(`应用 exe 的 Authenticode 签名状态为 ${signature.status || 'unknown'}`)
+  const actualThumbprint = String(signature.thumbprint ?? '').replaceAll(':', '').toUpperCase()
+  if (actualThumbprint !== expectedThumbprint) fail('应用 exe 的签名者指纹与仓库内公钥证书不匹配')
+  const untrustedSelfSignedChain = signature.status === 'UnknownError'
+    && /certificate chain processed,\s*but terminated in a root certificate which is not trusted/i.test(signature.statusMessage)
+  if (signature.status !== 'Valid' && !untrustedSelfSignedChain) {
+    fail(`应用 exe 的 Authenticode 签名状态为 ${signature.status || 'unknown'}`)
+  }
   if (!matchesDesktopPublisher(publisherNames, signature.subject)) {
-    fail('app-update.yml 的 publisherName 与应用 exe 的签名证书主题不匹配')
+    fail('app-update.yml 的 publisherName 与公钥证书主题不匹配')
   }
 }
 
