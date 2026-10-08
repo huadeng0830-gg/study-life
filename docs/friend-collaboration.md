@@ -90,7 +90,7 @@
 
 ## 当前部署与外部依赖
 
-主迁移、外键索引和限流表 RLS 迁移已应用到三两事 Supabase 项目 `xyuwjmswqmxfwtyzakan`，`campus-social` 已部署且启用 JWT 验证。Cloudflare Pages 生产站点已部署网页版本 `2026年10月08日-版本3`：<https://study-life.pages.dev/>。线上资源完整性审计为 GREEN：149 条 Service Worker 预缓存、101 个 JS 模块及 148 个静态资源均可访问，没有缺失项。GitHub 源码与 Windows 安装包发布仍需推送本次仓库改动及桌面标签后完成。
+主迁移、外键索引和限流表 RLS 迁移已应用到三两事 Supabase 项目 `xyuwjmswqmxfwtyzakan`，`campus-social` 已部署且启用 JWT 验证。Cloudflare Pages 生产站点已部署网页版本 `2026年10月08日-版本3`：<https://study-life.pages.dev/>。线上资源完整性审计为 GREEN：149 条 Service Worker 预缓存、101 个 JS 模块及 148 个静态资源均可访问，没有缺失项。GitHub 源码已推送，Windows 桌面版 `1.0.4` 已发布，且 Release 同时包含安装包、`latest.yml` 和 `.blockmap`：<https://github.com/huadeng0830-gg/study-life/releases/tag/v1.0.4>。
 
 现有 Auth 文档记录自定义 SMTP 尚未配置：Supabase 默认邮件收件限制会妨碍普通邮箱注册/验证。因此要用两个新建普通邮箱完成首次真实验收，项目维护者还需配置自定义 SMTP、Site URL 和 Redirect URLs；已经可登录且邮箱已验证的两个账号不受该注册邮件限制。Supabase 组织当前是 Free 方案，而[泄露密码保护要求 Pro 或更高方案](https://supabase.com/docs/guides/auth/password-security#password-strength-and-leaked-password-protection)，因此本次未升级付费方案。即使升级后仍需在 Supabase Auth 设置中开启该选项；当前 Supabase 工具没有 Auth 设置写接口，本机 UI 自动化初始化失败，不能代替项目维护者完成控制台设置。
 

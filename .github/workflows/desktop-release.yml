@@ -57,7 +57,16 @@ jobs:
           npx electron-builder --config electron-builder.yml --win nsis --x64 --publish never
           npm run desktop:verify
 
-      - name: Build and publish Windows installer and update metadata
-        run: npx electron-builder --config electron-builder.yml --win nsis --x64 --publish always
-        env:
-          GH_TOKEN: ${{ github.token }}
+      - name: Publish one Windows Release with installer and updater metadata
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: 三两事 Windows ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          make_latest: true
+          fail_on_unmatched_files: true
+          files: |
+            release-desktop/study-life-desktop-setup-*.exe
+            release-desktop/study-life-desktop-setup-*.exe.blockmap
+            release-desktop/latest.yml

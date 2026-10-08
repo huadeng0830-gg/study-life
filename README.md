@@ -162,7 +162,7 @@ npm run desktop:installer # 生成 NSIS 安装程序并校验应用内更新配�
 
 ### 发布桌面更新
 
-每次新版本先运行 `npm run release:bump -- --notes "更新说明一|更新说明二"`。脚本会递增网页日期版本和 Windows 桌面 SemVer patch，更新源码签名，并同步本 README 中的版本号与最近更新内容。完成 `npm run check`、提交并推送到 `main` 后，为桌面版本创建同名标签（例如 `v1.0.5`）并推送；GitHub Actions 会在 Windows runner 上重跑质量检查、构建并校验安装包，然后把安装包和 electron-updater 所需的元数据发布到同仓库的 GitHub Release。用户可在桌面版“设置 → 应用更新”内检查、下载并安装新版本。
+每次新版本先运行 `npm run release:bump -- --notes "更新说明一|更新说明二"`。脚本会递增网页日期版本和 Windows 桌面 SemVer patch，更新源码签名，并同步本 README 中的版本号与最近更新内容。完成 `npm run check`、提交并推送到 `main` 后，为桌面版本创建同名标签（例如 `v1.0.5`）并推送；GitHub Actions 会在 Windows runner 上重跑质量检查，构建并验证 NSIS 安装包，再将安装包、`.blockmap` 和 `latest.yml` 一次发布到同一个 GitHub Release；任一发布文件缺失都会让工作流失败。用户可在桌面版“设置 → 应用更新”内检查、下载并安装新版本。
 
 标签必须与 `desktop-app/package.json` 中的版本完全一致。发布流水线只在收到 `v*` 标签时运行，日常网页部署仍走 Cloudflare Pages；本地构建使用 `--publish never`，不会意外创建公开发行版。README 版本区块由发布脚本维护，`npm run check` 会阻止版本说明漏同步。
 
