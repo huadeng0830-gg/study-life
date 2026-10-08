@@ -31,8 +31,10 @@ jobs:
         shell: pwsh
         run: |
           $certificatePath = Join-Path $env:GITHUB_WORKSPACE 'desktop/certificates/study-life-code-signing.cer'
-          Import-Certificate -FilePath $certificatePath -CertStoreLocation Cert:\CurrentUser\Root | Out-Null
-          Import-Certificate -FilePath $certificatePath -CertStoreLocation Cert:\CurrentUser\TrustedPublisher | Out-Null
+          & certutil.exe -user -addstore -f Root $certificatePath
+          if ($LASTEXITCODE -ne 0) { throw "Failed to trust the signing certificate in CurrentUser\Root (exit code $LASTEXITCODE)." }
+          & certutil.exe -user -addstore -f TrustedPublisher $certificatePath
+          if ($LASTEXITCODE -ne 0) { throw "Failed to trust the signing certificate in CurrentUser\TrustedPublisher (exit code $LASTEXITCODE)." }
 
       - name: Setup Node
         uses: actions/setup-node@v4
