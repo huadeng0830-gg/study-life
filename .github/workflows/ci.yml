@@ -93,7 +93,7 @@ jobs:
       - name: Build and inspect the Windows app package
         run: |
           npm run build:desktop
-          npx electron-builder --config electron-builder.yml --dir --win --x64 --publish never
+          npx electron-builder --config electron-builder.yml --win nsis --x64 --publish never
           npm run desktop:verify
 
   # 依赖漏洞与过期提示。npm audit 放在独立 job：它是"信息"而非"门禁"，
