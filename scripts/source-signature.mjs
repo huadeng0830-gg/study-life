@@ -46,7 +46,13 @@ export function computeSourceSignature({
   const hash = createHash('sha256')
   const files = releaseInputs
     .flatMap((input) => collectReleaseFiles(resolve(projectRoot, input)))
-    .sort((a, b) => a.localeCompare(b))
+    // Use code-point ordering so paths hash identically under different OS
+    // locales and ICU defaults (for example, zh-CN workstations and en-US CI).
+    .sort((a, b) => {
+      const left = relative(projectRoot, a).replaceAll('\\', '/')
+      const right = relative(projectRoot, b).replaceAll('\\', '/')
+      return left < right ? -1 : left > right ? 1 : 0
+    })
   for (const file of files) {
     const relativePath = relative(projectRoot, file).replaceAll('\\', '/')
     hash.update(relativePath)

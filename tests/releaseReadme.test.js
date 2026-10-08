@@ -25,6 +25,13 @@ describe('README 发布状态同步', () => {
     expect(isReleaseStatusInSync(readme, release)).toBe(false)
   })
 
+  it('Windows CRLF 检出时仍能验证发布区块一致', () => {
+    const readme = syncReleaseStatus('# App\n\n<!-- RELEASE_STATUS:START -->\n旧版本\n<!-- RELEASE_STATUS:END -->\n\n## 使用', release)
+    const windowsReadme = readme.replace(/\n/g, '\r\n')
+    expect(isReleaseStatusInSync(windowsReadme, release)).toBe(true)
+    expect(isReleaseStatusInSync(windowsReadme.replace('1.0.4', '1.0.3'), release)).toBe(false)
+  })
+
   it('标记缺失或重复时拒绝写入', () => {
     expect(() => syncReleaseStatus('# App', release)).toThrow('README.md 必须且只能包含一组')
     const duplicated = '<!-- RELEASE_STATUS:START --><!-- RELEASE_STATUS:END -->\n<!-- RELEASE_STATUS:START --><!-- RELEASE_STATUS:END -->'

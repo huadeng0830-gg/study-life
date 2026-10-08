@@ -30,7 +30,11 @@ export function syncReleaseStatus(readme, release) {
 
 export function isReleaseStatusInSync(readme, release) {
   try {
-    return syncReleaseStatus(readme, release) === String(readme ?? '')
+    // Windows checkouts may convert README.md from LF to CRLF via core.autocrlf.
+    // Compare a canonical representation so the release guard behaves the same
+    // locally and on the Windows installer runner.
+    const normalizedReadme = String(readme ?? '').replace(/\r\n/g, '\n')
+    return syncReleaseStatus(normalizedReadme, release) === normalizedReadme
   } catch {
     return false
   }
