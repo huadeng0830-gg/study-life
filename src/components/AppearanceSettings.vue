@@ -1,4 +1,5 @@
 <script setup>
+import ActionButton from './ActionButton.vue'
 import { computed, defineComponent, h, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import Modal from './Modal.vue'
 import ActionSheet from './ActionSheet.vue'
@@ -12,6 +13,8 @@ import { clearAllWallpapers, compressWallpaper, getWallpaper, removeWallpaper, s
 import { useTabKeys } from '../composables/tabKeys.js'
 import { appearanceTab } from '../composables/modalSections.js'
 import { reorderHomeModules, resetHomeModuleOrder as resetHomeModuleOrderValue } from '../composables/homeModules.js'
+import { useLatestTask } from '../composables/latestTask.js'
+import { useAppearanceQuoteSave } from '../composables/appearanceFeedback.js'
 
 // 高对比度开关（与 style.css 的 :root[data-contrast='high'] 对应）。
 // 用 computed 双向绑定，select 才能用布尔值当 v-model。
@@ -77,6 +80,7 @@ const SwipeActionSelector = defineComponent({
 
 const props = defineProps({ open: Boolean })
 const emit = defineEmits(['close', 'edit-navigation'])
+const uploads = useLatestTask()
 
 // 分区状态存在 composables/modalSections.js 的模块级 ref 里：关闭再打开回到上次所在的分区。
 const tab = appearanceTab
@@ -101,6 +105,7 @@ const message = ref('')
 const resetAppearanceTarget = ref(false)
 const resetWallpapersTarget = ref(false)
 const quoteDraft = ref('')
+const quoteSaves = useAppearanceQuoteSave({ draft: quoteDraft, error, message })
 let previewRequest = 0
 const SWIPE_OPTIONS = [
   { id: 'none', label: '无操作' },
@@ -119,7 +124,7 @@ const previewSettings = computed(() =>
 )
 
 watch(() => props.open, (open) => {
-  if (!open) return
+  if (!open) { uploads.cancel(); quoteSaves.cancel(); previewRequest++; busy.value = false; busyStage.value = ''; return }
   // 壁纸预览会读取 IndexedDB 并创建 Blob URL。设置默认打开“主题”页，
   // 不再强制回到"主题"页：关闭再打开会回到上次所在的分区（见 modalSections.js）。
   // 壁纸预览那套 I/O 依然只在 tab === 'wallpaper' 时才做（见下面的 watcher），
@@ -228,6 +233,7 @@ async function loadPreview() {
 }
 
 function chooseTarget(key) {
+  if (busy.value) return
   selectedTarget.value = key
   error.value = ''
   message.value = ''
@@ -242,6 +248,9 @@ async function uploadImage(event) {
   const file = event.target.files?.[0]
   event.target.value = ''
   if (!file) return
+  if (busy.value) return
+  const job = uploads.begin()
+  const target = selectedTarget.value
   busy.value = true
   error.value = ''
   message.value = ''
@@ -250,8 +259,10 @@ async function uploadImage(event) {
   busyStage.value = '正在本机压缩图片…'
   try {
     const result = await compressWallpaper(file)
+    if (!job.isCurrent()) return
     busyStage.value = '正在保存到本机…'
-    await setWallpaper(selectedTarget.value, result.blob)
+    await setWallpaper(target, result.blob)
+    if (!job.isCurrent()) return
     wallpaperAccent.value = result.accent
     targetConfig.value.fit = 'auto'
     if (isGlobal.value) targetConfig.value.enabled = true
@@ -259,10 +270,11 @@ async function uploadImage(event) {
     message.value = `已压缩为 ${result.width}×${result.height}，并提取主题色 ${result.accent}`
     await loadPreview()
   } catch (reason) {
+    if (!job.isCurrent()) return
     error.value = reason instanceof Error ? reason.message : '无法处理这张图片'
   } finally {
-    busy.value = false
-    busyStage.value = ''
+    if (job.isCurrent()) { busy.value = false; busyStage.value = '' }
+    job.finish()
   }
 }
 
@@ -293,9 +305,7 @@ function onImageSheetSelect(action) {
   else if (action.key === 'remove') removeImage()
 }
 
-async function resetAllAppearance() {
-  resetAppearanceTarget.value = true
-}
+function resetAllAppearance() { resetAppearanceTarget.value = true }
 
 async function confirmResetAllAppearance() {
   resetAppearanceTarget.value = false
@@ -341,9 +351,7 @@ async function confirmRemoveImage() {
   await loadPreview()
 }
 
-async function resetAllWallpapers() {
-  resetWallpapersTarget.value = true
-}
+function resetAllWallpapers() { resetWallpapersTarget.value = true }
 
 async function confirmResetAllWallpapers() {
   resetWallpapersTarget.value = false
@@ -367,14 +375,6 @@ function chooseTheme(key, event) {
     () => { themeKey.value = key },
     originFromEvent(event, event?.currentTarget),
   )
-}
-
-function saveQuotes() {
-  const lines = quoteDraft.value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).slice(0, 50)
-  appearance.value.quotes = lines.length ? lines : ['今天也要漂亮通关。']
-  appearance.value.fixedQuoteIndex = Math.min(appearance.value.fixedQuoteIndex, appearance.value.quotes.length - 1)
-  quoteDraft.value = appearance.value.quotes.join('\n')
-  message.value = `已保存 ${appearance.value.quotes.length} 条文字`
 }
 
 const previewStyle = computed(() => ({
@@ -464,7 +464,7 @@ const previewStyle = computed(() => ({
       <label>励志语（每行一条，最多 50 条）<textarea v-model="quoteDraft" rows="9" placeholder="今天也要漂亮通关。"></textarea></label>
       <div class="quote-row"><label>显示方式<select v-model="appearance.quoteMode"><option value="daily">每天轮换</option><option value="random">每次打开随机</option><option value="fixed">固定一条</option></select></label><label v-if="appearance.quoteMode === 'fixed'">固定显示<select v-model.number="appearance.fixedQuoteIndex"><option v-for="(quote, index) in appearance.quotes" :key="index" :value="index">{{ quote }}</option></select></label></div>
       <label>个人签名<input v-model="appearance.signature" maxlength="40" placeholder="例如：保持好奇，慢慢变强" /></label>
-      <button class="btn btn-primary" @click="saveQuotes">保存文字</button>
+      <ActionButton kind="frequent" :action="quoteSaves.save" :show-error="false" success-label="已保存">保存文字</ActionButton>
     </section>
 
     <section v-else-if="tab === 'layout'" class="layout-editor" role="tabpanel" aria-labelledby="appearance-tab-layout">

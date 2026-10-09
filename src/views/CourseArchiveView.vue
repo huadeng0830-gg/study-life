@@ -7,6 +7,7 @@ import Toast from '../components/Toast.vue'
 import TaskWorkSession from '../components/tasks/TaskWorkSession.vue'
 import CourseTaskItem from '../components/courses/CourseTaskItem.vue'
 import CourseActivityItem from '../components/courses/CourseActivityItem.vue'
+import LearningNavigation from '../components/learning/LearningNavigation.vue'
 import { buildCourseProgress, courseDateLabel, courseTaskDueLabel } from '../composables/courseProgress.js'
 import { useDomainCommands } from '../composables/domain/commands.js'
 import { clearFocusFromRoute, focusElementWhenReady, focusLocation, readFocusQuery } from '../composables/focusNavigation.js'
@@ -188,6 +189,8 @@ watch(() => [route.query.focus, route.query.section, courseId.value, timeline.va
         <RouterLink v-if="profile && !profile.archived" class="btn btn-primary" :to="taskLocation">＋ 添加课程待办</RouterLink>
       </div>
     </header>
+
+    <LearningNavigation current="course" />
 
     <template v-if="!courseId">
       <section class="overview-stats" aria-label="在学课程概览">

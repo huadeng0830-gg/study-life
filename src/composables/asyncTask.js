@@ -11,6 +11,12 @@ export function throwIfAborted(signal) {
 }
 
 // 为本身不支持 AbortSignal 的 Worker/Promise 提供统一超时与真实中断钩子。
+/**
+ * @template T
+ * @param {T | PromiseLike<T>} task
+ * @param {{signal?: AbortSignal | null, timeoutMs?: number, timeoutMessage?: string, onInterrupt?: ((reason: string) => unknown) | null}} [options]
+ * @returns {Promise<T>}
+ */
 export function raceWithControls(task, {
   signal = null,
   timeoutMs = 0,

@@ -110,7 +110,7 @@ describe('分摊：人数为 1 不是分摊', () => {
   })
 })
 
-describe('退款：币种与分摊必须继承，上限按「我承担」算（真缺陷）', () => {
+describe('退款：币种继承，上限按「我承担」算（真缺陷）', () => {
   let domain
   beforeEach(async () => {
     vi.resetModules()
@@ -150,14 +150,20 @@ describe('退款：币种与分摊必须继承，上限按「我承担」算（�
     expect(totals.expenseTotal).toBe(0)
   })
 
-  it('退款继承 split，计入时与原支出口径一致', () => {
+  it('部分退款按实际到账冲抵，连续退款累计不超过原承担金额', () => {
     const created = domain.createTransaction({
       name: '聚餐', amount: 100, date: '2026-09-01', cat: 'food',
       split: buildSplit(100, { count: 2, mine: 60 }),
     })
-    const refund = domain.refundTransaction(created.id, { amount: 60, date: '2026-09-02' })
-    expect(refund.split).toBeTruthy()
-    expect(mySpendCents(refund)).toBe(6000)
+    const refund = domain.refundTransaction(created.id, { amount: 10, date: '2026-09-02' })
+    const second = domain.refundTransaction(created.id, { amount: 20, date: '2026-09-03' })
+    expect(refund.split).toBeUndefined()
+    expect(mySpendCents(refund)).toBe(1000)
+    expect(mySpendCents(second)).toBe(2000)
+    expect(personalSpendTotals([created, refund, second]).expenseTotal).toBe(30)
+    expect(domain.refundTransaction(created.id, { amount: 30.01 }).blocked).toBe(true)
+    expect(domain.refundTransaction(created.id, { amount: 30 }).blocked).toBeUndefined()
+    expect(domain.refundTransaction(created.id, { amount: 0.01 }).blocked).toBe(true)
   })
 })
 

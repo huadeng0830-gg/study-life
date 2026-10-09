@@ -9,12 +9,12 @@
  */
 import { computed, ref } from 'vue'
 import { appToday } from '../timeContext.js'
-import { buildLedgerMonthReview, catInfo, expenses, ledgerIndex } from '../ledger.js'
+import { buildLedgerMonthReview, catInfo, expenses, filterLedgerTransactions, isValidDateKey, ledgerIndex } from '../ledger.js'
 import { mySpendCents, mySpendYuan, personalSpendTotals } from '../ledgerSplit.js'
-import { summarizeLedgerMonthsInBase } from '../ledgerFx.js'
+import { createLedgerBaseConverter, summarizeLedgerMonthsInBase, sumLedgerMonthInBase } from '../ledgerFx.js'
 import { shiftTrendMonth } from '../monthlyTrendChart.js'
 
-export function useLedgerReview({ personalAmount, ledgerToday, tab, fx }) {
+export function useLedgerReview({ ledgerToday, tab, fx }) {
   const reviewMonth = ref(ledgerToday().slice(0, 7)) // YYYY-MM
   const trendEndMonth = ref(reviewMonth.value)
   const earliestTrendMonth = computed(() => {
@@ -52,9 +52,35 @@ export function useLedgerReview({ personalAmount, ledgerToday, tab, fx }) {
 
   // 回顾与首页同一口径：整月合计、分类分布、月历点迹、最大一笔全部按「我承担的份额」算
   // （`amountOf: mySpendCents`）。未分摊的记录逐分不变，所以没有分摊的月份与改建前完全一致。
-  const monthlyReview = computed(() => buildLedgerMonthReview(expenses.value, reviewMonth.value, { amountOf: mySpendCents }))
+  const monthlyReview = computed(() => {
+    const convert = createLedgerBaseConverter(fx.value)
+    const amountOf = (item) => convert(mySpendYuan(item), item.currency).cents
+    const raw = buildLedgerMonthReview(expenses.value, reviewMonth.value, { amountOf: mySpendCents })
+    const converted = buildLedgerMonthReview(expenses.value, reviewMonth.value, { amountOf })
+    const summary = sumLedgerMonthInBase(expenses.value, fx.value, reviewMonth.value, { amountOf: mySpendYuan })
+    const items = filterLedgerTransactions(ledgerIndex.value.sortedExpenses, { dateFilter: (date) => date.startsWith(reviewMonth.value) })
+    const dayItems = new Map()
+    const dayTotals = new Map()
+    for (const item of items) {
+      const day = Number(item.date.slice(8))
+      const entries = dayItems.get(day) || []
+      entries.push(item); dayItems.set(day, entries)
+      const total = dayTotals.get(day) || { count: 0, totalCents: 0, excludedCount: 0 }
+      total.count += 1
+      const cents = amountOf(item)
+      if (cents === null) total.excludedCount += 1
+      else if (item.direction !== 'income') total.totalCents += item.direction === 'refund' ? -cents : cents
+      dayTotals.set(day, total)
+    }
+    return { ...converted, expenses: raw.expenses, count: raw.count, mostFrequent: raw.mostFrequent,
+      recordCount: items.length, excludedCount: summary.excludedCount, missingRates: summary.missingRates,
+      hasForeignCurrency: summary.hasForeign, base: summary.base, ratesUpdatedAt: summary.ratesUpdatedAt,
+      dayItems,
+      dayTotals: new Map([...dayTotals].map(([day, entry]) => [day, { count: entry.count, total: entry.totalCents / 100, excludedCount: entry.excludedCount }])),
+    }
+  })
   const reviewTotal = computed(() => monthlyReview.value.total)
-  const reviewCount = computed(() => monthlyReview.value.count)
+  const reviewCount = computed(() => monthlyReview.value.recordCount)
   const mostFrequent = computed(() => monthlyReview.value.mostFrequent)
   const topCategory = computed(() => {
     const top = monthlyReview.value.topCategory
@@ -63,7 +89,7 @@ export function useLedgerReview({ personalAmount, ledgerToday, tab, fx }) {
   const maxSingle = computed(() => monthlyReview.value.maxSingle)
   // 「最大一笔」的金额：卡片上的其它数字都是份额，这一笔也必须显示**我的份额**
   // （这条记录的总额仍在详情面板与导出里，信息没丢）。
-  const maxSingleMine = computed(() => (maxSingle.value ? personalAmount(maxSingle.value) : null))
+  const maxSingleMine = computed(() => maxSingle.value ? createLedgerBaseConverter(fx.value)(mySpendYuan(maxSingle.value), maxSingle.value.currency).cents / 100 : null)
   /* ---------- 分类分布（回顾） ----------
    * 改造前这里有两个看不见的墙：
    *   1. `categoryTotals.slice(0, 5)` —— 第 6 名以后的分类在页面上**完全不存在**。
@@ -81,10 +107,14 @@ export function useLedgerReview({ personalAmount, ledgerToday, tab, fx }) {
   const showAllReviewCats = ref(false) // 「展开其余 N 个分类」
   const reviewCategoryRows = computed(() => {
     const buckets = new Map()
+    const convert = createLedgerBaseConverter(fx.value)
+    const baseAmount = (item) => convert(mySpendYuan(item), item.currency).cents
     for (const item of monthlyReview.value.expenses) {
       const key = item.cat || 'other'
-      const bucket = buckets.get(key) ?? { key, totalCents: 0, items: [] }
-      bucket.totalCents += Math.round(personalAmount(item) * 100)
+      const bucket = buckets.get(key) ?? { key, totalCents: 0, items: [], excludedCount: 0 }
+      const cents = baseAmount(item)
+      if (cents === null) bucket.excludedCount += 1
+      else bucket.totalCents += cents
       bucket.items.push(item)
       buckets.set(key, bucket)
     }
@@ -93,10 +123,11 @@ export function useLedgerReview({ personalAmount, ledgerToday, tab, fx }) {
       info: catInfo(bucket.key),
       value: bucket.totalCents / 100,
       count: bucket.items.length,
+      excludedCount: bucket.excludedCount,
       // 分类内按金额倒序：点开就是想看「钱花在哪几笔上」，最大的那笔该在第一条。
       // 金额相同时按日期时间倒序，保证顺序稳定（不依赖录入顺序）。
       items: bucket.items.slice().sort((a, b) =>
-        personalAmount(b) - personalAmount(a)
+        (baseAmount(b) ?? -1) - (baseAmount(a) ?? -1)
         || `${b.date}${b.time || ''}`.localeCompare(`${a.date}${a.time || ''}`)),
     }))
     // 占比分母取「分类合计」而不是整月净额：退款是冲抵项、不属于任何分类，
@@ -135,6 +166,7 @@ export function useLedgerReview({ personalAmount, ledgerToday, tab, fx }) {
   function openReviewCategoryFromHome(key) {
     resetReviewCategoryView()
     reviewMonth.value = ledgerToday().slice(0, 7)
+    selectedDay.value = null
     expandedCategory.value = key
     tab.value = 'review'
   }
@@ -170,26 +202,27 @@ export function useLedgerReview({ personalAmount, ledgerToday, tab, fx }) {
   // 月历点迹
   const calendarCells = computed(() => {
     const [y, m] = reviewMonth.value.split('-').map(Number)
-    const first = new Date(y, m - 1, 1)
-    const daysInMonth = new Date(y, m, 0).getDate()
-    const lead = (first.getDay() + 6) % 7 // 周一开头
+    const first = new Date(Date.UTC(y, m - 1, 1))
+    const daysInMonth = new Date(Date.UTC(y, m, 0)).getUTCDate()
+    const lead = (first.getUTCDay() + 6) % 7 // 周一开头
     const cells = []
     for (let i = 0; i < lead; i++) cells.push(null)
     for (let d = 1; d <= daysInMonth; d++) {
       const day = monthlyReview.value.dayTotals.get(d)
-      cells.push({ day: d, ...(day ? { count: day.count, total: day.total } : { count: 0, total: 0 }) })
+      cells.push({ day: d, ...(day ? { count: day.count, total: day.total, excludedCount: day.excludedCount } : { count: 0, total: 0, excludedCount: 0 }) })
     }
     return cells
   })
   const selectedDay = ref(null)
   const selectedDayInfo = computed(() => {
-    if (!selectedDay.value) return null
+    if (!selectedDay.value || !isValidDateKey(`${reviewMonth.value}-${String(selectedDay.value).padStart(2, '0')}`)) return null
     const day = monthlyReview.value.dayTotals.get(selectedDay.value)
     const items = monthlyReview.value.dayItems.get(selectedDay.value) ?? []
     return {
       label: `${parseInt(reviewMonth.value.slice(5), 10)}月${selectedDay.value}日`,
       count: items.length,
       total: day?.total ?? 0,
+      excludedCount: day?.excludedCount ?? 0,
       items,
     }
   })

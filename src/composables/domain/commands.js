@@ -4,7 +4,7 @@ import { classifyTask } from '../smartClassify.js'
 import { amountToCents, categoriesForScope, classifyTransaction, isRefundTransaction, normalizeAmount, normalizeLedgerTime } from '../ledger.js'
 // 新增可选字段的来源：币种（多币种记账）与分摊（报销分摊）。
 // 两个模块都只做纯规范化，不反向依赖这里，所以不会形成循环导入。
-import { normalizeCurrency } from '../ledgerFx.js'
+import { normalizeCurrency, normalizeLedgerFx, useLedgerFx } from '../ledgerFx.js'
 import { mySpendCents, normalizeSplit, validateSplit } from '../ledgerSplit.js'
 import { isBillPayment, transactionBillId } from '../ledgerRelations.js'
 import { detachCourseRelations } from './relations.js'
@@ -356,6 +356,9 @@ export function useDomainCommands() {
     if (hasSplitInput && !validateSplit(value.split).ok) {
       throw new Error(`分摊数据不合法：${validateSplit(value.split).issues[0]}`)
     }
+    if (hasSplitInput && amountToCents(value.split.total) !== amountToCents(amount)) {
+      throw new Error('分摊总额必须与记录金额一致')
+    }
     const item = {
       id: value.id || createId('ex'), name, amount,
       cat: value.cat || value.category || classifyTransaction(name, { direction }).categoryId, date,
@@ -373,7 +376,7 @@ export function useDomainCommands() {
   }
   function updateTransaction(id, value = {}) {
     const item = transactions.value.find((entry) => entry.id === id)
-    if (!item) return null
+    if (!item || item.archivedAt || item.deletedAt || item.tombstone) return null
     const direction = value.direction === 'income' || value.type === 'income' ? 'income' : value.direction === 'expense' || value.type === 'expense' ? 'expense' : item.direction || 'expense'
     const amount = value.amount === undefined ? normalizeAmount(item.amount) : normalizeAmount(value.amount)
     const name = value.name === undefined && value.title === undefined
@@ -386,6 +389,20 @@ export function useDomainCommands() {
     if (time === null) throw new Error('时间格式不正确')
     if (value.split !== undefined && value.split !== null && !validateSplit(value.split).ok) {
       throw new Error(`分摊数据不合法：${validateSplit(value.split).issues[0]}`)
+    }
+    const split = value.split === undefined ? normalizeSplit(item.split) : normalizeSplit(value.split)
+    if (!isRefundTransaction(item) && split && amountToCents(split.total) !== amountToCents(amount)) {
+      throw new Error('分摊总额必须与记录金额一致，请同时调整分摊')
+    }
+    const refunds = transactions.value.filter((entry) => isRefundTransaction(entry) && entry.refundOf === id
+      && !entry.archivedAt && !entry.deletedAt && !entry.tombstone)
+    if (refunds.length) {
+      if (direction !== 'expense') throw new Error('已有退款的支出不能改为收入，请先撤销退款')
+      const currency = value.currency === undefined ? item.currency : value.currency
+      const base = normalizeLedgerFx(useLedgerFx().fx.value).base
+      if ((normalizeCurrency(currency) || base) !== (normalizeCurrency(item.currency) || base)) throw new Error('已有退款的支出不能更换币种，请先撤销退款')
+      const refunded = refunds.reduce((sum, entry) => sum + (mySpendCents(entry) ?? 0), 0)
+      if ((mySpendCents({ amount, split }) ?? 0) < refunded) throw new Error('我承担的金额不能小于已登记的退款')
     }
     Object.assign(item, {
       name, amount, direction, date,
@@ -445,6 +462,10 @@ export function useDomainCommands() {
     if (bill && item.billingPeriodKey) {
       return { blocked: true, reason: '这是固定账单的支付记录，请使用“撤销支付”，避免账单状态与账本不一致。' }
     }
+    if (transactions.value.some((entry) => isRefundTransaction(entry) && entry.refundOf === id
+      && !entry.archivedAt && !entry.deletedAt && !entry.tombstone)) {
+      return { blocked: true, reason: '这笔支出已有退款，请先撤销关联退款，再删除原记录。' }
+    }
     const index = transactions.value.findIndex((entry) => entry.id === id)
     const [deleted] = transactions.value.splice(index, 1)
     commitTransactions()
@@ -457,6 +478,7 @@ export function useDomainCommands() {
   }
   function refundTransaction(id, value = {}) {
     const original = transactions.value.find((entry) => entry.id === id)
+    if (original?.archivedAt || original?.deletedAt || original?.tombstone) return { blocked: true, reason: '原支出已不可用。' }
     if (!original) return { blocked: true, reason: '找不到要退款的记录。' }
     if (isRefundTransaction(original)) return { blocked: true, reason: '退款记录不能再次退款。' }
     if (original.direction === 'income') return { blocked: true, reason: '只有支出记录可以退款。' }
@@ -464,7 +486,10 @@ export function useDomainCommands() {
       return { blocked: true, reason: '固定账单的支付记录请使用「撤销支付」处理。' }
     }
     const amount = normalizeAmount(value.amount)
-    if (amount === null) return { blocked: true, reason: '退款金额需大于 0，且最多保留两位小数。' }
+    if (amount === null || amount <= 0) return { blocked: true, reason: '退款金额需大于 0，且最多保留两位小数。' }
+    if (value.date !== undefined && !validDateKey(value.date)) return { blocked: true, reason: '退款日期格式不正确。' }
+    const refundTime = normalizeLedgerTime(value.time || policyTimeKey(stamp()))
+    if (refundTime === null) return { blocked: true, reason: '退款时间格式不正确。' }
     // 【上限按「我承担」算，不按总额】整个账本对外回答的是「我实际承担多少」
     // （mySpendCents），退款必须用同一个口径冲减，否则一笔 2 人 AA 的支出
     // （总额 ¥100 / 我承担 ¥60）能退掉 ¥100，让本月花费变成 −¥40。
@@ -480,11 +505,13 @@ export function useDomainCommands() {
     // 【币种必须继承】外币支出的退款若不带 currency，会被导出与合计归到基准币种桶里，
     // 变成「用 9.99 人民币冲减一笔 9.99 美元的支出」。
     const currency = normalizeCurrency(original.currency)
-    // 【分摊必须继承】同理：原支出按 split.mine 计入，退款也必须按 mine 计入，
-    // 否则退掉的是全额、抵扣的只是我那一份。
+    // 退款输入已经是我实际收到的金额，不能再次套用原消费的分摊份额。
     const hasSplitInput = value.split !== undefined && value.split !== null
     if (hasSplitInput && !validateSplit(value.split).ok) {
       return { blocked: true, reason: `分摊数据不合法：${validateSplit(value.split).issues[0]}` }
+    }
+    if (hasSplitInput && (amountToCents(value.split.total) !== amountCents || amountToCents(value.split.mine) !== amountCents)) {
+      return { blocked: true, reason: '退款金额表示我实际收到的金额，不能再次分摊。' }
     }
     const item = {
       id: createId('ex'),
@@ -492,14 +519,14 @@ export function useDomainCommands() {
       amount,
       cat: original.cat || 'other',
       date: validDateKey(value.date) ? value.date : policyDateKey(now),
-      time: normalizeLedgerTime(value.time === undefined || value.time === null || value.time === '' ? policyTimeKey(now) : value.time) || '',
+      time: refundTime,
       note: String(value.note ?? '').trim() || '退款冲抵原支出',
       account: value.account && String(value.account).trim() ? String(value.account).trim() : original.account || '',
       direction: 'refund',
       refundOf: id,
       source: value.source || 'refund',
       ...(currency ? { currency } : {}),
-      ...(hasSplitInput ? { split: normalizeSplit(value.split) } : original.split ? { split: normalizeSplit(original.split) } : {}),
+      ...(hasSplitInput ? { split: normalizeSplit(value.split) } : {}),
       createdAt: now, updatedAt: now, ...origin(value),
     }
     transactions.value.push(item)
@@ -523,6 +550,10 @@ export function useDomainCommands() {
     commitTransactions()
     if (bill && bill.nextDate > item.billingPeriodKey) {
       bill.nextDate = item.billingPeriodKey
+      bill.updatedAt = stamp()
+      commitBills()
+    } else if (bill?.cycle === 'once' && bill.nextDate === item.billingPeriodKey && !bill.archivedAt) {
+      bill.active = true
       bill.updatedAt = stamp()
       commitBills()
     }
@@ -695,6 +726,7 @@ export function useDomainCommands() {
     if (!item) return null
     if (item.active === false || item.archivedAt) return { blocked: true, bill: item, reason: '账单已暂停，请恢复后再跳过本期。' }
     item.nextDate = nextBillDate(item, transactions.value)
+    if (item.cycle === 'once') item.active = false
     item.updatedAt = stamp()
     commitBills()
     return item
@@ -718,6 +750,7 @@ export function useDomainCommands() {
       sourceType: 'bill', sourceId: bill.id,
     })
     bill.nextDate = nextBillDate(bill, transactions.value)
+    if (bill.cycle === 'once') bill.active = false
     bill.updatedAt = stamp()
     commitBills()
     return { bill, transaction, duplicate: false }

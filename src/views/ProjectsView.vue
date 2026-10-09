@@ -1,4 +1,5 @@
 <script setup>
+import ActionButton from '../components/ActionButton.vue'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { socialRequest } from '../services/social.js'
@@ -1145,7 +1146,7 @@ onBeforeUnmount(() => {
         <p class="page-subtitle">一个人可以管理项目，需要时再邀请队友一起推进。</p>
       </div>
       <div class="projects-head-actions">
-        <button class="btn btn-ghost" type="button" :disabled="pageLoading" @click="refresh">刷新</button>
+        <ActionButton tone="ghost" class="btn btn-ghost" type="button" :disabled="pageLoading" kind="important" feedback="external" :show-error="false" :action="() => refresh()">刷新</ActionButton>
         <button class="btn btn-primary" type="button" :disabled="!isSignedIn" @click="openCreateProject">新建项目</button>
       </div>
     </header>
@@ -1177,7 +1178,7 @@ onBeforeUnmount(() => {
           <div><strong>{{ invite.projectName }}</strong><span>项目邀请 · {{ PROJECT_TYPE_LABELS[invite.type] || '项目' }}</span></div>
           <div class="projects-row-actions">
             <button class="btn btn-ghost" type="button" :disabled="actionBusy === `invite:${invite.projectId}`" @click="askConfirm({ kind: 'decline-invite', projectId: invite.projectId })">拒绝</button>
-            <button class="btn btn-primary" type="button" :disabled="actionBusy === `invite:${invite.projectId}`" @click="acceptProjectInvite(invite.projectId)">接受</button>
+            <ActionButton tone="primary" class="btn btn-primary" type="button" :disabled="actionBusy === `invite:${invite.projectId}`" kind="important" feedback="external" :show-error="false" :action="() => acceptProjectInvite(invite.projectId)">接受</ActionButton>
           </div>
         </div>
         <div v-for="assignment in inbox.assignments" :key="`assignment-${assignment.taskId}`" class="projects-inbox-row">
@@ -1279,14 +1280,14 @@ onBeforeUnmount(() => {
               </div>
               <div class="project-task-actions">
                 <template v-if="project.status === 'active' && task.assigneeId === accountUser.id && task.assignmentStatus === 'pending'">
-                  <button class="btn btn-ghost" type="button" :disabled="actionBusy === `task:${task.id}`" @click="respondTask(task, 'decline')">拒绝分工</button>
-                  <button class="btn btn-primary" type="button" :disabled="actionBusy === `task:${task.id}`" @click="respondTask(task, 'accept')">接受分工</button>
+                  <ActionButton tone="ghost" class="btn btn-ghost" type="button" :disabled="actionBusy === `task:${task.id}`" kind="important" feedback="external" :show-error="false" :action="() => respondTask(task, 'decline')">拒绝分工</ActionButton>
+                  <ActionButton tone="primary" class="btn btn-primary" type="button" :disabled="actionBusy === `task:${task.id}`" kind="important" feedback="external" :show-error="false" :action="() => respondTask(task, 'accept')">接受分工</ActionButton>
                 </template>
                 <template v-else-if="project.status === 'active' && task.status !== 'completed' && (isManager || (task.assigneeId === accountUser.id && task.assignmentStatus === 'accepted'))">
                   <button v-if="task.status === 'todo'" class="btn btn-secondary" type="button" :disabled="actionBusy === `task:${task.id}` || isTaskDependencyBlocked(task)" @click="openProjectTaskWorkbench(task)">工作台</button>
                   <button v-else class="btn btn-secondary" type="button" :disabled="actionBusy === `task:${task.id}`" @click="openProjectTaskWorkbench(task)">继续</button>
-                  <button v-if="task.status === 'in_progress'" class="btn btn-secondary" type="button" :disabled="actionBusy === `task:${task.id}` || isTaskDependencyBlocked(task)" @click="changeTaskStatus(task, 'review')">提交验收</button>
-                  <button class="btn btn-primary" type="button" :disabled="actionBusy === `task:${task.id}` || isTaskDependencyBlocked(task)" @click="changeTaskStatus(task, 'completed')">完成</button>
+                  <ActionButton tone="neutral" v-if="task.status === 'in_progress'" class="btn btn-secondary" type="button" :disabled="actionBusy === `task:${task.id}` || isTaskDependencyBlocked(task)" kind="important" feedback="external" :show-error="false" :action="() => changeTaskStatus(task, 'review')">提交验收</ActionButton>
+                  <ActionButton tone="primary" class="btn btn-primary" type="button" :disabled="actionBusy === `task:${task.id}` || isTaskDependencyBlocked(task)" kind="important" feedback="external" :show-error="false" :action="() => changeTaskStatus(task, 'completed')">完成</ActionButton>
                 </template>
                 <button v-if="canAddAdjustment(task)" class="btn btn-ghost" type="button" @click="openAdjustment(task)">协商调整</button>
                 <button v-if="isManager && project.status === 'active'" class="btn btn-ghost" type="button" @click="openTaskEdit(task)">编辑</button>
@@ -1294,7 +1295,7 @@ onBeforeUnmount(() => {
                 <button class="icon-btn" type="button" :aria-label="`查看“${task.title}”的进展记录`" title="进展记录" @click="loadTaskEvents(task)">⋯</button>
               </div>
               <div v-if="assignedSubtasks(task.id).length" class="project-subtasks">
-                <div v-for="child in assignedSubtasks(task.id)" :key="child.id" class="project-subtask-row"><span aria-hidden="true">↳</span><strong :class="{ 'task-is-done': child.status === 'completed' }">{{ child.title }}</strong><small>{{ taskAssignmentLabel(child) }}<template v-if="child.dueOn"> · {{ formatDate(child.dueOn) }}</template><template v-if="isTaskDependencyBlocked(child)"> · 等待前置：{{ child.dependencyTaskTitle }}</template></small><template v-if="project.status === 'active' && child.assigneeId === accountUser.id && child.assignmentStatus === 'pending'"><button class="btn btn-ghost" type="button" @click="respondTask(child, 'decline')">拒绝</button><button class="btn btn-ghost" type="button" @click="respondTask(child, 'accept')">接受</button></template><button v-else-if="project.status === 'active' && child.assigneeId === accountUser.id && child.assignmentStatus === 'accepted' && child.status !== 'completed'" class="btn btn-ghost" type="button" :disabled="isTaskDependencyBlocked(child)" @click="changeTaskStatus(child, 'completed')">完成</button><button v-if="isManager && project.status === 'active'" class="icon-btn" type="button" :aria-label="`编辑子任务 ${child.title}`" @click="openTaskEdit(child)">✎</button></div>
+                <div v-for="child in assignedSubtasks(task.id)" :key="child.id" class="project-subtask-row"><span aria-hidden="true">↳</span><strong :class="{ 'task-is-done': child.status === 'completed' }">{{ child.title }}</strong><small>{{ taskAssignmentLabel(child) }}<template v-if="child.dueOn"> · {{ formatDate(child.dueOn) }}</template><template v-if="isTaskDependencyBlocked(child)"> · 等待前置：{{ child.dependencyTaskTitle }}</template></small><template v-if="project.status === 'active' && child.assigneeId === accountUser.id && child.assignmentStatus === 'pending'"><ActionButton tone="ghost" class="btn btn-ghost" type="button" kind="important" feedback="external" :show-error="false" :action="() => respondTask(child, 'decline')">拒绝</ActionButton><ActionButton tone="ghost" class="btn btn-ghost" type="button" kind="important" feedback="external" :show-error="false" :action="() => respondTask(child, 'accept')">接受</ActionButton></template><ActionButton tone="ghost" v-else-if="project.status === 'active' && child.assigneeId === accountUser.id && child.assignmentStatus === 'accepted' && child.status !== 'completed'" class="btn btn-ghost" type="button" :disabled="isTaskDependencyBlocked(child)" kind="important" feedback="external" :show-error="false" :action="() => changeTaskStatus(child, 'completed')">完成</ActionButton><button v-if="isManager && project.status === 'active'" class="icon-btn" type="button" :aria-label="`编辑子任务 ${child.title}`" @click="openTaskEdit(child)">✎</button></div>
               </div>
             </article>
               </template>
@@ -1304,10 +1305,10 @@ onBeforeUnmount(() => {
           <section v-else-if="activeSection === 'schedule'" class="project-panel panel" aria-labelledby="project-schedule-title">
             <div class="projects-section-head"><div><h3 id="project-schedule-title">团队时间</h3><p>只返回共同空闲时段，不显示队友的课程或个人日程详情。</p></div><button v-if="project.status === 'active' && activeMembers.length >= 2" class="btn btn-primary" type="button" @click="openMeetingForm()">＋ 发起讨论</button></div>
             <section class="schedule-availability" aria-label="共同空闲时间">
-              <div class="schedule-query-row"><strong>共同空闲</strong><div><button v-for="days in [7, 14, 30]" :key="days" class="btn btn-ghost" type="button" :class="{ active: scheduleDays === days }" :disabled="scheduleBusy || activeMembers.length < 2" @click="queryGroupAvailability(days)">未来 {{ days }} 天</button></div></div>
+              <div class="schedule-query-row"><strong>共同空闲</strong><div><ActionButton tone="ghost" v-for="days in [7, 14, 30]" :key="days" class="btn btn-ghost" type="button" :class="{ active: scheduleDays === days }" :disabled="scheduleBusy || activeMembers.length < 2" kind="task" feedback="external" :show-error="false" :action="() => queryGroupAvailability(days)">未来 {{ days }} 天</ActionButton></div></div>
               <p v-if="activeMembers.length < 2" class="projects-form-hint">邀请至少一位队友后，可以计算共同空闲时间或发起讨论。</p>
               <div v-else-if="scheduleBusy" class="projects-loading" role="status">正在按每位成员自己的学校课表和时区计算…</div>
-              <p v-else-if="scheduleError" class="projects-form-error" role="alert">{{ scheduleError }} <button class="btn btn-ghost" type="button" @click="queryGroupAvailability()">重试</button></p>
+              <p v-else-if="scheduleError" class="projects-form-error" role="alert">{{ scheduleError }} <ActionButton tone="ghost" class="btn btn-ghost" type="button" kind="task" feedback="external" :show-error="false" :action="() => queryGroupAvailability()">重试</ActionButton></p>
               <template v-else-if="scheduleAvailability">
                 <p v-if="!scheduleAvailability.known" class="projects-form-hint">部分成员尚未完善或同步个人课表。可以先手动填写讨论时间，成员再接受、拒绝或提出改期。</p>
                 <div v-else-if="!scheduleAvailability.intervals.length" class="projects-empty compact"><strong>暂时没有满足偏好的共同空闲时段</strong><small>可以调整个人可约时间设置，或发起手动讨论邀请。</small><button v-if="project.status === 'active'" class="btn btn-secondary" type="button" @click="openMeetingForm()">手动发起讨论</button></div>
@@ -1323,7 +1324,7 @@ onBeforeUnmount(() => {
                   <div v-for="person in meeting.participants.filter((item) => item.status === 'proposed')" :key="`proposal-${meeting.id}-${person.userId}`" class="meeting-proposal"><span>{{ person.nickname }}建议：{{ formatProjectTime(person.proposedStartsAt) }} – {{ formatProjectTime(person.proposedEndsAt) }}</span><button v-if="(meeting.createdBy === accountUser.id || isManager) && project.status === 'active'" class="btn btn-secondary" type="button" @click="askConfirm({ kind: 'meeting-apply-proposal', meetingId: meeting.id, participantId: person.userId })">采用建议时间</button></div>
                 </div>
                 <div class="projects-row-actions meeting-actions">
-                  <template v-if="project.status === 'active' && meeting.status === 'open' && meeting.participants.some((person) => person.userId === accountUser.id && person.status === 'invited')"><button class="btn btn-ghost" type="button" :disabled="actionBusy === `meeting:${meeting.id}`" @click="openMeetingProposal(meeting)">提出改期</button><button class="btn btn-ghost" type="button" :disabled="actionBusy === `meeting:${meeting.id}`" @click="respondMeeting(meeting, 'decline')">拒绝</button><button class="btn btn-primary" type="button" :disabled="actionBusy === `meeting:${meeting.id}`" @click="respondMeeting(meeting, 'accept')">接受</button></template>
+                  <template v-if="project.status === 'active' && meeting.status === 'open' && meeting.participants.some((person) => person.userId === accountUser.id && person.status === 'invited')"><button class="btn btn-ghost" type="button" :disabled="actionBusy === `meeting:${meeting.id}`" @click="openMeetingProposal(meeting)">提出改期</button><ActionButton tone="ghost" class="btn btn-ghost" type="button" :disabled="actionBusy === `meeting:${meeting.id}`" kind="important" feedback="external" :show-error="false" :action="() => respondMeeting(meeting, 'decline')">拒绝</ActionButton><ActionButton tone="primary" class="btn btn-primary" type="button" :disabled="actionBusy === `meeting:${meeting.id}`" kind="important" feedback="external" :show-error="false" :action="() => respondMeeting(meeting, 'accept')">接受</ActionButton></template>
                   <button v-if="meetingCanConfirm(meeting) && project.status === 'active'" class="btn btn-primary" type="button" :disabled="actionBusy === `meeting-confirm:${meeting.id}`" @click="askConfirm({ kind: 'meeting-confirm', meetingId: meeting.id })">确认并加入日程</button>
                   <button v-if="(meeting.createdBy === accountUser.id || isManager) && project.status === 'active' && meeting.status !== 'cancelled'" class="btn btn-ghost danger-text" type="button" @click="askConfirm({ kind: 'meeting-cancel', meetingId: meeting.id })">取消邀约</button>
                 </div>
@@ -1340,8 +1341,8 @@ onBeforeUnmount(() => {
                 <small v-if="request.decisionNote">处理说明：{{ request.decisionNote }}</small>
               </div>
               <div class="projects-row-actions">
-                <template v-if="canRespondAdjustment(request)"><button class="btn btn-ghost" type="button" :disabled="actionBusy === `adjustment:${request.id}`" @click="decideAdjustment(request, 'reject')">拒绝</button><button class="btn btn-primary" type="button" :disabled="actionBusy === `adjustment:${request.id}`" @click="decideAdjustment(request, 'approve')">通过</button></template>
-                <button v-if="request.status === 'pending' && request.requesterId === accountUser.id" class="btn btn-ghost" type="button" :disabled="actionBusy === `adjustment:${request.id}`" @click="cancelAdjustment(request)">撤回</button>
+                <template v-if="canRespondAdjustment(request)"><ActionButton tone="ghost" class="btn btn-ghost" type="button" :disabled="actionBusy === `adjustment:${request.id}`" kind="important" feedback="external" :show-error="false" :action="() => decideAdjustment(request, 'reject')">拒绝</ActionButton><ActionButton tone="primary" class="btn btn-primary" type="button" :disabled="actionBusy === `adjustment:${request.id}`" kind="important" feedback="external" :show-error="false" :action="() => decideAdjustment(request, 'approve')">通过</ActionButton></template>
+                <ActionButton tone="ghost" v-if="request.status === 'pending' && request.requesterId === accountUser.id" class="btn btn-ghost" type="button" :disabled="actionBusy === `adjustment:${request.id}`" kind="important" feedback="external" :show-error="false" :action="() => cancelAdjustment(request)">撤回</ActionButton>
               </div>
             </article>
           </section>
@@ -1359,7 +1360,7 @@ onBeforeUnmount(() => {
               <div v-if="!deliveryChecks.length" class="projects-empty compact"><strong>还没有检查项</strong><small>简单项目可以跳过；需要明确交付要求时再添加。</small></div>
               <div v-for="item in deliveryChecks" :key="item.id" class="delivery-check-row">
                 <label class="delivery-check-toggle"><input type="checkbox" :checked="item.checked" :disabled="project.status !== 'active' || actionBusy === `delivery-check:${item.id}`" @change="saveDeliveryCheck(item, $event.target.checked)" /><span>{{ item.title }}<small>{{ item.required ? '必需' : '选填' }}<template v-if="item.checked && item.checkedByName"> · {{ item.checkedByName }}已确认</template></small></span></label>
-                <div class="delivery-check-actions"><input v-if="project.status === 'active'" v-model="item.evidence" maxlength="1000" :aria-label="`${item.title}的凭证或说明`" placeholder="凭证或说明（选填）" @input="deliveryEvidenceEdits.mark(item.id, item.evidence)" @keydown.enter.prevent="saveDeliveryCheck(item, item.checked)" /><button v-if="project.status === 'active'" class="btn btn-ghost" type="button" :disabled="actionBusy === `delivery-check:${item.id}`" @click="saveDeliveryCheck(item, item.checked)">保存说明</button><button v-if="isManager && project.status === 'active'" class="icon-btn danger-text" type="button" :aria-label="`删除检查项 ${item.title}`" @click="askConfirm({ kind: 'delivery-check-delete', checkId: item.id })">×</button></div>
+                <div class="delivery-check-actions"><input v-if="project.status === 'active'" v-model="item.evidence" maxlength="1000" :aria-label="`${item.title}的凭证或说明`" placeholder="凭证或说明（选填）" @input="deliveryEvidenceEdits.mark(item.id, item.evidence)" @keydown.enter.prevent="saveDeliveryCheck(item, item.checked)" /><ActionButton tone="ghost" v-if="project.status === 'active'" class="btn btn-ghost" type="button" :disabled="actionBusy === `delivery-check:${item.id}`" kind="frequent" feedback="external" :show-error="false" :action="() => saveDeliveryCheck(item, item.checked)">保存说明</ActionButton><button v-if="isManager && project.status === 'active'" class="icon-btn danger-text" type="button" :aria-label="`删除检查项 ${item.title}`" @click="askConfirm({ kind: 'delivery-check-delete', checkId: item.id })">×</button></div>
                 <small v-if="item.evidence && item.checked" class="delivery-check-evidence">{{ item.evidence }}</small>
               </div>
             </section>
@@ -1392,7 +1393,7 @@ onBeforeUnmount(() => {
             <article v-for="member in members" :key="member.userId" class="project-member-row">
               <span class="member-avatar" aria-hidden="true">{{ (member.nickname || '成').slice(0, 1) }}</span>
               <div class="project-member-copy"><strong>{{ member.nickname }}</strong><small>{{ member.school || '未填写学校' }} · {{ roleLabel(member.role) }}<template v-if="member.status === 'invited'"> · 等待接受</template></small></div>
-              <div v-if="isOwner && project.status === 'active' && member.role !== 'owner' && member.status === 'active'" class="member-row-actions"><button class="btn btn-ghost" type="button" :disabled="actionBusy === `role:${member.userId}`" @click="changeMemberRole(member)">{{ member.role === 'admin' ? '设为成员' : '设为管理员' }}</button><button class="btn btn-ghost" type="button" @click="transferTargetId = member.userId">转交负责人</button><button class="icon-btn danger-text" type="button" :aria-label="`移出成员 ${member.nickname}`" @click="askConfirm({ kind: 'remove', targetId: member.userId, targetName: member.nickname })">×</button></div>
+              <div v-if="isOwner && project.status === 'active' && member.role !== 'owner' && member.status === 'active'" class="member-row-actions"><ActionButton tone="ghost" class="btn btn-ghost" type="button" :disabled="actionBusy === `role:${member.userId}`" kind="important" feedback="external" :show-error="false" :action="() => changeMemberRole(member)">{{ member.role === 'admin' ? '设为成员' : '设为管理员' }}</ActionButton><button class="btn btn-ghost" type="button" @click="transferTargetId = member.userId">转交负责人</button><button class="icon-btn danger-text" type="button" :aria-label="`移出成员 ${member.nickname}`" @click="askConfirm({ kind: 'remove', targetId: member.userId, targetName: member.nickname })">×</button></div>
               <button v-else-if="isManager && member.role === 'member' && member.status === 'invited'" class="btn btn-ghost" type="button" @click="askConfirm({ kind: 'remove', targetId: member.userId, targetName: member.nickname })">撤回邀请</button>
             </article>
             <p v-if="!activeMembers.length" class="projects-rail-empty">当前项目还没有成员。</p>
@@ -1422,7 +1423,7 @@ onBeforeUnmount(() => {
         <label>项目说明 <textarea v-model="projectDraft.description" maxlength="2000" rows="3" placeholder="选填，写下目标或背景" /></label>
         <div class="projects-form-grid"><label>开始日期<input v-model="projectDraft.startsOn" type="date" /></label><label>预计结束<input v-model="projectDraft.targetEndOn" type="date" :min="projectDraft.startsOn || undefined" /></label></div>
         <p class="projects-form-error" aria-live="polite">{{ projectFormError }}</p>
-        <div class="projects-form-actions"><button class="btn btn-ghost" type="button" @click="showProjectForm = false">取消</button><button class="btn btn-primary" type="submit" :disabled="projectSaveBusy">{{ projectSaveBusy ? '保存中…' : editingProject ? '保存修改' : '创建项目' }}</button></div>
+        <div class="projects-form-actions"><button class="btn btn-ghost" type="button" @click="showProjectForm = false">取消</button><ActionButton tone="primary" kind="important" feedback="external" :show-error="false" class="btn btn-primary" type="submit" :disabled="projectSaveBusy" :busy="projectSaveBusy">{{ projectSaveBusy ? '保存中…' : editingProject ? '保存修改' : '创建项目' }}</ActionButton></div>
       </form>
     </Modal>
 
@@ -1436,7 +1437,7 @@ onBeforeUnmount(() => {
         <p v-if="taskDraft.dependsOnTaskId" class="projects-form-hint">前置任务完成前，成员不能开始或完成此任务；系统会阻止循环依赖。</p>
         <label>优先级<select v-model="taskDraft.priority"><option v-for="(label, value) in PROJECT_TASK_PRIORITY" :key="value" :value="value">{{ label }}</option></select></label>
         <p v-if="taskDraft.assigneeId" class="projects-form-hint">{{ editingTask ? '更换负责人后，新负责人需要明确接受；原负责人待办会转为个人记录。' : '分配后会等待负责人明确接受；接受后才加入对方的个人待办。' }}</p>
-        <div class="projects-form-actions"><button class="btn btn-ghost" type="button" @click="showTaskForm = false; editingTask = false">取消</button><button class="btn btn-primary" type="submit" :disabled="taskSaveBusy">{{ taskSaveBusy ? '保存中…' : editingTask ? '保存修改' : '添加任务' }}</button></div>
+        <div class="projects-form-actions"><button class="btn btn-ghost" type="button" @click="showTaskForm = false; editingTask = false">取消</button><ActionButton tone="primary" kind="important" feedback="external" :show-error="false" class="btn btn-primary" type="submit" :disabled="taskSaveBusy" :busy="taskSaveBusy">{{ taskSaveBusy ? '保存中…' : editingTask ? '保存修改' : '添加任务' }}</ActionButton></div>
       </form>
     </Modal>
 
@@ -1447,7 +1448,7 @@ onBeforeUnmount(() => {
         <label>阶段名称 <span aria-hidden="true">*</span><input v-model="milestoneDraft.title" maxlength="160" required autofocus placeholder="例如：方案评审" /></label>
         <label>阶段说明<textarea v-model="milestoneDraft.description" maxlength="2000" rows="3" placeholder="选填" /></label>
         <label>关键日期<input v-model="milestoneDraft.dueOn" type="date" :min="project?.startsOn || undefined" /></label>
-        <div class="projects-form-actions"><button class="btn btn-ghost" type="button" @click="showMilestoneForm = false">取消</button><button class="btn btn-primary" type="submit" :disabled="planningSaveBusy">{{ planningSaveBusy ? '保存中…' : editingMilestone ? '保存修改' : '添加里程碑' }}</button></div>
+        <div class="projects-form-actions"><button class="btn btn-ghost" type="button" @click="showMilestoneForm = false">取消</button><ActionButton tone="primary" kind="important" feedback="external" :show-error="false" class="btn btn-primary" type="submit" :disabled="planningSaveBusy" :busy="planningSaveBusy">{{ planningSaveBusy ? '保存中…' : editingMilestone ? '保存修改' : '添加里程碑' }}</ActionButton></div>
       </form>
     </Modal>
 
@@ -1455,7 +1456,7 @@ onBeforeUnmount(() => {
       <form class="projects-form" @submit.prevent="saveDeliveryCheckItem">
         <label>检查内容 <span aria-hidden="true">*</span><input v-model="deliveryCheckDraft.title" maxlength="200" required autofocus placeholder="例如：确认最终报告包含实验数据" /></label>
         <label class="project-check-row"><input v-model="deliveryCheckDraft.required" type="checkbox" />项目交付必需</label>
-        <div class="projects-form-actions"><button class="btn btn-ghost" type="button" @click="showDeliveryCheckForm = false">取消</button><button class="btn btn-primary" type="submit" :disabled="planningSaveBusy">{{ planningSaveBusy ? '保存中…' : '添加检查项' }}</button></div>
+        <div class="projects-form-actions"><button class="btn btn-ghost" type="button" @click="showDeliveryCheckForm = false">取消</button><ActionButton tone="primary" kind="important" feedback="external" :show-error="false" class="btn btn-primary" type="submit" :disabled="planningSaveBusy" :busy="planningSaveBusy">{{ planningSaveBusy ? '保存中…' : '添加检查项' }}</ActionButton></div>
       </form>
     </Modal>
 
@@ -1466,7 +1467,7 @@ onBeforeUnmount(() => {
         <label v-if="!meetingProposalTarget">讨论说明<textarea v-model="meetingDraft.note" maxlength="1500" rows="2" placeholder="选填，写下议题或会议链接" /></label>
         <label>{{ meetingProposalTarget ? '建议开始时间' : '开始时间' }}<input v-model="meetingDraft.startsLocal" type="datetime-local" required /></label>
         <label>{{ meetingProposalTarget ? '建议结束时间' : '结束时间' }}<input v-model="meetingDraft.endsLocal" type="datetime-local" required /></label>
-        <div class="projects-form-actions"><button class="btn btn-ghost" type="button" @click="showMeetingForm = false; meetingProposalTarget = null">取消</button><button class="btn btn-primary" type="submit" :disabled="Boolean(actionBusy)">{{ actionBusy ? '提交中…' : meetingProposalTarget ? '发送改期建议' : '发送讨论邀请' }}</button></div>
+        <div class="projects-form-actions"><button class="btn btn-ghost" type="button" @click="showMeetingForm = false; meetingProposalTarget = null">取消</button><ActionButton tone="primary" kind="important" feedback="external" :show-error="false" class="btn btn-primary" type="submit" :disabled="Boolean(actionBusy)" :busy="actionBusy">{{ actionBusy ? '提交中…' : meetingProposalTarget ? '发送改期建议' : '发送讨论邀请' }}</ActionButton></div>
       </form>
     </Modal>
 
@@ -1479,7 +1480,7 @@ onBeforeUnmount(() => {
         <label v-if="adjustmentDraft.type === 'scope_change'">调整后的任务说明<textarea v-model="adjustmentDraft.description" maxlength="3000" rows="3" placeholder="写下希望采用的新范围" /></label>
         <label v-if="adjustmentDraft.type === 'split'">拆分后的子任务<textarea v-model="adjustmentDraft.subtasks" rows="4" placeholder="每行一个子任务，最多 8 项" /></label>
         <label>申请原因 <span aria-hidden="true">*</span><textarea v-model="adjustmentDraft.reason" maxlength="1500" rows="3" required placeholder="说明当前遇到的问题和需要怎样的调整" /></label>
-        <div class="projects-form-actions"><button class="btn btn-ghost" type="button" @click="showAdjustmentForm = false">取消</button><button class="btn btn-primary" type="submit" :disabled="adjustmentSaveBusy">{{ adjustmentSaveBusy ? '提交中…' : '提交申请' }}</button></div>
+        <div class="projects-form-actions"><button class="btn btn-ghost" type="button" @click="showAdjustmentForm = false">取消</button><ActionButton tone="primary" kind="important" feedback="external" :show-error="false" class="btn btn-primary" type="submit" :disabled="adjustmentSaveBusy" :busy="adjustmentSaveBusy">{{ adjustmentSaveBusy ? '提交中…' : '提交申请' }}</ActionButton></div>
       </form>
     </Modal>
 
@@ -1491,7 +1492,7 @@ onBeforeUnmount(() => {
         <label>验收人<select v-model="deliverableDraft.reviewerId"><option value="">项目负责人或管理员</option><option v-for="member in activeMembers.filter((item) => item.userId !== accountUser.id)" :key="member.userId" :value="member.userId">{{ member.nickname }}</option></select></label>
         <label class="project-check-row"><input v-model="deliverableDraft.required" type="checkbox" />项目交付必需</label>
         <label class="project-check-row"><input v-model="deliverableDraft.reviewRequired" type="checkbox" />正式提交后需要验收</label>
-        <div class="projects-form-actions"><button class="btn btn-ghost" type="button" @click="showDeliverableForm = false">取消</button><button class="btn btn-primary" type="submit" :disabled="deliverableSaveBusy">{{ deliverableSaveBusy ? '保存中…' : '添加交付项' }}</button></div>
+        <div class="projects-form-actions"><button class="btn btn-ghost" type="button" @click="showDeliverableForm = false">取消</button><ActionButton tone="primary" kind="important" feedback="external" :show-error="false" class="btn btn-primary" type="submit" :disabled="deliverableSaveBusy" :busy="deliverableSaveBusy">{{ deliverableSaveBusy ? '保存中…' : '添加交付项' }}</ActionButton></div>
       </form>
     </Modal>
 
@@ -1507,7 +1508,7 @@ onBeforeUnmount(() => {
         </div>
         <label>本次修改说明<input v-model="changeNote" maxlength="1500" placeholder="选填，例如：根据验收意见补充了实验结果" /></label>
         <p v-if="draftRevision" class="projects-form-hint">当前草稿版本 {{ draftRevision }}。正式提交后会固定为一个不可覆盖的成果版本。</p>
-        <div class="projects-form-actions deliverable-editor-actions"><button class="btn btn-ghost" type="button" @click="showDeliverableEditor = false; activeDeliverable = null">关闭</button><button class="btn btn-secondary" type="button" :disabled="deliverableSaveBusy || fileUploadBusy" @click="saveDeliverableDraft">{{ deliverableSaveBusy ? '保存中…' : '保存草稿' }}</button><button class="btn btn-primary" type="submit" :disabled="deliverableSaveBusy || fileUploadBusy || draftRevision < 1">{{ deliverableSaveBusy ? '提交中…' : '正式提交新版本' }}</button></div>
+        <div class="projects-form-actions deliverable-editor-actions"><button class="btn btn-ghost" type="button" @click="showDeliverableEditor = false; activeDeliverable = null">关闭</button><ActionButton tone="neutral" class="btn btn-secondary" type="button" :disabled="deliverableSaveBusy || fileUploadBusy" kind="frequent" feedback="external" :show-error="false" :action="() => saveDeliverableDraft()">{{ deliverableSaveBusy ? '保存中…' : '保存草稿' }}</ActionButton><ActionButton tone="primary" kind="important" feedback="external" :show-error="false" class="btn btn-primary" type="submit" :disabled="deliverableSaveBusy || fileUploadBusy || draftRevision < 1" :busy="deliverableSaveBusy || fileUploadBusy">{{ deliverableSaveBusy ? '提交中…' : '正式提交新版本' }}</ActionButton></div>
       </form>
     </Modal>
 
@@ -1516,14 +1517,14 @@ onBeforeUnmount(() => {
         <p class="projects-form-hint">通过前请逐项确认检查结果；有未通过项时请选择退回修改。</p>
         <div class="review-checklist"><div v-for="(item, index) in reviewChecklist" :key="index" class="review-check-row"><input v-model="item.passed" type="checkbox" :aria-label="`检查项 ${index + 1} 通过`" /><input v-model="item.item" maxlength="200" :aria-label="`检查项 ${index + 1} 名称`" placeholder="检查项" /><button class="icon-btn" type="button" :aria-label="`删除检查项 ${index + 1}`" :disabled="reviewChecklist.length <= 1" @click="reviewChecklist.splice(index, 1)">×</button></div><button class="btn btn-ghost" type="button" :disabled="reviewChecklist.length >= 20" @click="addReviewChecklistItem">＋ 添加检查项</button></div>
         <label>验收意见 <span aria-hidden="true">*</span><textarea v-model="reviewFeedback" maxlength="3000" rows="4" required placeholder="说明检查结果，退回时请写清楚修改建议" /></label>
-        <div class="projects-form-actions"><button class="btn btn-ghost" type="button" :disabled="reviewSaveBusy" @click="decideReview('returned')">退回修改</button><button class="btn btn-primary" type="submit" :disabled="reviewSaveBusy">{{ reviewSaveBusy ? '保存中…' : '通过验收' }}</button></div>
+        <div class="projects-form-actions"><ActionButton tone="ghost" class="btn btn-ghost" type="button" :disabled="reviewSaveBusy" kind="important" feedback="external" :show-error="false" :action="() => decideReview('returned')">退回修改</ActionButton><ActionButton tone="primary" kind="important" feedback="external" :show-error="false" class="btn btn-primary" type="submit" :disabled="reviewSaveBusy" :busy="reviewSaveBusy">{{ reviewSaveBusy ? '保存中…' : '通过验收' }}</ActionButton></div>
       </form>
     </Modal>
 
     <Modal v-if="showInviteForm" :open="showInviteForm" title="邀请成员" :medium="true" @close="showInviteForm = false">
       <div class="projects-invite-dialog">
-        <section><h3>邀请好友</h3><p>好友会收到项目邀请，可自行接受或拒绝。</p><div class="projects-invite-row"><select v-model="selectedFriendId" aria-label="选择好友"><option value="">选择一位好友</option><option v-for="item in friends" :key="item.profile.userId" :value="item.profile.userId">{{ item.profile.nickname }}<template v-if="item.profile.school"> · {{ item.profile.school }}</template></option></select><button class="btn btn-primary" type="button" :disabled="!selectedFriendId || actionBusy === 'invite-friend'" @click="inviteFriend">发送邀请</button></div><p v-if="friendsLoading" class="projects-form-hint">正在载入好友…</p><p v-else-if="!friends.length" class="projects-form-hint">没有可邀请的好友；也可以创建受控邀请链接。</p></section>
-        <section><h3>受控邀请链接</h3><p>链接有效期 7 天，最多可加入 5 人。任何拿到链接并登录验证的账号都能加入。</p><button class="btn btn-secondary" type="button" :disabled="linkBusy" @click="createInviteLink">{{ linkBusy ? '正在创建…' : '创建并复制邀请链接' }}</button><div v-if="linkToShare" class="invite-link-result"><label>本次邀请链接<input :value="linkToShare" readonly @focus="$event.target.select()" /></label><button class="btn btn-ghost" type="button" @click="copyInviteLink(linkToShare)">复制</button></div><div v-if="inviteLinks.length" class="invite-link-list"><div v-for="link in inviteLinks" :key="link.id" class="invite-link-row"><span>{{ link.revokedAt ? '已停用' : new Date(link.expiresAt) <= new Date() ? '已过期' : `使用 ${link.uses}/${link.maxUses}` }} · {{ formatDate(link.expiresAt) }}过期</span><button v-if="!link.revokedAt && new Date(link.expiresAt) > new Date()" class="btn btn-ghost danger-text" type="button" :disabled="actionBusy === `link:${link.id}`" @click="revokeInviteLink(link.id)">停用</button></div></div></section>
+        <section><h3>邀请好友</h3><p>好友会收到项目邀请，可自行接受或拒绝。</p><div class="projects-invite-row"><select v-model="selectedFriendId" aria-label="选择好友"><option value="">选择一位好友</option><option v-for="item in friends" :key="item.profile.userId" :value="item.profile.userId">{{ item.profile.nickname }}<template v-if="item.profile.school"> · {{ item.profile.school }}</template></option></select><ActionButton tone="primary" class="btn btn-primary" type="button" :disabled="!selectedFriendId || actionBusy === 'invite-friend'" kind="important" feedback="external" :show-error="false" :action="() => inviteFriend()">发送邀请</ActionButton></div><p v-if="friendsLoading" class="projects-form-hint">正在载入好友…</p><p v-else-if="!friends.length" class="projects-form-hint">没有可邀请的好友；也可以创建受控邀请链接。</p></section>
+        <section><h3>受控邀请链接</h3><p>链接有效期 7 天，最多可加入 5 人。任何拿到链接并登录验证的账号都能加入。</p><ActionButton tone="neutral" class="btn btn-secondary" type="button" :disabled="linkBusy" kind="important" feedback="external" :show-error="false" :action="() => createInviteLink()">{{ linkBusy ? '正在创建…' : '创建并复制邀请链接' }}</ActionButton><div v-if="linkToShare" class="invite-link-result"><label>本次邀请链接<input :value="linkToShare" readonly @focus="$event.target.select()" /></label><ActionButton tone="ghost" class="btn btn-ghost" type="button" kind="frequent" feedback="external" :show-error="false" :action="() => copyInviteLink(linkToShare)">复制</ActionButton></div><div v-if="inviteLinks.length" class="invite-link-list"><div v-for="link in inviteLinks" :key="link.id" class="invite-link-row"><span>{{ link.revokedAt ? '已停用' : new Date(link.expiresAt) <= new Date() ? '已过期' : `使用 ${link.uses}/${link.maxUses}` }} · {{ formatDate(link.expiresAt) }}过期</span><ActionButton tone="ghost" v-if="!link.revokedAt && new Date(link.expiresAt) > new Date()" class="btn btn-ghost danger-text" type="button" :disabled="actionBusy === `link:${link.id}`" kind="danger" feedback="external" :show-error="false" :action="() => revokeInviteLink(link.id)">停用</ActionButton></div></div></section>
         <section v-if="pendingMemberInvites.length"><h3>等待接受的邀请</h3><p v-for="member in pendingMemberInvites" :key="member.userId" class="projects-form-hint">{{ member.nickname }} · 已发送邀请</p></section>
       </div>
     </Modal>
@@ -1535,7 +1536,7 @@ onBeforeUnmount(() => {
 
     <Modal v-if="transferTargetId" :open="Boolean(transferTargetId)" title="转交项目负责人" @close="transferTargetId = ''">
       <p class="transfer-confirm-copy">转交后，你会成为管理员，仍可管理项目和成员。</p>
-      <template #foot><div class="projects-form-actions"><button class="btn btn-ghost" type="button" @click="transferTargetId = ''">取消</button><button class="btn btn-primary" type="button" :disabled="actionBusy === 'transfer-owner'" @click="transferOwner">确认转交</button></div></template>
+      <template #foot><div class="projects-form-actions"><button class="btn btn-ghost" type="button" @click="transferTargetId = ''">取消</button><ActionButton tone="primary" class="btn btn-primary" type="button" :disabled="actionBusy === 'transfer-owner'" kind="important" feedback="external" :show-error="false" :action="() => transferOwner()">确认转交</ActionButton></div></template>
     </Modal>
 
     <ConfirmDialog v-if="confirmAction" :open="Boolean(confirmAction)" :title="({ archive: '归档项目', delete: '删除项目', leave: '退出项目', remove: '移出成员', restore: '恢复项目', 'decline-invite': '拒绝项目邀请', 'delete-milestone': '删除里程碑', 'meeting-confirm': '确认小组讨论', 'meeting-cancel': '取消讨论邀约', 'meeting-apply-proposal': '采用改期建议', 'delivery-check-delete': '删除交付检查项' })[confirmAction.kind] || '确认操作'" :message="({ archive: '归档后，成员可以查看历史内容，但不能新增成员或任务。', delete: '项目会移入回收站，成员暂时不能进入；可以通过负责人恢复项目。', leave: '退出后，你的个人待办会保留为个人记录，项目负责人可以重新分配未完成任务。', remove: `确定将${confirmAction.targetName || '该成员'}移出项目吗？未完成的分工会释放。`, restore: '恢复后，项目成员可以继续协作。', 'decline-invite': '拒绝后，项目邀请会从待处理列表移除。', 'delete-milestone': '删除后，关联任务仍会保留，只解除与此阶段的关联。', 'meeting-confirm': '所有受邀成员已接受。确认后会将讨论加入已接受成员的个人日程。', 'meeting-cancel': '取消后，成员的个人日程会标记为已取消。', 'meeting-apply-proposal': '采用后将新的时间发给全体受邀成员重新确认。', 'delivery-check-delete': '删除后，交付清单会移除此检查项。' })[confirmAction.kind] || ''" :confirm-label="confirmAction.kind === 'delete' || confirmAction.kind === 'remove' || confirmAction.kind === 'delivery-check-delete' || confirmAction.kind === 'delete-milestone' ? '确认删除' : '确认'" :tone="confirmAction.kind === 'delete' || confirmAction.kind === 'remove' || confirmAction.kind === 'leave' || confirmAction.kind === 'delivery-check-delete' || confirmAction.kind === 'meeting-cancel' || confirmAction.kind === 'delete-milestone' ? 'danger' : 'primary'" @close="confirmAction = null" @confirm="runConfirmedAction" />

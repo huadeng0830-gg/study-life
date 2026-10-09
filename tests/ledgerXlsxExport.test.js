@@ -105,7 +105,7 @@ describe('Excel 导出：汇总表', () => {
     expect(book.SheetNames).toContain('账单明细')
   })
 
-  it('汇总只讲支出：合计、退款、净额、笔数，且口径是「我承担」', async () => {
+  it('支出汇总包含合计、退款、净额和笔数，且口径是「我承担」', async () => {
     const month = String(appToday.value).slice(0, 7)
     seedRecords(month)
     const book = await exportXlsx(month)
@@ -123,16 +123,15 @@ describe('Excel 导出：汇总表', () => {
     expect(cny('支出笔数')).toBe(3)
   })
 
-  it('汇总表里不再出现收入与结余（本表只讲花了多少）', async () => {
+  it('汇总表包含收入与结余，分类排行仍只统计支出', async () => {
     const month = String(appToday.value).slice(0, 7)
     seedRecords(month)
     const book = await exportXlsx(month)
     const rows = await summaryRows(book)
     const labels = rows.map((row) => String(row[0] ?? ''))
 
-    expect(labels).not.toContain('收入合计')
-    expect(labels.some((label) => label.includes('结余')), '汇总表不该再出现结余').toBe(false)
-    // 收入那条记录仍然导出在明细里，只是不进汇总
+    expect(rows.find((row) => row[0] === '收入合计')[1]).toBe(5000)
+    expect(rows.find((row) => row[0] === '结余（收入 − 支出净额）')[1]).toBe(4920)
     expect(labels.join('|')).toContain('只统计支出')
   })
 

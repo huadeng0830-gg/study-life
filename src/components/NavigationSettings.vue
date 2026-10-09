@@ -9,6 +9,7 @@ import {
 } from '../composables/navigationPreferences.js'
 import { useTabKeys } from '../composables/tabKeys.js'
 import Modal from './Modal.vue'
+import ActionButton from './ActionButton.vue'
 import NavigationPreview from './navigation/NavigationPreview.vue'
 import NavigationFeaturePicker from './navigation/NavigationFeaturePicker.vue'
 
@@ -21,12 +22,14 @@ const editor = useNavigationEditor({ initialMode: props.initialMode
 const { mode, drafts, availableItems, dirty, hasChanges, conflicts,
   saving, error, message, canUndo, canRedo, isDefault } = editor
 const editorEl = ref(null)
+const navAction = ref(null)
 const newGroupLabel = ref('')
 const targetGroup = ref('')
 const pendingDeparture = ref(null)
 const pendingGroupRemoval = ref(null)
 const removalTarget = ref('')
 const draggingId = ref('')
+watch(hasChanges, (value) => { if (value && !saving.value && navAction.value?.phase !== 'idle') navAction.value?.cancel() })
 const instanceId = useId()
 const panelId = `nav-panel-${instanceId}`
 const groupInputId = `nav-group-${instanceId}`
@@ -50,6 +53,11 @@ const pinnedIds = computed(() => mode.value === 'mobile' ? drafts.value.mobile :
 const mobileFull = computed(() => drafts.value.mobile.length >= MAX_MOBILE_NAV_ITEMS)
 const removalGroups = computed(() => drafts.value.desktop.filter((group) => group.id !== pendingGroupRemoval.value?.id))
 const deviceLabel = (device) => device === 'mobile' ? '手机导航' : '电脑侧栏'
+async function saveNavigation() {
+  const saved = await editor.save()
+  if (!saved && error.value) throw new Error(error.value)
+  return saved
+}
 const { onKeydown: onModeKeydown, tabIndexFor } = useTabKeys({
   keys: ['mobile', 'desktop'], active: () => mode.value,
   select: (key) => { if (saving.value || drag) return false; mode.value = key },
@@ -267,7 +275,7 @@ function discardAndLeave() {
         <p v-else-if="message" class="navigation-feedback" role="status">{{ message }}</p>
         <div class="navigation-save-row">
           <div class="navigation-save-copy"><b :class="{ dirty: hasChanges }">{{ hasChanges ? '有未保存的修改' : '布局已保存' }}</b><small>{{ accountUser?.id ? '保存后生效，并跟随当前账号同步。' : '保存在本机，登录后可随账号同步。' }}</small></div>
-          <div class="navigation-footer-actions"><button class="nav-history" type="button" aria-label="撤销上一步" :disabled="!canUndo || Boolean(draggingId)" @click="editor.undo()">↶ <span>撤销</span></button><button class="nav-history" type="button" aria-label="重做上一步" :disabled="!canRedo || Boolean(draggingId)" @click="editor.redo()">↷ <span>重做</span></button><button class="btn btn-primary nav-save" type="button" :disabled="saving || !hasChanges || Boolean(draggingId)" @click="editor.save()">{{ saving ? '正在保存…' : dirty.mobile && dirty.desktop ? '保存两端修改' : '保存导航' }}</button></div>
+          <div class="navigation-footer-actions"><button class="nav-history" type="button" aria-label="撤销上一步" :disabled="!canUndo || Boolean(draggingId)" @click="editor.undo()">↶ <span>撤销</span></button><button class="nav-history" type="button" aria-label="重做上一步" :disabled="!canRedo || Boolean(draggingId)" @click="editor.redo()">↷ <span>重做</span></button><ActionButton ref="navAction" class="nav-save" kind="important" :action="saveNavigation" :busy="saving" :show-error="false" :disabled="!hasChanges || Boolean(draggingId)" success-label="已保存">{{ dirty.mobile && dirty.desktop ? '保存两端修改' : '保存导航' }}</ActionButton></div>
         </div>
       </div>
     </template>
@@ -276,7 +284,7 @@ function discardAndLeave() {
   <Modal v-if="pendingDeparture" :open="true" title="保存导航修改？" @close="!saving && (pendingDeparture = null)">
     <p class="nav-dialog-message">{{ [dirty.mobile && '手机导航', dirty.desktop && '电脑侧栏'].filter(Boolean).join('和') }}还有未保存的修改。</p>
     <p v-if="error" class="navigation-feedback error" role="alert">{{ error }}</p>
-    <template #foot><div class="nav-dialog-actions"><button class="btn btn-ghost" type="button" :disabled="saving" @click="pendingDeparture = null">继续编辑</button><button class="btn btn-ghost nav-discard" type="button" :disabled="saving" @click="discardAndLeave">放弃修改</button><button class="btn btn-primary" type="button" :disabled="saving" @click="saveAndLeave">{{ saving ? '正在保存…' : '保存并离开' }}</button></div></template>
+    <template #foot><div class="nav-dialog-actions"><button class="btn btn-ghost" type="button" :disabled="saving" @click="pendingDeparture = null">继续编辑</button><button class="btn btn-ghost nav-discard" type="button" :disabled="saving" @click="discardAndLeave">放弃修改</button><ActionButton tone="primary" class="btn btn-primary" type="button" :disabled="saving" kind="frequent" feedback="external" :show-error="false" :action="() => saveAndLeave()">{{ saving ? '正在保存…' : '保存并离开' }}</ActionButton></div></template>
   </Modal>
 
   <Modal v-if="pendingGroupRemoval" :open="true" title="移除分组" @close="pendingGroupRemoval = null">

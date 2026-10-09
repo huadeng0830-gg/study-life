@@ -9,6 +9,7 @@ import { computed } from 'vue'
 import { expenses, isRefundTransaction, isValidDateKey } from '../ledger.js'
 import { hasSplit, mySpendCents } from '../ledgerSplit.js'
 import { appToday } from '../timeContext.js'
+import { createLedgerBaseConverter, normalizeLedgerFx, useLedgerFx } from '../ledgerFx.js'
 
 const ledgerToday = () => appToday.value
 
@@ -52,7 +53,9 @@ function previousMonthKey(monthKey) {
  * 分别扫完整份流水；记录变更时同一批数据最多重复扫描三次。账本常驻使用时，
  * 把这些合成一个索引式归约，保持金额口径不变并减掉重复工作。
  */
-export function summarizeLedgerSpendPeriods(list, { today = ledgerToday() } = {}) {
+export function summarizeLedgerSpendPeriods(list, { today = ledgerToday(), fx = null } = {}) {
+  const config = normalizeLedgerFx(fx)
+  const convert = createLedgerBaseConverter(config)
   const monthKey = today.slice(0, 7)
   const lastMonthKey = previousMonthKey(monthKey)
   const weekKeys = weekDateKeys(today)
@@ -63,16 +66,28 @@ export function summarizeLedgerSpendPeriods(list, { today = ledgerToday() } = {}
     previousMonthExpense: 0, previousMonthRefund: 0,
     monthIncome: 0, monthSplitCount: 0,
   }
+  const excluded = { today: 0, week: 0, month: 0, previousMonth: 0 }
+  const missingRates = new Set()
 
   for (const item of Array.isArray(list) ? list : []) {
     if (!item || item.archivedAt || item.deletedAt || item.tombstone) continue
     if (!String(item.id ?? '').trim() || !isValidDateKey(item.date)) continue
-    const cents = mySpendCents(item)
-    if (cents === null) continue
+    const personalCents = mySpendCents(item)
+    if (personalCents === null) continue
     const date = String(item.date)
     const itemMonth = date.slice(0, 7)
     const inMonth = itemMonth === monthKey
     const inPreviousMonth = itemMonth === lastMonthKey
+    const converted = convert(personalCents / 100, item.currency)
+    if (converted.cents === null) {
+      if (date === today) excluded.today += 1
+      if (weekKeys.has(date)) excluded.week += 1
+      if (inMonth) excluded.month += 1
+      if (inPreviousMonth) excluded.previousMonth += 1
+      if (inMonth || weekKeys.has(date)) missingRates.add(converted.currency)
+      continue
+    }
+    const cents = converted.cents
     if (inMonth && hasSplit(item)) totals.monthSplitCount += 1
 
     if (item.direction === 'income') {
@@ -109,17 +124,21 @@ export function summarizeLedgerSpendPeriods(list, { today = ledgerToday() } = {}
       balance: monthIncomeTotal - monthExpenseTotal,
     },
     previousMonthExpenseTotal: (totals.previousMonthExpense - totals.previousMonthRefund) / 100,
+    base: config.base,
+    excluded,
+    missingRates: [...missingRates].sort(),
   }
 }
-const periodSummary = computed(() => summarizeLedgerSpendPeriods(expenses.value, { today: ledgerToday() }))
+const { fx } = useLedgerFx()
+const periodSummary = computed(() => summarizeLedgerSpendPeriods(expenses.value, { today: ledgerToday(), fx: fx.value }))
 const mySpendPeriodStats = computed(() => periodSummary.value.spend)
 
 // 三块数字保持「今天花费 / 本周花费 / 本月花费」这几个用户熟悉的标签，
 // 数值按「我承担」算；口径说明只在**本月确有分摊**时补一行（见模板 split-note）。
 const spendStats = computed(() => [
-  { key: 'today', label: '今天花费', value: mySpendPeriodStats.value.today },
-  { key: 'week', label: '本周花费', value: mySpendPeriodStats.value.week },
-  { key: 'month', label: '本月花费', value: mySpendPeriodStats.value.month },
+  { key: 'today', label: '今天花费', value: mySpendPeriodStats.value.today, excludedCount: periodSummary.value.excluded.today },
+  { key: 'week', label: '本周花费', value: mySpendPeriodStats.value.week, excludedCount: periodSummary.value.excluded.week },
+  { key: 'month', label: '本月花费', value: mySpendPeriodStats.value.month, excludedCount: periodSummary.value.excluded.month },
 ])
 
 // 本月的「我承担」摘要：同时给出口径说明需要的分摊笔数与环比用的合计。
@@ -133,7 +152,7 @@ const currentMonthHasSplit = computed(() => currentMonthPersonal.value.splitCoun
 const monthCompare = computed(() => {
   const current = currentMonthPersonal.value.expenseTotal
   const previous = periodSummary.value.previousMonthExpenseTotal
-  if (!previous) return null
+  if (!previous || periodSummary.value.excluded.month || periodSummary.value.excluded.previousMonth) return null
   const diff = Math.round((current - previous) * 100) / 100
   return { current, previous, diff, up: diff > 0, down: diff < 0, flat: diff === 0 }
 })
@@ -145,5 +164,6 @@ export function useLedgerSpendStats() {
     currentMonthPersonal,
     currentMonthHasSplit,
     monthCompare,
+    spendMissingRates: computed(() => periodSummary.value.missingRates),
   }
 }

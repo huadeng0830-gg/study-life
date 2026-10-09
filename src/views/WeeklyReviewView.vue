@@ -1,4 +1,5 @@
 <script setup>
+import LearningNavigation from '../components/learning/LearningNavigation.vue'
 import { computed } from 'vue'
 import { useStoredRef } from '../composables/store'
 import { moodLog } from '../composables/atmosphereStore.js'
@@ -98,6 +99,8 @@ const weekRangeLabel = (week) => `${week.startDate.slice(5)}–${week.lastDate.s
         <router-link class="btn btn-ghost" to="/">回到今天</router-link>
       </div>
     </header>
+
+    <LearningNavigation current="review" />
 
     <section class="review-grid">
       <article class="card review-card review-primary">

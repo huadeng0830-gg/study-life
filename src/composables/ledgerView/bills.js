@@ -12,12 +12,15 @@
  */
 import { computed, ref } from 'vue'
 import { formatAppDate } from '../timeContext.js'
-import { moneyRow, moneyWithCurrency } from '../../utils/formatters.js'
+import { moneyWithCurrency } from '../../utils/formatters.js'
 import { policyDateTime } from '../settingsPolicy.js'
 import { useStoredRef } from '../store/index.js'
+import { normalizeLedgerFx, useLedgerFx } from '../ledgerFx.js'
 
 export function useLedgerBills({ domain, notify, ledgerToday }) {
   const bills = useStoredRef('sl_bills', [])
+  const { fx } = useLedgerFx()
+  const baseCurrency = computed(() => normalizeLedgerFx(fx.value).base)
   function daysUntil(dateStr) {
     if (!dateStr) return Infinity
     const target = policyDateTime(dateStr, '00:00')
@@ -40,7 +43,7 @@ export function useLedgerBills({ domain, notify, ledgerToday }) {
   }
   // 账单金额按它自己的币种显示；旧账单没有 currency → 仍是原来的 ¥xx.xx。
   function billAmountText(bill) {
-    return moneyWithCurrency(bill?.amount, bill?.currency)
+    return moneyWithCurrency(bill?.amount, bill?.currency || baseCurrency.value)
   }
 
   // 已支付：生成账本记录 + 推进周期
@@ -55,7 +58,9 @@ export function useLedgerBills({ domain, notify, ledgerToday }) {
       notify(`本期「${result.bill.name}」已记入账本，未重复创建交易`)
       return
     }
-    notify(`已支付并记入账本 ${moneyRow(result.transaction.amount)} · 下一期 ${result.bill.nextDate}`)
+    notify(`已支付并记入账本 ${billAmountText(result.transaction)}${result.bill.active === false ? ' · 一次性账单已完成' : ` · 下一期 ${result.bill.nextDate}`}`, {
+      actionLabel: '撤销', undoFn: () => domain.undoBillPayment(result.transaction.id),
+    })
   }
 
   // 跳过本次：只推进周期，不生成记录
@@ -66,7 +71,7 @@ export function useLedgerBills({ domain, notify, ledgerToday }) {
       notify(target.reason)
       return
     }
-    notify(`已跳过本期「${target.name}」，下一期 ${target.nextDate}`)
+    notify(target.active === false ? `已跳过「${target.name}」，一次性账单已结束` : `已跳过本期「${target.name}」，下一期 ${target.nextDate}`)
   }
 
   // 待处理（账本首页）

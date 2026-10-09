@@ -35,7 +35,7 @@
       <div class="bill-form-grid">
         <label class="bill-field">
           <span>金额 <i>必填</i></span>
-          <div class="bill-money-input"><b>¥</b><input
+          <div class="bill-money-input"><b>{{ currencySymbol(billForm.currency || baseCurrency) }}</b><input
             ref="billAmountInput"
             v-model="billForm.amount"
             type="text"
@@ -153,6 +153,7 @@ import ConfirmDialog from '../../components/ConfirmDialog.vue'
 import { activeCategories, detectCategory, normalizeAmount } from '../../composables/ledger.js'
 import { currencyChoices, normalizeCurrency, useLedgerFx } from '../../composables/ledgerFx.js'
 import { templateToBillForm, useLedgerTemplateCommands } from '../../composables/ledgerTemplates.js'
+import { currencySymbol } from '../../utils/formatters.js'
 
 // 周期字典与 BillsPanel 收到的那份是同一组文案（页面侧另有一份同名常量）。
 const CYCLES = {

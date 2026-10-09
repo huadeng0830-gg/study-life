@@ -14,6 +14,8 @@ const props = defineProps({
 const emit = defineEmits(['jump-to-month', 'range-end-change'])
 const trendRange = ref(6)
 const previewMonth = ref('')
+let monthGesture = null
+let handledTouchMonth = ''
 /** @type {import('vue').Ref<HTMLElement | null>} */
 const monthViewport = ref(null)
 const visibleMonths = computed(() => props.months.slice(-trendRange.value))
@@ -94,7 +96,42 @@ function setRange(range) {
 }
 function selectMonth(month) {
   previewMonth.value = ''
-  emit('jump-to-month', month)
+  if (month !== props.reviewMonth) emit('jump-to-month', month)
+}
+function previewPointerMonth(event, month) {
+  // 触屏生成的 mouseenter 会先改动预览内容，部分浏览器随后吞掉首次 click。
+  if (event.pointerType === 'mouse' && !event.buttons) previewMonth.value = month
+}
+function previewFocusedMonth(event, month) {
+  if (!monthGesture && event.currentTarget.matches(':focus-visible')) previewMonth.value = month
+}
+function beginMonthGesture(event, month) {
+  handledTouchMonth = ''
+  monthGesture = event.pointerType === 'touch' || event.pointerType === 'pen'
+    ? { id: event.pointerId, month, x: event.clientX, y: event.clientY, moved: false } : null
+}
+function moveMonthGesture(event) {
+  if (!monthGesture || monthGesture.id !== event.pointerId) return
+  if (Math.hypot(event.clientX - monthGesture.x, event.clientY - monthGesture.y) > 10) monthGesture.moved = true
+}
+function finishMonthGesture(event, month) {
+  moveMonthGesture(event)
+  const gesture = monthGesture
+  monthGesture = null
+  if (!gesture || gesture.id !== event.pointerId || gesture.month !== month) return
+  handledTouchMonth = month
+  if (gesture.moved) return
+  selectMonth(month)
+}
+function cancelMonthGesture() {
+  handledTouchMonth = monthGesture?.month || ''
+  monthGesture = null
+}
+function clickMonth(event, month) {
+  // pointerup 已完成选月，兼容 click 只消耗一次，避免写两次月份。
+  if (handledTouchMonth === month && event.detail !== 0) { handledTouchMonth = ''; return }
+  handledTouchMonth = ''
+  selectMonth(month)
 }
 function resetPreview(event) {
   if (event?.type === 'focusout' && event.currentTarget.contains(event.relatedTarget)) return
@@ -115,7 +152,11 @@ async function revealSelectedMonth() {
   if (!viewport) return
   const buttons = [...viewport.querySelectorAll('button')]
   const target = buttons.find((button) => button.dataset.month === props.reviewMonth) || buttons.at(-1)
-  if (target) viewport.scrollLeft = Math.max(0, target.offsetLeft - (viewport.clientWidth - target.clientWidth) / 2)
+  // 已可见的月份保持原位；只在换区间或从月度导航进入屏外月份时滚动。
+  if (target && (target.offsetLeft < viewport.scrollLeft
+    || target.offsetLeft + target.clientWidth > viewport.scrollLeft + viewport.clientWidth)) {
+    viewport.scrollLeft = Math.max(0, target.offsetLeft - (viewport.clientWidth - target.clientWidth) / 2)
+  }
 }
 watch(visibleMonths, () => {
   previewMonth.value = ''
@@ -165,7 +206,7 @@ watch(() => props.reviewMonth, (month) => {
         <div class="trend-plot" :style="{ '--trend-columns': visibleMonths.length || trendRange }">
           <div class="trend-grid" aria-hidden="true"><i v-for="tick in scale.ticks" :key="tick" :class="{ zero: tick === 0 }" :style="{ bottom: `${tickPosition(tick)}%` }"></i></div>
           <div class="monthly-trend-bars" role="group" aria-label="每月支出和收入">
-            <button v-for="(row, index) in visibleMonths" :key="row.month" :data-month="row.month" type="button" class="trend-month" :class="{ selected: reviewMonth === row.month, preview: previewMonth === row.month }" :aria-pressed="reviewMonth === row.month" :aria-label="monthLabel(row)" @click="selectMonth(row.month)" @mouseenter="previewMonth = row.month" @focus="previewMonth = row.month" @keydown="onMonthKeydown($event, index)">
+            <button v-for="(row, index) in visibleMonths" :key="row.month" :data-month="row.month" type="button" class="trend-month" :class="{ selected: reviewMonth === row.month, preview: previewMonth === row.month }" :aria-pressed="reviewMonth === row.month" :aria-label="monthLabel(row)" @click="clickMonth($event, row.month)" @pointerenter="previewPointerMonth($event, row.month)" @pointerdown="beginMonthGesture($event, row.month)" @pointermove="moveMonthGesture" @pointerup="finishMonthGesture($event, row.month)" @pointercancel="cancelMonthGesture" @focus="previewFocusedMonth($event, row.month)" @keydown="onMonthKeydown($event, index)">
               <span class="trend-month-bars" aria-hidden="true"><i class="trend-bar trend-expense" :class="{ 'trend-expense-negative': Number(row.expense) < 0 }" :style="barStyle(row.expense)"></i><i class="trend-bar trend-income" :style="barStyle(row.income)"></i></span>
               <span class="trend-month-label"><b>{{ Number(row.month.slice(5)) }}月</b><small>{{ yearLabel(row, index) }}</small></span>
             </button>
@@ -225,16 +266,17 @@ watch(() => props.reviewMonth, (month) => {
 .trend-grid i { position:absolute; right:0; left:0; border-top:1px dashed var(--border); }
 .trend-grid i.zero { border-top-style:solid; border-top-color:var(--border-strong); }
 .monthly-trend-bars { position:relative; height:100%; display:grid; grid-template-columns:repeat(var(--trend-columns),minmax(0,1fr)); gap:8px; }
-.trend-month { display:flex; min-width:0; align-items:stretch; flex-direction:column; padding:0 4px; color:var(--ink-soft); border:0; border-radius:var(--radius-8); background:transparent; cursor:pointer; transition:background var(--dur-fast) var(--ease-standard); }
+.trend-month { display:grid; grid-template-rows:var(--trend-chart-height) var(--trend-label-height); min-width:0; min-height:0; align-items:stretch; padding:0 4px; color:var(--ink-soft); border:0; border-radius:var(--radius-8); background:transparent; cursor:pointer; touch-action:pan-x pan-y pinch-zoom; transition:background var(--dur-fast) var(--ease-standard); }
+.trend-month:active:not(:disabled) { transform:none; }
 .trend-month:hover, .trend-month.preview { background:var(--bg-tint); }
 .trend-month.selected { color:var(--primary); background:var(--primary-soft); }
 .trend-month:focus-visible { outline-offset:-2px; }
-.trend-month-bars { position:relative; display:block; min-height:0; flex:1; width:100%; }
+.trend-month-bars { position:relative; display:block; height:var(--trend-chart-height); min-height:0; width:100%; pointer-events:none; }
 .trend-bar { position:absolute; width:clamp(7px,28%,22px); border-radius:var(--radius-4) var(--radius-4) 0 0; transition:height var(--dur-base) var(--ease-standard), bottom var(--dur-base) var(--ease-standard); }
 .trend-expense { right:calc(50% + 2px); background:var(--primary); }
 .trend-income { left:calc(50% + 2px); background:var(--success); }
 .trend-expense-negative { border-radius:0 0 var(--radius-4) var(--radius-4); background:var(--danger); }
-.trend-month-label { display:flex; height:var(--trend-label-height); flex:none; flex-direction:column; align-items:center; justify-content:center; gap:3px; font-variant-numeric:tabular-nums; line-height:1.1; }
+.trend-month-label { display:flex; width:100%; height:var(--trend-label-height); flex:none; flex-direction:column; align-items:center; justify-content:center; gap:3px; font-variant-numeric:tabular-nums; line-height:1.1; pointer-events:none; }
 .trend-month-label b { font-size:var(--fs-11-5); font-weight:var(--fw-650); white-space:nowrap; }
 .trend-month-label small { min-height:11px; color:var(--ink-soft); font-size:var(--fs-9); }
 .trend-month.selected .trend-month-label b { padding:3px 6px; border-radius:var(--radius-5); color:var(--on-primary); background:var(--primary); }

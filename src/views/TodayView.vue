@@ -19,6 +19,7 @@ import MemoryView from '../components/MemoryView.vue'
 import FocusPanel from '../components/FocusPanel.vue'
 import Modal from '../components/Modal.vue'
 import { useStoredRef } from '../composables/store/index.js'
+import { animationsEnabled } from '../composables/motion.js'
 import { coursesForDates } from '../composables/store/schedule.js'
 import { useDomainCommands } from '../composables/domain/commands.js'
 import { selectTodayActionPanels, reminderAction } from '../composables/domain/selectors.js'
@@ -67,6 +68,14 @@ const { courses, tasks, milestones: exams, bills, transactions, events } = domai
 const { fx: ledgerFx } = useLedgerFx()
 const router = useRouter()
 const route = useRoute()
+/** @type {import('vue').Ref<{ id: string, minutes: number, token: number } | null>} */
+const focusRequest = ref(null)
+let focusRequestToken = 0
+watch(() => [route.path, route.query.focusTask, route.query.focusMinutes], ([path, id, minutes]) => {
+  if (path !== '/') { focusRequest.value = null; return }
+  if (!id) return
+  focusRequest.value = { id: String(id), minutes: Math.max(5, Math.min(180, Math.round(Number(minutes) || 25))), token: ++focusRequestToken }
+}, { immediate: true })
 const focusSessions = useStoredRef('sl_focus_sessions', [])
 const courseCheckins = useStoredRef('sl_course_checkins', [])
 const eventDetail = ref(null)
@@ -76,12 +85,24 @@ const now = appNow
 const todayKey = () => appToday.value
 const activeSchedule = computed(() => schedulePolicy())
 // 首页模块按用户在个性化里拖拽后的顺序渲染；只保留可见且仍合法的模块 id。
-const visibleHomeModuleIds = computed(() =>
-  appearance.value.homeModules
+const visibleHomeModuleIds = computed(() => {
+  const ids = appearance.value.homeModules
     .filter((module) => module.visible !== false)
     .map((module) => module.id)
     .filter((id) => HOME_MODULES.some((item) => item.id === id))
-)
+  return focusRequest.value ? ['focus', ...ids.filter((id) => id !== 'focus')] : ids
+})
+
+async function onFocusPrepared(result) {
+  focusMessage.value = result.message
+  await nextTick()
+  if (route.path !== '/' || String(route.query.focusTask || '') !== result.taskId) return
+  document.querySelector('.focus-panel')?.scrollIntoView({ block: 'center', behavior: animationsEnabled() ? 'smooth' : 'auto' })
+  const query = { ...route.query }
+  delete query.focusTask
+  delete query.focusMinutes
+  await router.replace({ query })
+}
 
 /* ---------- 氛围问候 + 心情记录（模块 A） ---------- */
 const showMemory = ref(false)
@@ -334,7 +355,7 @@ function countdownLabel(item) {
     <template v-if="entryReady">
       <p v-if="experienceMessage" class="experience-message" role="status">✓ {{ experienceMessage }}</p>
       <p v-if="focusMessage" class="experience-message" role="status">{{ focusMessage }}</p>
-      <HomeProductivityPanel />
+      <HomeProductivityPanel v-if="!focusRequest" />
 
       <template v-for="id in visibleHomeModuleIds" :key="id">
         <section v-if="id === 'next'" class="next-panel" :class="nextUp.kind" aria-label="接下来">
@@ -398,7 +419,7 @@ function countdownLabel(item) {
           <p class="week-finance-note">{{ weeklyFinance.count }} 笔收支记录 · {{ weeklyFinanceNote }}<template v-if="weeklyBills.due || weeklyBills.paid"> · 固定账单已付 {{ weeklyBills.paid }} 笔（{{ moneyWithCurrency(weeklyBillFinance.expenseTotal, ledgerCurrency) }}；{{ weeklyBillFinanceNote }}），本周应付 {{ weeklyBills.due }} 项</template><template v-else> · 本周没有应付固定账单</template></p>
         </section>
 
-        <FocusPanel v-else-if="id === 'focus'" />
+        <FocusPanel v-else-if="id === 'focus'" :request="focusRequest" @prepared="onFocusPrepared" />
       </template>
 
       <div ref="socialCalendarAnchor" class="social-calendar-anchor">

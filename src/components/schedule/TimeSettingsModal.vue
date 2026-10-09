@@ -1,4 +1,5 @@
 <script setup>
+import ActionButton from '../ActionButton.vue'
 import { onBeforeUnmount, ref, watch } from 'vue'
 import Modal from '../Modal.vue'
 import ConfirmDialog from '../ConfirmDialog.vue'
@@ -29,7 +30,7 @@ import {
   planCampusId,
   planSeasonId,
   rowError,
-  saveDraft,
+  saveDraftWithFeedback,
   discardDraft,
   seasonsForPlanCampus,
   setDraftCloseHandler,
@@ -404,7 +405,7 @@ defineExpose({ stopBackgroundWork })
               aria-label="粘贴作息时间"
               placeholder="粘贴学校官网或通知里的作息时间，每行一条：&#10;第一节 8:00-8:45&#10;第二节 8:55-9:40&#10;夏季时间 / 南校区 等标题会被自动识别"
             />
-            <button class="btn btn-sm btn-ghost" @click="runParsePaste">解析预览</button>
+            <ActionButton tone="ghost" class="btn btn-sm btn-ghost" kind="task" feedback="external" :show-error="false" :action="() => runParsePaste()">解析预览</ActionButton>
           </div>
 
           <div v-else class="image-import" role="tabpanel" aria-labelledby="time-import-tab-image">
@@ -505,8 +506,7 @@ defineExpose({ stopBackgroundWork })
         <span v-if="draftDirty" class="dirty-dot">● 有未保存修改</span>
         <button v-if="draftDirty" class="btn" @click="discardDraft">放弃修改</button>
         <button v-else class="btn btn-ghost" @click="onResetTimes">恢复默认时间</button>
-        <button v-if="draftDirty" class="btn btn-primary" :disabled="planHasError" @click="saveDraft">保存</button>
-        <button v-else class="btn btn-primary" @click="tryCloseTimeEditor">完成</button>
+        <ActionButton kind="frequent" :action="saveDraftWithFeedback" :show-error="false" :disabled="draftDirty && planHasError" success-label="已保存">{{ draftDirty ? '保存' : '完成' }}</ActionButton>
       </div>
     </div>
   </Modal>

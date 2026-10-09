@@ -5,6 +5,8 @@ import { PALETTE, MAX_WEEK } from '../../composables/store/utils.js'
 import { periodIndex, periodLabelById, periodRangeById } from '../../composables/store/timeConfig.js'
 import { weekLabel } from '../../composables/store/schedule.js'
 import { isArchived, taskStatus } from '../../composables/domain/state.js'
+import { focusLocation } from '../../composables/focusNavigation.js'
+import TaskFocusLink from '../learning/TaskFocusLink.vue'
 
 const props = defineProps({
   open: Boolean,
@@ -141,6 +143,14 @@ function requestDelete() {
 <template>
   <Modal :open="open" :title="editingId ? '编辑课程' : '添加课程'" @close="emit('close')">
     <div class="form">
+      <section v-if="editingId" class="course-links" aria-label="课程关联事项">
+        <div class="course-links-head"><div><b>关联事项</b><small>删除课程只会解除关联，待办和重要日期会保留。</small></div><span v-if="linkedReviewProgress !== null" class="link-progress">复习 {{ linkedReviewProgress }}%</span></div>
+        <RouterLink class="course-archive-link" :to="{ path: '/course', query: { courseId: String(editingId) } }" @click="emit('close')">查看课程进度 →</RouterLink>
+        <div class="course-link-columns">
+          <div><span class="link-label">待推进 {{ linkedTasks.length }}</span><p v-if="!linkedTasks.length" class="link-empty">暂无待完成的课程事项</p><ul v-else class="link-list"><li v-for="task in linkedTasks.slice(0, 3)" :key="task.id"><RouterLink :to="focusLocation('/tasks', task.id)" @click="emit('close')">{{ task.title }}</RouterLink><small :class="{ 'link-overdue': taskStatus(task) === 'overdue' }">{{ taskStatus(task) === 'overdue' ? '已逾期 · ' : '' }}{{ task.dueDate || '未设截止日期' }}{{ task.dueTime ? ' ' + task.dueTime : '' }}</small><TaskFocusLink v-if="task.sourceType !== 'project-task'" :task="task" @navigate="emit('close')" /></li></ul><div class="link-actions"><RouterLink class="link-action" :to="{ path: '/tasks', query: { new: '1', courseId: String(editingId) } }" @click="emit('close')">＋ 课程待办</RouterLink><button type="button" class="link-action" @click="emit('add-homework')">添加作业</button></div></div>
+          <div><span class="link-label">学习类重要日期 {{ linkedCountdowns.length }}</span><p v-if="!linkedCountdowns.length" class="link-empty">暂无关联学习类重要日期</p><ul v-else class="link-list"><li v-for="item in linkedCountdowns.slice(0, 3)" :key="item.id"><RouterLink :to="focusLocation('/exams', item.id)" @click="emit('close')">{{ item.name }}</RouterLink><small>{{ item.date }} · 复习 {{ item.reviewProgress || 0 }}%</small></li></ul><RouterLink class="link-action" :to="{ path: '/exams', query: { new: '1', courseId: String(editingId) } }" @click="emit('close')">＋ 记录考试或重要日期</RouterLink></div>
+        </div>
+      </section>
       <label for="course-name">课程名称 *</label>
       <input
           id="course-name"
@@ -182,14 +192,7 @@ function requestDelete() {
              并让两个周次下拉框通过 aria-describedby 指向它——否则读屏用户只看到两个「正常」的下拉框。 -->
       <p v-if="formCellClash" id="course-week-clash" class="error" role="alert">⚠️ 周次与「{{ formCellClash.name }}」重叠，请调整开始/结束周，否则两门课会叠在一起</p>
 
-      <section v-if="editingId" class="course-links" aria-label="课程关联事项">
-        <div class="course-links-head"><div><b>关联事项</b><small>删除课程只会解除关联，待办和重要日期会保留。</small></div><span v-if="linkedReviewProgress !== null" class="link-progress">复习 {{ linkedReviewProgress }}%</span></div>
-        <RouterLink class="course-archive-link" :to="{ path: '/course', query: { courseId: String(editingId) } }" @click="emit('close')">查看课程进度 →</RouterLink>
-        <div class="course-link-columns">
-          <div><span class="link-label">待办 {{ linkedTasks.length }}</span><p v-if="!linkedTasks.length" class="link-empty">暂无关联待办</p><ul v-else class="link-list"><li v-for="task in linkedTasks.slice(0, 3)" :key="task.id"><span :class="{ done: taskStatus(task) === 'completed' }">{{ task.title }}</span><small>{{ taskStatus(task) === 'completed' ? '已完成' : (task.date || '未安排日期') }}</small></li></ul><div class="link-actions"><RouterLink class="link-action" to="/tasks">管理待办 →</RouterLink><button type="button" class="link-action" @click="emit('add-homework')">添加作业</button></div></div>
-          <div><span class="link-label">学习类重要日期 {{ linkedCountdowns.length }}</span><p v-if="!linkedCountdowns.length" class="link-empty">暂无关联学习类重要日期</p><ul v-else class="link-list"><li v-for="item in linkedCountdowns.slice(0, 3)" :key="item.id"><span>{{ item.name }}</span><small>{{ item.date }} · 复习 {{ item.reviewProgress || 0 }}%</small></li></ul><RouterLink class="link-action" to="/exams">管理重要日期 →</RouterLink></div>
-        </div>
-      </section>
+
 
       <label>标记颜色</label>
       <div class="colors"><button v-for="color in PALETTE" :key="color" type="button" class="swatch" :style="{ background: color }" :class="{ picked: draft.color === color }" :aria-label="`标记颜色 ${colorName(color)}`" :aria-pressed="draft.color === color" @click="draft.color = color"></button></div>
@@ -201,6 +204,9 @@ function requestDelete() {
 </template>
 
 <style scoped>
+.link-list a { color: var(--primary); text-decoration: none; font-size: var(--fs-12); overflow-wrap: anywhere; }
+.link-list a:hover { text-decoration: underline; }
+.link-list small.link-overdue { color: var(--danger); }
 .form { display: flex; flex-direction: column; gap: 8px; }
 .link-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .link-actions .link-action { padding: 0; color: var(--primary); font: inherit; background: transparent; border: 0; cursor: pointer; }

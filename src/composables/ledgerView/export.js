@@ -15,16 +15,18 @@
 import { catInfo, expenses, isRefundTransaction, isValidDateKey } from '../ledger.js'
 import { mySpendCents } from '../ledgerSplit.js'
 import { normalizeCurrency } from '../ledgerFx.js'
+import { ref } from 'vue'
 
-export function useLedgerExport({ getMonth, personalAmount, baseCurrency, notify }) {
+export function useLedgerExport({ getMonth, getFilteredItems = () => [], personalAmount, baseCurrency, notify }) {
+  const exporting = ref(false)
   const EXPORT_COLUMNS = ['日期', '时间', '名称', '分类', '收支', '金额', '我承担', '币种', '账户', '备注']
   // 明细表各列的显示宽度。SheetJS 社区版不写样式，只能靠列宽和数字格式让文件
   // 「看起来是给人看的」；不设的话 Excel 会按表头文字宽度排，日期和备注会被截断。
   const COLUMN_WIDTHS = { 日期: 12, 时间: 8, 名称: 22, 分类: 12, 收支: 8, 金额: 12, 我承担: 12, 币种: 8, 账户: 14, 备注: 28 }
   const MONEY_FORMAT = '#,##0.00'
   /** 导出范围的人话描述，用于提示文案（「该月…」/「全部历史…」）。 */
-  function scopeLabel() {
-    return getMonth() === 'all' ? '全部历史' : '该月'
+  function scopeLabel(scope = getMonth()) {
+    return scope === 'all' ? '全部历史' : scope === 'filtered' ? '当前筛选' : '该月'
   }
   /**
    * 这一条记录算不算在导出范围内。
@@ -53,6 +55,8 @@ export function useLedgerExport({ getMonth, personalAmount, baseCurrency, notify
  * `getMonth()` 返回 `'all'` 时导出全部历史。
  */
 function exportItems(scope = getMonth()) {
+    if (scope === 'filtered') return getFilteredItems().filter(isValidLedgerItem)
+      .sort((a, b) => `${a.date}${a.time || ''}`.localeCompare(`${b.date}${b.time || ''}`))
     const month = scope === 'all' ? '' : String(scope)
     return expenses.value
       .filter((item) => isValidLedgerItem(item) && (!month || String(item.date).slice(0, 7) === month))
@@ -134,8 +138,8 @@ function exportItems(scope = getMonth()) {
    * 就全错，而且错了不会报错——只是金额变成一串裸数字。所以这里改成构建时就记下
    * 每一处需要格式化的坐标，格式跟着内容走，不再依赖任何行号推算。
    */
-  function buildSummarySheet(XLSX, items) {
-    const month = getMonth()
+  function buildSummarySheet(XLSX, items, scope) {
+    const month = scope === 'all' ? '全部历史' : scope === 'filtered' ? '当前筛选' : scope
     const buckets = summarizeByCurrency(items)
     const currencyCodes = buckets.length ? buckets.map((b) => b.code) : [baseCurrency.value]
     const aoa = []
@@ -149,7 +153,7 @@ function exportItems(scope = getMonth()) {
       return row
     }
 
-    aoa.push([`账单支出汇总 · ${month}`])
+    aoa.push([`账单收支汇总 · ${month}`])
     aoa.push([`共 ${items.length} 条记录`, `生成时间：${new Date().toLocaleString('zh-CN')}`])
     aoa.push([])
     aoa.push(['项目', ...currencyCodes])
@@ -158,6 +162,11 @@ function exportItems(scope = getMonth()) {
     pushMoneyRow('支出净额（支出 − 退款）', (code) => {
       const entry = buckets.find((b) => b.code === code)
       return entry ? (entry.expenseCents - entry.refundCents) / 100 : 0
+    })
+    pushMoneyRow('收入合计', (code) => (buckets.find((b) => b.code === code)?.incomeCents ?? 0) / 100)
+    pushMoneyRow('结余（收入 − 支出净额）', (code) => {
+      const entry = buckets.find((b) => b.code === code)
+      return entry ? (entry.incomeCents - entry.expenseCents + entry.refundCents) / 100 : 0
     })
     // 笔数用整数格式，别让「5」显示成「5.00」
     const countRow = aoa.length
@@ -184,7 +193,7 @@ function exportItems(scope = getMonth()) {
       }
       aoa.push([])
     }
-    aoa.push(['说明：本表只统计支出，不含收入。'])
+    aoa.push(['说明：收支汇总包含收入、支出和退款；分类排行只统计支出。'])
     aoa.push(['说明：金额为「我承担」口径（分摊时只算自己那份）；不同币种不做折算，故按币种分列。'])
     aoa.push(['说明：支出净额已扣掉退款，与账本首页「本月花费」口径一致。'])
 
@@ -226,13 +235,13 @@ function csvCell(value) {
   const safe = /^[=+\-@\t\r]/.test(text) ? `'${text}` : text
   return /[",\n\r]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe
 }
-  function exportLedgerCsv() {
-    const rows = ledgerExportRows()
-    if (!rows.length) { notify(scopeLabel() + '还没有可导出的记录'); return }
+  function exportLedgerCsv(scope = getMonth()) {
+    const rows = ledgerExportRows(exportItems(scope))
+    if (!rows.length) { notify(scopeLabel(scope) + '还没有可导出的记录'); return false }
     const lines = [EXPORT_COLUMNS.join(',')].concat(
       rows.map((row) => EXPORT_COLUMNS.map((col) => csvCell(row[col])).join(','))
     )
-    downloadLedgerFile(new Blob(['\uFEFF' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' }), `账单-${getMonth() === 'all' ? '全部' : getMonth()}.csv`)
+    downloadLedgerFile(new Blob(['\uFEFF' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' }), `账单-${scope === 'all' ? '全部' : scope === 'filtered' ? '筛选结果' : scope}.csv`)
     notify(`已导出 ${rows.length} 条账单 CSV`)
   }
   /**
@@ -241,18 +250,23 @@ function csvCell(value) {
  * 此前导出被硬编码成 `getMonth()`，想拿完整数据只能一个月一个月点。
  */
 async function exportLedgerXlsx(scope = getMonth()) {
-    const items = exportItems(scope)
-    if (!items.length) { notify(scope === 'all' ? '全部历史还没有可导出的记录' : '该月还没有可导出的记录'); return }
+    if (exporting.value) return false
+    const items = exportItems(scope).map((item) => ({ ...item, currency: currencyOf(item),
+      ...(item.split ? { split: { ...item.split, participants: item.split.participants?.map((entry) => ({ ...entry })) } } : {}),
+    }))
+    if (!items.length) { notify(scopeLabel(scope) + '还没有可导出的记录'); return false }
+    const rows = ledgerExportRows(items)
+    exporting.value = true
+    try {
     const XLSX = await import('@e965/xlsx')
     const workbook = XLSX.utils.book_new()
     // 汇总表放在**第一个**：Excel 打开文件时显示的就是它，一眼能看到花了多少。
-    XLSX.utils.book_append_sheet(workbook, buildSummarySheet(XLSX, items), '汇总')
+    XLSX.utils.book_append_sheet(workbook, buildSummarySheet(XLSX, items, scope), '汇总')
 
     // 明细也用**同一份快照**：原先这里重新调 `ledgerExportRows()`，
     // 而它内部再取一次 exportItems()。中间隔着一个 `await import(...)`，
     // 期间任何写入（同步拉取、撤销 toast、另一个标签页的 storage 事件）都会让
     // 「汇总」与「账单明细」描述两个不同时刻的账本，`!autofilter` 的行数也会错位。
-    const rows = ledgerExportRows(items)
     const worksheet = XLSX.utils.json_to_sheet(rows, { header: EXPORT_COLUMNS })
     worksheet['!cols'] = EXPORT_COLUMNS.map((col) => ({ wch: COLUMN_WIDTHS[col] ?? 12 }))
     // 明细的可读性只能靠这三样，因为 SheetJS 社区版**不写样式**：
@@ -272,8 +286,13 @@ async function exportLedgerXlsx(scope = getMonth()) {
     XLSX.utils.book_append_sheet(workbook, worksheet, '账单明细')
 
     const output = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' })
-    downloadLedgerFile(new Blob([output], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `账单-${scope === 'all' ? '全部' : scope}.xlsx`)
+    downloadLedgerFile(new Blob([output], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }), `账单-${scope === 'all' ? '全部' : scope === 'filtered' ? '筛选结果' : scope}.xlsx`)
     notify(`已导出 ${items.length} 条账单 Excel`)
+    return true
+    } catch (cause) {
+      notify(`导出失败：${cause?.message || '请重试'}`, { type: 'error' })
+      return false
+    } finally { exporting.value = false }
   }
 
   /** 回顾页「导出全部」按钮：导出不限月份的完整历史。 */
@@ -281,5 +300,8 @@ async function exportLedgerXlsx(scope = getMonth()) {
     return exportLedgerXlsx('all')
   }
 
-  return { exportLedgerCsv, exportLedgerXlsx, exportAllLedgerXlsx }
+  return { exporting, exportLedgerCsv, exportLedgerXlsx, exportAllLedgerXlsx,
+    exportFilteredCsv: () => exportLedgerCsv('filtered'),
+    exportFilteredXlsx: () => exportLedgerXlsx('filtered'),
+  }
 }

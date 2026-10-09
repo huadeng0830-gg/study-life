@@ -1,4 +1,5 @@
 <script setup>
+import ActionButton from './ActionButton.vue'
 import Modal from './Modal.vue'
 import { useQuickRecordPanel } from '../composables/useQuickRecordPanel.js'
 
@@ -247,8 +248,8 @@ const {
         <div class="footer">
           <div class="save-feedback"><p v-if="feedback" class="success" role="status">{{ feedback }}</p><button v-if="lastSaved.length" type="button" class="undo-save" :disabled="saving" @click="undoLastSaved">撤销刚才保存</button><small v-if="hasDrafts && !feedback">{{ saving ? '正在保存，请稍候…' : `将保存 ${selectedDrafts.length} 项记录` }}</small></div>
           <div v-if="hasDrafts" class="save-actions">
-            <button type="button" class="btn btn-primary" :disabled="saving || !selectedDrafts.length || listening || clipboardLoading" :aria-busy="saving || undefined" @click="saveAll(false)">{{ saveLabel }}</button>
-            <button type="button" class="btn btn-ghost" :disabled="saving || !selectedDrafts.length || listening || clipboardLoading" :aria-busy="saving || undefined" @click="saveAll(true)">保存并继续</button>
+            <ActionButton tone="primary" type="button" class="btn btn-primary" :disabled="saving || !selectedDrafts.length || listening || clipboardLoading" :busy="saving || undefined" kind="frequent" feedback="external" :show-error="false" :action="() => saveAll(false)">{{ saveLabel }}</ActionButton>
+            <ActionButton tone="ghost" type="button" class="btn btn-ghost" :disabled="saving || !selectedDrafts.length || listening || clipboardLoading" :busy="saving || undefined" kind="frequent" feedback="external" :show-error="false" :action="() => saveAll(true)">保存并继续</ActionButton>
           </div>
         </div>
 

@@ -7,6 +7,20 @@
 // 3. 更早的版本逐条下移，最多保留 3 个版本，超出即删除。
 export const RELEASE_UPDATES = Object.freeze([
   {
+    version: '2026年10月09日-版本2',
+    signature: '75519cb63f',
+    notes: [
+      '学习入口以课表为中心，课程卡片显示待办与逾期，课程详情可直接记录作业、考试或准备专注',
+      '学习安排利用课表空档联动待办与复习，支持今日、明日和自选日期、冲突复核、加入日程及撤销',
+      '专注带入原任务与下一步，结束后回写实际时长并续记进度，重复复习复用当前待办',
+      '修复账本回顾柱形与月份对齐，触屏点按一次即可切换，滑动不会误选，支持直接选择月份',
+      '统一账本汇率、分摊与退款统计，完善收入回顾、筛选导出、录入校验及固定账单撤销',
+      '清单支持购物、出行等常用模板、多行添加、分类搜索排序与批量管理，复制或重置后可重复使用',
+      '完善清单数量、单价与预算统计，修复新增事项即时刷新、跨清单撤销和全局搜索定位，适配手机与键盘操作',
+      '统一操作反馈：重要保存使用真实结果动画，普通保存快速反馈，长任务保留处理阶段，完善防重、错误重试和移动端焦点',
+    ],
+  },
+  {
     version: '2026年10月09日-版本1',
     signature: '4ff8d7aaeb',
     notes: [
@@ -34,20 +48,13 @@ export const RELEASE_UPDATES = Object.freeze([
       '优化首页空状态与专注模块布局',
     ],
   },
-  {
-    version: '2026年10月08日-版本8',
-    signature: 'a8ca62573f',
-    notes: [
-      '修复 Windows 桌面版应用内自动检查、下载与安装更新',
-    ],
-  },
 ])
 
 // 对用户展示、version.txt 和更新检测统一使用此版本号；后续同日发布只递增“版本”序号。
 export const RELEASE_VERSION = RELEASE_UPDATES[0].version
 
 // 与第一条签名保持一致，交给 vite.config.js 校验源码一致性。
-export const RELEASE_SOURCE_SIGNATURE = '4ff8d7aaeb'
+export const RELEASE_SOURCE_SIGNATURE = '75519cb63f'
 
 // 兼容旧引用：当前版本的更新说明。
 export const RELEASE_NOTES = RELEASE_UPDATES[0].notes

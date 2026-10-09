@@ -1,6 +1,9 @@
 <script setup>
 import { computed, ref, unref, watch } from 'vue'
 import Modal from './Modal.vue'
+import ActionButton from './ActionButton.vue'
+import ActionFeedback from './ActionFeedback.vue'
+import { useLatestTask } from '../composables/latestTask.js'
 import { parseDomainCsvFile } from '../composables/domainCsvImport.js'
 
 const props = defineProps({
@@ -14,6 +17,8 @@ const filename = ref('')
 const preview = ref(null)
 const error = ref('')
 const importing = ref(false)
+const reads = useLatestTask()
+watch(open, (value) => { if (!value) { reads.cancel(); importing.value = false } })
 
 const labels = {
   tasks: { noun: '待办', title: '导入待办 CSV' },
@@ -24,6 +29,8 @@ const copy = computed(() => labels[props.kind] || labels.tasks)
 const previewRows = computed(() => preview.value?.rows?.slice(0, 8) || [])
 
 watch(() => props.kind, () => {
+  reads.cancel()
+  importing.value = false
   preview.value = null
   filename.value = ''
   error.value = ''
@@ -42,31 +49,38 @@ async function readFile(event) {
   const file = event.target.files?.[0]
   event.target.value = ''
   if (!file) return
+  preview.value = null
   if (!/\.csv$/i.test(file.name) && !/csv|text\/plain/i.test(file.type || '')) {
     error.value = '请选择 CSV 文件。'
     return
   }
   importing.value = true
+  const job = reads.begin()
   error.value = ''
   filename.value = file.name
   try {
-    const result = parseDomainCsvFile(await file.arrayBuffer(), { kind: props.kind, records: unref(props.records) })
+    const buffer = await file.arrayBuffer()
+    if (!job.isCurrent()) return
+    const result = parseDomainCsvFile(buffer, { kind: props.kind, records: unref(props.records) })
     preview.value = result
     if (result.error) error.value = result.error
     else if (!result.rows.length) error.value = '没有可导入的新记录。请检查表头，或确认这些记录尚未导入。'
   } catch (reason) {
+    if (!job.isCurrent()) return
     preview.value = null
     error.value = reason instanceof Error ? reason.message : '读取 CSV 失败，请检查文件编码和格式。'
   } finally {
-    importing.value = false
+    if (job.isCurrent()) importing.value = false
+    job.finish()
   }
 }
 
 function confirmImport() {
+  if (!open.value || importing.value) return
   const rows = preview.value?.rows || []
   if (!rows.length) return
-  emit('import', rows)
   open.value = false
+  emit('import', rows)
 }
 </script>
 
@@ -74,7 +88,7 @@ function confirmImport() {
   <div v-if="importAvailable" class="csv-import-control">
     <button type="button" class="btn btn-ghost" @click="openImport">⇧ 导入 CSV</button>
     <Modal :open="open" :title="copy.title" medium @close="open = false">
-      <div class="csv-import-body">
+      <div class="csv-import-body" :aria-busy="importing || undefined">
         <p>支持 Todoist、Notion、提醒事项等导出的 CSV。文件只在本机解析；会扫描表头并跳过已导入或重复的记录。</p>
         <label class="csv-file-picker">
           <input type="file" accept=".csv,text/csv" :disabled="importing" @change="readFile" />
@@ -95,12 +109,12 @@ function confirmImport() {
           </ul>
           <p v-if="preview.total > previewRows.length" class="csv-more">另有 {{ preview.total - previewRows.length }} 条不在预览中。</p>
         </section>
-        <p v-if="error" class="csv-error" role="alert">{{ error }}</p>
+        <ActionFeedback class="csv-error" :message="error" tone="error" />
       </div>
       <template #foot>
         <div class="csv-import-footer">
           <button type="button" class="btn btn-ghost" @click="open = false">取消</button>
-          <button type="button" class="btn btn-primary" :disabled="!preview?.rows?.length || importing" @click="confirmImport">导入 {{ preview?.total || '' }} 条</button>
+          <ActionButton feedback="external" :disabled="!preview?.rows?.length || importing" @click="confirmImport">导入 {{ preview?.total || '' }} 条</ActionButton>
         </div>
       </template>
     </Modal>

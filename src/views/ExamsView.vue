@@ -7,6 +7,9 @@ import ConfirmDialog from '../components/ConfirmDialog.vue'
 import VirtualList from '../components/VirtualList.vue'
 import ContextMenu from '../components/ContextMenu.vue'
 import Toast from '../components/Toast.vue'
+import LearningNavigation from '../components/learning/LearningNavigation.vue'
+import TaskFocusLink from '../components/learning/TaskFocusLink.vue'
+import { ensureMilestoneReviewTask } from '../composables/learningPlan.js'
 import {
   fmtCountdownDate,
   useStoredRef,
@@ -79,6 +82,17 @@ function openAdd() {
   form.value = emptyForm()
   showForm.value = true
 }
+
+watch(() => [route.path, route.query.new, route.query.courseId], ([path, value, courseId]) => {
+  if (path !== '/exams' || value !== '1') return
+  openAdd()
+  const course = courses.value.find((item) => String(item.id) === String(courseId || '') && !isArchived(item) && !item.deletedAt && !item.tombstone)
+  if (course) form.value.courseId = course.id
+  const query = { ...route.query }
+  delete query.new
+  delete query.courseId
+  void router.replace({ query })
+}, { immediate: true })
 
 function openEdit(item) {
   editingId.value = item.id
@@ -248,27 +262,12 @@ function isMilestoneCard(value) {
 
 function createReviewTask(item, event) {
   event?.stopPropagation()
-  const existing = tasks.value.find((task) => isTaskActionable(task) && task.sourceType === 'milestone-review' && task.sourceId === item.id)
-  if (existing) {
-    void router.push({ path: '/tasks', query: { focus: existing.id } })
-    return
-  }
-  const course = courses.value.find((entry) => entry.id === item.courseId)
-  const task = domain.createTask({
-    title: `复习：${item.name}`,
-    kind: 'review',
-    courseId: item.courseId || '',
-    course: course?.name || item.courseName || '',
-    dueDate: appToday.value,
-    priority: 'high',
-    estimateMinutes: 25,
-    note: `由学习类重要日期「${item.name}」创建，可在今天页直接开始专注。`,
-    createdFrom: 'milestone-review',
-    sourceType: 'milestone-review',
-    sourceId: item.id,
-  })
-  reviewMessage.value = `已安排“${item.name}”的 25 分钟复习，可在今天页开始专注`
-  showToast('已安排 25 分钟复习', { type: 'success', actionLabel: '查看待办', viewFn: () => router.push({ path: '/tasks', query: { focus: task.id } }), duration: 6000 })
+  try {
+    const { task, created } = ensureMilestoneReviewTask(domain, item.id)
+    if (!created) { void router.push({ path: '/tasks', query: { focus: task.id } }); return }
+    reviewMessage.value = `已安排“${item.name}”的 25 分钟复习，可直接准备专注`
+    showToast('已安排 25 分钟复习', { type: 'success', actionLabel: '查看待办', viewFn: () => router.push({ path: '/tasks', query: { focus: task.id } }), duration: 6000 })
+  } catch (cause) { showToast(cause instanceof Error ? cause.message : '安排复习失败，请重试。', { type: 'error' }) }
 }
 
 function openReviewTasks(item) {
@@ -524,6 +523,8 @@ function courseLabel(item) {
       </div>
     </header>
 
+    <LearningNavigation current="exams" />
+
     <div v-if="exams.length && !showHistory" class="date-overview" role="group" aria-label="重要日期概览">
       <button type="button" class="card overview-item" :class="{ selected: periodFilter === 'all' && !showPast }" :aria-pressed="periodFilter === 'all' && !showPast" @click="selectOverview('all')"><span>即将到来</span><b>{{ summary.upcoming }}</b><small>全部当前日期</small></button>
       <button type="button" class="card overview-item" :class="{ selected: periodFilter === 'week' }" :aria-pressed="periodFilter === 'week'" @click="selectOverview('week')"><span>未来 7 天</span><b>{{ summary.week }}</b><small>含今天</small></button>
@@ -639,6 +640,7 @@ function courseLabel(item) {
           <span class="tl-dot" :class="{ on: item.timeline.sameDay }"></span>
         </div>
         <button v-if="item.category === '学习' && !item.countdown.isPast && !isArchived(item)" type="button" class="review-action" @click="createReviewTask(item, $event)">{{ item.activeReview ? '继续复习 →' : item.review ? '再安排 25 分钟复习' : '安排 25 分钟复习' }}</button>
+        <TaskFocusLink v-if="item.activeReview && item.category === '学习' && !item.countdown.isPast && !isArchived(item)" :task="item.activeReview" />
       </div>
       </template>
     </VirtualList>

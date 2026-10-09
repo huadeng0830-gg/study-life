@@ -61,7 +61,7 @@ describe('QuickRecordPanel 保存并发保护', () => {
     await nextTick()
 
     expect(saveMock).toHaveBeenCalledTimes(1)
-    expect(saveButton.disabled).toBe(true)
+    expect(saveButton.getAttribute('aria-disabled')).toBe('true')
     expect(events).toEqual([])
 
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))

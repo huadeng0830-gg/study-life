@@ -33,6 +33,7 @@ import {
 import { timeSettingsTab } from './modalSections.js'
 import { settingError, showToast } from './timeSettingsShared.js'
 import { resetPlanTools } from './timePlanTools.js'
+import { restoreStoredValues } from './store/core.js'
 
 export function toMinutes(hhmm) {
   const [h = 0, m = 0] = String(hhmm ?? '').split(':').map(Number)
@@ -159,11 +160,11 @@ export function markDirty() {
   draftDirty.value = true
 }
 
-export function saveDraft() {
-  if (!planSeasonId.value || !planCampusId.value) return
+export function saveDraft({ notify = true } = {}) {
+  if (!planSeasonId.value || !planCampusId.value) return false
   if (planHasError.value) {
     settingError.value = '存在时间问题（结束需晚于开始、不能重叠等），请先修正后再保存'
-    return
+    return false
   }
   normalizeTimes(timeConfig.value)
   const list = timeConfig.value.times[planSeasonId.value][planCampusId.value]
@@ -172,11 +173,28 @@ export function saveDraft() {
   })
   draftDirty.value = false
   settingError.value = ''
-  showToast('作息方案已保存')
+  if (notify) showToast('作息方案已保存')
+  return true
 }
 
 export function discardDraft() {
   loadPlanDraft(planSeasonId.value, planCampusId.value)
+}
+
+// The editor uses the existing durable commit seam before showing success.
+// Legacy synchronous callers keep saveDraft's validation and toast behavior.
+/** @param {{signal?: AbortSignal}} [context] */
+export async function saveDraftWithFeedback({ signal } = {}) {
+  if (!draftDirty.value) { tryCloseTimeEditor(); return false }
+  if (!saveDraft({ notify: false })) return false
+  try {
+    await restoreStoredValues({ sl_timecfg: JSON.parse(JSON.stringify(timeConfig.value)) })
+    return !signal?.aborted && (draftDirty.value ? { feedback: false } : true)
+  } catch (cause) {
+    draftDirty.value = true
+    if (!signal?.aborted) settingError.value = cause instanceof Error ? cause.message : '作息保存失败，请重试'
+    throw cause
+  }
 }
 
 // 关闭弹窗时守卫（确认放弃才复位草稿并关闭）。

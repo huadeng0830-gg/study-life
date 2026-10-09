@@ -1,6 +1,7 @@
 <script setup>
 import { courseTaskDueLabel } from '../../composables/courseProgress.js'
 import { focusLocation } from '../../composables/focusNavigation.js'
+import TaskFocusLink from '../learning/TaskFocusLink.vue'
 
 defineProps({
   row: { type: /** @type {import('vue').PropType<import('../../composables/courseProgress.js').CourseTaskRow>} */ (Object), required: true },
@@ -20,6 +21,7 @@ const emit = defineEmits(['complete', 'work'])
       <p v-else-if="row.task.workCheckpoint?.lastStep" class="task-last-step">上次做到：{{ row.task.workCheckpoint.lastStep }}</p>
       <p v-if="row.task.workCheckpoint?.blocker" class="task-blocker">卡点：{{ row.task.workCheckpoint.blocker }}</p>
       <button class="task-work-link" type="button" @click="emit('work', row.task)">{{ row.task.sourceType === 'project-task' ? '打开项目任务 →' : row.task.workCheckpoint || row.task.status === 'in_progress' ? '继续这项任务 →' : '开始这项任务 →' }}</button>
+      <TaskFocusLink v-if="row.task.sourceType !== 'project-task'" :task="row.task" />
     </div>
   </article>
 </template>

@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>账本浏览器回归验证</title></head>
+  <body>
+    <div id="app"></div>
+    <script type="module">
+      import { createApp, h, ref } from 'vue'
+      import MonthlyTrendCard from '../../src/views/ledger-panels/MonthlyTrendCard.vue'
+      import '../../src/style.css'
+      import { appToday } from '../../src/composables/timeContext.js'
+      import { shiftTrendMonth } from '../../src/composables/monthlyTrendChart.js'
+
+      // 直接向真实图表传入虚构月度汇总，不读取或写入账本记录。
+      const today = appToday.value.slice(0, 7)
+      const endMonth = ref(today)
+      const selectedMonth = ref(today)
+      const rows = Array.from({ length: 25 }, (_, index) => {
+        return { month: shiftTrendMonth(today, index - 24), expense: index === 22 ? -30 : 30 + index * 17, income: 120 + index * 30, count: 2 }
+      })
+      createApp({ render: () => h('main', { class: 'page', style: 'max-width:1000px;margin:24px auto;padding:12px' }, [
+        h('div', { class: 'month-nav card' }, [h('b', { 'data-selected-month': selectedMonth.value }, selectedMonth.value)]),
+        h(MonthlyTrendCard, {
+          months: rows.filter((row) => row.month <= endMonth.value).slice(-13),
+          reviewMonth: selectedMonth.value,
+          todayMonth: today,
+          earliestMonth: rows[0].month,
+          currency: 'CNY',
+          onJumpToMonth: (month) => { selectedMonth.value = month },
+          onRangeEndChange: (month) => { endMonth.value = month },
+        }),
+      ]) }).mount('#app')
+    </script>
+  </body>
+</html>

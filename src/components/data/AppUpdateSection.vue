@@ -1,4 +1,5 @@
 <script setup>
+import ActionButton from '../ActionButton.vue'
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { APP_RELEASE } from '../../composables/releaseNotes.js'
 import {
@@ -234,9 +235,9 @@ async function recoverToLatest() {
       <summary>版本异常或更新卡住？</summary>
       <div class="update-recovery-content">
         <p>修复会重建应用资源缓存并重新加载，不会删除本机课程、待办或账本记录。</p>
-        <button type="button" class="btn btn-secondary" :disabled="checkBusy" :aria-busy="recovering" @click="recoverToLatest">
+        <ActionButton tone="neutral" type="button" class="btn btn-secondary" :disabled="checkBusy" :busy="recovering" kind="task" feedback="external" :show-error="false" :action="() => recoverToLatest()">
           {{ recovering ? '正在修复…' : '修复更新缓存' }}
-        </button>
+        </ActionButton>
       </div>
     </details>
   </section>

@@ -1,9 +1,10 @@
 <script setup>
-import { ref, computed, watch } from 'vue'
+import ActionButton from '../../components/ActionButton.vue'
+import { ref, computed, nextTick, watch } from 'vue'
 import Modal from '../../components/Modal.vue'
 import QuickRecordPanel from '../../components/QuickRecordPanel.vue'
 import { activeCategories, catInfo, classifyTransaction, parseNatural } from '../../composables/ledger.js'
-import { splitCentsEvenly } from '../../composables/ledgerSplit.js'
+import { currencySymbol } from '../../utils/formatters.js'
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -26,6 +27,7 @@ const props = defineProps({
   currencyInput: { type: String, default: '' },
   splitCount: { type: String, default: '1' },
   splitMine: { type: String, default: '' },
+  splitMode: { type: String, default: 'equal' },
   splitPreview: { type: String, default: '' },
   dupWarn: { type: Boolean, default: false },
   forceDup: { type: Boolean, default: false },
@@ -35,6 +37,9 @@ const props = defineProps({
   categoryInputManuallySelected: { type: Boolean, default: false },
   suggestedCategoryInput: { type: String, default: '' },
   duplicateHit: { type: Boolean, default: false },
+  formError: { type: String, default: '' },
+  errorField: { type: String, default: '' },
+  saveAction: { type: Function, default: null },
   /**
    * 是否显示内嵌的「⚡ 用一句话记」面板。
    *
@@ -69,6 +74,7 @@ const emit = defineEmits([
   'update:currencyInput',
   'update:splitCount',
   'update:splitMine',
+  'update:splitMode',
   'update:showAllQuickCategories',
   'update:directionInput',
   'update:moreOpen',
@@ -106,23 +112,6 @@ watch(() => props.amountInput, v => { localAmountInput.value = v })
 watch(() => props.splitCount, v => { localSplitCount.value = v })
 watch(() => props.currencyInput, v => { localCurrencyInput.value = v })
 watch(() => props.splitMine, v => { localSplitMine.value = v })
-
-function parseAmount(v) {
-  const n = Number(String(v).replace(/[^0-9.-]/g, ''))
-  return Number.isFinite(n) && n > 0 ? Math.round(n * 100) : null
-}
-
-function syncSplitMine() {
-  const totalCents = parseAmount(props.amountInput)
-  const people = Math.trunc(Number(props.splitCount))
-  if (totalCents === null || !Number.isFinite(people) || people < 1) { emit('update:splitMine', ''); return }
-  const parts = splitCentsEvenly(totalCents, people)
-  emit('update:splitMine', String(parts[0] / 100))
-}
-
-function onSplitChange() {
-  syncSplitMine()
-}
 
 function setDirection(direction) {
   emit('update:directionInput', direction)
@@ -165,7 +154,16 @@ function selectQuickCategory(key) {
 }
 
 async function saveExpense(keepOpen = false) {
-  emit('save', keepOpen)
+  if (!props.saveAction) { emit('save', keepOpen); return }
+  const saved = await props.saveAction(keepOpen)
+  await nextTick()
+  if (saved && keepOpen) amountEl.value?.focus()
+  else if (!saved && props.errorField) {
+    const selector = props.errorField === 'amount' ? '.amount-input'
+      : props.errorField === 'split' ? '[aria-label="参与人数"]' : `input[type="${props.errorField}"]`
+    amountEl.value?.closest('.quick-form')?.querySelector(selector)?.focus()
+  }
+  return saved
 }
 
 function closeQuick() {
@@ -188,6 +186,10 @@ function createBillFromSuggest() {
     name: parsed.name || props.nameInput.trim(),
     amount: props.amountInput || parsed.amount || '',
     cycle: s?.kind ?? 'monthly',
+    currency: props.currencyInput,
+    account: props.accountInput,
+    nextDate: props.dateInput,
+    note: props.noteInput,
   }
   emit('update:open', false)
   emit('open-bill-form', prefill)
@@ -198,6 +200,8 @@ function createBillFromSuggest() {
 <Modal :open="open" :title="editingId ? '编辑记录' : keepAdding ? '再记一笔' : '记一笔'" @close="closeQuick">
   <div class="quick-form">
     <button v-if="!editingId" class="natural-entry-link" type="button" @click="openQuickRecord">⚡ 用一句话记</button>
+    <div class="quick-amount-field">
+    <span class="quick-currency" aria-hidden="true">{{ currencySymbol(currencyInput || baseCurrency) }}</span>
     <input
       ref="amountEl"
       :value="localAmountInput"
@@ -208,18 +212,22 @@ function createBillFromSuggest() {
       placeholder="0.00"
       autocomplete="off"
       aria-label="金额"
+      :aria-invalid="errorField === 'amount' || undefined"
+      :aria-describedby="formError ? 'quick-entry-error' : undefined"
       @keydown.enter="saveExpense(keepAdding)"
     />
-    <div v-if="!editingId" class="direction-toggle" role="group" aria-label="选择收支类型">
-       <button type="button" :class="{ on: directionInput === 'expense' }" @click="setDirection('expense')">支出</button>
-       <button type="button" :class="{ on: directionInput === 'income' }" @click="setDirection('income')">收入</button>
+    </div>
+    <p v-if="formError" id="quick-entry-error" class="quick-error" role="alert">{{ formError }}</p>
+    <div class="direction-toggle" role="group" aria-label="选择收支类型">
+       <button type="button" :aria-pressed="directionInput === 'expense'" :class="{ on: directionInput === 'expense' }" @click="setDirection('expense')">支出</button>
+       <button type="button" :aria-pressed="directionInput === 'income'" :class="{ on: directionInput === 'income' }" @click="setDirection('income')">收入</button>
     </div>
     <input
       :value="nameInput"
       @input="e => { $emit('update:nameInput', e.target.value); onNameInput(e.target.value) }"
       class="name-input"
-      aria-label="备注或用途"
-      placeholder="买了什么？可不填"
+      aria-label="记录名称"
+      :placeholder="directionInput === 'income' ? '例如：工资、奖学金（可不填）' : '例如：午饭、地铁（可不填）'"
       @keydown.enter="saveExpense(keepAdding)"
     />
     <p v-if="!editingId && categorySuggestion" class="category-suggestion" :class="{ uncertain: categorySuggestion.uncertain }" role="status">
@@ -274,16 +282,19 @@ function createBillFromSuggest() {
           </select>
         </label>
      </div>
-     <input :value="noteInput" @input="e => $emit('update:noteInput', e.target.value)" aria-label="备注" placeholder="买了什么？可不填" />
+     <input :value="noteInput" @input="e => $emit('update:noteInput', e.target.value)" aria-label="备注" placeholder="补充说明（可不填）" />
+<template v-if="directionInput === 'expense'">
 <div class="more-grid">
-        <label>参与人数<input :value="localSplitCount" @input="e => { localSplitCount = e.target.value; onSplitChange(); $emit('update:splitCount', e.target.value) }" type="number" min="1" max="99" step="1" inputmode="numeric" /></label>
-        <label>我承担<input :value="localSplitMine" type="text" inputmode="decimal" aria-label="我在这一笔里承担的份额（自动计算，可手改）" readonly /></label>
+        <label>参与人数<input :value="localSplitCount" @input="e => { localSplitCount = e.target.value; $emit('update:splitCount', e.target.value) }" aria-label="参与人数" type="number" min="1" max="99" step="1" inputmode="numeric" /></label>
+        <label>我承担<input :value="localSplitMine" @input="e => $emit('update:splitMine', e.target.value)" type="text" inputmode="decimal" :aria-label="splitMode === 'custom' ? '我承担的份额' : '我承担的份额（自动计算，只读）'" :readonly="splitMode !== 'custom'" /></label>
       </div>
+     <label v-if="Number(splitCount) > 1" class="split-mode"><input type="checkbox" :checked="splitMode === 'custom'" @change="$emit('update:splitMode', $event.target.checked ? 'custom' : 'equal')" />自定义我承担的金额</label>
      <p v-if="splitPreview" class="form-note">{{ splitPreview }}</p>
+     </template>
     </div>
 
     <div class="quick-actions">
-      <button class="btn btn-primary save-btn" :disabled="savingExpense" @click="saveExpense(keepAdding)">{{ editingId ? '保存修改' : keepAdding ? '记下一笔' : '记下' }}</button>
+      <ActionButton tone="primary" class="btn btn-primary save-btn" :disabled="savingExpense" kind="frequent" feedback="external" :show-error="false" :action="() => saveExpense(keepAdding)">{{ editingId ? '保存修改' : keepAdding ? '记下一笔' : '记下' }}</ActionButton>
       <!-- 连续记模式下这个按钮是「完成」，语义是**退出连续记账**，不是再存一笔。
            原来无论哪种状态都调 saveExpense(true)：连点「完成」会去保存一张空表单
            （金额为空 → 直接 focus 金额框返回），于是「完成」是个走不出去的死胡同，
@@ -309,6 +320,11 @@ function createBillFromSuggest() {
   flex-direction:column;
   gap:10px;
   display:flex}
+.quick-amount-field { display:flex; align-items:center; gap:8px; }
+.quick-currency { color:var(--ink-soft); font-size:var(--fs-23); }
+.quick-error { margin:0; color:var(--danger); font-size:var(--fs-12); line-height:1.5; }
+.split-mode { display:flex; align-items:center; gap:8px; color:var(--ink-soft); font-size:var(--fs-12); }
+.split-mode input { width:16px; height:16px; accent-color:var(--primary); }
 .natural-entry-link {
   color:var(--primary);
   cursor:pointer;

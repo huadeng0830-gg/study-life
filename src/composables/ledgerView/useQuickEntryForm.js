@@ -6,13 +6,13 @@
  * 多币种 / 分摊 都是纯函数，不依赖页面级命令对象（`domain.createTransaction` 等由页面注入）。
  */
 import { computed, ref, watch } from 'vue'
-import { activeCategories, classifyTransaction, commonCategories, detectCategory, ledgerCategories, ledgerIndex, rememberCategoryOverride } from '../ledger.js'
-import { buildSplit, hasSplit, splitCentsEvenly } from '../ledgerSplit.js'
+import { activeCategories, classifyTransaction, commonCategories, detectCategory, isValidDateKey, ledgerCategories, ledgerIndex, normalizeLedgerTime, rememberCategoryOverride } from '../ledger.js'
+import { buildSplit, hasSplit, normalizeSplit, splitCentsEvenly } from '../ledgerSplit.js'
 import { moneyWithCurrency } from '../../utils/formatters.js'
 import { amountToCents, normalizeAmount } from '../ledger.js'
 import { currencyChoices, currencyField, normalizeCurrency, useLedgerFx } from '../ledgerFx.js'
 import { parseNatural } from '../ledger.js'
-import { defaultAccount } from '../settingsPolicy.js'
+import { defaultAccount, timestampOf } from '../settingsPolicy.js'
 import { appToday } from '../timeContext.js'
 
 export function useQuickEntryForm({ baseCurrency, domain, notify, closeSwipe, ledgerNowHM }) {
@@ -30,7 +30,9 @@ export function useQuickEntryForm({ baseCurrency, domain, notify, closeSwipe, le
   const accountInput = ref('')
   const sourceInput = ref('manual')
   const billIdInput = ref('')
-  const amountEl = ref(null)
+  const formError = ref('')
+  const errorField = ref('')
+  const currentEditingId = ref(null)
   const dupWarn = ref(false)
   const forceDup = ref(false)
   const keepAdding = ref(false)
@@ -48,31 +50,31 @@ export function useQuickEntryForm({ baseCurrency, domain, notify, closeSwipe, le
   // 分摊
   const splitCount = ref('1')
   const splitMine = ref('')
+  const splitMode = ref('equal')
+  let originalSplit = null
 
-  // splitMine 是「我承担」那一半的金额。界面上它是只读的（用户不能手填），
-  // 所以正常情况下它**永远**应该等于按分等分算出来的那一份。
-  //
-  // 但编辑一条**本来就有分摊**的记录时，它来自既有数据，不能被覆盖 ——
-  // 用这个标志区分「派生值」和「外部给定的值」：
-  //   - 派生：改金额/人数就跟着重算；
-  //   - 外部给定：保持不动。
-  // 之前没有这个区分，只能把重算塞进 splitPreview 这个 computed 里、靠渲染时
-  // 写状态来「顺便」纠正 —— 等于每次重渲染都改一次表单状态。
-  let splitMineIsDerived = true
-
-  watch([amountInput, splitCount], () => {
-    if (splitMineIsDerived) syncSplitMine()
+  // 平均分摊随金额和人数重算；自定义份额及既有分摊保持用户填写的金额。
+  watch([amountInput, splitCount, splitMode], () => {
+    if (splitMode.value === 'equal') syncSplitMine()
   }, { immediate: true })
+  watch([amountInput, nameInput, dateInput, timeInput, currencyInput, accountInput, directionInput, splitCount, splitMine], () => {
+    formError.value = ''; errorField.value = ''
+    dupWarn.value = false; forceDup.value = false
+  })
 
   function resetSplitState() {
     splitCount.value = '1'
     splitMine.value = ''
-    splitMineIsDerived = true
+    splitMode.value = 'equal'
+    originalSplit = null
   }
 
   function draftSplit() {
     try {
-      return { split: buildSplit(amountInput.value, { count: splitCount.value, mine: splitMine.value }) }
+      if (originalSplit && normalizeAmount(amountInput.value) === originalSplit.total
+        && Number(splitCount.value) === originalSplit.participants.length
+        && normalizeAmount(splitMine.value) === originalSplit.mine) return { split: originalSplit }
+      return { split: buildSplit(amountInput.value, { count: splitCount.value, mine: splitMode.value === 'custom' ? splitMine.value : null }) }
     } catch (cause) {
       return { error: cause?.message || '分摊数据不合法' }
     }
@@ -86,11 +88,13 @@ export function useQuickEntryForm({ baseCurrency, domain, notify, closeSwipe, le
   // 现在 splitMine 只由下面的 watch / syncSplitMine() 负责更新，这里保持纯函数。
   const splitPreview = computed(() => {
     const totalCents = amountToCents(amountInput.value)
-    const people = Math.trunc(Number(splitCount.value)) || 1
-    if (totalCents === null || !Number.isFinite(people) || people < 1) return ''
+    const people = Number(splitCount.value)
+    if (totalCents === null || !Number.isInteger(people) || people < 1 || people > 99) return ''
     const shares = splitCentsEvenly(totalCents, people)
-    const mine = shares[0] / 100
-    const others = (totalCents - shares[0]) / 100
+    const mineCents = splitMode.value === 'custom' ? amountToCents(splitMine.value) : shares[0]
+    if (mineCents === null || mineCents > totalCents) return ''
+    const mine = mineCents / 100
+    const others = (totalCents - mineCents) / 100
     // 单人不是「分摊」：金额与人数都对，但没有第二个人参与，写进数据里只会让
     // 每一条记录都自称「已分摊 1 人」。故此处与 saveExpense 一样按人数分流。
     return people === 1
@@ -100,17 +104,19 @@ export function useQuickEntryForm({ baseCurrency, domain, notify, closeSwipe, le
 
   function syncSplitMine() {
     const totalCents = amountToCents(amountInput.value)
-    const people = Math.trunc(Number(splitCount.value))
-    if (totalCents === null || !Number.isFinite(people) || people < 1) { splitMine.value = ''; return }
+    const people = Number(splitCount.value)
+    if (totalCents === null || !Number.isInteger(people) || people < 1 || people > 99) { splitMine.value = ''; return }
     splitMine.value = String(splitCentsEvenly(totalCents, people)[0] / 100)
   }
 
   function onSplitChange() {
-    syncSplitMine()
+    if (splitMode.value === 'equal') syncSplitMine()
   }
 
   function openQuick(prefill = {}) {
-    amountInput.value = prefill.amount ?? ''
+    currentEditingId.value = prefill.id ?? null
+    formError.value = ''; errorField.value = ''
+    amountInput.value = String(prefill.amount ?? '')
     nameInput.value = prefill.name ?? ''
     dateInput.value = prefill.date ?? appToday.value
     timeInput.value = prefill.time ?? ledgerNowHM()
@@ -135,10 +141,11 @@ export function useQuickEntryForm({ baseCurrency, domain, notify, closeSwipe, le
     billIdInput.value = prefill.billId ?? ''
     currencyInput.value = normalizeCurrency(prefill.currency) || baseCurrency.value
     const hasExistingSplit = hasSplit(prefill)
+    originalSplit = normalizeSplit(prefill.split)
     splitCount.value = String(prefill.split?.participants?.length || 1)
     splitMine.value = hasExistingSplit ? String(prefill.split?.mine ?? '') : ''
     // 编辑既有分摊记录时，「我承担」来自原数据，之后不该被按分等分重算覆盖。
-    splitMineIsDerived = !hasExistingSplit
+    splitMode.value = hasExistingSplit ? 'custom' : 'equal'
     if (!hasExistingSplit) syncSplitMine()
     moreOpen.value = Boolean(prefill.id) || Boolean(prefill.expandMore)
     dupWarn.value = false
@@ -224,9 +231,14 @@ export function useQuickEntryForm({ baseCurrency, domain, notify, closeSwipe, le
     const amt = normalizeAmount(amountInput.value)
     const nm = nameInput.value.trim()
     if (amt === null || !nm) return false
-    return ledgerIndex.value.sortedExpenses.some(
-      (e) => e.name.trim() === nm && normalizeAmount(e.amount) === amt && Date.now() - (e.createdAt ? new Date(e.createdAt).getTime() : 0) < 2 * 60 * 1000
-    )
+    return ledgerIndex.value.sortedExpenses.some((e) => {
+      const age = Date.now() - timestampOf(e.createdAt)
+      return String(e.id) !== String(currentEditingId.value) && e.direction !== 'refund'
+        && String(e.name ?? '').trim().toLowerCase() === nm.toLowerCase() && normalizeAmount(e.amount) === amt
+        && e.date === dateInput.value && (e.direction || 'expense') === directionInput.value
+        && (normalizeCurrency(e.currency) || baseCurrency.value) === (normalizeCurrency(currencyInput.value) || baseCurrency.value)
+        && String(e.account ?? '').trim() === accountInput.value.trim() && age >= 0 && age < 2 * 60 * 1000
+    })
   })
 
   /**
@@ -241,7 +253,7 @@ export function useQuickEntryForm({ baseCurrency, domain, notify, closeSwipe, le
     if (savingExpense.value) return false
     savingExpense.value = true
     // 确保分摊状态同步（测试直接设值可能未触发 watch）
-    syncSplitMine()
+    if (splitMode.value === 'equal') syncSplitMine()
     const amount = normalizeAmount(amountInput.value)
     const name = nameInput.value.trim()
     try {
@@ -250,26 +262,29 @@ export function useQuickEntryForm({ baseCurrency, domain, notify, closeSwipe, le
         // 本页从未绑定到任何元素（LedgerView 没有解构它；弹窗里那个 ref 是同名的**另一个**
         // 局部 ref），于是焦点回跳是空操作、也没有任何提示 —— 用户点「记下」只看到
         // 按钮毫无反应，只能自己猜是漏了金额还是数字格式不对。
-        amountEl.value?.focus()
-        notify('请先填写有效金额，例如 12.50')
+        formError.value = '请先填写有效金额，例如 12.50（最多两位小数）'
+        errorField.value = 'amount'
         return false
+      }
+      if (!isValidDateKey(dateInput.value)) {
+        formError.value = '请选择有效日期'; errorField.value = 'date'; moreOpen.value = true; return false
+      }
+      if (normalizeLedgerTime(timeInput.value) === null) {
+        formError.value = '请填写有效时间'; errorField.value = 'time'; moreOpen.value = true; return false
       }
       if (duplicateHit.value) { dupWarn.value = true; return false }
       let split = null
-      // 【人数为 1 不是分摊】此前无条件 `draftSplit()`，于是 splitCount 默认 '1'
-      // 也会写出一份「合法」的 1 人 split：结果每条支出都自称「已分摊 1 人」，
-      // 列表副标题、详情、回顾、首页口径说明全部被这一条无关数据污染。
-      // 收入不参与分摊；人数为 1 时不写 split 字段（= 未分摊，语义与旧记录一致）。
-      const people = Math.trunc(Number(splitCount.value))
-      if (directionInput.value !== 'income' && Number.isFinite(people) && people > 1) {
-        const draft = draftSplit()
-        if (draft.error) { notify(draft.error); return false }
-        split = draft.split
-      } else if (directionInput.value !== 'income' && splitCount.value !== '1' && splitCount.value !== '') {
-        // 人数非法（0 / 负数 / 非数字）时必须报错，不能静默当成单人记录。
-        const draft = draftSplit()
-        if (draft.error) { notify(draft.error); return false }
-        split = draft.split
+      // 收入不参与分摊；人数为 1 时不写 split 字段。
+      const people = Number(splitCount.value)
+      if (directionInput.value !== 'income') {
+        if (!Number.isInteger(people) || people < 1 || people > 99) {
+          formError.value = '分摊人数需为 1–99 的整数'; errorField.value = 'split'; moreOpen.value = true; return false
+        }
+        if (people > 1) {
+          const draft = draftSplit()
+          if (draft.error) { formError.value = draft.error; errorField.value = 'split'; moreOpen.value = true; return false }
+          split = draft.split
+        }
       }
       const currency = currencyField(currencyInput.value, fx.value)
       if (editingId) {
@@ -279,11 +294,12 @@ export function useQuickEntryForm({ baseCurrency, domain, notify, closeSwipe, le
           name, amount, cat: catInput.value || detectCategory(name, { direction: directionInput.value }),
           date: dateInput.value || appToday.value, time: timeInput.value || ledgerNowHM(),
           account: accountInput.value.trim(), note: noteInput.value.trim(),
-          currency, split,
+          direction: directionInput.value, currency, split,
         })
+        if (!target) { formError.value = '这条记录已不可用，请关闭后重新打开'; return false }
         if (target) {
           if (name && previousCategory !== target.cat) rememberCategoryOverride(name, target.cat, target.direction)
-          notify(`已更新 ${moneyWithCurrency(target.amount, target.currency)} · ${target.name}`)
+          notify(`已更新 ${moneyWithCurrency(target.amount, target.currency || baseCurrency.value)} · ${target.name}`)
         }
       } else {
         const saved = domain.createTransaction({ name, amount,
@@ -298,7 +314,7 @@ export function useQuickEntryForm({ baseCurrency, domain, notify, closeSwipe, le
           currency, split,
         })
         if (name && categoryInputManuallySelected.value) rememberCategoryOverride(name, saved.cat, directionInput.value)
-        notify(`已记下 ${directionInput.value === 'income' ? '+' : '-'}${moneyWithCurrency(saved.amount, saved.currency)} · ${saved.name}`, {
+        notify(`已记下 ${directionInput.value === 'income' ? '+' : '-'}${moneyWithCurrency(saved.amount, saved.currency || baseCurrency.value)} · ${saved.name}`, {
           actionLabel: '撤销',
           undoFn: () => domain.deleteTransaction(saved.id),
           duration: 6000,
@@ -325,11 +341,12 @@ export function useQuickEntryForm({ baseCurrency, domain, notify, closeSwipe, le
         // 而界面上没有任何东西提示它被继承了。resetSplitState 就是为这件事写的，
         // 此前一直零调用。
         resetSplitState()
-        amountEl.value?.focus()
+        sourceInput.value = 'manual'
+        billIdInput.value = ''
       }
       return true
     } catch (cause) {
-      notify(cause?.message || '保存失败，请检查金额和日期')
+      formError.value = cause?.message || '保存失败，请检查金额和日期'
       return false
     } finally {
       savingExpense.value = false
@@ -337,6 +354,7 @@ export function useQuickEntryForm({ baseCurrency, domain, notify, closeSwipe, le
   }
 
   function closeQuick() {
+    showQuickRecord.value = false
     keepAdding.value = false
     savingExpense.value = false
   }
@@ -353,7 +371,8 @@ export function useQuickEntryForm({ baseCurrency, domain, notify, closeSwipe, le
     accountInput,
     sourceInput,
     billIdInput,
-    amountEl,
+    formError,
+    errorField,
     dupWarn,
     forceDup,
     keepAdding,
@@ -367,6 +386,7 @@ export function useQuickEntryForm({ baseCurrency, domain, notify, closeSwipe, le
     currencyOptions,
     splitCount,
     splitMine,
+    splitMode,
     resetSplitState,
     draftSplit,
     splitPreview,

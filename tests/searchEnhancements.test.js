@@ -285,6 +285,34 @@ const chipOf = (label) => chips().find((el) => el.textContent.includes(label))
 const emptyTitle = () => document.querySelector('.empty-state h2, .empty-state h3, .empty-state h4')?.textContent.trim() ?? ''
 const storageKeys = () => Array.from({ length: localStorage.length }, (_, i) => localStorage.key(i)).sort()
 
+describe('生活清单在全局搜索中的定位', () => {
+  const seed = { sl_checklists: [{ id: 'demo-packing', name: '示例返校准备', type: 'packing', items: [
+    { id: 'demo-charger', name: '电脑充电器', category: '数码', note: '放在背包侧袋', done: false },
+    { id: 'demo-legacy', text: '旧格式校园卡', done: true },
+  ] }] }
+
+  it('读取真实的 name 字段，结果可定位到对应清单事项', async () => {
+    const { router, closed, settle } = await mountPanel(seed)
+    await typeSearch('充电器', settle)
+    expect(resultsOf('清单')).toEqual(['电脑充电器'])
+    document.querySelector('.search-result').click()
+    await settle()
+    expect(await waitFor(() => router.currentRoute.value.path === '/lists')).toBe(true)
+    expect(router.currentRoute.value.query.focus).toBe('demo-charger')
+    expect(closed.count).toBe(1)
+  })
+
+  it('分类和备注可搜索，并保留旧格式名称支持', async () => {
+    const { settle } = await mountPanel(seed)
+    await typeSearch('数码', settle)
+    expect(resultsOf('清单')).toEqual(['电脑充电器'])
+    await typeSearch('背包侧袋', settle)
+    expect(resultsOf('清单')).toEqual(['电脑充电器'])
+    await typeSearch('校园卡', settle)
+    expect(resultsOf('清单')).toEqual(['旧格式校园卡'])
+  })
+})
+
 const task = (id, title, extra = {}) => ({
   id,
   title,

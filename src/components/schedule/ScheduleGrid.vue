@@ -13,6 +13,7 @@ const props = defineProps({
   currentDayIndex: { type: Number, required: true },
   focusedCourseId: { type: [String, Number], default: '' },
   appearance: { type: Object, required: true },
+  courseProgress: { type: Object, default: () => ({}) },
 })
 
 const emit = defineEmits(['open-add', 'open-edit', 'week-change', 'mobile-day-change', 'open-adjustments'])
@@ -224,7 +225,7 @@ async function onCellKeydown(event, day, periodIndex) {
           @click="openEdit(course)"
         >
           <span class="mobile-course-time">{{ courseTimeRange(course) || coursePeriodText(course) }}</span>
-          <span class="mobile-course-main"><b>{{ course.name }}</b><small>{{ course.room || '未设置地点' }}<template v-if="course.teacher"> · {{ course.teacher }}</template></small></span>
+          <span class="mobile-course-main"><b>{{ course.name }}</b><small>{{ course.room || '未设置地点' }}<template v-if="course.teacher"> · {{ course.teacher }}</template></small><span v-if="courseProgress[course.id]?.pending" class="course-study-badge" :class="{ urgent: courseProgress[course.id]?.overdue }">{{ courseProgress[course.id].overdue ? `${courseProgress[course.id].overdue} 项逾期` : `${courseProgress[course.id].pending} 项待办` }}</span></span>
           <span class="mobile-course-arrow">›</span>
         </button>
       </div>
@@ -297,6 +298,7 @@ async function onCellKeydown(event, day, periodIndex) {
           @click="openEdit(c)"
         >
           <span class="c-name">{{ c.name }}</span>
+          <span v-if="courseProgress[c.id]?.pending" class="course-study-badge" :class="{ urgent: courseProgress[c.id]?.overdue }">{{ courseProgress[c.id].overdue ? `${courseProgress[c.id].overdue} 项逾期` : `${courseProgress[c.id].pending} 项待办` }}</span>
           <span class="c-week">{{ weekLabel(c) }}</span>
           <span v-if="c.room" class="c-sub">@{{ c.room }}</span>
         </div>
@@ -307,12 +309,15 @@ async function onCellKeydown(event, day, periodIndex) {
       💡 正在查看：{{ activeCampus?.name || '' }} ·
       {{ activeSeason?.name || '' }}<template v-if="timeConfig.seasons.length > 1 && timeConfig.autoSeason">（自动）</template> ·
       {{ viewWeekText(viewWeek) }}的课程；
-      点击空白格子，或聚焦后用方向键选中再回车，都能快速添加，点击课程卡片可编辑
+      <template v-if="mobileView === 'day'">点击课程查看待办、准备复习或专注；用“添加课程”补充课表。</template>
+      <template v-else>点击空白格子，或聚焦后用方向键选中再回车，都能快速添加；点击课程查看关联事项。</template>
     </p>
   </div>
 </template>
 
 <style scoped>
+.course-study-badge { display: block; max-width: 100%; color: var(--primary); font-size: var(--fs-10); line-height: 1.5; font-weight: var(--fw-700); }
+.course-study-badge.urgent { color: var(--danger); }
 .mobile-day-view {
   border-radius: var(--radius-14);
   overflow: hidden;
@@ -413,7 +418,7 @@ async function onCellKeydown(event, day, periodIndex) {
 .course {
   z-index: 2;
   margin: 2px;
-  padding: 6px 8px;
+  padding: 5px 8px;
   border-radius: var(--radius-8);
   border-left: 4px solid;
   cursor: pointer;
@@ -425,7 +430,7 @@ async function onCellKeydown(event, day, periodIndex) {
 }
 .course:hover { transform: scale(1.02); }
 .course.conflict { outline: 2px dashed var(--danger); outline-offset: -2px; }
-.c-name { font-size: var(--fs-13); font-weight: var(--fw-600); }
+.c-name { font-size: var(--fs-13); font-weight: var(--fw-600); line-height: 1.35; }
 .c-week { font-size: var(--fs-10); color: var(--primary); font-weight: var(--fw-600); }
 .c-sub { font-size: var(--fs-11); color: var(--muted); }
 .tip { color: var(--muted); font-size: var(--fs-13); }

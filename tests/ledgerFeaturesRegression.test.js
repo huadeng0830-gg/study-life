@@ -70,8 +70,13 @@ function snapshotIndex(index) {
 }
 
 describe('既有账本聚合不因新字段而改变', () => {
-  it('buildLedgerIndex：加不加 currency / split，索引每一项都逐字相同', () => {
-    expect(snapshotIndex(buildLedgerIndex(withNewFields))).toEqual(snapshotIndex(buildLedgerIndex(plainRecords)))
+  it('buildLedgerIndex：金额索引不变，常记保留最近一次的币种和账户', () => {
+    const withFields = snapshotIndex(buildLedgerIndex(withNewFields))
+    const plain = snapshotIndex(buildLedgerIndex(plainRecords))
+    const stripRepeatContext = (snapshot) => ({ ...snapshot, frequent: snapshot.frequent.map(({ currency, account, ...entry }) => entry) })
+    expect(stripRepeatContext(withFields)).toEqual(stripRepeatContext(plain))
+    expect(withFields.frequent.find((entry) => entry.name === '地铁').currency).toBe('JPY')
+    expect(withFields.frequent.find((entry) => entry.name === '八月的账').currency).toBe('EUR')
     // 自证：两批记录**确实**不一样，否则上面的相等是废话
     expect(JSON.stringify(withNewFields)).not.toBe(JSON.stringify(plainRecords))
   })

@@ -60,6 +60,11 @@ export function dragCandidates(sources) {
  */
 export const DRAG_ALTERNATIVES = [
   {
+    file: 'views/ledger-panels/MonthlyTrendCard.vue',
+    needles: ['onMonthKeydown', '@keydown="onMonthKeydown($event, index)"', '@click="clickMonth($event, row.month)"'],
+    reason: '月份按钮支持点击和键盘方向键；pointermove 用于取消滑动中的误选，用户也可直接点按选月。',
+  },
+  {
     file: 'components/schedule/ImageCropModal.vue',
     needles: ['onStageKeydown', '@keydown="onStageKeydown"', 'tabindex="0"', 'aria-describedby="crop-hint"'],
     reason: '拖动框选：键盘用方向键移动、Shift 收小、Ctrl 放大，见 tests/imageCropKeyboard.test.js。',

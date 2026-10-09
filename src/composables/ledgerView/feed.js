@@ -16,8 +16,11 @@ import {
   filterLedgerTransactions,
   isDateInLedgerRange,
   ledgerIndex,
+  amountToCents,
+  isValidDateKey,
 } from '../ledger.js'
-import { mySpendCents, normalizeSplit } from '../ledgerSplit.js'
+import { mySpendCents, mySpendYuan, normalizeSplit } from '../ledgerSplit.js'
+import { createLedgerBaseConverter, normalizeLedgerFx, summarizeLedgerInBase, useLedgerFx } from '../ledgerFx.js'
 import { transactionSwipeActions } from '../ledgerSwipe.js'
 import { moneyWithCurrency } from '../../utils/formatters.js'
 import { appToday } from '../timeContext.js'
@@ -26,6 +29,8 @@ import { useDebouncedRef } from '../useDebouncedRef.js'
 const ledgerToday = () => appToday.value
 
 export function useLedgerFeed({ onFilterChange = () => {} } = {}) {
+  const { fx } = useLedgerFx()
+  const baseCurrency = computed(() => normalizeLedgerFx(fx.value).base)
   // 搜索词与查询解耦：输入框绑 q（打字立刻有反馈），真正的整表扫描只跑在
   // debouncedQ 上。账本搜索一次要连过三遍（过滤 → 按日汇总 → 造列表项），
   // 每敲一个字就跑一遍在流水变多之后是能看见的卡顿。
@@ -40,41 +45,60 @@ export function useLedgerFeed({ onFilterChange = () => {} } = {}) {
   const fMin = ref('')
   const fMax = ref('')
   const fAccount = ref('')
+  const fCurrency = ref('')
   const fKind = ref('all') // all | manual | bill
   const fDirection = ref('all') // all | expense | income
+  const filterError = computed(() => {
+    if (fRange.value === 'custom') {
+      if ((fFrom.value && !isValidDateKey(fFrom.value)) || (fTo.value && !isValidDateKey(fTo.value))) return '请选择有效的起止日期'
+      if (fFrom.value && fTo.value && fFrom.value > fTo.value) return '起始日期不能晚于结束日期'
+    }
+    if ((fMin.value !== '' && amountToCents(fMin.value) === null) || (fMax.value !== '' && amountToCents(fMax.value) === null)) return '金额筛选需为非负金额，最多两位小数'
+    if (fMin.value !== '' && fMax.value !== '' && amountToCents(fMin.value) > amountToCents(fMax.value)) return '最低金额不能大于最高金额'
+    return ''
+  })
 
   function inRange(dateStr) {
     return isDateInLedgerRange(dateStr, fRange.value, { today: ledgerToday(), from: fFrom.value, to: fTo.value })
   }
 
   const filteredExpenses = computed(() => {
+    if (filterError.value) return []
     return filterLedgerTransactions(ledgerIndex.value.sortedExpenses, {
       query: debouncedQ.value,
       category: fCat.value,
       account: fAccount.value,
+      currency: fCurrency.value,
+      baseCurrency: baseCurrency.value,
       min: fMin.value,
       max: fMax.value,
       kind: fKind.value,
       direction: fDirection.value,
       dateFilter: inRange,
       categoryName: (key) => catInfo(key).name,
+      amountOf: mySpendCents,
     })
   })
 
   const filtersActive = computed(() =>
-    fRange.value !== 'all' || fCat.value || fAccount.value || fMin.value !== '' || fMax.value !== '' || fKind.value !== 'all' || fDirection.value !== 'all' || fFrom.value || fTo.value
+    Boolean(q.value.trim() || fRange.value !== 'all' || fCat.value || fAccount.value || fCurrency.value || fMin.value !== '' || fMax.value !== '' || fKind.value !== 'all' || fDirection.value !== 'all' || fFrom.value || fTo.value)
   )
   function clearFilters() {
+    q.value = ''; debouncedQ.flush(''); fCurrency.value = ''
     fRange.value = 'all'; fFrom.value = ''; fTo.value = ''; fCat.value = ''; fAccount.value = ''; fMin.value = ''; fMax.value = ''; fKind.value = 'all'; fDirection.value = 'all'
   }
+  const filterSummary = computed(() => summarizeLedgerInBase(filteredExpenses.value, fx.value, { amountOf: mySpendYuan }))
+  const currencyOptions = computed(() => [...new Set(ledgerIndex.value.sortedExpenses.map((item) => String(item.currency || baseCurrency.value).toUpperCase()))].sort())
 
   const feedDayTotals = computed(() => {
     const map = new Map()
+    const convert = createLedgerBaseConverter(fx.value)
     for (const item of filteredExpenses.value) {
-      const current = map.get(item.date) ?? { expenseCents: 0, incomeCents: 0 }
+      const current = map.get(item.date) ?? { expenseCents: 0, incomeCents: 0, excludedCount: 0 }
       // 与列表行同一口径：金额列显示的是「我承担的份额」，日期头的当日支出就必须同源，
       // 否则同一天会出现「行里 ¥40、日期头 ¥200」两个互相矛盾的数字。
-      const cents = mySpendCents(item) ?? 0
+      const cents = convert(mySpendYuan(item), item.currency).cents
+      if (cents === null) { current.excludedCount += 1; map.set(item.date, current); continue }
       if (item.direction === 'income') current.incomeCents += cents
       else if (item.direction === 'refund') current.expenseCents -= cents
       else current.expenseCents += cents
@@ -83,6 +107,7 @@ export function useLedgerFeed({ onFilterChange = () => {} } = {}) {
     return new Map([...map.entries()].map(([date, summary]) => [date, {
       expense: summary.expenseCents / 100,
       income: summary.incomeCents / 100,
+      excludedCount: summary.excludedCount,
     }]))
   })
   function feedDaySummary(date) { return feedDayTotals.value.get(date) ?? { expense: 0, income: 0 } }
@@ -113,16 +138,17 @@ export function useLedgerFeed({ onFilterChange = () => {} } = {}) {
   function splitNote(transaction) {
     const split = normalizeSplit(transaction?.split)
     if (!split) return ''
-    return `已分摊 ${split.participants.length} 人 · 共 ${moneyWithCurrency(split.total, transaction.currency)}`
+    if (transaction.direction === 'refund') return ''
+    return `已分摊 ${split.participants.length} 人 · 共 ${moneyWithCurrency(split.total, transaction.currency || baseCurrency.value)}`
   }
   // 分摊标记（**详情面板**）：详情页顶部的大数字是这一笔的**总额**，
   // 所以这里必须把「我承担多少 + 几个人」一起说清——用户要的两个口径在这一屏上都在。
   function splitDetailNote(transaction) {
     const split = normalizeSplit(transaction?.split)
-    if (!split) return ''
+    if (!split || transaction.direction === 'refund') return ''
     const mineCents = mySpendCents(transaction)
     if (mineCents === null) return '已分摊'
-    return `已分摊 ${split.participants.length} 人 · 我承担 ${moneyWithCurrency(mineCents / 100, transaction.currency)}（上方是总额）`
+    return `已分摊 ${split.participants.length} 人 · 我承担 ${moneyWithCurrency(mineCents / 100, transaction.currency || baseCurrency.value)}（上方是总额）`
   }
   /**
    * 账本页「这一条显示/计入多少钱」的唯一出处：我的实际承担额
@@ -145,7 +171,7 @@ export function useLedgerFeed({ onFilterChange = () => {} } = {}) {
   // 账本首页回答的是「我花了多少」，总额由副标题的「已分摊 N 人 · 共 ¥xx」交代。
   const feedAmount = (transaction) => {
     const amount = personalAmount(transaction)
-    return `${transaction.direction === 'income' || transaction.direction === 'refund' ? '+' : '-'}${moneyWithCurrency(amount, transaction.currency)}`
+    return `${transaction.direction === 'income' || transaction.direction === 'refund' ? '+' : '-'}${moneyWithCurrency(amount, transaction.currency || baseCurrency.value)}`
   }
   const canExpandFeed = computed(() => !showAllFeed.value && !q.value.trim() && !filtersActive.value && filteredExpenses.value.length > feedTransactions.value.length)
 
@@ -157,7 +183,7 @@ export function useLedgerFeed({ onFilterChange = () => {} } = {}) {
   //
   // 监听 debouncedQ 而不是 q：与查询本身同一口径，否则会出现「结果还是旧的、
   // 但手势已经收起来了」这种中间态。
-  watch([debouncedQ, fRange, fFrom, fTo, fCat, fAccount, fMin, fMax, fKind, fDirection], () => {
+  watch([debouncedQ, fRange, fFrom, fTo, fCat, fAccount, fCurrency, fMin, fMax, fKind, fDirection], () => {
     showAllFeed.value = false
     onFilterChange()
   })
@@ -172,10 +198,14 @@ export function useLedgerFeed({ onFilterChange = () => {} } = {}) {
     fMin,
     fMax,
     fAccount,
+    fCurrency,
     fKind,
     fDirection,
     filteredExpenses,
     filtersActive,
+    filterError,
+    filterSummary,
+    currencyOptions,
     clearFilters,
     showAllFeed,
     feedItems,

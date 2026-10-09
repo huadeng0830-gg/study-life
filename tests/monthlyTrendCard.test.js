@@ -197,4 +197,48 @@ describe('monthly cash-flow card with real ledger summaries', () => {
     expect(query('.rs-top b').textContent).toBe(money(100))
     expect(month(historicalMonth).getAttribute('aria-pressed')).toBe('true')
   })
+
+  it('switches the real review month on the first touch release, even when no compatibility click arrives', async () => {
+    const todayMonth = appToday.value.slice(0, 7)
+    const targetMonth = shiftTrendMonth(todayMonth, -1)
+    expenses.value = [{ id: 'first-tap-review', name: '示例消费', date: `${targetMonth}-10`, amount: 25, cat: 'food' }]
+    const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/bills', component: LedgerView }] })
+    await router.push('/bills?tab=review')
+    host = document.createElement('div')
+    document.body.appendChild(host)
+    app = createApp(LedgerView).use(router)
+    app.mount(host)
+    await nextTick()
+    const button = month(targetMonth)
+    for (const type of ['pointerdown', 'pointerup']) {
+      button.dispatchEvent(new PointerEvent(type, { bubbles: true, pointerType: 'touch', pointerId: 1, clientX: 100, clientY: 100, button: 0 }))
+      await nextTick()
+    }
+    expect(query('.month-nav b').textContent).toContain(`${Number(targetMonth.slice(5))}月`)
+    expect(button.getAttribute('aria-pressed')).toBe('true')
+    expect(query('.rs-top b').textContent).toBe(money(25))
+  })
+
+  it('does not select a month during a scroll gesture or after pointer cancellation', async () => {
+    await mount()
+    const target = month('2026-09')
+    const pointer = (type, x = 100) => target.dispatchEvent(new PointerEvent(type, {
+      bubbles: true, pointerType: 'touch', pointerId: 4, clientX: x, clientY: 100, button: 0,
+    }))
+    pointer('pointerdown')
+    pointer('pointermove', 125)
+    pointer('pointerup', 125)
+    target.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }))
+    await nextTick()
+    expect(review.reviewMonth.value).toBe('2026-10')
+    pointer('pointerdown')
+    pointer('pointercancel')
+    target.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }))
+    await nextTick()
+    expect(review.reviewMonth.value).toBe('2026-10')
+    pointer('pointerdown')
+    pointer('pointerup')
+    await nextTick()
+    expect(review.reviewMonth.value).toBe('2026-09')
+  })
 })

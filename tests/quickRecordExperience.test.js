@@ -124,7 +124,7 @@ describe('快速记录完整录入体验', () => {
     button('保存').click()
     await nextTick()
     expect(document.querySelector('.entry-fields').disabled).toBe(true)
-    expect(button('保存中…').disabled).toBe(true)
+    expect(button('保存中…').getAttribute('aria-disabled')).toBe('true')
     document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
     expect(events).toEqual([])
     resolve({ message: '已保存', undo: vi.fn() })

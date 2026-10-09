@@ -1,4 +1,5 @@
 <script setup>
+import ActionButton from '../ActionButton.vue'
 import { computed, ref, useId, watch } from 'vue'
 import { accountOpen, accountUser } from '../../composables/accountAuth.js'
 import { accountSyncViaAccount, setAccountSyncMode } from '../../composables/accountSyncMode.js'
@@ -99,7 +100,7 @@ function toggleAccountSync() {
       <small v-if="timeText">上次完成：{{ timeText }}</small>
       <p v-if="accountSyncError" class="account-sync-error">{{ accountSyncError }}</p>
       <p v-if="localSafeMode" class="account-sync-error">当前处于本机安全模式，同步已暂停。</p>
-      <button v-if="accountSyncViaAccount" type="button" class="btn" :disabled="busy || localSafeMode" :aria-busy="busy" @click="synchronize">{{ busy ? '正在同步…' : accountSyncPreparationError ? '重试账号同步' : '立即同步' }}</button>
+      <ActionButton tone="neutral" v-if="accountSyncViaAccount" type="button" class="btn" :disabled="busy || localSafeMode" :busy="busy" kind="task" feedback="external" :show-error="false" :action="() => synchronize()">{{ busy ? '正在同步…' : accountSyncPreparationError ? '重试账号同步' : '立即同步' }}</ActionButton>
       <div v-if="accountSyncConflicts.length" class="account-conflicts">
         <p>两边都修改了同一份内容，请逐项选择。本机记录会保留到确认完成。</p>
         <article v-for="(conflict, index) in accountSyncConflicts" :key="accountConflictKey(conflict)" class="account-conflict">
@@ -107,7 +108,7 @@ function toggleAccountSync() {
           <div class="account-conflict-values"><div><small>本机</small><pre>{{ displayValue(conflict.local) }}</pre></div><div><small>云端</small><pre>{{ displayValue(conflict.remote) }}</pre></div></div>
           <fieldset><legend>选择保留的版本</legend><label><input v-model="choices[accountConflictKey(conflict)]" type="radio" :name="'account-conflict-' + panelId + '-' + index" value="local" />保留本机</label><label><input v-model="choices[accountConflictKey(conflict)]" type="radio" :name="'account-conflict-' + panelId + '-' + index" value="remote" />使用云端</label></fieldset>
         </article>
-        <button type="button" class="btn btn-primary" :disabled="busy || localSafeMode || accountSyncConflicts.some(conflict => !choices[accountConflictKey(conflict)])" :aria-busy="submitting" @click="submitChoices">{{ submitting ? '正在确认…' : '确认并继续同步' }}</button>
+        <ActionButton tone="primary" type="button" class="btn btn-primary" :disabled="busy || localSafeMode || accountSyncConflicts.some(conflict => !choices[accountConflictKey(conflict)])" :busy="submitting" kind="important" feedback="external" :show-error="false" :action="() => submitChoices()">{{ submitting ? '正在确认…' : '确认并继续同步' }}</ActionButton>
       </div>
     </template>
     <button v-else type="button" class="btn" @click="accountOpen = true">注册 / 登录</button>

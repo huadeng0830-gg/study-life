@@ -1,4 +1,5 @@
 <script setup>
+import ActionButton from './components/ActionButton.vue'
 import { retireLegacySyncState } from './composables/retireLegacySyncState.js'
 import { defineAsyncComponent, computed, onBeforeUnmount, onMounted, ref, watch, watchEffect } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -486,7 +487,7 @@ function t(key) {
       <div v-if="persistenceState.status === 'error'" key="persistence-error" class="global-persistence-alert" :style="{ '--alert-slot': `${alertSlots.persistenceError}` }">
         <b>{{ PERSISTENCE_ERROR_TITLE }}</b>
         <span>{{ persistenceState.message }}</span>
-        <button type="button" class="btn btn-sm" @click="exportCurrentData">导出当前数据</button>
+        <ActionButton tone="neutral" type="button" class="btn btn-sm" kind="important" feedback="external" :show-error="false" :action="() => exportCurrentData()">导出当前数据</ActionButton>
         <button type="button" class="global-error-close tap-target" aria-label="关闭本机保存提示" @click="dismissPersistenceNotice">×</button>
       </div>
       <div v-if="persistenceState.status === 'recovered'" key="persistence-recovered" class="global-persistence-alert recovered" :style="{ '--alert-slot': `${alertSlots.persistenceRecovered}` }">{{ PERSISTENCE_RECOVERED_TEXT }}</div>
@@ -499,9 +500,9 @@ function t(key) {
              （去数据管理处理冲突、在本机安全模式下恢复、导出后重试账号同步），
              没有按钮就等于只有一条死路 —— 用户看到红色横幅却无处可去。
              重试放在最前面，因为它是最常见也最省事的那一个。 -->
-        <button type="button" class="btn btn-sm" :disabled="retryingSync" @click="retrySyncNow">
+        <ActionButton tone="neutral" type="button" class="btn btn-sm" :disabled="retryingSync" kind="task" feedback="external" :show-error="false" :action="() => retrySyncNow()">
           {{ retryingSync ? '正在重试…' : '重试账号同步' }}
-        </button>
+        </ActionButton>
         <button type="button" class="text-button" @click="openDataManager">打开数据管理</button>
       </div>
       <div v-if="showBackupNudge" key="backup-nudge" class="global-persistence-alert" :style="{ '--alert-slot': `${alertSlots.backupNudge}` }">

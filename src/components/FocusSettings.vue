@@ -1,9 +1,11 @@
 <script setup>
+import ActionButton from './ActionButton.vue'
 import { ref, watch } from 'vue'
 import Modal from './Modal.vue'
 import { useStoredRef } from '../composables/store/index.js'
 import { DEFAULT_FOCUS_SETTINGS } from '../composables/focusTimer.js'
 import { focusSettingsDraftOf, prepareFocusSettingsSave } from '../composables/focusSettingsEditor.js'
+import { useLatestTask } from '../composables/latestTask.js'
 
 const props = defineProps({ open: Boolean })
 const emit = defineEmits(['close'])
@@ -11,47 +13,57 @@ const emit = defineEmits(['close'])
 const settings = useStoredRef('sl_focus_settings', DEFAULT_FOCUS_SETTINGS)
 const draft = ref(focusSettingsDraftOf(DEFAULT_FOCUS_SETTINGS))
 const error = ref('')
+const saves = useLatestTask()
 
 watch(
   () => props.open,
   (open) => {
+    saves.cancel()
     if (!open) return
     draft.value = focusSettingsDraftOf(settings.value)
     error.value = ''
   }
 )
 
-async function save() {
+/** @param {{signal?: AbortSignal}} [context] */
+async function save({ signal } = {}) {
   const result = prepareFocusSettingsSave(settings.value, draft.value)
   if (!result.ok) {
     error.value = result.error
-    return
+    return false
   }
-  if (draft.value.systemNotificationEnabled) {
-    if (typeof window === 'undefined' || !('Notification' in window)) {
-      draft.value.systemNotificationEnabled = false
-      error.value = '当前浏览器不支持系统通知，已关闭该选项；声音和震动仍可使用'
-      return
-    }
-    try {
-      const permission = Notification.permission === 'default'
-        ? await Notification.requestPermission()
-        : Notification.permission
-      if (permission !== 'granted') {
+  const job = saves.begin(signal)
+  try {
+    if (draft.value.systemNotificationEnabled) {
+      if (typeof window === 'undefined' || !('Notification' in window)) {
         draft.value.systemNotificationEnabled = false
-        error.value = permission === 'denied'
-          ? '浏览器已拒绝通知权限，请在站点设置中允许后再开启'
-          : '未获得通知权限，已关闭该选项'
-        return
+        error.value = '当前浏览器不支持系统通知，已关闭该选项；声音和震动仍可使用'
+        return false
       }
-    } catch {
-      draft.value.systemNotificationEnabled = false
-      error.value = '通知权限请求失败，已关闭该选项；可稍后重试'
-      return
+      try {
+        const permission = Notification.permission === 'default'
+          ? await Notification.requestPermission()
+          : Notification.permission
+        if (!job.isCurrent()) return false
+        if (permission !== 'granted') {
+          draft.value.systemNotificationEnabled = false
+          error.value = permission === 'denied'
+            ? '浏览器已拒绝通知权限，请在站点设置中允许后再开启'
+            : '未获得通知权限，已关闭该选项'
+          return false
+        }
+      } catch {
+        if (!job.isCurrent()) return false
+        draft.value.systemNotificationEnabled = false
+        error.value = '通知权限请求失败，已关闭该选项；可稍后重试'
+        return false
+      }
     }
-  }
-  settings.value = result.settings
-  emit('close')
+    if (!job.isCurrent()) return false
+    settings.value = result.settings
+    emit('close')
+    return true
+  } finally { job.finish() }
 }
 </script>
 
@@ -90,7 +102,7 @@ async function save() {
       <p v-if="error" class="error" role="alert">{{ error }}</p>
       <div class="actions">
         <button class="btn btn-ghost" @click="emit('close')">取消</button>
-        <button class="btn btn-primary" @click="save">保存设置</button>
+        <ActionButton tone="primary" class="btn btn-primary" kind="frequent" feedback="external" :show-error="false" :action="save">保存设置</ActionButton>
       </div>
     </div>
   </Modal>

@@ -1,4 +1,5 @@
 <script setup>
+import ActionButton from './ActionButton.vue'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import Modal from './Modal.vue'
 import {
@@ -115,12 +116,12 @@ onBeforeUnmount(() => {
                 <span v-if="task.description" class="task-row-hint">{{ task.description }}</span>
               </p>
             </div>
-            <button
+            <ActionButton tone="neutral"
               v-if="taskCanCancel(task)"
               type="button"
               class="btn task-row-action"
-              @click="onCancel(task)"
-            >取消</button>
+              kind="task" feedback="external" :show-error="false" :action="() => onCancel(task)"
+            >取消</ActionButton>
             <span v-else-if="taskCancelHint(task)" class="task-row-note">{{ taskCancelHint(task) }}</span>
           </article>
         </section>

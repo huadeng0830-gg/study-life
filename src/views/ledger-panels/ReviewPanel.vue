@@ -2,7 +2,7 @@
 import EmptyState from '../../components/EmptyState.vue'
 import MonthlyTrendCard from './MonthlyTrendCard.vue'
 import { catInfo } from '../../composables/ledger.js'
-import { moneyHero, moneyRow } from '../../utils/formatters.js'
+import { moneyWithCurrency } from '../../utils/formatters.js'
 
 const props = defineProps({
   reviewLabel: { type: String, default: '' },
@@ -34,12 +34,16 @@ const props = defineProps({
   exportLedgerCsv: { type: Function, required: true },
   exportLedgerXlsx: { type: Function, required: true },
   exportAllLedgerXlsx: { type: Function, required: true },
+  exporting: { type: Boolean, default: false },
   revealReviewCategory: { type: Function, required: true },
   toggleReviewCategory: { type: Function, required: true },
   openDetail: { type: Function, required: true },
 })
 
 const emit = defineEmits(['selected-day-change', 'update:showAllReviewCats', 'jump-to-month', 'trend-end-month-change'])
+const moneyRow = (value) => moneyWithCurrency(value, props.trendCurrency)
+const moneyHero = moneyRow
+const transactionMoney = (item) => `${item.direction === 'income' || item.direction === 'refund' ? '+' : '-'}${moneyWithCurrency(props.personalAmount(item), item.currency || props.trendCurrency)}`
 
 /* 月历圆点：按当天笔数给粗细（l1/l2/l3），纯展示、与账本口径无关。
    拆分时从 LedgerView 一并搬进来——它只依赖本面板自己的 reviewMonth。 */
@@ -61,7 +65,7 @@ function dotClass(cell) {
 function cellLabel(cell) {
   const month = parseInt(props.reviewMonth.slice(5), 10)
   const date = `${month}月${cell.day}日`
-  return cell.count ? `${date}，${cell.count} 笔账目，合计 ${moneyRow(cell.total)}` : `${date}，无账目`
+  return cell.count ? `${date}，${cell.count} 笔账目，净支出 ${moneyRow(cell.total)}${cell.excludedCount ? `，${cell.excludedCount} 笔未折算` : ''}` : `${date}，无账目`
 }
 </script>
 
@@ -76,12 +80,13 @@ function cellLabel(cell) {
     <button class="mn-btn tap-target" aria-label="上一个月" @click="shiftMonth(-1)">‹</button>
     <b>{{ reviewLabel }}</b>
     <button class="mn-btn tap-target" aria-label="下一个月" :disabled="reviewMonth >= todayMonth" @click="shiftMonth(1)">›</button>
+    <input class="review-month-picker" type="month" aria-label="选择回顾月份" :value="reviewMonth" :max="todayMonth" @change="emit('jump-to-month', $event.target.value)" />
     <span class="review-export" role="group" aria-label="导出账单">
-      <button class="btn btn-sm" type="button" @click="exportLedgerCsv">导出 CSV</button>
-      <button class="btn btn-sm" type="button" @click="exportLedgerXlsx">导出 Excel</button>
+      <button class="btn btn-sm" type="button" :disabled="exporting" @click="exportLedgerCsv()">导出 CSV</button>
+      <button class="btn btn-sm" type="button" :disabled="exporting" @click="exportLedgerXlsx()">{{ exporting ? '正在导出…' : '导出 Excel' }}</button>
       <!-- 「导出全部历史」：此前导出被硬编码成当月，想拿完整数据只能一个月一个月点。
            用 aria-label 说清范围，避免用户以为导出的还是当前月。 -->
-      <button class="btn btn-sm" type="button" aria-label="导出全部历史账单，不限当前月份" @click="props.exportAllLedgerXlsx()">导出全部</button>
+      <button class="btn btn-sm" type="button" :disabled="exporting" aria-label="导出全部历史账单，不限当前月份" @click="props.exportAllLedgerXlsx()">导出全部</button>
     </span>
   </div>
 
@@ -100,7 +105,7 @@ function cellLabel(cell) {
     class="card empty-box"
     icon="🌙"
     :title="`${reviewLabel}还没有记录`"
-    description="这个月还没有留下消费痕迹。"
+    description="这个月还没有收支或退款记录。"
   />
 
   <template v-else>
@@ -109,7 +114,7 @@ function cellLabel(cell) {
         <!-- 「退款」写在标题行里，而上方大数字是**净额**（支出 − 退款）、
              下方「分类分布」那句是**毛额**（退款不进分类）——两个数字天然不等。
              所以这里把大数字的标签说清楚，否则用户会以为下面那句算错了。 -->
-        <span>记录了 {{ reviewCount }} 笔<template v-if="monthlyReview.refundTotal"> · 退款 ¥{{ monthlyReview.refundTotal.toFixed(2) }}<template v-if="reviewCategorySum"> · 已从合计扣除</template></template></span>
+        <span>记录了 {{ reviewCount }} 笔 · 支出净额<template v-if="monthlyReview.refundTotal"> · 退款 {{ moneyRow(monthlyReview.refundTotal) }}<template v-if="reviewCategorySum"> · 已从合计扣除</template></template></span>
         <b>{{ moneyHero(reviewTotal) }}</b>
       </div>
       <div class="rs-facts">
@@ -140,18 +145,16 @@ function cellLabel(cell) {
       <!-- 收入与结余：此前整个回顾页只看得见支出（收入在 buildLedgerMonthReview 里
            被 continue 掉），「这个月赚了多少、还剩多少」两个数一个都拿不到。
            数据一直都在聚合里躺着，只是从没被渲染出来。 -->
-      <div v-if="monthlyReview.incomeTotal" class="rs-io">
+      <div class="rs-io">
         <span>本月收入 <b>{{ moneyRow(monthlyReview.incomeTotal) }}</b></span>
         <span>结余 <b :class="{ negative: monthlyReview.balance < 0 }">{{ moneyRow(monthlyReview.balance) }}</b></span>
       </div>
-      <!-- 本月合计是按记录**原值**相加的（这是账本一贯的不折算约定）。
-           出现两种以上币种时那个数字没有意义，必须说清楚，不能让用户自己发现。 -->
-      <p v-if="monthlyReview.currencyCount > 1" class="form-note">
-        本月含 {{ monthlyReview.currencyCount }} 种币种，上方金额按记录原始数值直接相加，未做汇率折算；逐笔金额见账单明细。
-      </p>
+      <!-- 汇总使用基准币种，逐笔明细保留原币，缺汇率的记录明确标出。 -->
+      <p v-if="monthlyReview.hasForeignCurrency" class="form-note">合计、分类与月历按手动汇率折算为 {{ trendCurrency }}，逐笔显示原币金额。汇率日期：{{ monthlyReview.ratesUpdatedAt || '未记录' }}。</p>
+      <p v-if="monthlyReview.excludedCount" class="review-fx-warning" role="status">{{ monthlyReview.missingRates.join('、') }} 缺少汇率，{{ monthlyReview.excludedCount }} 笔暂未计入汇总，仍可在分类、月历和导出中查看。</p>
     </section>
 
-    <section class="review-cats card">
+    <section v-if="reviewCategoryRows.length" class="review-cats card">
       <div class="rc-head">
         <h2 class="block-title">分类分布</h2>
         <!-- 金额是**毛额**（退款是冲抵项、不进分类），与上方净额合计差的就是那笔退款。 -->
@@ -172,9 +175,9 @@ function cellLabel(cell) {
           >
             <span class="cb-name">
               <span class="cb-label">{{ row.info.icon }} {{ row.info.name }}</span>
-              <small class="cb-meta">{{ row.pct }}% · {{ row.count }} 笔</small>
+              <small class="cb-meta">{{ row.pct }}% · {{ row.count }} 笔<template v-if="row.excludedCount"> · {{ row.excludedCount }} 笔未折算</template></small>
             </span>
-            <span class="cb-track"><i :style="{ width: `${Math.max(2, row.pct)}%` }"></i></span>
+            <span class="cb-track"><i :style="{ width: `${row.value > 0 ? Math.max(2, row.pct) : 0}%` }"></i></span>
             <span class="cb-value">{{ moneyRow(row.value) }}</span>
             <span class="cb-caret" aria-hidden="true">{{ expandedCategory === row.key ? '▴' : '▾' }}</span>
           </button>
@@ -189,9 +192,9 @@ function cellLabel(cell) {
             >
               <span class="rd-name">{{ e.name }}</span>
               <small>{{ e.date.slice(5).replace('-', '/') }}{{ e.time ? ` ${e.time}` : '' }}</small>
-              <b>{{ moneyRow(personalAmount(e)) }}</b>
+              <b>{{ moneyWithCurrency(personalAmount(e), e.currency || trendCurrency) }}</b>
             </button>
-            <p class="rc-detail-foot">共 {{ row.count }} 笔 · 我承担 {{ moneyRow(row.value) }}</p>
+            <p class="rc-detail-foot">共 {{ row.count }} 笔 · 我承担 {{ moneyRow(row.value) }}<template v-if="row.excludedCount"> · {{ row.excludedCount }} 笔缺少汇率未计入</template></p>
           </div>
         </div>
       </div>
@@ -219,7 +222,7 @@ function cellLabel(cell) {
       </div>
       <div v-if="selectedDayInfo" class="cal-detail">
         <b>{{ selectedDayInfo.label }}</b>
-        <small>{{ selectedDayInfo.count }} 笔 · {{ moneyRow(selectedDayInfo.total) }}</small>
+        <small>{{ selectedDayInfo.count }} 笔 · 净支出 {{ moneyRow(selectedDayInfo.total) }}<template v-if="selectedDayInfo.excludedCount"> · {{ selectedDayInfo.excludedCount }} 笔未折算</template></small>
         <!-- 同 .feed-item：日历里的当日明细行也是打开详情的唯一入口，
              原本同样只有 @click，键盘与读屏都够不到。
                第四十三轮补 tap-target：这一行是全仓唯一「有 role="button"、却既没有
@@ -237,7 +240,7 @@ function cellLabel(cell) {
           @keydown.enter.prevent="openDetail(e.id)"
           @keydown.space.prevent="openDetail(e.id)"
         >
-          <span>{{ e.name }}</span><small>{{ catInfo(e.cat).name }} · {{ e.time }}</small><b>{{ moneyRow(personalAmount(e)) }}</b>
+          <span>{{ e.name }}</span><small>{{ e.direction === 'refund' ? '退款' : e.direction === 'income' ? '收入' : catInfo(e.cat).name }} · {{ e.time }}</small><b>{{ transactionMoney(e) }}</b>
         </div>
       </div>
     </section>
@@ -265,6 +268,8 @@ function cellLabel(cell) {
   text-align:center;
   min-width:72px;
   font-size:var(--fs-15)}
+.review-month-picker { width:150px; min-width:0; min-height:34px; font-size:var(--fs-12); }
+.review-fx-warning { margin:0; padding:10px 12px; border-left:3px solid var(--warning); background:var(--bg-tint); color:var(--ink-soft); font-size:var(--fs-12); line-height:1.5; }
 .mn-btn {
   width:32px;
   height:32px;
@@ -559,6 +564,7 @@ function cellLabel(cell) {
 }
 .month-nav .mn-btn { justify-self:center; }
 .month-nav b { grid-column:2; min-width:0; }
+.review-month-picker { grid-column:1 / -1; width:100%; }
 .review-export {
   grid-column:1 / -1;
   width:100%;

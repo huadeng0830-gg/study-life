@@ -143,8 +143,10 @@ describe('账本首页：折算行与预算预警真的渲染出来', () => {
     expect(fxLine.textContent).not.toContain(moneyWithCurrency(150, 'CNY'))
     expect(fxLine.textContent).toContain('EUR 缺少汇率')
     expect(fxLine.textContent).toContain('另有 1 笔未计入')
-    // 既有「本月花费」卡片仍按记录原值相加（老路径一行没改），这正是新折算行存在的理由
-    expect(text).toContain(`本月花费${moneyWithCurrency(150, 'CNY')}`)
+    // 花费、预算和折算行必须统一；缺汇率不能按 1:1 混入花费。
+    expect(text).toContain(`本月花费${moneyWithCurrency(100, 'CNY')}`)
+    expect(text).not.toContain(`本月花费${moneyWithCurrency(150, 'CNY')}`)
+    expect(text).toContain('1 笔未计入')
   })
 
   it('通过「设置预算」弹窗真的能保存预算并作用到首页', async () => {

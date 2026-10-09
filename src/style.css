@@ -1,3 +1,5 @@
+@import './styles/action-feedback.css';
+
 :root {
   color-scheme: light;
   --bg: #f5f7fb;
@@ -128,6 +130,10 @@
   --ease-standard: cubic-bezier(0.2, 0.8, 0.2, 1);
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --action-collapse: var(--dur-slow);
+  --action-fade: 150ms;
+  --action-ease: ease-in-out;
+  --action-success: #16a34a;
 
   /* ---------- v4 焦点可见性 ----------
      原来的 --focus-ring 是 16% 透明度的品牌色，只适合做“输入框激活阴影”，
@@ -344,6 +350,9 @@ summary:focus:not(:focus-visible) {
 }
 
 .btn {
+  position: relative;
+  min-height: 42px;
+  line-height: 20px;
   text-decoration: none;
   border: none;
   border-radius: var(--radius-8);
@@ -355,11 +364,11 @@ summary:focus:not(:focus-visible) {
 }
 
 .btn:hover {
-  transform: translateY(-1px);
+  transform: none;
 }
 
 .btn:active {
-  transform: translateY(0);
+  transform: scale(0.98);
   transition-duration: var(--dur-instant);
 }
 
@@ -371,37 +380,6 @@ summary:focus:not(:focus-visible) {
   transform: none;
   box-shadow: none;
   filter: saturate(0.7);
-}
-
-.btn[aria-busy='true'] {
-  cursor: progress;
-  opacity: 0.78;
-  transform: none;
-  box-shadow: none;
-  /* 双击保护的第一道闸：鼠标层面直接吞掉重复点击。
-     键盘层面由按钮自身的 :disabled 负责 —— 所有异步按钮在提交期间都会
-     置 disabled，因此 Enter/Space 重复触发不会发生。 */
-  pointer-events: none;
-}
-
-/* 加载中的 spinner：贴在文字后面，不改变按钮宽度以外的布局。
-   只认 aria-busy —— 全仓的异步按钮都用 :aria-busy="busy || undefined" 接线了，
-   原来并列的 .btn.is-loading 钩子一处都没用，已删除（理由同表单无效态）。 */
-.btn[aria-busy='true']::after {
-  content: '';
-  display: inline-block;
-  width: 1em;
-  height: 1em;
-  margin-left: 8px;
-  vertical-align: -0.16em;
-  border: 2px solid currentColor;
-  border-top-color: transparent;
-  border-radius: var(--radius-circle);
-  animation: btn-spin 720ms linear infinite;
-}
-
-@keyframes btn-spin {
-  to { transform: rotate(360deg); }
 }
 
 /* 图标按钮（关闭 / 删除这类只有一个符号的控件）在本仓库一律由组件自带样式，

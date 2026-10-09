@@ -2,6 +2,8 @@
 
 本文件记录 `src/style.css` 与 `src/composables/theme.js` 里对外的设计令牌，以及新增令牌时必须遵守的规则。令牌是唯一事实来源，业务样式不应再写硬编码值。
 
+操作反馈使用 `ActionButton.vue` 与 `actionFeedback.js`。常规按钮最小高度 42px；触屏沿用 `--tap-min` 44px；圆角沿用 `--radius-8`。`--action-collapse: 300ms` 同时用于收缩、展开与 SVG 对勾绘制，`--action-fade: 150ms` 用于文案淡出，`--action-ease: ease-in-out` 用于主体变形。`--action-success: #16a34a` 只用于完整成功动画的圆形底色，白色图标按非文本对比度验证；成功文字继续使用 `--success`。失败继续使用 `--danger`，图标统一 22px、2px 描边。JS 时序集中在 `ACTION_TIMING`，业务完成不等待视觉计时器。详见 `docs/INTERACTION_UX_AUDIT.md`。
+
 ## 1. 颜色令牌
 
 定义位置：`src/style.css` 的 `:root`，覆盖位置为 `:root[data-theme='purple' | 'green' | 'pink' | 'custom' | 'dark']` 与 `:root[data-contrast='high']`。

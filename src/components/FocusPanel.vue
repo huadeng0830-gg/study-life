@@ -1,6 +1,8 @@
 <script setup>
-import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref } from 'vue'
+import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue'
 import Modal from './Modal.vue'
+import TaskWorkSession from './tasks/TaskWorkSession.vue'
+import { useTaskWorkSession } from '../composables/tasks/useTaskWorkSession.js'
 import { useStoredRef } from '../composables/store/index.js'
 import { useDomainCommands } from '../composables/domain/commands.js'
 import { isTaskActionable, taskStatus } from '../composables/domain/state.js'
@@ -19,6 +21,10 @@ import {
   pushRecentTemporary,
 } from '../composables/focusTimer.js'
 
+const props = defineProps({ request: { type: /** @type {import('vue').PropType<{ id: string, minutes: number, token: number } | null>} */ (Object), default: null } })
+const emit = defineEmits(['prepared'])
+let panelMounted = false
+let handledRequest = null
 const domain = useDomainCommands()
 // 这里只取 tasks；专注记录用 domain.recordFocusSession 写入，
 // 面板本身不读取会话列表（统计在专注统计视图里）。
@@ -56,8 +62,16 @@ const quickTimes = computed(() => settings.value.quickTimes)
 const recentTemporaries = computed(() => settings.value.recentTemporaries)
 const display = computed(() => (active.value ? focusDisplayState(active.value, now.value) : null))
 const selectedTodo = computed(() => tasks.value.find((task) => task.id === selectedTodoId.value) || null)
+const activeTodo = computed(() => tasks.value.find((task) => task.id === active.value?.todoId) || null)
+const savedTodo = computed(() => tasks.value.find((task) => task.id === lastSavedSession.value?.todoId) || null)
+const canRecordProgress = computed(() => savedTodo.value && !savedTodo.value.deletedAt && !savedTodo.value.tombstone && savedTodo.value.sourceType !== 'project-task' && isTaskActionable(savedTodo.value))
+const {
+  task: workSessionTask, draft: workSessionDraft, error: workSessionError, busy: workSessionBusy,
+  statusLabel: workSessionStatusLabel, open: openTaskWorkSession, close: closeTaskWorkSession,
+  updateField: updateWorkSessionField, save: saveTaskWorkProgress,
+} = useTaskWorkSession({ domain, openProjectTask: () => {}, notify: showFlash })
 const openTasks = computed(() => {
-  const open = tasks.value.filter((task) => task && isTaskActionable(task, new Date(now.value)))
+  const open = tasks.value.filter((task) => task && !task.deletedAt && !task.tombstone && isTaskActionable(task, new Date(now.value)))
   const dueTs = (task) => (task.dueDate ? appDateTime(task.dueDate, task.dueTime || '23:59') : Infinity)
   return open.sort((a, b) => {
     const overdueA = dueTs(a) < Date.now() ? 0 : 1
@@ -104,6 +118,36 @@ const activeStateLine = computed(() => {
 function applySettingsToUi() {
   selectedMinutes.value = settings.value.lastUsedMinutes || 25
 }
+
+function prepareRequestedTask() {
+  const request = props.request
+  if (!panelMounted || !request || handledRequest === request.token) return
+  handledRequest = request.token
+  if (activeRef.value) {
+    const message = '已有专注正在进行，请先继续或结束当前专注。'
+    showFlash(message)
+    emit('prepared', { taskId: request.id, message })
+    return
+  }
+  const task = tasks.value.find((item) => String(item.id) === request.id && !item.deletedAt && !item.tombstone && isTaskActionable(item))
+  if (!task) {
+    const message = '这条待办已完成、归档或移除，请选择当前待办。'
+    showFlash(message)
+    emit('prepared', { taskId: request.id, message })
+    return
+  }
+  selectedTodoId.value = task.id
+  selectedMinutes.value = Math.max(5, Math.min(180, Math.round(Number(request.minutes) || 25)))
+  targetTitle.value = ''
+  lastSavedSession.value = null
+  restEndsAt.value = null
+  showEarly.value = false
+  showTodoPicker.value = false
+  syncTicker()
+  emit('prepared', { taskId: request.id, message: `已选中「${task.title}」，确认时长后开始专注。` })
+}
+
+watch(() => props.request, prepareRequestedTask, { flush: 'post' })
 
 function onGoalInput(event) {
   if (selectedTodoId.value) return
@@ -181,6 +225,12 @@ function start() {
   const minutes = Math.round(Number(selectedMinutes.value))
   if (!Number.isFinite(minutes) || minutes < 5 || minutes > 180) selectedMinutes.value = 25
   const todoId = selectedTodoId.value || ''
+  if (todoId && (!selectedTodo.value || selectedTodo.value.deletedAt || selectedTodo.value.tombstone || !isTaskActionable(selectedTodo.value))) {
+    selectedTodoId.value = ''
+    showFlash('这条待办已完成或移除，请重新选择。')
+    return
+  }
+  if (todoId && selectedTodo.value?.sourceType !== 'project-task') domain.updateTask(todoId, { status: 'in_progress', done: false, completedAt: null })
   const title = todoId ? selectedTodo.value?.title || '' : targetTitle.value.trim()
   const startedAt = new Date().toISOString()
   let nextSettings = normalizeFocusSettings(focusSettings.value)
@@ -404,6 +454,8 @@ onMounted(() => {
     now.value = Date.now()
     recoverStaleFocusSession()
   }
+  panelMounted = true
+  prepareRequestedTask()
   syncTicker()
   document.addEventListener('visibilitychange', onVisibilityChange)
   window.addEventListener('focus', onPageShow)
@@ -425,6 +477,7 @@ onBeforeUnmount(() => {
 // 让 display / clockText / restRemainingSeconds 全部反复失效 —— 页面看不见，CPU 照烧。
 // 与 VirtualList.vue 用的是同一套 onActivated / onDeactivated 约定。
 onDeactivated(() => {
+  closeTaskWorkSession()
   stopTicker()
   document.removeEventListener('visibilitychange', onVisibilityChange)
   window.removeEventListener('focus', onPageShow)
@@ -432,6 +485,7 @@ onDeactivated(() => {
 })
 
 onActivated(() => {
+  prepareRequestedTask()
   syncTicker()
   document.addEventListener('visibilitychange', onVisibilityChange)
   window.addEventListener('focus', onPageShow)
@@ -440,7 +494,7 @@ onActivated(() => {
 </script>
 
 <template>
-  <section class="focus-panel panel" aria-label="自由专注">
+  <section class="focus-panel panel" :aria-label="active?.todoId || selectedTodo ? '任务专注' : '自由专注'">
     <div class="panel-head">
       <h2>现在专注</h2>
       <span class="panel-progress">
@@ -455,6 +509,7 @@ onActivated(() => {
         <span class="focus-type-tag">{{ active.focusType === 'free' ? '自由专注' : active.focusType === 'temporary' ? '临时目标' : '关联待办' }}</span>
         <strong>{{ active.title || '自由专注' }}</strong>
       </div>
+      <p v-if="activeTodo?.workCheckpoint?.nextStep" class="focus-checkpoint">下一步：{{ activeTodo.workCheckpoint.nextStep }}</p>
       <b class="focus-clock" :class="{ overtime: display ? display.overtimeSeconds > 0 : false }">{{ clockText }}</b>
       <p class="focus-round">第 {{ roundNumber }} 轮 / 共 {{ settings.pomodoroRounds }} 轮</p>
       <p class="focus-state-line">{{ activeStateLine }}</p>
@@ -471,6 +526,7 @@ onActivated(() => {
       <p class="focus-round">第 {{ lastCompletedRound }} 轮 / 共 {{ settings.pomodoroRounds }} 轮</p>
       <p v-if="lastSavedSession" class="focus-rest-summary">{{ lastSavedSession.title || '自由专注' }} · 本次专注 {{ formatFocusDuration(lastSavedSession.actualFocusSeconds) }}</p>
       <p class="focus-state-line">{{ restRemainingSeconds > 0 ? `休息 ${restMinutes} 分钟` : '休息结束' }}</p>
+      <button v-if="canRecordProgress" type="button" class="btn btn-ghost" @click="openTaskWorkSession(savedTodo)">记录做到哪里</button>
       <button type="button" class="btn btn-primary" @click="finishRest">{{ restRemainingSeconds > 0 ? '结束休息' : '返回专注' }}</button>
     </div>
 
@@ -480,6 +536,7 @@ onActivated(() => {
       <p class="focus-done-time">本次专注 {{ formatFocusDuration(lastSavedSession.actualFocusSeconds) }}</p>
       <p v-if="lastCompletedRound" class="focus-round">第 {{ lastCompletedRound }} 轮 / 共 {{ settings.pomodoroRounds }} 轮</p>
       <div class="focus-done-actions">
+        <button v-if="canRecordProgress" type="button" class="btn btn-ghost" @click="openTaskWorkSession(savedTodo)">记录做到哪里</button>
         <button v-if="lastSavedSession.focusType === 'temporary' && !tempTodoAdded" type="button" class="btn btn-ghost" @click="addTempTodo">加入待办</button>
         <span v-else-if="lastSavedSession.focusType === 'temporary' && tempTodoAdded" class="focus-done-hint">✓ 已加入待办</span>
         <button v-if="lastSavedSession.focusType === 'todo-linked'" type="button" class="btn btn-ghost" :disabled="linkedTodoDone" @click="markTodoDone">
@@ -544,7 +601,12 @@ onActivated(() => {
 
       <button type="button" class="btn btn-primary start-btn" @click="start">开始专注 · {{ selectedMinutes }}分钟</button>
       <p class="link-hint">{{ selectedTodo ? `已关联待办：${selectedTodo.title}` : '不输入目标也可以直接开始，记录为自由专注。' }}</p>
+      <p v-if="selectedTodo?.workCheckpoint?.nextStep" class="focus-checkpoint">下一步：{{ selectedTodo.workCheckpoint.nextStep }}</p>
     </div>
+
+    <TaskWorkSession :open="Boolean(workSessionTask)" :task="workSessionTask" :checkpoint="workSessionTask?.workCheckpoint" :form="workSessionDraft"
+      :status-label="workSessionStatusLabel" :can-save="Boolean(workSessionTask)" :busy="workSessionBusy" :error="workSessionError"
+      @close="closeTaskWorkSession" @save="saveTaskWorkProgress" @update:field="updateWorkSessionField" />
 
     <Modal :open="showTodoPicker" title="从待办选择" @close="showTodoPicker = false">
       <div class="todo-picker">
@@ -582,327 +644,4 @@ onActivated(() => {
   </section>
 </template>
 
-<style scoped>
-.focus-panel {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 10px;
-}
-.focus-flash {
-  margin: 0;
-  padding: 8px 12px;
-  border-radius: var(--radius-9);
-  color: var(--success);
-  background: color-mix(in srgb, var(--success) 10%, var(--card));
-  border: 1px solid color-mix(in srgb, var(--success) 35%, var(--card));
-  font-size: var(--fs-12-5);
-}
-.focus-active,
-.focus-rest,
-.focus-completed,
-.focus-idle {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  min-width: 0;
-}
-.focus-goal-label {
-  color: var(--ink-soft);
-  font-size: var(--fs-13);
-  font-weight: var(--fw-600);
-  align-self: flex-start;
-}
-.focus-goal-row {
-  display: flex;
-  gap: 8px;
-  position: relative;
-  flex-wrap: wrap;
-}
-.goal-input {
-  flex: 1;
-  min-width: min(240px, 100%);
-  padding: 10px 12px;
-  border-radius: var(--radius-10);
-}
-.goal-input[readonly] {
-  color: var(--ink-soft);
-  background: var(--primary-soft);
-  border-color: transparent;
-}
-.pick-todo-btn,
-.unlink-btn {
-  white-space: nowrap;
-  padding: 9px 14px;
-  min-height: 40px;
-}
-.recent-row {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 7px;
-  margin-top: -2px;
-}
-.recent-label {
-  color: var(--ink-faint);
-  font-size: var(--fs-12);
-}
-.recent-chip {
-  border: 1px solid var(--border);
-  background: var(--bg-tint);
-  border-radius: var(--radius-pill);
-  padding: 5px 10px;
-  font-size: var(--fs-12);
-  color: var(--ink-soft);
-  cursor: pointer;
-}
-.recent-chip:hover {
-  border-color: var(--primary);
-  color: var(--primary);
-  background: var(--primary-soft);
-}
-.focus-clock {
-  color: var(--primary);
-  font-size: clamp(30px, 3vw, 38px);
-  letter-spacing: 0.04em;
-  font-variant-numeric: tabular-nums;
-  line-height: 1.15;
-}
-.focus-clock.overtime {
-  color: #0ea271;
-}
-.focus-target {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-.focus-target strong {
-  font-size: var(--fs-15);
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.focus-type-tag {
-  flex: 0 0 auto;
-  font-size: var(--fs-11);
-  font-weight: var(--fw-700);
-  padding: 3px 8px;
-  border-radius: var(--radius-pill);
-  background: var(--primary-soft);
-  color: var(--primary);
-}
-.focus-state-line {
-  margin: 0;
-  color: var(--ink-faint);
-  font-size: var(--fs-12-5);
-}
-.focus-round {
-  margin: 0;
-  color: var(--primary);
-  font-size: var(--fs-12);
-  font-weight: var(--fw-700);
-}
-.focus-rest-summary {
-  margin: 0;
-  color: var(--ink-soft);
-  font-size: var(--fs-12-5);
-}
-.focus-actions {
-  display: flex;
-  gap: 9px;
-}
-.focus-actions .btn {
-  flex: 1;
-  min-height: 44px;
-}
-.time-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-.time-chip {
-  min-height: 40px;
-  min-width: 56px;
-  padding: 8px 14px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-10);
-  background: var(--card);
-  color: var(--ink-soft);
-  font-weight: var(--fw-650);
-  font-size: var(--fs-14);
-  cursor: pointer;
-}
-.time-chip.on {
-  border-color: var(--primary);
-  background: var(--primary-soft);
-  color: var(--primary);
-}
-.start-btn {
-  min-height: 48px;
-  font-size: var(--fs-15);
-  border-radius: var(--radius-12);
-}
-.link-hint {
-  margin: 0;
-  color: var(--ink-faint);
-  font-size: var(--fs-12);
-}
-.focus-done-mark {
-  width: 44px;
-  height: 44px;
-  display: grid;
-  place-items: center;
-  border-radius: var(--radius-circle);
-  background: color-mix(in srgb, var(--success) 10%, var(--card));
-  color: var(--success);
-  font-size: var(--fs-22);
-  font-weight: var(--fw-900);
-}
-.focus-done-title {
-  margin: 0;
-  font-size: var(--fs-16);
-  font-weight: var(--fw-700);
-}
-.focus-done-time {
-  margin: 0;
-  color: var(--ink-soft);
-  font-size: var(--fs-13-5);
-}
-.focus-done-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 9px;
-}
-.focus-done-actions .btn {
-  min-height: 44px;
-}
-.focus-done-hint {
-  display: inline-flex;
-  align-items: center;
-  min-height: 44px;
-  /* 写死的 #087a58 落在主题卡片的 var(--card) 上，深色主题只有 2.97:1
-     （浅色 5.34:1）——13px/600 属正文，门槛 4.5。改用令牌后浅色 5.63、深色 8.15。 */
-  color: var(--success);
-  font-size: var(--fs-13);
-  font-weight: var(--fw-600);
-}
-.focus-rest-row {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  padding-top: 4px;
-  color: var(--ink-faint);
-  font-size: var(--fs-12-5);
-}
-.rest-btn {
-  padding: 7px 12px;
-  min-height: 38px;
-  font-size: var(--fs-12-5);
-}
-.todo-picker {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  max-height: 55vh;
-  max-height: 55dvh;
-  overflow-y: auto;
-}
-.todo-option {
-  display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 3px;
-  padding: 11px 12px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-10);
-  background: var(--card);
-  text-align: left;
-  cursor: pointer;
-}
-.todo-option:hover {
-  border-color: var(--primary);
-  background: var(--primary-soft);
-}
-.todo-option-title {
-  color: var(--text);
-  font-size: var(--fs-14);
-  font-weight: var(--fw-600);
-}
-.todo-option small {
-  color: var(--ink-faint);
-  font-size: var(--fs-12);
-}
-.empty-line {
-  color: var(--ink-faint);
-  font-size: var(--fs-13);
-  padding: 8px 0;
-}
-.custom-time {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-.custom-time label {
-  color: var(--ink-soft);
-  font-weight: var(--fw-600);
-  font-size: var(--fs-13);
-}
-.custom-time input {
-  font-size: var(--fs-18);
-  padding: 10px 12px;
-}
-.custom-hint,
-.early-hint {
-  margin: 0;
-  color: var(--ink-faint);
-  font-size: var(--fs-12-5);
-}
-.custom-error {
-  margin: 0;
-  color: var(--danger);
-  font-size: var(--fs-12-5);
-}
-.modal-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 9px;
-}
-.modal-actions .btn {
-  min-height: 44px;
-}
-.early-text {
-  margin: 0;
-  font-size: var(--fs-15);
-  font-weight: var(--fw-700);
-}
-@media (max-width: 520px) {
-  .focus-goal-row {
-    flex-direction: column;
-  }
-  .goal-input {
-    width: 100%;
-    min-width: 0;
-  }
-  .pick-todo-btn,
-  .unlink-btn {
-    width: 100%;
-  }
-  .time-chip {
-    flex: 1;
-    min-width: 56px;
-    height: 46px;
-  }
-  .start-btn {
-    width: 100%;
-    height: 52px;
-  }
-  .focus-actions {
-    width: 100%;
-  }
-  .focus-actions .btn {
-    height: 48px;
-  }
-}
-</style>
+<style scoped src="./focus-panel.css"></style>

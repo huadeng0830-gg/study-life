@@ -1,6 +1,8 @@
 <script setup>
 import { ref } from 'vue'
 import Modal from './Modal.vue'
+import ActionButton from './ActionButton.vue'
+import { useLatestTask } from '../composables/latestTask.js'
 import { appTimezone } from '../composables/timeContext.js'
 import { MAX_ICS_IMPORT_BYTES, parseIcsCalendar } from '../composables/icalImport.js'
 
@@ -10,8 +12,8 @@ const fileInput = ref(null)
 const preview = ref(null)
 const fileName = ref('')
 const error = ref('')
-const message = ref('')
 const busy = ref(false)
+const reads = useLatestTask()
 
 async function readFile(event) {
   const input = event.target
@@ -19,7 +21,7 @@ async function readFile(event) {
   input.value = ''
   if (!file) return
   error.value = ''
-  message.value = ''
+  preview.value = null
   if (!/\.ics$/i.test(file.name) && file.type !== 'text/calendar') {
     error.value = '请选择 .ics 日历文件。'
     return
@@ -29,8 +31,11 @@ async function readFile(event) {
     return
   }
   busy.value = true
+  const job = reads.begin()
   try {
-    const result = parseIcsCalendar(await file.text(), { existingEvents: props.records, timezone: appTimezone.value })
+    const text = await file.text()
+    if (!job.isCurrent()) return
+    const result = parseIcsCalendar(text, { existingEvents: props.records, timezone: appTimezone.value })
     if (!result.found) {
       error.value = '文件中没有找到日历事件。'
       return
@@ -38,9 +43,11 @@ async function readFile(event) {
     fileName.value = file.name
     preview.value = result
   } catch (cause) {
+    if (!job.isCurrent()) return
     error.value = cause?.message || '无法读取这个日历文件。'
   } finally {
-    busy.value = false
+    if (job.isCurrent()) busy.value = false
+    job.finish()
   }
 }
 
@@ -52,7 +59,6 @@ function importEvents() {
   const rows = preview.value?.events || []
   if (!rows.length) return
   emit('import', rows)
-  message.value = '已提交 ' + rows.length + ' 条日程导入。'
   preview.value = null
 }
 </script>
@@ -65,13 +71,13 @@ function importEvents() {
       type="file"
       accept=".ics,text/calendar"
       aria-label="选择 ICS 日历文件"
+      :disabled="busy"
       @change="readFile"
     />
-    <button type="button" class="btn" :disabled="busy" @click="fileInput?.click()">
+    <ActionButton tone="neutral" feedback="external" :busy="busy" @click="fileInput?.click()">
       {{ busy ? '正在读取…' : '导入 .ics' }}
-    </button>
+    </ActionButton>
     <p v-if="error" class="ics-message error" role="alert">{{ error }}</p>
-    <p v-else-if="message" class="ics-message" role="status">{{ message }}</p>
 
     <Modal :open="Boolean(preview)" title="预览日历导入" medium @close="closePreview">
       <div v-if="preview" class="ics-preview">

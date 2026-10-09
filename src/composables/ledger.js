@@ -146,6 +146,8 @@ export function filterLedgerTransactions(list, {
   query = '',
   category = '',
   account = '',
+  currency = '',
+  baseCurrency = 'CNY',
   min = '',
   max = '',
   kind = 'all',
@@ -163,12 +165,14 @@ export function filterLedgerTransactions(list, {
     if (cents === null) return false
     if (keyword) {
       const label = typeof categoryName === 'function' ? categoryName(item.cat) : item.cat
-      const haystack = `${item.name ?? ''} ${item.note ?? ''} ${label ?? ''}`.toLowerCase()
+      const haystack = `${item.name ?? ''} ${item.note ?? ''} ${label ?? ''} ${item.account ?? ''}`.toLowerCase()
       if (!haystack.includes(keyword)) return false
     }
     if (category && item.cat !== category) return false
     if (account && String(item.account ?? '').trim() !== account) return false
-    if (direction !== 'all' && (item.direction === 'refund' ? 'expense' : (item.direction || 'expense')) !== direction) return false
+    if (currency && (String(item.currency || baseCurrency).toUpperCase() !== currency)) return false
+    if (direction === 'refund' && !isRefundTransaction(item)) return false
+    if (direction !== 'all' && direction !== 'refund' && (item.direction === 'refund' ? 'expense' : (item.direction || 'expense')) !== direction) return false
     if (kind === 'manual' && item.source === 'bill') return false
     if (kind === 'bill' && item.source !== 'bill') return false
     if (minAmountCents !== null && cents < minAmountCents) return false
@@ -272,6 +276,8 @@ function collectFrequentEntry(map, expense, cents = amountToCents(expense?.amoun
     map.set(name, {
       name,
       amount: cents / 100,
+      currency: expense.currency || '',
+      account: expense.account || '',
       cat: expense.cat,
       count: 1,
       last: timestamp,
@@ -282,6 +288,8 @@ function collectFrequentEntry(map, expense, cents = amountToCents(expense?.amoun
   if (timestamp >= previous.last) {
     previous.last = timestamp
     previous.amount = cents / 100
+    previous.currency = expense.currency || ''
+    previous.account = expense.account || ''
     previous.cat = expense.cat
   }
 }

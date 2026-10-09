@@ -35,6 +35,10 @@ export default defineConfig(({ mode }) => {
   const appRelease = accountEnv.VITE_APP_RELEASE?.trim() || RELEASE_VERSION
   return {
   base: desktopBuild ? './' : '/',
+  server: {
+    // 浏览器回归测试的临时配置和数据库会被独占，开发服务器无需监视它们。
+    watch: { ignored: ['**/.vitest-tmp/**', '**/.playwright-cli/**'] },
+  },
   resolve: desktopBuild ? {
     alias: {
       'virtual:pwa-register': fileURLToPath(new URL('./desktop/pwa-register-shim.js', import.meta.url)),

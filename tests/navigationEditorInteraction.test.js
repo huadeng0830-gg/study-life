@@ -74,7 +74,9 @@ describe('navigation editor interactions', () => {
     await vi.waitFor(() => expect(document.querySelector('.navigation-feedback')?.textContent).toContain('已保存'), { timeout: 2000 })
     expect(mobileNavigation.value).toEqual(['schedule', 'events'])
     expect(desktopNavigation.value[1].label).toBe('自定义学习')
-    expect(document.querySelector('.nav-save').disabled).toBe(true)
+    // Keep the focused button in place during its result animation; its
+    // synchronous action guard and aria-disabled still prevent another write.
+    expect(document.querySelector('.nav-save').getAttribute('aria-disabled')).toBe('true')
   })
 
   it('protects drafts on close and feature navigation, and allows continuing or discarding without saving', async () => {

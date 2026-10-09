@@ -4,9 +4,11 @@ import VirtualList from '../../components/VirtualList.vue'
 import SwipeActionItem from '../../components/SwipeActionItem.vue'
 import LedgerBudgetCard from './LedgerBudgetCard.vue'
 import { catInfo } from '../../composables/ledger.js'
-import { dayLabel, moneyHero, moneyRow } from '../../utils/formatters.js'
+import { dayLabel, moneyWithCurrency } from '../../utils/formatters.js'
 
-defineProps({
+const props = defineProps({
+  baseCurrency: { type: String, default: 'CNY' },
+  spendMissingRates: { type: Array, default: () => [] },
   spendStats: { type: Array, default: () => [] },
   currentMonthHasSplit: { type: Boolean, default: false },
   currentMonthPersonal: { type: Object, default: () => ({ splitCount: 0 }) },
@@ -27,6 +29,11 @@ defineProps({
   fTo: { type: String, default: '' },
   fCat: { type: String, default: '' },
   fAccount: { type: String, default: '' },
+  fCurrency: { type: String, default: '' },
+  filterCurrencyOptions: { type: Array, default: () => [] },
+  filterSummary: { type: Object, default: null },
+  filterError: { type: String, default: '' },
+  exporting: { type: Boolean, default: false },
   fMin: { type: String, default: '' },
   fMax: { type: String, default: '' },
   fKind: { type: String, default: 'all' },
@@ -64,6 +71,7 @@ defineEmits([
   'update-f-to',
   'update-f-cat',
   'update-f-account',
+  'update-f-currency',
   'update-f-min',
   'update-f-max',
   'update-f-kind',
@@ -74,7 +82,11 @@ defineEmits([
   'swipe-open-change',
   'switch-tab',
   'open-review-category',
+  'export-filtered-csv',
+  'export-filtered-xlsx',
 ])
+const moneyRow = (value, currency = props.baseCurrency) => moneyWithCurrency(value, currency)
+const moneyHero = moneyRow
 </script>
 
 <template>
@@ -92,13 +104,15 @@ defineEmits([
       <div v-for="metric in spendStats" :key="metric.key" class="spend-metric" :class="{ current: metric.key === 'month' }">
         <small>{{ metric.label }}</small>
         <b>{{ moneyHero(metric.value) }}</b>
+        <small v-if="metric.excludedCount" class="metric-warning">{{ metric.excludedCount }} 笔未计入</small>
       </div>
     </div>
     <!-- 口径说明：本月没有分摊时三块数字与全额口径逐分相等，多写一句只会是噪声。 -->
     <p v-if="currentMonthHasSplit" class="hero-sub split-note">
-      {{ currentMonthPersonal.splitCount }} 笔分摊已按「我承担」计入（支出 ÷ 人数，余数归我），列表金额同样是份额。<a class="link-btn" @click="$emit('show-all-feed-change', true)">查看全部记录</a>
+      {{ currentMonthPersonal.splitCount }} 笔分摊已按「我承担」的份额计入，列表金额同样是份额。<button type="button" class="link-btn" @click="$emit('show-all-feed-change', true)">查看全部记录</button>
     </p>
-    <span class="hero-sub">按自然周统计 · 只计算支出</span>
+    <span class="hero-sub">按自然周统计 · 支出已扣退款 · 汇总币种 {{ baseCurrency }}</span>
+    <p v-if="spendMissingRates.length" class="hero-sub metric-warning" role="status">{{ spendMissingRates.join('、') }} 缺少汇率，相关记录暂未计入花费。</p>
     <!-- 本月收入与结余：收入数据一直在 personalSpendTotals 里算着，
          此前三块数字全是支出，「这个月赚了多少、还剩多少」一个都看不到。
          没有收入记录时整行不渲染，不会出现「收入 ¥0.00」这种噪声。 -->
@@ -161,7 +175,7 @@ defineEmits([
       <button v-for="item in frequent" :key="item.name" class="freq-pill" @click="$emit('use-frequent', item)">
         <span class="freq-icon">{{ catInfo(item.cat).icon }}</span>
         <b>{{ item.name }}</b>
-        <small>{{ moneyRow(item.amount) }}</small>
+        <small>{{ moneyRow(item.amount, item.currency || baseCurrency) }}</small>
       </button>
     </div>
   </section>
@@ -170,9 +184,9 @@ defineEmits([
   <section class="search-block">
     <div class="search-row">
       <span class="search-icon">🔍</span>
-      <input :value="q" @input="e => $emit('update-q', e.target.value)" class="search-input" aria-label="搜索账本记录" placeholder="搜索名称、备注或分类" />
+      <input :value="q" @input="e => $emit('update-q', e.target.value)" class="search-input" aria-label="搜索账本记录" placeholder="搜索名称、备注、分类或账户" />
       <button class="btn btn-sm" :class="{ 'btn-ghost': filtersActive || showFilters }" aria-label="打开账本筛选" :aria-expanded="showFilters" @click="$emit('toggle-filters')">筛选</button>
-      <button v-if="filtersActive" class="link-btn" @click="$emit('clear-filters')">清除</button>
+      <button v-if="filtersActive" class="link-btn" type="button" aria-label="清除搜索与筛选" @click="$emit('clear-filters')">清除</button>
     </div>
     <div v-if="showFilters" class="filter-panel">
       <div class="chip-row">
@@ -205,15 +219,35 @@ defineEmits([
           <option value="all">全部收支</option>
           <option value="expense">支出</option>
           <option value="income">收入</option>
+          <option value="refund">退款</option>
+        </select>
+        <select aria-label="筛选币种" :value="fCurrency" @change="$emit('update-f-currency', $event.target.value)">
+          <option value="">全部币种</option>
+          <option v-for="code in filterCurrencyOptions" :key="code" :value="code">{{ code }}</option>
         </select>
       </div>
+      <p class="filter-note">金额范围按「我承担」的原币金额筛选，外币可先选择币种。</p>
+    </div>
+    <p v-if="filterError" class="filter-error" role="alert">{{ filterError }}</p>
+    <div v-if="filtersActive && filterSummary && !filterError" class="filter-result-summary" aria-live="polite">
+      <b>筛选结果 · {{ filteredExpenses.length }} 笔</b>
+      <div class="filter-result-totals">
+        <span>净支出 <b>{{ moneyRow(filterSummary.expenseTotal) }}</b></span>
+        <span>收入 <b>{{ moneyRow(filterSummary.incomeTotal) }}</b></span>
+        <span>结余 <b>{{ moneyRow(filterSummary.incomeTotal - filterSummary.expenseTotal) }}</b></span>
+      </div>
+      <p v-if="filterSummary.hasMissing" class="filter-note">{{ filterSummary.missingRates.join('、') }} 缺少汇率，{{ filterSummary.excludedCount }} 笔未计入汇总，仍保留在明细和导出中。</p>
     </div>
   </section>
 
   <!-- 最近记录：生活记录流 -->
   <section class="feed-block">
     <div class="block-head">
-      <h2 class="block-title">最近记录</h2>
+      <h2 class="block-title">{{ filtersActive ? '符合条件的记录' : '最近记录' }}</h2>
+      <div v-if="filtersActive && filteredExpenses.length" class="feed-export-actions" role="group" aria-label="导出当前筛选结果">
+        <button class="link-btn" type="button" :disabled="exporting" @click="$emit('export-filtered-csv')">CSV</button>
+        <button class="link-btn" type="button" :disabled="exporting" @click="$emit('export-filtered-xlsx')">{{ exporting ? '正在导出…' : '导出结果' }}</button>
+      </div>
       <button v-if="canExpandFeed" class="link-btn" type="button" @click="$emit('show-all-feed-change', true)">查看全部（{{ filteredExpenses.length }}）</button>
       <button v-else-if="showAllFeed" class="link-btn" type="button" @click="$emit('show-all-feed-change', false)">收起</button>
     </div>
@@ -221,10 +255,10 @@ defineEmits([
       <EmptyState
         class="card"
         icon="🧾"
-        title="还没有记录"
-        description="第一笔不用很认真，记下刚刚花的钱就可以。"
-        primary-label="＋ 记一笔"
-        @primary="$emit('open-quick')"
+        :title="filtersActive ? '没有符合条件的记录' : '还没有记录'"
+        :description="filtersActive ? (filterError || '试试调整关键词、日期或金额范围。') : '第一笔不用很认真，记下刚刚花的钱就可以。'"
+        :primary-label="filtersActive ? '清除搜索与筛选' : '＋ 记一笔'"
+        @primary="$emit(filtersActive ? 'clear-filters' : 'open-quick')"
       />
     </div>
     <div v-else class="feed">
@@ -247,6 +281,7 @@ defineEmits([
               <span>{{ dayLabel(e.date) }}</span>
               <small v-if="e.summary.expense">支出 {{ moneyRow(e.summary.expense) }}</small>
               <small v-if="e.summary.income">收入 {{ moneyRow(e.summary.income) }}</small>
+              <small v-if="e.summary.excludedCount">{{ e.summary.excludedCount }} 笔未折算</small>
             </h3>
           </div>
           <SwipeActionItem
@@ -548,9 +583,17 @@ defineEmits([
 .custom-range input {
   width:auto}
 .filter-line {
-  grid-template-columns:repeat(5,1fr);
+  grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
   gap:8px;
   display:grid}
+.metric-warning, .filter-error { color:var(--warning); }
+.filter-error { margin:10px 0 0; color:var(--danger); font-size:var(--fs-12); }
+.filter-note { margin:0; color:var(--ink-faint); font-size:var(--fs-11); line-height:1.5; }
+.filter-result-summary { display:flex; flex-direction:column; gap:9px; margin-top:12px; padding:12px; border-radius:var(--radius-10); background:var(--bg-tint); font-size:var(--fs-12); }
+.filter-result-totals { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; }
+.filter-result-totals span { min-width:0; color:var(--ink-soft); }
+.filter-result-totals b { display:block; color:var(--ink); font-variant-numeric:tabular-nums; overflow-wrap:anywhere; }
+.feed-export-actions { display:flex; align-items:center; gap:10px; }
 .filter-line select, .filter-line input {
   width:100%;
   min-width:0}

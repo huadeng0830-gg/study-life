@@ -44,23 +44,23 @@ const stateText = computed(() => ({
 </script>
 
 <template>
-  <section v-if="task.active && task.visible" class="task-progress" :class="[{ compact }, `is-${task.status}`]" aria-live="polite">
+  <section v-if="task.active && task.visible" class="task-progress" :class="[{ compact }, `is-${task.status}`]">
     <header class="task-progress-head">
       <div>
         <b>{{ task.title }}</b>
         <span>{{ ['completed', 'warning'].includes(task.status) ? `用时 ${elapsedText}` : `已用时 ${elapsedText}` }}</span>
       </div>
-      <span class="task-state">{{ stateText }}</span>
+      <span class="task-state" role="status" aria-atomic="true">{{ stateText }}</span>
     </header>
 
-    <ol v-if="!compact || task.status !== 'running'" class="task-steps">
+    <ol v-if="!compact || task.status !== 'running'" class="task-steps" aria-live="polite">
       <li v-for="step in task.steps" :key="step.id" :class="`step-${step.status}`">
         <i>{{ ICONS[step.status] }}</i>
         <span><b>{{ step.label }}</b><small v-if="step.detail">{{ step.detail }}</small></span>
       </li>
     </ol>
 
-    <div v-else class="current-step">
+    <div v-else class="current-step" role="status" aria-atomic="true">
       <i>●</i>
       <span>{{ task.steps.find((step) => step.status === 'running')?.label || task.latestActivity }}</span>
     </div>

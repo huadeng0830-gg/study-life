@@ -160,6 +160,12 @@ export function convertToBaseMinor(amountYuan, currency, fx) {
   return convertToBaseMinorWithConfig(amountYuan, currency, normalizeLedgerFx(fx))
 }
 
+/** 批量展示时只规范化一次汇率；每条记录仍保留缺失汇率的原因。 */
+export function createLedgerBaseConverter(fx) {
+  const config = normalizeLedgerFx(fx)
+  return (amountYuan, currency) => convertToBaseMinorWithConfig(amountYuan, currency, config)
+}
+
 /** 简版换算：成功返回基准币种「分」，失败（金额非法或缺汇率）返回 null。 */
 export function toBaseMinor(amountYuan, currency, fx) {
   return convertToBaseMinor(amountYuan, currency, fx).cents

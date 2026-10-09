@@ -72,7 +72,8 @@ function seedStorage() {
     { id: 'e2', name: '普通话考试', date: day(90), category: '其他', repeat: 'none', pinned: false, reviewProgress: 0, createdAt: now, updatedAt: now },
   ])
   set('sl_events', [
-    { id: 'v1', title: '小组会议', date: day(0), time: '19:00', endTime: '20:30', note: '讨论选题', createdAt: now, updatedAt: now },
+    // 默认列表展示即将到来的日程；明天的会议不会因晚间运行而被筛除。
+    { id: 'v1', title: '小组会议', date: day(1), time: '19:00', endTime: '20:30', note: '讨论选题', createdAt: now, updatedAt: now },
   ])
   set('sl_checklists', [
     {

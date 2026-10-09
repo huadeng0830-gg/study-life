@@ -1,4 +1,5 @@
 <script setup>
+import ActionButton from '../ActionButton.vue'
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { accountBusy, accountUser, updateAccountPassword, validateAccountPassword } from '../../composables/accountAuth.js'
 import { announceAlert } from '../../composables/liveRegion.js'
@@ -89,7 +90,7 @@ async function submit() {
       </div>
       <label class="account-password-toggle"><input v-model="visible" type="checkbox" :disabled="busy" />显示密码</label>
       <p v-if="error" class="account-error">{{ error }}</p>
-      <button type="submit" class="btn btn-primary" :disabled="busy" :aria-busy="busy">{{ submitting ? '正在保存…' : '保存新密码' }}</button>
+      <ActionButton tone="primary" kind="important" feedback="external" :show-error="false" type="submit" class="btn btn-primary" :disabled="busy" :busy="busy">{{ submitting ? '正在保存…' : '保存新密码' }}</ActionButton>
       <button v-if="!recovery" type="button" class="btn btn-ghost" :disabled="busy || resetSeconds > 0" @click="emit('reset-request')">{{ resetSeconds > 0 ? resetSeconds + ' 秒后可重发邮件' : '忘记当前密码？通过邮箱重设' }}</button>
     </form>
   </section>

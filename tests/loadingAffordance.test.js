@@ -28,8 +28,9 @@ const BUTTONS = [
 ]
 
 describe('按钮加载态接线', () => {
-  it('style.css 仍然提供 aria-busy 的视觉与交互反馈', () => {
-    const css = source('style.css')
+  it('style.css 引入的共享样式仍然提供 aria-busy 的视觉与交互反馈', () => {
+    expect(source('style.css')).toContain("@import './styles/action-feedback.css'")
+    const css = source('styles/action-feedback.css')
     expect(css).toContain(".btn[aria-busy='true']")
     expect(css).toContain('pointer-events: none')
   })
@@ -37,12 +38,14 @@ describe('按钮加载态接线', () => {
   for (const [path, expected] of BUTTONS) {
     it(`${path} 的异步按钮带上了 aria-busy`, () => {
       const text = source(path)
-      const bound = text.match(/:aria-busy="/g) || []
+      // Shared ActionButton maps :busy to aria-busy and guards repeated native
+      // clicks synchronously while keeping keyboard focus on the button.
+      const bound = text.match(/:(?:aria-busy|busy)="/g) || []
       expect(bound).toHaveLength(expected)
       // 每个 aria-busy 都必须和 :disabled 绑在同一个状态上，
       // 否则会出现"按钮转圈但还能再点一次"。disabled 可以额外带上别的条件
       // （比如 `busy || cameraStarting`），这里只要求它提到 aria-busy 的那个状态。
-      expect(text).toMatch(/:disabled="[^"]*(\w+)[^"]*"\s+:aria-busy="\1 \|\| undefined"/)
+      expect(text).toMatch(/:disabled="[^"]*(\w+)[^"]*"\s+:(?:aria-busy|busy)="\1 \|\| undefined"/)
       expect(text).not.toMatch(/:aria-busy="undefined"/)
     })
   }

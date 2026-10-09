@@ -5,19 +5,18 @@
  * 页面持有 `detailItem`、`detailEdit`、`showRefund`、`refundItem` 等开关，
  * 但具体动作的实现（updateTransaction、refundTransaction、freqPrefs 修改）搬到这里。
  */
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { expenses, isRefundTransaction, freqPrefs, rememberCategoryOverride } from '../ledger.js'
 import { normalizeAmount } from '../ledger.js'
-import { buildSplit, hasSplit, mySpendCents } from '../ledgerSplit.js'
+import { buildSplit, hasSplit, mySpendCents, normalizeSplit, splitCentsEvenly } from '../ledgerSplit.js'
 import { isBillPayment } from '../ledgerRelations.js'
-import { moneyRow } from '../../utils/formatters.js'
-import { appToday } from '../timeContext.js'
+import { moneyWithCurrency } from '../../utils/formatters.js'
 import { normalizeCurrency, currencyField, useLedgerFx } from '../ledgerFx.js'
 
-export function useTransactionDetail({ domain, notify, closeSwipe, flashTransaction, highlightTransaction, baseCurrency, ledgerToday, splitDetailNote }) {
+export function useTransactionDetail({ domain, notify, closeSwipe, flashTransaction, baseCurrency, ledgerToday }) {
   const { fx } = useLedgerFx()
   const detailItem = ref(null)
-  const detailExpense = computed(() => detailItem.value ? expenses.value.find((e) => e.id === detailItem.value) ?? null : null)
+  const detailExpense = computed(() => detailItem.value ? expenses.value.find((e) => String(e.id) === String(detailItem.value) && !e.archivedAt && !e.deletedAt && !e.tombstone) ?? null : null)
   const detailEdit = ref(false)
   const detailAmountInput = ref('')
   const detailCategoryInput = ref('')
@@ -52,6 +51,13 @@ export function useTransactionDetail({ domain, notify, closeSwipe, flashTransact
   const refundAmountInput = ref('')
   const refundDateInput = ref('')
   const refundNoteInput = ref('')
+  const refundError = ref('')
+  const linkedRefunds = computed(() => expenses.value.filter((entry) => isRefundTransaction(entry)
+    && entry.refundOf === detailExpense.value?.id && !entry.archivedAt && !entry.deletedAt && !entry.tombstone))
+  const refundOriginal = computed(() => isRefundTransaction(detailExpense.value)
+    ? expenses.value.find((entry) => entry.id === detailExpense.value.refundOf && !entry.archivedAt && !entry.deletedAt && !entry.tombstone) : null)
+  const money = (item) => moneyWithCurrency(item.amount, item.currency || baseCurrency.value)
+  watch([refundAmountInput, refundDateInput, refundNoteInput], () => { refundError.value = '' })
 
   function openDetail(id) {
     detailItem.value = id
@@ -95,6 +101,7 @@ export function useTransactionDetail({ domain, notify, closeSwipe, flashTransact
     }
     let primaryUpdated = false
     try {
+      const previousCategory = e.cat || 'other'
       // 【分摊同步】总额变了而 split 停在旧值时，校验只查 Σ参与者===split.total，
       // 两者都没变所以**校验通过**，于是「我承担」永远按旧份额计入所有合计。
       // 这里按新的总额重建分摊，1 人时就是全额，不改变任何未分摊记录的语义。
@@ -105,12 +112,18 @@ export function useTransactionDetail({ domain, notify, closeSwipe, flashTransact
         currency: currencyField(detailCurrencyInput.value, fx.value),
       }
       if (hasSplit(e)) {
-        patch.split = buildSplit(amount, { count: e.split.participants.length, mine: e.split.mine })
+        const original = normalizeSplit(e.split)
+        const count = original.participants.length
+        const equalShares = splitCentsEvenly(Math.round(original.total * 100), count)
+        const isEqual = original.participants.every((entry, index) => Math.round(entry.amount * 100) === equalShares[index])
+          && Math.round(original.mine * 100) === equalShares[0]
+        patch.split = amount === original.total ? original : buildSplit(amount, { count, mine: isEqual ? null : original.mine })
+        patch.split.participants = patch.split.participants.map((entry, index) => ({ ...entry, label: original.participants[index].label }))
       }
       const updated = domain.updateTransaction(e.id, patch)
       if (!updated) return
       primaryUpdated = true
-      if (updated.name && (e.cat || 'other') !== updated.cat) {
+      if (updated.name && previousCategory !== updated.cat) {
         rememberCategoryOverride(updated.name, updated.cat, updated.direction)
       }
       let previousCategories = []
@@ -124,7 +137,7 @@ export function useTransactionDetail({ domain, notify, closeSwipe, flashTransact
       applySameNameCategory.value = false
       closeSwipe()
       flashTransaction(updated.id)
-      const summary = `已更新 ${updated.direction === 'income' ? '+' : '-'}${moneyRow(updated.amount)} · ${updated.name}`
+      const summary = `已更新 ${updated.direction === 'income' ? '+' : '-'}${money(updated)} · ${updated.name}`
       const message = previousCategories.length
         ? `${summary}，并调整另外 ${previousCategories.length} 笔同名记录`
         : summary
@@ -142,7 +155,7 @@ export function useTransactionDetail({ domain, notify, closeSwipe, flashTransact
     const e = detailExpense.value
     if (!e) return
     closeDetail()
-    return { name: e.name, amount: String(e.amount), cat: e.cat, note: e.note, direction: e.direction, currency: e.currency, split: e.split }
+    return { name: e.name, amount: String(e.amount), cat: e.cat, note: e.note, account: e.account, direction: e.direction, currency: e.currency, split: e.split }
   }
 
   /**
@@ -156,7 +169,7 @@ export function useTransactionDetail({ domain, notify, closeSwipe, flashTransact
    */
   function fullEditFromDetail() {
     const e = detailExpense.value
-    if (!e) return null
+    if (!e || isBillPayment(e) || isRefundTransaction(e)) return null
     closeDetail()
     return {
       id: e.id,
@@ -184,7 +197,7 @@ export function useTransactionDetail({ domain, notify, closeSwipe, flashTransact
     if (!undone) return
     closeSwipe()
     if (String(detailItem.value) === String(e.id)) closeDetail()
-    notify(`已撤销本期账单支付 · ${moneyRow(undone.amount)}`)
+    notify(`已撤销本期账单支付 · ${money(undone)}`)
   }
 
   function deleteFromDetail() {
@@ -199,7 +212,7 @@ export function useTransactionDetail({ domain, notify, closeSwipe, flashTransact
     if (!deleted) return
     closeSwipe()
     if (String(detailItem.value) === String(e.id)) closeDetail()
-    notify(`已删除 ${moneyRow(snapshot.amount)} · ${snapshot.name}`, {
+    notify(`已删除 ${money(snapshot)} · ${snapshot.name}`, {
       actionLabel: '撤销',
       undoFn: () => domain.restoreDeletedTransaction(snapshot),
     })
@@ -217,11 +230,12 @@ export function useTransactionDetail({ domain, notify, closeSwipe, flashTransact
 
   function openRefund() {
     const e = detailExpense.value
-    if (!e) return
+    if (!e || isRefundTransaction(e) || isBillPayment(e) || e.direction === 'income' || refundRemaining(e) <= 0) return
     refundItem.value = e
     refundAmountInput.value = String(refundRemaining(e))
-    refundDateInput.value = appToday.value
+    refundDateInput.value = ledgerToday()
     refundNoteInput.value = ''
+    refundError.value = ''
     showRefund.value = true
   }
 
@@ -233,27 +247,35 @@ export function useTransactionDetail({ domain, notify, closeSwipe, flashTransact
   function confirmRefund() {
     const original = refundItem.value
     if (!original) return
-    const result = domain.refundTransaction(original.id, {
-      amount: refundAmountInput.value,
-      date: refundDateInput.value,
-      note: refundNoteInput.value,
-    })
+    let result
+    try {
+      result = domain.refundTransaction(original.id, {
+        amount: refundAmountInput.value,
+        date: refundDateInput.value,
+        note: refundNoteInput.value,
+      })
+    } catch (cause) {
+      refundError.value = cause?.message || '退款保存失败，请稍后重试'
+      return
+    }
     if (result?.blocked) {
-      notify(result.reason)
+      refundError.value = result.reason
       return
     }
     if (!result) return
     closeRefund()
     closeDetail()
     flashTransaction(result.id)
-    notify(`已登记退款 ${moneyRow(result.amount)} · 原支出已冲抵`)
+    notify(`已登记退款 ${money(result)} · 原支出已冲抵`, {
+      actionLabel: '撤销', undoFn: () => domain.deleteTransaction(result.id), duration: 6000,
+    })
   }
 
   function togglePinName() {
     const e = detailExpense.value
     if (!e) return
     const name = e.name.trim()
-    const prefs = { pinned: [...(freqPrefs.value.pinned ?? [])], hidden: [...(freqPrefs.value.hidden ?? [])] }
+    const prefs = { ...freqPrefs.value, pinned: [...(freqPrefs.value.pinned ?? [])], hidden: [...(freqPrefs.value.hidden ?? [])] }
     if (prefs.pinned.includes(name)) prefs.pinned = prefs.pinned.filter((n) => n !== name)
     else prefs.pinned.push(name)
     freqPrefs.value = prefs
@@ -264,7 +286,7 @@ export function useTransactionDetail({ domain, notify, closeSwipe, flashTransact
     const e = detailExpense.value
     if (!e) return
     const name = e.name.trim()
-    const prefs = { pinned: [...(freqPrefs.value.pinned ?? [])], hidden: [...(freqPrefs.value.hidden ?? [])] }
+    const prefs = { ...freqPrefs.value, pinned: [...(freqPrefs.value.pinned ?? [])], hidden: [...(freqPrefs.value.hidden ?? [])] }
     if (prefs.hidden.includes(name)) prefs.hidden = prefs.hidden.filter((n) => n !== name)
     else {
       prefs.hidden.push(name)
@@ -301,6 +323,10 @@ export function useTransactionDetail({ domain, notify, closeSwipe, flashTransact
     refundAmountInput,
     refundDateInput,
     refundNoteInput,
+    refundError,
+    linkedRefunds,
+    refundOriginal,
+    remainingRefund: computed(() => refundRemaining(detailExpense.value)),
     refundRemaining,
     openRefund,
     closeRefund,

@@ -11,6 +11,8 @@ import VirtualList from '../components/VirtualList.vue'
 import Toast from '../components/Toast.vue'
 import TaskWorkCheckpointFields from '../components/tasks/TaskWorkCheckpointFields.vue'
 import TaskWorkSession from '../components/tasks/TaskWorkSession.vue'
+import LearningNavigation from '../components/learning/LearningNavigation.vue'
+import TaskFocusLink from '../components/learning/TaskFocusLink.vue'
 import { appearance } from '../composables/appearance.js'
 import { findUniqueCourseByName } from '../composables/courseLinks.js'
 import { classifyTasks } from '../composables/smartClassify.js'
@@ -104,8 +106,8 @@ const {
   remove,
 } = useTaskEditor({ domain, tasks, courses, events: domain.events, onSaved: (message) => showToast(message, { type: 'success' }) })
 
-watch(() => [route.query.new, route.query.courseId], ([value, courseId]) => {
-  if (value !== '1') return
+watch(() => [route.path, route.query.new, route.query.courseId], ([path, value, courseId]) => {
+  if (path !== '/tasks' || value !== '1') return
   openAdd()
   /** @type {import('../types/domain').Course | undefined} */
   const linkedCourse = courses.value.find((course) => String(course.id) === String(courseId || '') && !isArchived(course) && !course.deletedAt && !course.tombstone)
@@ -609,6 +611,8 @@ function updateTaskCheckpointField(field, value) {
       </div>
     </header>
 
+    <LearningNavigation current="tasks" />
+
     <div v-if="tasks.length && !showHistory" class="task-overview" role="group" aria-label="待办概览">
       <button type="button" class="card overview-item" :class="{ selected: periodFilter === 'today' }" :aria-pressed="periodFilter === 'today'" @click="selectOverview('today')"><span>今天到期</span><b>{{ workspaceSummary.today }}</b><small>待完成事项</small></button>
       <button type="button" class="card overview-item overdue-overview" :class="{ selected: periodFilter === 'overdue' }" :aria-pressed="periodFilter === 'overdue'" @click="selectOverview('overdue')"><span>已逾期</span><b>{{ workspaceSummary.overdue }}</b><small>完成或重新安排</small></button>
@@ -738,6 +742,7 @@ function updateTaskCheckpointField(field, value) {
           <span class="due" :class="dueInfo(task).cls">{{ dueInfo(task).text }}</span>
 
           <div class="more" @click.stop>
+            <TaskFocusLink v-if="task.sourceType !== 'project-task' && !isArchived(task) && !task.done && task.status !== 'completed' && task.status !== 'cancelled'" :task="task" />
             <button v-if="task.sourceType === 'project-task'" class="link-btn" :aria-label="task.workCheckpoint?.nextStep ? `继续齐行任务：${task.title}` : `打开齐行工作台：${task.title}`" :title="task.workCheckpoint?.nextStep ? '查看齐行上次进度并继续' : '打开齐行工作台'" @click.stop="openProjectTask(task)">{{ task.workCheckpoint?.nextStep ? '继续' : '查看项目' }}</button>
             <button v-if="task.sourceType !== 'project-task' && !isArchived(task) && taskStatus(task) !== 'completed'" class="link-btn continue-link" :aria-label="task.workCheckpoint?.nextStep ? `继续待办：${task.title}` : `开始待办：${task.title}`" :title="task.workCheckpoint?.nextStep ? '查看上次进度并继续' : '开始并记录任务进度'" @click.stop="openTaskWorkSession(task)">{{ task.workCheckpoint?.nextStep ? '继续' : task.status === 'in_progress' ? '工作台' : '开始' }}</button>
             <button v-if="task.sourceType !== 'project-task' && !isArchived(task) && taskStatus(task) === 'overdue'" class="link-btn reschedule-link" title="重新安排日期" @click.stop="openReschedule(task)">重新安排</button>

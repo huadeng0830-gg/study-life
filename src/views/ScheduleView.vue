@@ -1,10 +1,10 @@
 <script setup>
-import { defineAsyncComponent, ref, computed, onBeforeUnmount, onDeactivated, onMounted } from 'vue'
+import { defineAsyncComponent, ref, computed, onBeforeUnmount, onDeactivated } from 'vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import { useDomainCommands } from '../composables/domain/commands.js'
 import { useCourseTemplateCommands } from '../composables/courseTemplates.js'
 import { appearance } from '../composables/appearance.js'
-import { useStoredRef, MAX_WEEK } from '../composables/store'
+import { MAX_WEEK } from '../composables/store'
 import { timeConfig } from '../composables/store/timeConfig.js'
 import {
   semester,
@@ -19,6 +19,7 @@ import { appToday, currentDayIndex, currentWeek as appCurrentWeek } from '../com
 import { isArchived } from '../composables/domain/state.js'
 import QuickRecordPanel from '../components/QuickRecordPanel.vue'
 import ScheduleGrid from '../components/schedule/ScheduleGrid.vue'
+import ScheduleNote from '../components/schedule/ScheduleNote.vue'
 import Toast from '../components/Toast.vue'
 import { useScheduleOcrImport } from '../composables/scheduleOcrImport.js'
 import { DAYS, useScheduleBatchText } from '../composables/scheduleBatchText.js'
@@ -27,6 +28,8 @@ import { useScheduleCourseManager } from '../composables/scheduleCourseManager.j
 import { useScheduleCampusSeason } from '../composables/scheduleCampusSeason.js'
 import { useScheduleCourseForm } from '../composables/scheduleCourseForm.js'
 import { useScheduleFocusRoute } from '../composables/scheduleFocusRoute.js'
+import LearningNavigation from '../components/learning/LearningNavigation.vue'
+import { buildCourseProgress } from '../composables/courseProgress.js'
 
 // 弹窗一律按需加载：仅“查看课程表”不再下载作息设置、批量录入等大体量模块，
 // 打开课程表更快，内存占用更小（这些弹窗只有在真正点开时才会加载）。
@@ -38,29 +41,20 @@ const ImportConflictModal = defineAsyncComponent(() => import('../components/sch
 const ExceptionsModal = defineAsyncComponent(() => import('../components/schedule/ExceptionsModal.vue'))
 const SemesterModal = defineAsyncComponent(() => import('../components/schedule/SemesterModal.vue'))
 const TimeSettingsModal = defineAsyncComponent(() => import('../components/schedule/TimeSettingsModal.vue'))
+const StudyPlanner = defineAsyncComponent(() => import('../components/learning/StudyPlanner.vue'))
 
 const domain = useDomainCommands()
 const { courses, tasks, milestones: countdowns } = domain
+const showLearningPlan = ref(false)
+const courseProfiles = computed(() => buildCourseProgress({ courses: courses.value, tasks: tasks.value, milestones: countdowns.value }))
+const courseProgress = computed(() => Object.fromEntries(courseProfiles.value.map((item) => [String(item.course.id), { pending: item.pendingTasks.length, overdue: item.overdueCount } ])))
+const learningPendingCount = computed(() => courseProfiles.value.filter((item) => !item.archived).reduce((sum, item) => sum + item.pendingTasks.length, 0))
+const editingProfile = computed(() => courseProfiles.value.find((item) => String(item.course.id) === String(editingId.value)))
 const showArchivedCourses = ref(false)
 const visibleCourses = computed(() => showArchivedCourses.value ? courses.value : courses.value.filter((course) => !isArchived(course)))
 const courseTemplateCommands = useCourseTemplateCommands()
 const { templates: courseTemplates } = courseTemplateCommands
 const toast = ref({ open: false, message: '', type: 'info', actionLabel: '', undoFn: null, viewFn: null, duration: 3200 })
-const scheduleNote = useStoredRef('sl_schedule_note', '')
-const scheduleNoteEl = ref(null)
-
-function saveScheduleNote() {
-  // 备注内容已通过 useStoredRef 自动保存
-}
-
-function resizeScheduleNote() {
-  const element = scheduleNoteEl.value
-  if (!element) return
-  element.style.height = 'auto'
-  element.style.height = `${Math.min(Math.max(element.scrollHeight, 38), 180)}px`
-}
-
-onMounted(resizeScheduleNote)
 
 function showToast(message, { type = 'info', actionLabel = '', undoFn = null, viewFn = null, duration = 3200 } = {}) {
   toast.value = { open: true, message, type, actionLabel, undoFn, viewFn, duration }
@@ -256,6 +250,8 @@ function confirmDeleteCourse() {
       </div>
     </div>
 
+    <LearningNavigation current="schedule" />
+
     <section v-if="showScheduleSettings" class="schedule-settings" aria-label="课程表设置">
       <div><h2>课程</h2><button class="btn btn-ghost" @click="openCourseManager">☷ 批量管理</button><button class="btn btn-ghost" @click="openBatchShift">⇩ 导入课程表</button></div>
       <div><h2>时间与日期</h2><button class="btn btn-ghost" @click="showSemester = true">📅 学期</button><button class="btn btn-ghost" @click="openTimeSettings">🕐 作息与节次</button></div>
@@ -358,24 +354,19 @@ function confirmDeleteCourse() {
       :current-day-index="todayIdx"
       :focused-course-id="focusedCourseId"
       :appearance="appearance"
+      :course-progress="courseProgress"
       @open-add="openAdd"
       @open-edit="openEdit"
       @mobile-day-change="shiftMobileDay"
       @open-adjustments="openExceptionManager"
     />
 
-    <div class="schedule-note">
-      <textarea
-        ref="scheduleNoteEl"
-        v-model="scheduleNote"
-        rows="1"
-        aria-label="课程表备注"
-        placeholder="📝 课程表备注..."
-        class="schedule-note-input"
-        @input="resizeScheduleNote"
-        @blur="saveScheduleNote"
-      ></textarea>
-    </div>
+    <section v-if="!showArchivedCourses" class="learning-plan-section panel" aria-label="课表学习联动">
+      <button type="button" class="learning-plan-toggle" :aria-expanded="showLearningPlan" aria-controls="schedule-learning-plan" @click="showLearningPlan = !showLearningPlan"><span><b>学习安排</b><small>{{ learningPendingCount ? `${learningPendingCount} 项课程待办，利用课表空档继续推进` : '把课程待办、复习和专注接到课表上' }}</small></span><span>{{ showLearningPlan ? '收起 ↑' : '展开 →' }}</span></button>
+      <div v-if="showLearningPlan" id="schedule-learning-plan" class="learning-plan-content"><StudyPlanner /></div>
+    </section>
+
+    <ScheduleNote />
 
     <CourseEditorModal
       :open="showForm"
@@ -383,8 +374,8 @@ function confirmDeleteCourse() {
       :form="form"
       :courses="courses"
       :time-config="timeConfig"
-      :linked-tasks="editingId ? tasks.filter((task) => task.courseId === editingId) : []"
-      :linked-countdowns="editingId ? countdowns.filter((item) => item.category === '学习' && item.courseId === editingId) : []"
+      :linked-tasks="editingProfile?.pendingTasks.map((row) => row.task) || []"
+      :linked-countdowns="editingProfile?.milestones.filter((item) => item.category === '学习' && !isArchived(item)) || []"
       :linked-review-progress="editingId ? linkedStudyProgress(editingId) : null"
       @close="showForm = false"
       @save="saveCourseFromEditor"
@@ -597,6 +588,13 @@ function confirmDeleteCourse() {
 .head-btns {
   gap:10px;
   display:flex}
+.learning-plan-section { padding: 0; }
+.learning-plan-toggle { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; padding: 14px 16px; border: 0; border-radius: var(--radius-12); background: transparent; color: var(--primary); text-align: left; cursor: pointer; font-size: var(--fs-12); }
+.learning-plan-toggle > span:first-child { display: grid; gap: 4px; min-width: 0; }
+.learning-plan-toggle b { color: var(--text); font-size: var(--fs-14); }
+.learning-plan-toggle small { color: var(--ink-soft); font-size: var(--fs-12); line-height: 1.5; }
+.learning-plan-toggle > span:last-child { flex-shrink: 0; }
+.learning-plan-content { padding: 0 16px 16px; }
 .schedule-settings {
   border:1px solid var(--border);
   background:var(--bg-tint);
@@ -718,12 +716,13 @@ function confirmDeleteCourse() {
   grid-template-columns:1fr;
   gap:11px}
 .head {
-  flex-direction:column;
-  align-items:flex-start;
-  gap:12px}
+  flex-direction:row;
+  align-items:center;
+  gap:8px}
 .head-btns {
   flex-wrap:nowrap;
-  width:100%;
+  width:auto;
+  max-width:calc(100% - 86px);
   padding-bottom:2px;
   overflow-x:auto}
 .head-btns .btn {
@@ -735,10 +734,11 @@ function confirmDeleteCourse() {
   align-items:flex-start;
   gap:12px}
 .seg-group {
-  flex-direction:column;
-  align-items:flex-start;
+  flex-direction:row;
+  align-items:center;
   gap:5px;
   max-width:100%}
+.mobile-view-switcher .seg-label { display:none; }
 .toolbar .seg {
   max-width:calc(100vw - 40px)}
 .add-actions {
@@ -764,35 +764,9 @@ function confirmDeleteCourse() {
   font-size:var(--fs-20)}
 
 .mobile-view-switcher {
-  width:100%}
+  width:auto}
 .mobile-view-switcher .seg,.mobile-view-switcher .seg button {
   flex:1}
 }
-
-.schedule-note {
-  margin-top:8px}
-.schedule-note-input {
-  border:1px solid var(--border);
-  background:var(--card);
-  width:100%;
-  min-height:38px;
-  max-height:180px;
-  color:var(--text);
-  resize:vertical;
-  -webkit-overflow-scrolling:touch;
-  touch-action:pan-y;
-  transition:border-color var(--dur-base) var(--ease-standard), box-shadow var(--dur-base) var(--ease-standard);
-  border-radius:var(--radius-10);
-  padding:10px 14px;
-  font-size:var(--fs-14);
-  line-height:1.55;
-  overflow-y:auto}
-/* 不再写 outline:none：scoped 类选择器的特异性会压过全局 :focus-visible 焦点环。
-   鼠标点击的默认 UA 环由全局 input:focus 样式（style.css 已统一处理）。 */
-.schedule-note-input:focus {
-  border-color:var(--primary);
-  box-shadow:0 0 0 3px var(--primary-soft)}
-.schedule-note-input::placeholder {
-  color:var(--muted)}
 
 </style>

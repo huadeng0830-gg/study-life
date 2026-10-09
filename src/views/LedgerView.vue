@@ -7,14 +7,14 @@ import ConfirmDialog from '../components/ConfirmDialog.vue'
 import Toast from '../components/Toast.vue'
 import { ledgerTabFromQuery } from '../composables/routeState.js'
 import {
-  activeCategories,
+  ledgerCategories,
   catInfo,
   computeFrequentFromIndex,
   expenses,
   freqPrefs,
   ledgerIndex,
 } from '../composables/ledger.js'
-import { moneyRow } from '../utils/formatters.js'
+import { moneyWithCurrency } from '../utils/formatters.js'
 import { useDomainCommands } from '../composables/domain/commands.js'
 import { policyTimeKey } from '../composables/settingsPolicy.js'
 import { appNow, appToday } from '../composables/timeContext.js'
@@ -22,7 +22,7 @@ import { clearFocusFromRoute, focusElementWhenReady, readFocusQuery } from '../c
 import { useTabKeys } from '../composables/tabKeys.js'
 // 本轮新增的四个功能各自一个模块：多币种汇率 / 预算预警 / 账单模板 / 报销分摊。
 // 它们都只提供纯函数与新选择器，既有汇总路径（buildLedgerIndex 等）一行都没改。
-import { normalizeCurrency, normalizeLedgerFx, useLedgerFx } from '../composables/ledgerFx.js'
+import { createLedgerBaseConverter, normalizeCurrency, normalizeLedgerFx, useLedgerFx } from '../composables/ledgerFx.js'
 import { sumLedgerMonthInBase } from '../composables/ledgerFx.js'
 import { useLedgerBudget } from '../composables/ledgerBudget.js'
 import { useLedgerFeed } from '../composables/ledgerView/feed.js'
@@ -156,6 +156,10 @@ const {
   fAccount,
   fKind,
   fDirection,
+  fCurrency,
+  currencyOptions: filterCurrencyOptions,
+  filterError,
+  filterSummary,
   filteredExpenses,
   filtersActive,
   clearFilters,
@@ -214,7 +218,7 @@ function undoBillPaymentById(id) {
   if (!undone) return
   closeSwipe()
   if (String(detailItem.value) === String(target.id)) closeDetail()
-  showToast(`已撤销本期账单支付 · ${moneyRow(undone.amount)}`)
+  showToast(`已撤销本期账单支付 · ${moneyWithCurrency(undone.amount, undone.currency || baseCurrency.value)}`)
 }
 function deleteTransactionById(id) {
   const target = expenses.value.find((item) => String(item.id) === String(id))
@@ -228,7 +232,7 @@ function deleteTransactionById(id) {
   if (!deleted) return
   closeSwipe()
   if (String(detailItem.value) === String(target.id)) closeDetail()
-  showToast(`已删除 ${moneyRow(snapshot.amount)} · ${snapshot.name}`, {
+  showToast(`已删除 ${moneyWithCurrency(snapshot.amount, snapshot.currency || baseCurrency.value)} · ${snapshot.name}`, {
     actionLabel: '撤销',
     undoFn: () => {
       domain.restoreDeletedTransaction(snapshot)
@@ -237,7 +241,6 @@ function deleteTransactionById(id) {
 }
 
 const highlightedTransactionId = ref('')
-const detailItem = ref(null)
 const focusedBillId = ref('')
 const focusMessage = ref('')
 let highlightTimer = 0
@@ -296,7 +299,7 @@ onMounted(() => {
 
 /* ---------- 分摊口径的「我花了多少」 ---------- */
 // 三个口径块（今天/本周/本月 + 分摊摘要 + 环比）整段搬进 composables/ledgerView/spendStats.js。
-const { spendStats, currentMonthPersonal, currentMonthHasSplit, monthCompare } = useLedgerSpendStats()
+const { spendStats, spendMissingRates, currentMonthPersonal, currentMonthHasSplit, monthCompare } = useLedgerSpendStats()
 
 /* ================= 多币种汇率 + 预算（页面侧派生） ================= */
 // 汇率与预算都是页面侧的新 computed：既有的 monthStats / spendStats 一行没改。
@@ -321,7 +324,10 @@ const {
   currencyInput,
   splitCount,
   splitMine,
+  splitMode,
   splitPreview,
+  formError,
+  errorField,
   dupWarn,
   forceDup,
   keepAdding,
@@ -385,11 +391,13 @@ function closeQuickModal() {
 async function handleQuickSave(keepOpen) {
   const saved = await saveExpense(keepOpen, editingId.value)
   if (saved && !keepOpen) closeQuickModal()
+  return saved
 }
 
 // 新增：记录详情 composable
 const {
   open: detailOpen,
+  detailItem,
   detailExpense,
   detailEdit,
   detailAmountInput,
@@ -403,11 +411,16 @@ const {
   refundAmountInput,
   refundDateInput,
   refundNoteInput,
+  refundError,
+  linkedRefunds,
+  refundOriginal,
+  remainingRefund,
   openDetail,
   closeDetail,
   editFromDetail,
   cancelDetailEdit,
   saveDetailEdit,
+  againFromDetail,
   fullEditFromDetail,
   undoBillPaymentFromDetail,
   deleteFromDetail,
@@ -427,6 +440,16 @@ const {
   splitDetailNote,
 })
 
+function openFullDetailEditor() {
+  const prefill = fullEditFromDetail()
+  if (prefill) openQuick(prefill)
+}
+
+function repeatDetailRecord() {
+  const prefill = againFromDetail()
+  if (prefill) openQuick(prefill)
+}
+
 // 新增：汇率/预算页面态 composable
 const {
   baseCurrency,
@@ -443,17 +466,23 @@ const {
 
 /* ---------- 账单导出（按月，人类可读） ---------- */
 // 导出（CSV / xlsx）整段搬进 composables/ledgerView/export.js；月份来自回顾分区。
-const { exportLedgerCsv, exportLedgerXlsx, exportAllLedgerXlsx } = useLedgerExport({
+const { exportLedgerCsv, exportLedgerXlsx, exportAllLedgerXlsx, exportFilteredCsv: exportFilteredLedgerCsv, exportFilteredXlsx: exportFilteredLedgerXlsx, exporting } = useLedgerExport({
   getMonth: () => reviewMonth.value,
+  getFilteredItems: () => filteredExpenses.value,
   personalAmount,
   baseCurrency,
   notify: showToast,
 })
-const allActiveCategories = computed(() => [...activeCategories('expense'), ...activeCategories('income')])
+const allActiveCategories = computed(() => ledgerCategories.value)
 const accountOptions = computed(() => [...new Set(ledgerIndex.value.sortedExpenses
   .map((item) => String(item?.account ?? '').trim())
   .filter(Boolean))].sort((a, b) => a.localeCompare(b)))
-const monthCategoryTotals = computed(() => personalMonthCategoryTotals(expenses.value, ledgerToday()))
+const monthCategoryTotals = computed(() => {
+  const convert = createLedgerBaseConverter(fx.value)
+  return personalMonthCategoryTotals(expenses.value, ledgerToday(), {
+    amountOf: (item) => convert(mySpendYuan(item), item.currency).cents ?? 0,
+  })
+})
 const categoryOverview = computed(() => {
   // 与 hero 的「本月承担」同源：分类条回答的也是「我的钱花到哪去了」，
   // 用全额分类合计会让同一屏上出现「本月承担 ¥40 / 其它 ¥200」这种自相矛盾。
@@ -479,7 +508,7 @@ const monthCategoryKeys = computed(() => [...monthCategoryTotals.value.keys()])
 const frequent = computed(() => computeFrequentFromIndex(ledgerIndex.value, freqPrefs.value))
 
 function useFrequent(item) {
-  openQuick({ name: item.name, amount: String(item.amount || ''), cat: item.cat })
+  openQuick({ name: item.name, amount: String(item.amount ?? ''), cat: item.cat, currency: item.currency, account: item.account })
 }
 
 /* ================= 回顾 ================= */
@@ -550,7 +579,9 @@ const {
     <!-- ================= 账本首页 ================= -->
     <div v-if="tab === 'ledger'" role="tabpanel" aria-labelledby="ledger-tab-ledger">
       <LedgerHomePanel
+        :base-currency="baseCurrency"
         :spend-stats="spendStats"
+        :spend-missing-rates="spendMissingRates"
         :current-month-has-split="currentMonthHasSplit"
         :current-month-personal="currentMonthPersonal"
         :month-compare="monthCompare"
@@ -574,6 +605,11 @@ const {
         :f-max="fMax"
         :f-kind="fKind"
         :f-direction="fDirection"
+        :f-currency="fCurrency"
+        :filter-currency-options="filterCurrencyOptions"
+        :filter-error="filterError"
+        :filter-summary="filterSummary"
+        :exporting="exporting"
         :all-active-categories="allActiveCategories"
         :account-options="accountOptions"
         :can-expand-feed="canExpandFeed"
@@ -608,6 +644,9 @@ const {
         @update-f-max="fMax = $event"
         @update-f-kind="fKind = $event"
         @update-f-direction="fDirection = $event"
+        @update-f-currency="fCurrency = $event"
+        @export-filtered-csv="exportFilteredLedgerCsv"
+        @export-filtered-xlsx="exportFilteredLedgerXlsx"
         @open-detail="openDetail"
         @transaction-swipe="onTransactionSwipe"
         @swipe-action="onTransactionSwipeAction"
@@ -640,6 +679,7 @@ const {
     <!-- ================= 回顾 ================= -->
     <div v-else role="tabpanel" aria-labelledby="ledger-tab-review">
       <ReviewPanel
+        :exporting="exporting"
         :monthly-trend="reviewTrendMonths"
         :earliest-trend-month="earliestTrendMonth"
         :trend-currency="baseCurrency"
@@ -701,7 +741,11 @@ const {
       :currency-input="currencyInput"
       :split-count="splitCount"
       :split-mine="splitMine"
+      :split-mode="splitMode"
       :split-preview="splitPreview"
+      :form-error="formError"
+      :error-field="errorField"
+      :save-action="handleQuickSave"
       :dup-warn="dupWarn"
       :force-dup="forceDup"
       :cycle-suggest="cycleSuggest"
@@ -725,6 +769,7 @@ const {
       @update:currency-input="currencyInput = $event"
       @update:split-count="splitCount = $event"
       @update:split-mine="splitMine = $event"
+      @update:split-mode="splitMode = $event"
       @update:show-all-quick-categories="showAllQuickCategories = $event"
       @update:direction-input="directionInput = $event"
       @update:more-open="moreOpen = $event"
@@ -762,6 +807,10 @@ const {
       :refund-amount-input="refundAmountInput"
       :refund-date-input="refundDateInput"
       :refund-note-input="refundNoteInput"
+      :refund-error="refundError"
+      :linked-refunds="linkedRefunds"
+      :refund-original="refundOriginal"
+      :remaining-refund="remainingRefund"
       :base-currency="baseCurrency"
       :splitDetailNote="splitDetailNote"
       @update:open="closeDetail()"
@@ -779,8 +828,9 @@ const {
       @edit-from-detail="editFromDetail"
       @save-detail-edit="saveDetailEdit"
       @cancel-detail-edit="cancelDetailEdit"
-      @again-from-detail="openQuick($event); closeDetail()"
-      @full-edit-from-detail="openQuick(fullEditFromDetail())"
+      @again-from-detail="repeatDetailRecord"
+      @full-edit-from-detail="openFullDetailEditor"
+      @open-related-record="openDetail"
       @undo-bill-payment-from-detail="undoBillPaymentFromDetail"
       @delete-from-detail="deleteFromDetail"
       @open-refund="openRefund"

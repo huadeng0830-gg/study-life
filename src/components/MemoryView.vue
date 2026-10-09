@@ -1,4 +1,5 @@
 <script setup>
+import ActionButton from './ActionButton.vue'
 import { computed, ref, watch } from 'vue'
 import Modal from './Modal.vue'
 import EmptyState from './EmptyState.vue'
@@ -155,8 +156,8 @@ watch(() => props.open, (open) => {
         </div>
 
         <div class="memory-actions">
-          <button type="button" class="btn btn-ghost" @click="onCopy">复制</button>
-          <button type="button" class="btn btn-primary" @click="onShare">分享</button>
+          <ActionButton tone="ghost" type="button" class="btn btn-ghost" kind="frequent" feedback="external" :show-error="false" :action="() => onCopy()">复制</ActionButton>
+          <ActionButton tone="primary" type="button" class="btn btn-primary" kind="important" feedback="external" :show-error="false" :action="() => onShare()">分享</ActionButton>
         </div>
       </div>
 

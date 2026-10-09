@@ -224,16 +224,15 @@ const allGroups = computed(() => {
   if (courses) out.push(courses)
 
   const checklistEntries = checklists.value
-    .flatMap((list) => (Array.isArray(list?.items) ? list.items.map((item) => ({ list: list.name || '', item })) : []))
+    .flatMap((list) => (Array.isArray(list?.items) ? list.items.map((item) => ({ list: list.name || '', item, updatedAt: list.updatedAt || list.createdAt })) : []))
   const checklistItems = group('checklist', text, collect(checklistEntries, text, (row) => (row.item ? hit({
     id: row.item.id,
-    title: row.item.text || row.item.title,
-    contents: [row.item.note],
-    // 清单条目没有 updatedAt：取 0 就等于"同级按原顺序"，也就是清单内的书写顺序。
-    updatedAt: '',
+    title: row.item.name || row.item.text || row.item.title,
+    contents: [row.item.note, row.item.category, row.list],
+    updatedAt: row.updatedAt || '',
     meta: row.list,
     archived: row.item.done === true,
-    to: { path: '/lists' },
+    to: focusLocation('/lists', row.item.id),
   }) : null), (row) => live(row.item)))
   if (checklistItems) out.push(checklistItems)
 

@@ -105,9 +105,12 @@ const CURRENCY_SYMBOLS = {
  * 空币种 = 基准币种（与记录侧「旧记录没有 currency」的约定一致），显示仍为 ¥。
  */
 export function moneyWithCurrency(v, currency = 'CNY') {
+  return moneyRow(v).replace(/^¥/, currencySymbol(currency))
+}
+
+export function currencySymbol(currency = 'CNY') {
   const code = String(currency ?? '').trim().toUpperCase() || 'CNY'
-  const symbol = CURRENCY_SYMBOLS[code] ?? `${code} `
-  return moneyRow(v).replace(/^¥/, symbol)
+  return CURRENCY_SYMBOLS[code] ?? `${code} `
 }
 
 // 相对日期标签：今天 / 昨天 / M月D日。

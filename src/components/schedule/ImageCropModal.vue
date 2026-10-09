@@ -1,4 +1,6 @@
 <script setup>
+import ActionButton from '../ActionButton.vue'
+import { useLatestTask } from '../../composables/latestTask.js'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import Modal from '../Modal.vue'
 import { cropCanvasDimensions } from '../../composables/imageCropSizing.js'
@@ -16,7 +18,9 @@ function resetPreview(file) {
   imageUrl.value = file ? URL.createObjectURL(file) : ''
   selection.value = { left: 0, top: 0, right: 100, bottom: 100 }
 }
-watch(() => props.file, resetPreview, { immediate: true })
+const crops = useLatestTask()
+watch(() => props.file, (file) => { crops.cancel(); resetPreview(file) }, { immediate: true })
+watch(() => props.show, (value) => { if (!value) crops.cancel() })
 onBeforeUnmount(() => { if (imageUrl.value) URL.revokeObjectURL(imageUrl.value) })
 
 function point(event) {
@@ -109,10 +113,11 @@ function onStageKeydown(event) {
 }
 
 async function confirm() {
+  const job = crops.begin()
   const file = props.file
   const img = imageEl.value
   const crop = selection.value
-  if (!file || !img || crop.right - crop.left < 4 || crop.bottom - crop.top < 4) return
+  if (!file || !img || crop.right - crop.left < 4 || crop.bottom - crop.top < 4) { job.finish(); return false }
   const canvas = document.createElement('canvas')
   const sx = Math.round(img.naturalWidth * crop.left / 100)
   const sy = Math.round(img.naturalHeight * crop.top / 100)
@@ -129,8 +134,10 @@ async function confirm() {
     // toBlob 完成后及时释放像素缓冲，避免弹窗关闭前同时保留大画布和 PNG。
     canvas.width = 1
     canvas.height = 1
+    job.finish()
   }
-  if (!blob) return
+  if (!job.isCurrent()) return false
+  if (!blob) throw new Error('图片裁切失败，请重新选择图片后重试')
   emit('confirm', new File([blob], `${file.name.replace(/\.[^.]+$/, '') || 'timetable'}-crop.png`, { type: 'image/png', lastModified: Date.now() }))
 }
 </script>
@@ -155,7 +162,7 @@ async function confirm() {
         <i class="crop-selection" :style="{ left: `${selection.left}%`, top: `${selection.top}%`, width: `${selection.right - selection.left}%`, height: `${selection.bottom - selection.top}%` }"></i>
       </div>
       <p class="crop-readout" aria-live="polite">{{ selectionReadout }}</p>
-      <div class="actions"><button class="btn" @click="emit('close')">取消</button><button class="btn btn-primary" :disabled="selection.right - selection.left < 4 || selection.bottom - selection.top < 4" @click="confirm">裁切并识别</button></div>
+      <div class="actions"><button class="btn" @click="emit('close')">取消</button><ActionButton tone="primary" class="btn btn-primary" :disabled="selection.right - selection.left < 4 || selection.bottom - selection.top < 4" kind="task" feedback="external" :action="confirm">裁切并识别</ActionButton></div>
     </div>
   </Modal>
 </template>

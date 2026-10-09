@@ -1,0 +1,323 @@
+.focus-checkpoint { margin: 0; color: var(--primary); font-size: var(--fs-12); line-height: 1.6; overflow-wrap: anywhere; }
+.focus-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+}
+.focus-flash {
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: var(--radius-9);
+  color: var(--success);
+  background: color-mix(in srgb, var(--success) 10%, var(--card));
+  border: 1px solid color-mix(in srgb, var(--success) 35%, var(--card));
+  font-size: var(--fs-12-5);
+}
+.focus-active,
+.focus-rest,
+.focus-completed,
+.focus-idle {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+.focus-goal-label {
+  color: var(--ink-soft);
+  font-size: var(--fs-13);
+  font-weight: var(--fw-600);
+  align-self: flex-start;
+}
+.focus-goal-row {
+  display: flex;
+  gap: 8px;
+  position: relative;
+  flex-wrap: wrap;
+}
+.goal-input {
+  flex: 1;
+  min-width: min(240px, 100%);
+  padding: 10px 12px;
+  border-radius: var(--radius-10);
+}
+.goal-input[readonly] {
+  color: var(--ink-soft);
+  background: var(--primary-soft);
+  border-color: transparent;
+}
+.pick-todo-btn,
+.unlink-btn {
+  white-space: nowrap;
+  padding: 9px 14px;
+  min-height: 40px;
+}
+.recent-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: -2px;
+}
+.recent-label {
+  color: var(--ink-faint);
+  font-size: var(--fs-12);
+}
+.recent-chip {
+  border: 1px solid var(--border);
+  background: var(--bg-tint);
+  border-radius: var(--radius-pill);
+  padding: 5px 10px;
+  font-size: var(--fs-12);
+  color: var(--ink-soft);
+  cursor: pointer;
+}
+.recent-chip:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: var(--primary-soft);
+}
+.focus-clock {
+  color: var(--primary);
+  font-size: clamp(30px, 3vw, 38px);
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.15;
+}
+.focus-clock.overtime {
+  color: #0ea271;
+}
+.focus-target {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.focus-target strong {
+  font-size: var(--fs-15);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.focus-type-tag {
+  flex: 0 0 auto;
+  font-size: var(--fs-11);
+  font-weight: var(--fw-700);
+  padding: 3px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+.focus-state-line {
+  margin: 0;
+  color: var(--ink-faint);
+  font-size: var(--fs-12-5);
+}
+.focus-round {
+  margin: 0;
+  color: var(--primary);
+  font-size: var(--fs-12);
+  font-weight: var(--fw-700);
+}
+.focus-rest-summary {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: var(--fs-12-5);
+}
+.focus-actions {
+  display: flex;
+  gap: 9px;
+}
+.focus-actions .btn {
+  flex: 1;
+  min-height: 44px;
+}
+.time-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.time-chip {
+  min-height: 40px;
+  min-width: 56px;
+  padding: 8px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-10);
+  background: var(--card);
+  color: var(--ink-soft);
+  font-weight: var(--fw-650);
+  font-size: var(--fs-14);
+  cursor: pointer;
+}
+.time-chip.on {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+.start-btn {
+  min-height: 48px;
+  font-size: var(--fs-15);
+  border-radius: var(--radius-12);
+}
+.link-hint {
+  margin: 0;
+  color: var(--ink-faint);
+  font-size: var(--fs-12);
+}
+.focus-done-mark {
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-circle);
+  background: color-mix(in srgb, var(--success) 10%, var(--card));
+  color: var(--success);
+  font-size: var(--fs-22);
+  font-weight: var(--fw-900);
+}
+.focus-done-title {
+  margin: 0;
+  font-size: var(--fs-16);
+  font-weight: var(--fw-700);
+}
+.focus-done-time {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: var(--fs-13-5);
+}
+.focus-done-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px;
+}
+.focus-done-actions .btn {
+  min-height: 44px;
+}
+.focus-done-hint {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  /* 写死的 #087a58 落在主题卡片的 var(--card) 上，深色主题只有 2.97:1
+     （浅色 5.34:1）——13px/600 属正文，门槛 4.5。改用令牌后浅色 5.63、深色 8.15。 */
+  color: var(--success);
+  font-size: var(--fs-13);
+  font-weight: var(--fw-600);
+}
+.focus-rest-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-top: 4px;
+  color: var(--ink-faint);
+  font-size: var(--fs-12-5);
+}
+.rest-btn {
+  padding: 7px 12px;
+  min-height: 38px;
+  font-size: var(--fs-12-5);
+}
+.todo-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 55vh;
+  max-height: 55dvh;
+  overflow-y: auto;
+}
+.todo-option {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 3px;
+  padding: 11px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-10);
+  background: var(--card);
+  text-align: left;
+  cursor: pointer;
+}
+.todo-option:hover {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+}
+.todo-option-title {
+  color: var(--text);
+  font-size: var(--fs-14);
+  font-weight: var(--fw-600);
+}
+.todo-option small {
+  color: var(--ink-faint);
+  font-size: var(--fs-12);
+}
+.empty-line {
+  color: var(--ink-faint);
+  font-size: var(--fs-13);
+  padding: 8px 0;
+}
+.custom-time {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.custom-time label {
+  color: var(--ink-soft);
+  font-weight: var(--fw-600);
+  font-size: var(--fs-13);
+}
+.custom-time input {
+  font-size: var(--fs-18);
+  padding: 10px 12px;
+}
+.custom-hint,
+.early-hint {
+  margin: 0;
+  color: var(--ink-faint);
+  font-size: var(--fs-12-5);
+}
+.custom-error {
+  margin: 0;
+  color: var(--danger);
+  font-size: var(--fs-12-5);
+}
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 9px;
+}
+.modal-actions .btn {
+  min-height: 44px;
+}
+.early-text {
+  margin: 0;
+  font-size: var(--fs-15);
+  font-weight: var(--fw-700);
+}
+@media (max-width: 520px) {
+  .focus-goal-row {
+    flex-direction: column;
+  }
+  .goal-input {
+    width: 100%;
+    min-width: 0;
+  }
+  .pick-todo-btn,
+  .unlink-btn {
+    width: 100%;
+  }
+  .time-chip {
+    flex: 1;
+    min-width: 56px;
+    height: 46px;
+  }
+  .start-btn {
+    width: 100%;
+    height: 52px;
+  }
+  .focus-actions {
+    width: 100%;
+  }
+  .focus-actions .btn {
+    height: 48px;
+  }
+}

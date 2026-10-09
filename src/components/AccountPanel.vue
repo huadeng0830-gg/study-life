@@ -1,4 +1,5 @@
 <script setup>
+import ActionButton from './ActionButton.vue'
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Modal from './Modal.vue'
 import AccountSyncPanel from './data/AccountSyncPanel.vue'
@@ -285,9 +286,9 @@ onBeforeUnmount(() => {
         <h3 id="account-confirmation-title" ref="summaryHeading" tabindex="-1">验证邮箱</h3>
         <p>请在 <strong class="account-email">{{ confirmationEmail }}</strong> 中打开验证链接。</p>
         <p class="account-help">没有收到邮件时，请检查垃圾邮件或稍后重新发送。</p>
-        <button type="button" class="btn" :disabled="busy || resendSeconds > 0" :aria-busy="busy" @click="resend">
+        <ActionButton tone="neutral" type="button" class="btn" :disabled="busy || resendSeconds > 0" :busy="busy" kind="important" feedback="external" :show-error="false" :action="() => resend()">
           {{ resendSeconds > 0 ? resendSeconds + ' 秒后可重发' : '重新发送验证邮件' }}
-        </button>
+        </ActionButton>
         <div class="account-links">
           <button type="button" class="btn btn-primary" :disabled="busy" @click="changeMode('login')">已验证，去登录</button>
           <button type="button" class="btn" :disabled="busy" @click="changeMode('register')">更换邮箱</button>
@@ -298,7 +299,7 @@ onBeforeUnmount(() => {
         <h3 id="account-recovery-title" ref="summaryHeading" tabindex="-1">检查密码重设邮件</h3>
         <p>如果 <strong class="account-email">{{ recoveryEmail }}</strong> 已注册，你会收到一封包含重设链接的邮件。</p>
         <p class="account-help">{{ recoveryHelp }}</p>
-        <button type="button" class="btn" :disabled="busy || resendSeconds > 0" :aria-busy="busy" @click="submit">{{ resendSeconds > 0 ? resendSeconds + ' 秒后可重发' : '重新发送重设邮件' }}</button>
+        <ActionButton tone="neutral" type="button" class="btn" :disabled="busy || resendSeconds > 0" :busy="busy" kind="important" feedback="external" :show-error="false" :action="() => submit()">{{ resendSeconds > 0 ? resendSeconds + ' 秒后可重发' : '重新发送重设邮件' }}</ActionButton>
         <div class="account-links"><button type="button" class="btn btn-primary" :disabled="busy" @click="changeMode('login')">返回登录</button><button type="button" class="btn" :disabled="busy" @click="changeMode('recovery')">更换邮箱</button></div>
       </section>
 
@@ -332,9 +333,9 @@ onBeforeUnmount(() => {
             <p v-if="errors.confirmation" id="account-confirmation-error" class="account-error">{{ errors.confirmation }}</p>
           </div>
           <label v-if="mode !== 'recovery'" class="account-password-toggle"><input v-model="passwordVisible" type="checkbox" :disabled="busy || !accountAvailable" />显示密码</label>
-          <button type="submit" class="btn btn-primary account-submit" :disabled="busy || !accountAvailable || (isEmailFlow && resendSeconds > 0)" :aria-busy="busy">{{ busy ? '正在处理…' : isEmailFlow && resendSeconds > 0 ? resendSeconds + ' 秒后可发送' : mode === 'register' ? '创建账号' : mode === 'recovery' ? '发送重设邮件' : '登录' }}</button>
+          <ActionButton tone="primary" kind="important" feedback="external" :show-error="false" type="submit" class="btn btn-primary account-submit" :disabled="busy || !accountAvailable || (isEmailFlow && resendSeconds > 0)" :busy="busy">{{ busy ? '正在处理…' : isEmailFlow && resendSeconds > 0 ? resendSeconds + ' 秒后可发送' : mode === 'register' ? '创建账号' : mode === 'recovery' ? '发送重设邮件' : '登录' }}</ActionButton>
           <button v-if="mode === 'recovery'" type="button" class="btn btn-ghost" :disabled="busy" @click="changeMode('login')">返回登录</button>
-          <button v-if="accountCallbackError && accountAvailable" type="button" class="btn" :disabled="busy || resendSeconds > 0" @click="resend">{{ resendSeconds > 0 ? resendSeconds + ' 秒后可重发' : '重新发送验证邮件' }}</button>
+          <ActionButton tone="neutral" v-if="accountCallbackError && accountAvailable" type="button" class="btn" :disabled="busy || resendSeconds > 0" kind="important" feedback="external" :show-error="false" :action="() => resend()">{{ resendSeconds > 0 ? resendSeconds + ' 秒后可重发' : '重新发送验证邮件' }}</ActionButton>
         </form>
       </template>
       <p class="account-privacy">{{ accountUser ? '账号同步通过加密连接传输；壁纸图片保存在本机，导出备份时可选择携带。' : '账号为可选功能，不登录也可以在本机记录。密码只用于账号验证，不进入业务备份或数据同步。' }}</p>

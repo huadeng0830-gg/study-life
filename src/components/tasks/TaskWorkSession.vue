@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import Modal from '../Modal.vue'
 import TaskWorkCheckpointFields from './TaskWorkCheckpointFields.vue'
+import TaskFocusLink from '../learning/TaskFocusLink.vue'
 import { safeTaskResourceLinks } from '../../composables/tasks/taskWorkProgress.js'
 
 const props = defineProps({
@@ -63,6 +64,7 @@ function formatUpdatedAt(value) {
 
       <p v-if="error" class="task-work-error" role="alert">{{ error }}</p>
       <div class="task-work-actions">
+        <TaskFocusLink v-if="canStart && task.sourceType !== 'project-task' && !readonly" :task="task" @navigate="emit('close')" />
         <button v-if="canStart" class="btn btn-secondary" type="button" :disabled="busy" @click="emit('start')">{{ startLabel }}</button>
         <button v-if="canSave" class="btn btn-primary" type="button" :disabled="busy" @click="emit('save')">{{ busy ? '保存中…' : '保存进度' }}</button>
         <button v-if="!canStart && !canSave" class="btn btn-ghost" type="button" @click="emit('close')">关闭</button>

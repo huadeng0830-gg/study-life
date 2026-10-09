@@ -49,8 +49,8 @@ function assembleSplit(totalCents, mineCents, shares, { selfLabel = '我', membe
 export function buildSplit(totalYuan, { count = 2, mine = null, selfLabel = '我', memberLabel = '成员' } = {}) {
   const totalCents = amountToCents(totalYuan)
   if (totalCents === null || totalCents <= 0) throw new Error('分摊总额需为大于 0 的金额，最多两位小数')
-  const people = Math.trunc(Number(count))
-  if (!Number.isFinite(people) || people < 1 || people > 99) throw new Error('参与人数需为 1~99 的整数')
+  const people = Number(count)
+  if (!Number.isInteger(people) || people < 1 || people > 99) throw new Error('参与人数需为 1~99 的整数')
   const hasMine = !(mine === null || mine === undefined || mine === '')
   const mineCents = hasMine ? amountToCents(mine) : null
   if (hasMine && mineCents === null) throw new Error('我的份额需为不小于 0 的金额，最多两位小数')
@@ -113,6 +113,7 @@ export function normalizeSplit(value) {
 
 /** 这条记录是否已分摊（旧记录没有该字段，null/半坏数据都不算）。 */
 export function hasSplit(item) {
+  if (isRefundTransaction(item)) return false
   return Boolean(normalizeSplit(item?.split))
 }
 
@@ -129,6 +130,9 @@ export function mySpendCents(item) {
   if (amountCents === null) return null
   const split = normalizeSplit(item?.split)
   if (!split) return amountCents
+  // 旧版退款复制了原支出的 split：部分退款的 amount 已是实际到账金额，
+  // split.total 却仍是原消费总额。读侧按到账金额兼容，不改写历史记录。
+  if (isRefundTransaction(item) && amountToCents(split.total) !== amountCents) return amountCents
   const mineCents = amountToCents(split.mine)
   return mineCents === null ? amountCents : mineCents
 }
@@ -147,7 +151,7 @@ export function mySpendYuan(item) {
  * （退款是冲抵项，不是新消费）。与索引的唯一区别是每条取 `mine` 而不是 `amount`。
  * 返回 `Map<分类 key, 元>`；没有可计入记录时返回空 Map。
  */
-export function personalMonthCategoryTotals(list, month) {
+export function personalMonthCategoryTotals(list, month, { amountOf = mySpendCents } = {}) {
   const monthKey = String(month ?? '').slice(0, 7)
   const totals = new Map()
   for (const item of Array.isArray(list) ? list : []) {
@@ -156,7 +160,7 @@ export function personalMonthCategoryTotals(list, month) {
     if (!String(item.id ?? '').trim() || !isValidDateKey(item.date)) continue
     if (String(item.date).slice(0, 7) !== monthKey) continue
     if (item.direction === 'income' || isRefundTransaction(item)) continue
-    const cents = mySpendCents(item)
+    const cents = amountOf(item)
     if (cents === null) continue
     const key = item.cat || 'other'
     totals.set(key, (totals.get(key) ?? 0) + cents)
