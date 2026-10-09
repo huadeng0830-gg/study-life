@@ -2,7 +2,7 @@
 
 import { ref } from 'vue'
 
-/** 外观设置：theme | wallpaper | quotes | layout | swipe */
+/** 外观设置：theme | wallpaper | quotes | layout | swipe | navigation */
 export const appearanceTab = ref('theme')
 
 /** 作息设置：plans | base */

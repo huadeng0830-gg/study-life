@@ -70,6 +70,11 @@ export const DRAG_ALTERNATIVES = [
     reason: '拖动排序首页模块：手柄按钮上 Alt + 上下方向键移动，焦点跟随模块。',
   },
   {
+    file: 'components/NavigationSettings.vue',
+    needles: ['function reorderMobileItem(index, offset)', '@click="reorderMobileItem(index, -1)"', '@click="reorderMobileItem(index, 1)"'],
+    reason: '手机导航支持拖动排序；每一行还提供明确的上移、下移按钮，键盘用户可逐步重排。',
+  },
+  {
     file: 'components/Modal.vue',
     needles: ['Escape', "emit('close')"],
     reason: '底部弹层拖动关闭：Esc 与关闭按钮都能关（拖动只是快捷方式）。',

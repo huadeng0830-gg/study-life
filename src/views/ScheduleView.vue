@@ -10,6 +10,8 @@ import {
   semester,
   weekOf,
   scheduleExceptions,
+  dateForWeekDay,
+  repairScheduleExceptionIds,
   upsertScheduleException,
   removeScheduleException,
 } from '../composables/store/schedule.js'
@@ -182,15 +184,18 @@ function shiftMobileDay(delta) {
 }
 
 const sortedExceptions = computed(() =>
-  [...scheduleExceptions.value].sort((a, b) => a.date.localeCompare(b.date)),
+  scheduleExceptions.value.filter((item) => item?.date).slice().sort((a, b) => a.date.localeCompare(b.date)),
 )
+const exceptionInitialDate = ref(appToday.value)
 
-function openExceptionManager() {
+function openExceptionManager(date) {
+  repairScheduleExceptionIds()
+  exceptionInitialDate.value = typeof date === 'string' ? date : dateForWeekDay(viewWeek.value, mobileDay.value)
   showExceptions.value = true
 }
 
 function saveException(payload) {
-  upsertScheduleException(payload)
+  if (!upsertScheduleException(payload)) showToast('课程调整未保存，请检查日期和课程选择', { type: 'error' })
 }
 
 function removeException(id) {
@@ -253,7 +258,7 @@ function confirmDeleteCourse() {
 
     <section v-if="showScheduleSettings" class="schedule-settings" aria-label="课程表设置">
       <div><h2>课程</h2><button class="btn btn-ghost" @click="openCourseManager">☷ 批量管理</button><button class="btn btn-ghost" @click="openBatchShift">⇩ 导入课程表</button></div>
-      <div><h2>时间与日期</h2><button class="btn btn-ghost" @click="showSemester = true">📅 学期</button><button class="btn btn-ghost" @click="openTimeSettings">🕐 作息与节次</button><button class="btn btn-ghost" @click="openExceptionManager">🗓 特殊日期</button></div>
+      <div><h2>时间与日期</h2><button class="btn btn-ghost" @click="showSemester = true">📅 学期</button><button class="btn btn-ghost" @click="openTimeSettings">🕐 作息与节次</button></div>
       <div><h2>显示</h2><button class="btn btn-ghost" @click="mobileView = mobileView === 'day' ? 'week' : 'day'">{{ mobileView === 'day' ? '切换整周视图' : '切换单日视图' }}</button></div>
     </section>
 
@@ -337,6 +342,7 @@ function confirmDeleteCourse() {
       </p>
 
       <div class="add-actions">
+        <button class="btn btn-ghost" title="放假、调课与补课" @click="openExceptionManager">🗓 课程调整</button>
         <button class="btn btn-primary" @click="openAdd()">＋ 添加课程</button>
       </div>
     </div>
@@ -355,6 +361,7 @@ function confirmDeleteCourse() {
       @open-add="openAdd"
       @open-edit="openEdit"
       @mobile-day-change="shiftMobileDay"
+      @open-adjustments="openExceptionManager"
     />
 
     <div class="schedule-note">
@@ -522,6 +529,8 @@ function confirmDeleteCourse() {
       :show="showExceptions"
       :exceptions="sortedExceptions"
       :days="DAYS"
+      :all-courses="visibleCourses"
+      :initial-date="exceptionInitialDate"
       @close="showExceptions = false"
       @submit="saveException"
       @remove="removeException"

@@ -1,14 +1,6 @@
 <script setup>
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import Modal from './Modal.vue'
-import { isSupported, transcribe, voiceErrorMessage, VOICE_STATES } from '../composables/voiceInput.js'
-import { useQuickRecordAdapters } from '../composables/quickRecord/adapters.js'
-import { parseQuickRecord } from '../composables/quickRecord/parser.js'
-import { QUICK_ACTIONS, recordTypeMeta } from '../composables/quickRecord/types.js'
-import { amountToCents, catInfo, categoriesForScope, classifyTransaction, rememberCategoryOverride } from '../composables/ledger.js'
-import { settings as quickRecordSettings } from '../composables/settingsPolicy.js'
-import { useDomainCommands } from '../composables/domain/commands.js'
-import { announce as announceLive, announceAlert } from '../composables/liveRegion.js'
+import { useQuickRecordPanel } from '../composables/useQuickRecordPanel.js'
 
 const props = defineProps({
   open: Boolean,
@@ -17,478 +9,96 @@ const props = defineProps({
 })
 const emit = defineEmits(['close', 'saved'])
 
-const { courses, save } = useQuickRecordAdapters()
-const { tasks, transactions, events, milestones } = useDomainCommands()
-
-const input = ref('')
-const inputEl = ref(null)
-const forcedType = ref('')
-const drafts = ref([])
-const expandedId = ref('')
-const feedback = ref('')
-const error = ref('')
-const saving = ref(false)
-const clipboardHint = ref('')
-const voiceState = ref(VOICE_STATES.idle)
-const voiceSeconds = ref(0)
-const listening = ref(false)
-const settings = quickRecordSettings
-const voiceSupported = isSupported()
-const voiceHintShown = ref(false)
-const previewTypes = ['expense', 'income', 'todo', 'event', 'countdown']
-let initialized = false
-let recognizer = null
-let feedbackTimer = 0
-let resultAnnounceTimer = 0
-let voiceTimer = 0
-let smartBeforeVoice = ''
-let voiceRunId = 0
-
-const actions = computed(() => QUICK_ACTIONS.map((type) => ({ type, ...recordTypeMeta(type) })))
-const hasDrafts = computed(() => drafts.value.length > 0)
-const categoryEditorId = ref('')
-const categoryPickerOffset = ref(0)
-const recentRecords = computed(() => {
-  const items = [
-    ...transactions.value.filter((item) => item && !item.archivedAt && !item.deletedAt && !item.tombstone).map((item) => ({
-      // 退款是**冲抵项**，不能显示成支出；此前一律映射成 'expense'，
-      // 于是下面「支出合计」会把退款**加进去**（¥200 支出 + ¥50 退款 → 显示 ¥250）。
-      id: item.id,
-      type: item.direction === 'income' ? 'income' : item.direction === 'refund' ? 'refund' : 'expense',
-      title: item.name || '日常支出', raw: item.name || '',
-      amount: item.amount,
-      detail: `${item.direction === 'income' || item.direction === 'refund' ? '+' : '-'}¥${Number(item.amount || 0).toFixed(2)}`,
-      at: item.updatedAt || item.createdAt,
-    })),
-    ...tasks.value.filter((item) => item && !item.archivedAt && !item.deletedAt).map((item) => ({
-      id: item.id, type: item.kind === 'homework' ? 'homework' : 'todo', title: item.title || '待办', raw: item.sourceText || item.title || '',
-      detail: item.dueDate ? (item.dueTime || item.dueDate) : '待安排', at: item.updatedAt || item.createdAt,
-    })),
-    ...events.value.filter((item) => item && !item.archivedAt && !item.deletedAt).map((item) => ({
-      id: item.id, type: 'event', title: item.title || '日程', raw: item.sourceText || item.title || '',
-      detail: item.date ? (item.time || item.date) : '待安排', at: item.updatedAt || item.createdAt,
-    })),
-    ...milestones.value.filter((item) => item && !item.archivedAt && !item.deletedAt).map((item) => ({
-      id: item.id, type: 'countdown', title: item.name || '重要日期', raw: item.sourceText || item.name || '',
-      detail: item.date || '待安排', at: item.updatedAt || item.createdAt,
-    })),
-  ]
-  return items.sort((a, b) => String(b.at || '').localeCompare(String(a.at || ''))).slice(0, 5)
-})
-const totalExpense = computed(() => drafts.value
-  .filter((item) => item.type === 'expense')
-  .reduce((cents, item) => cents + (amountToCents(item.amount) ?? 0), 0) / 100)
-const voiceStatusText = computed(() => {
-  if (voiceState.value === VOICE_STATES.listening) return `🔴 正在聆听…… ${voiceSeconds.value}s`
-  if (voiceState.value === VOICE_STATES.transcribing) return '正在转写……'
-  if (voiceState.value === VOICE_STATES.done) return '识别完成'
-  if (voiceState.value === VOICE_STATES.error) return '语音识别未完成'
-  return ''
-})
-
-watch(error, (message) => {
-  if (message && props.open) announceAlert(message, { clearAfter: 7000 })
-})
-watch(feedback, (message) => {
-  if (message && props.open) announceLive(message, { clearAfter: 5000 })
-})
-watch(voiceState, (state) => {
-  if (!props.open) return
-  const message = {
-    [VOICE_STATES.listening]: '正在聆听',
-    [VOICE_STATES.transcribing]: '正在转写',
-    [VOICE_STATES.done]: '语音识别完成',
-  }[state]
-  if (message) announceLive(message, { clearAfter: 5000 })
-})
-
-function isSmallViewport() {
-  return typeof window !== 'undefined' && (
-    window.matchMedia?.('(max-width: 520px)')?.matches || window.innerWidth <= 520
-  )
-}
-function focusInput(force = false) {
-  if (!force && isSmallViewport()) return
-  nextTick(() => inputEl.value?.focus())
-}
-function autosize(el, maxHeight = 220) {
-  if (!el) return
-  el.style.height = 'auto'
-  el.style.height = `${Math.min(el.scrollHeight, maxHeight)}px`
-}
-
-function onSmartInput() {
-  autosize(inputEl.value)
-  parse()
-}
-
-function onSmartKeydown(event) {
-  if (event.isComposing) return
-  if (event.shiftKey) return
-  // 手机上 Enter 只负责换行，避免拇指误触直接保存；桌面仍保留快速回车保存，
-  // Ctrl/Cmd + Enter 在两端都明确表示保存。
-  if (isSmallViewport() && !event.ctrlKey && !event.metaKey) return
-  event.preventDefault()
-  saveAll()
-}
-
-function parse() {
-  error.value = ''
-  categoryEditorId.value = ''
-  drafts.value = parseQuickRecord(input.value, {
-    courses: courses.value,
-    forcedType: forcedType.value,
-    context: props.context,
-  })
-  window.clearTimeout(resultAnnounceTimer)
-  if (drafts.value.length) {
-    resultAnnounceTimer = window.setTimeout(() => {
-      if (props.open && drafts.value.length) {
-        announceLive(`识别到 ${drafts.value.length} 项，请确认内容`, { clearAfter: 5000 })
-      }
-    }, 600)
-  }
-}
-
-function chooseAction(type) {
-  stopActiveVoice()
-  forcedType.value = type
-  parse()
-  focusInput(true)
-}
-
-function chooseAuto() {
-  stopActiveVoice()
-  forcedType.value = ''
-  parse()
-  focusInput(true)
-}
-
-function recentIcon(type) { return recordTypeMeta(type).icon }
-function recentTitle(item) { return item.title || recordTypeMeta(item.type).label }
-function reuseRecent(item) {
-  forcedType.value = ['expense', 'income'].includes(item.type) ? item.type : ''
-  input.value = ['expense', 'income'].includes(item.type) && item.amount
-    ? `${item.title} ${item.amount}元`
-    : item.raw || item.title || ''
-  parse()
-  focusInput(true)
-}
-
-function changeDraftType(draft, type) {
-  if (!draft || !previewTypes.includes(type) || draft.type === type) return
-  const [nextDraft] = parseQuickRecord(draft.raw, { courses: courses.value, forcedType: type, context: props.context })
-  if (nextDraft) drafts.value.splice(drafts.value.indexOf(draft), 1, nextDraft)
-  expandedId.value = ''
-  categoryEditorId.value = ''
-}
-
-function chooseCategory(draft, category) {
-  if (!draft || !category) return
-  draft.category = category.key
-  confirmCategory(draft)
-  categoryEditorId.value = ''
-}
-
-function toggleCategoryEditor(draft, event) {
-  if (categoryEditorId.value === draft.id) {
-    categoryEditorId.value = ''
-    return
-  }
-  const trigger = event?.currentTarget?.getBoundingClientRect?.()
-  const viewportWidth = window.innerWidth || document.documentElement.clientWidth
-  const popupWidth = Math.min(300, Math.max(0, viewportWidth - 40))
-  const minLeft = 20 - (trigger?.left || 0)
-  const maxLeft = viewportWidth - 20 - popupWidth - (trigger?.left || 0)
-  categoryPickerOffset.value = Math.max(minLeft, Math.min(0, maxLeft))
-  categoryEditorId.value = draft.id
-}
-
-function chooseQuestion(draft, field, value) {
-  draft[field] = field === 'amount' ? Number(value) : value
-  draft.questions = draft.questions.filter((item) => item.field !== field)
-}
-
-function updateRecent(types) {
-  settings.value = { ...settings.value, recentTypes: [...new Set([...types, ...(settings.value.recentTypes || [])])].slice(0, 4) }
-}
-
-function categoryLabel(key) { return catInfo(key).name }
-function categoryOptions(draft) { return categoriesForScope(draft?.type === 'income' ? 'income' : 'expense') }
-function refreshCategorySuggestion(draft) {
-  if (!draft || !['expense', 'income', 'bill'].includes(draft.type)) return
-  const direction = draft.type === 'income' ? 'income' : 'expense'
-  const classification = classifyTransaction(draft.title || draft.raw, { direction })
-  Object.assign(draft, {
-    category: classification.categoryId,
-    categoryConfidence: classification.confidence,
-    categoryUncertain: classification.uncertain,
-    categorySuggested: classification.categoryId,
-    categoryMatchedBy: classification.matchedBy,
-    categoryMatchedTerms: classification.matchedTerms,
-    categoryCandidates: classification.candidates,
-    categoryAmbiguous: classification.ambiguous,
-    categoryConfirmed: false,
-    categoryEdited: false,
-  })
-}
-function onDraftTypeChange(draft) {
-  if (!['expense', 'income', 'bill'].includes(draft?.type)) return
-  const valid = categoryOptions(draft).some((category) => category.key === draft.category)
-  if (!valid || draft.type === 'income') refreshCategorySuggestion(draft)
-}
-function confirmCategory(draft) {
-  if (!draft || !['expense', 'income', 'bill'].includes(draft.type)) return
-  draft.categoryConfirmed = true
-  draft.categoryUncertain = false
-  draft.categoryEdited = true
-  rememberCategoryOverride(draft.title || draft.raw, draft.category, draft.type === 'income' ? 'income' : 'expense')
-}
-
-function resetForNextSmartEntry({ focus = true } = {}) {
-  input.value = ''
-  drafts.value = []
-  forcedType.value = ''
-  expandedId.value = ''
-  categoryEditorId.value = ''
-  clipboardHint.value = ''
-  error.value = ''
-  feedback.value = ''
-  smartBeforeVoice = ''
-  stopActiveVoice()
-  if (focus) focusInput(true)
-}
-
-function savedMessage(results) {
-  return results.length === 1 ? results[0].message : `已添加 ${results.length} 项记录`
-}
-
-function requestClose() {
-  if (saving.value) return
-  emit('close')
-}
-
-function finishSave(results, keepOpen) {
-  updateRecent(results.map((result) => result.type).filter(Boolean))
-  const message = savedMessage(results)
-  const undo = () => results.forEach((result) => result.undo?.())
-  if (keepOpen) {
-    resetForNextSmartEntry()
-    showFeedback(`✓ ${message}`)
-    return
-  }
-  // The panel stays mounted after its first opening so closing it never drops
-  // an unfinished draft. A successful save explicitly clears it before close.
-  resetForNextSmartEntry({ focus: false })
-  emit('saved', {
-    message,
-    undo,
-    entityType: results.length === 1 ? results[0].entityType : '',
-    entityId: results.length === 1 ? results[0].entityId : '',
-    entities: results.map((result) => ({ type: result.entityType, id: result.entityId })).filter((item) => item.type && item.id),
-  })
-  emit('close')
-}
-
-async function saveAll(keepOpen = false) {
-  if (saving.value) return
-  if (!drafts.value.length) return
-  if (drafts.value.some((draft) => draft.type === 'unknown')) {
-    error.value = '请先选择待办、日程、账目或重要日期类型，再保存。'
-    return
-  }
-  const unconfirmedCategory = drafts.value.find((draft) => (
-    ['expense', 'income', 'bill'].includes(draft.type)
-    && draft.categoryUncertain
-    && !draft.categoryConfirmed
-  ))
-  if (unconfirmedCategory) {
-    expandedId.value = unconfirmedCategory.id
-    error.value = `请确认「${categoryLabel(unconfirmedCategory.category)}」分类后再保存`
-    return
-  }
-  saving.value = true
-  error.value = ''
-  const pending = drafts.value.map((draft) => ({
-    ...draft,
-    questions: Array.isArray(draft.questions)
-      ? draft.questions.map((question) => ({ ...question, choices: [...(question.choices || [])] }))
-      : [],
-  }))
-  const results = []
-  const savedIds = []
-  try {
-    for (const draft of pending) {
-      try {
-        results.push({ ...(await save(draft)), type: draft.type })
-        savedIds.push(draft.id)
-      } catch (cause) {
-        drafts.value = drafts.value.filter((item) => !savedIds.includes(item.id))
-        const reason = cause?.message || '请补充必要信息'
-        error.value = savedIds.length
-          ? `前 ${savedIds.length} 项已保存；剩余内容未保存：${reason}`
-          : `保存失败：${reason}`
-        if (savedIds.length) updateRecent(pending.slice(0, savedIds.length).map((draft) => draft.type))
-        return
-      }
-    }
-    finishSave(results, keepOpen)
-  } finally {
-    saving.value = false
-  }
-}
-
-function showFeedback(value) {
-  feedback.value = value
-  window.clearTimeout(feedbackTimer)
-  feedbackTimer = window.setTimeout(() => { feedback.value = '' }, 5000)
-}
-
-function retryAs(draft, type) {
-  if (!draft) return
-  const index = drafts.value.findIndex((item) => item.id === draft.id)
-  const reparsed = parseQuickRecord(draft.raw, { courses: courses.value, forcedType: type, context: props.context })
-  if (reparsed.length) {
-    drafts.value.splice(index, 1, ...reparsed)
-  } else {
-    drafts.value.splice(index, 1)
-  }
-  expandedId.value = ''
-}
-
-function stopVoiceTimer() {
-  window.clearInterval(voiceTimer)
-  voiceTimer = 0
-  voiceSeconds.value = 0
-}
-
-function stopActiveVoice() {
-  voiceRunId += 1
-  const activeRecognizer = recognizer
-  recognizer = null
-  listening.value = false
-  activeRecognizer?.abort?.()
-  stopVoiceTimer()
-  voiceState.value = VOICE_STATES.idle
-}
-
-function onVoiceState(state) {
-  voiceState.value = state
-  if (state === VOICE_STATES.listening) {
-    voiceSeconds.value = 0
-    stopVoiceTimer()
-    voiceTimer = window.setInterval(() => { voiceSeconds.value += 1 }, 1000)
-  } else if (state !== VOICE_STATES.transcribing) {
-    stopVoiceTimer()
-  }
-}
-
-function toggleVoice() {
-  if (!voiceSupported) {
-    if (!voiceHintShown.value) {
-      voiceHintShown.value = true
-      error.value = '当前浏览器不支持语音识别，请手动输入'
-    }
-    return
-  }
-  if (listening.value) { recognizer?.stop(); return }
-
-  const runId = ++voiceRunId
-  const isCurrentRun = () => runId === voiceRunId
-  const onError = (code) => {
-    if (!isCurrentRun()) return
-    listening.value = false
-    voiceState.value = VOICE_STATES.error
-    stopVoiceTimer()
-    error.value = voiceErrorMessage(code)
-  }
-
-  smartBeforeVoice = input.value
-  recognizer = transcribe({
-    continuous: true,
-    maxSeconds: 60,
-    onStateChange: (state) => { if (isCurrentRun()) onVoiceState(state) },
-    onResult: (finalText, interimText) => {
-      if (!isCurrentRun()) return
-      input.value = (smartBeforeVoice + (smartBeforeVoice ? ' ' : '') + finalText + interimText).trim()
-    },
-    onError,
-    onEnd: (finalText) => {
-      if (!isCurrentRun()) return
-      listening.value = false
-      if (finalText) {
-        input.value = (smartBeforeVoice + (smartBeforeVoice ? ' ' : '') + finalText).trim()
-        parse()
-      }
-      onVoiceState(finalText ? VOICE_STATES.done : VOICE_STATES.idle)
-      stopVoiceTimer()
-    },
-  })
-
-  if (!recognizer) { error.value = '语音识别暂不可用'; return }
-  listening.value = true
-  voiceState.value = VOICE_STATES.listening
-  recognizer.start()
-}
-
-function useClipboard() {
-  input.value = clipboardHint.value
-  clipboardHint.value = ''
-  chooseAuto()
-}
-
-async function checkClipboard() {
-  if (!settings.value.clipboardHint || !navigator.clipboard?.readText) return
-  try {
-    const value = (await navigator.clipboard.readText()).trim()
-    if (value && value.length <= 500 && value !== input.value) clipboardHint.value = value
-  } catch { /* clipboard permission is optional */ }
-}
-
-watch(() => props.open, (open) => {
-  if (!open) {
-    stopActiveVoice()
-    return
-  }
-  if (!initialized) {
-    initialized = true
-    input.value = props.initialText || ''
-    forcedType.value = ''
-    drafts.value = input.value ? parseQuickRecord(input.value, { courses: courses.value, context: props.context }) : []
-  }
-  feedback.value = ''
-  error.value = ''
-  voiceState.value = VOICE_STATES.idle
-  voiceSeconds.value = 0
-  listening.value = false
-  voiceHintShown.value = false
-  stopVoiceTimer()
-  focusInput()
-  void checkClipboard()
-})
-
-onBeforeUnmount(() => {
-  stopActiveVoice()
-  window.clearTimeout(feedbackTimer)
-  window.clearTimeout(resultAnnounceTimer)
-})
+const {
+  input,
+  inputEl,
+  forcedType,
+  drafts,
+  expandedId,
+  feedback,
+  error,
+  saving,
+  clipboardHint,
+  listening,
+  voiceSupported,
+  panelId,
+  courseListId,
+  draftStatus,
+  validationAttempted,
+  lastSaved,
+  clipboardLoading,
+  actions,
+  hasDrafts,
+  selectedDrafts,
+  examples,
+  placeholder,
+  draftIssues,
+  saveLabel,
+  categoryEditorId,
+  categoryPickerOffset,
+  recentRecords,
+  totalExpense,
+  totalIncome,
+  voiceStatusText,
+  courses,
+  recordTypeMeta,
+  previewTypes,
+  catInfo,
+  onSmartInput,
+  onSmartKeydown,
+  chooseAction,
+  chooseAuto,
+  recentIcon,
+  recentTitle,
+  reuseRecent,
+  changeDraftType,
+  onDraftTypeSelect,
+  chooseCategory,
+  toggleCategoryEditor,
+  chooseQuestion,
+  categoryLabel,
+  categoryOptions,
+  confirmCategory,
+  onDraftTitleChange,
+  syncDraftCourse,
+  requestClose,
+  saveAll,
+  retryAs,
+  fieldId,
+  issueFor,
+  fieldDescription,
+  detailsControlId,
+  isFinancial,
+  setAllSelected,
+  removeDraft,
+  clearEntry,
+  useExample,
+  undoLastSaved,
+  toggleVoice,
+  useClipboard,
+  pasteClipboard,
+} = useQuickRecordPanel(props, emit)
 </script>
 
 <template>
-  <Modal :open="open" title="⚡ 快速记录" medium sheet :sheet-detents="[0.62, 0.92]" @close="requestClose">
+  <Modal :open="open" title="⚡ 快速记录" medium sheet :auto-focus="false" :sheet-detents="[0.82, 0.92]" @close="requestClose">
     <section class="quick-record">
-      <!-- 自然语言解析为待办、日程、收支或重要日期。 -->
+      <fieldset class="entry-fields" :disabled="saving" aria-label="编辑快速记录">
+        <div class="compose-heading"><b>想到就记，保存前再确认</b><small>待办 · 日程 · 收支 · 重要日期</small></div>
         <div class="input-wrap">
           <textarea
             ref="inputEl"
             v-model="input"
+            :readonly="listening"
             class="smart-input"
             rows="2"
             autocomplete="off"
             inputmode="text"
             aria-label="快速记录内容"
-            placeholder="今天想记点什么？"
+            :placeholder="placeholder"
+            :aria-describedby="`quick-input-help-${panelId}`"
             @input="onSmartInput"
+            @compositionend="onSmartInput"
             @keydown.enter.exact="onSmartKeydown"
             @keydown.ctrl.enter="onSmartKeydown"
             @keydown.meta.enter="onSmartKeydown"
@@ -503,14 +113,22 @@ onBeforeUnmount(() => {
           >{{ listening ? '⏹' : '🎤' }}</button>
         </div>
 
-        <p class="example">例如：买牛肉面花了15元</p>
-
-        <div class="action-row" aria-label="其它记录方式">
-          <button v-if="input" type="button" class="action-more" :class="{ on: forcedType }" @click="chooseAuto">自动识别</button>
-          <template v-if="input">
-            <button v-for="action in actions" :key="action.type" type="button" :class="{ on: forcedType === action.type }" @click="chooseAction(action.type)">{{ action.icon }} {{ action.label }}</button>
-          </template>
+        <div class="input-tools">
+          <p :id="`quick-input-help-${panelId}`" class="example">一行一项，可混合记录。<span class="desktop-key-hint">Enter 保存 · Shift + Enter 换行</span><span class="mobile-key-hint">回车换行</span></p>
+          <button type="button" :disabled="clipboardLoading" @click="pasteClipboard">{{ clipboardLoading ? '读取中…' : '粘贴文字' }}</button>
+          <button v-if="input || hasDrafts" type="button" @click="clearEntry">清空</button>
         </div>
+        <p v-if="draftStatus" class="draft-status">{{ draftStatus }} · 仅保留在当前标签页</p>
+
+        <div class="action-row" role="group" aria-label="记录方式">
+          <button type="button" :class="{ on: !forcedType }" :aria-pressed="!forcedType" @click="chooseAuto">✨ 自动识别</button>
+          <button v-for="action in actions" :key="action.type" type="button" :class="{ on: forcedType === action.type }" :aria-pressed="forcedType === action.type" @click="chooseAction(action.type)">{{ action.icon }} {{ action.label }}</button>
+        </div>
+
+        <section v-if="!input.trim()" class="example-block" aria-label="记录示例">
+          <p>试试这样记 <small>点击示例，修改后保存</small></p>
+          <button v-for="text in examples" :key="text" type="button" class="example-entry" @click="useExample(text)"><span>{{ text.replace(/\n/g, ' / ') }}</span><span aria-hidden="true">↗</span></button>
+        </section>
 
         <p v-if="voiceStatusText" class="voice-status">{{ voiceStatusText }}</p>
 
@@ -519,7 +137,7 @@ onBeforeUnmount(() => {
         </div>
 
         <section v-if="!input && recentRecords.length" class="recent-block" aria-label="最近记录">
-          <div class="recent-head"><span>最近</span><small>刚刚记过的内容</small></div>
+          <div class="recent-head"><span>最近记录</span><small>点击复用，确认后创建新记录</small></div>
           <button v-for="item in recentRecords" :key="`${item.type}-${item.id}`" type="button" class="recent-row" @click="reuseRecent(item)">
             <span class="recent-icon" aria-hidden="true">{{ recentIcon(item.type) }}</span>
             <span class="recent-name">{{ recentTitle(item) }}</span>
@@ -528,20 +146,25 @@ onBeforeUnmount(() => {
         </section>
 
         <section v-if="hasDrafts" class="results">
-          <p v-if="drafts.length > 1" class="result-count">识别到 {{ drafts.length }} 项</p>
+          <div class="results-heading">
+            <p class="result-count">识别到 {{ drafts.length }} 项<span v-if="drafts.length > 1"> · 已选 {{ selectedDrafts.length }} 项</span></p>
+            <div v-if="drafts.length > 1" class="selection-actions"><button type="button" @click="setAllSelected(true)">全选</button><button type="button" @click="setAllSelected(false)">取消全选</button></div>
+          </div>
 
-          <article v-for="draft in drafts" :key="draft.id" class="record-card" :class="{ uncertain: draft.uncertain || draft.type === 'unknown' || draft.categoryUncertain }">
+          <article v-for="(draft, index) in drafts" :key="draft.id" class="record-card" :class="{ uncertain: draft.uncertain || draft.type === 'unknown' || draft.categoryUncertain, excluded: draft.selected === false, invalid: validationAttempted && Object.keys(draftIssues[draft.id] || {}).length }">
             <div class="record-head">
-              <b>{{ recordTypeMeta(draft.type).icon }} {{ recordTypeMeta(draft.type).label }}</b>
+              <div class="record-heading"><input v-if="drafts.length > 1 || draft.selected === false" v-model="draft.selected" type="checkbox" :aria-label="`选择第 ${index + 1} 项记录`" /><b>{{ recordTypeMeta(draft.type).icon }} {{ recordTypeMeta(draft.type).label }}</b><small v-if="draft.selected === false">暂不保存</small></div>
               <div class="record-head-actions">
-                <button type="button" :aria-expanded="expandedId === draft.id" @click="expandedId = expandedId === draft.id ? '' : draft.id">{{ expandedId === draft.id ? '收起' : '修改' }}</button>
+                <button type="button" :aria-expanded="expandedId === draft.id" :aria-controls="detailsControlId(draft)" @click="expandedId = expandedId === draft.id ? '' : draft.id">{{ expandedId === draft.id ? '收起' : '修改' }}</button>
+                <button type="button" :aria-label="`移除第 ${index + 1} 项草稿`" @click="removeDraft(draft)">移除</button>
               </div>
             </div>
 
-            <div class="type-switch" role="group" aria-label="纠正记录类型">
+            <div :id="fieldId(draft, 'type-choices')" class="type-switch" role="group" aria-label="纠正记录类型" :aria-describedby="fieldDescription(draft, 'type')">
               <span v-if="draft.uncertain" class="human-confidence">看起来像{{ recordTypeMeta(draft.type).label }}，请确认</span>
-              <button v-for="type in previewTypes" :key="type" type="button" :class="{ on: draft.type === type }" @click="changeDraftType(draft, type)">{{ recordTypeMeta(type).label }}</button>
+              <button v-for="type in previewTypes" :key="type" type="button" :class="{ on: draft.type === type }" :aria-pressed="draft.type === type" @click="changeDraftType(draft, type)">{{ recordTypeMeta(type).label }}</button>
             </div>
+            <small v-if="issueFor(draft, 'type')" :id="fieldId(draft, 'type-error')" class="field-error">{{ issueFor(draft, 'type') }}</small>
 
             <!-- 不确定类型时保留原文，要求先选结构化类型再保存。 -->
             <template v-if="draft.type === 'unknown'">
@@ -554,10 +177,11 @@ onBeforeUnmount(() => {
 
             <!-- 普通结构化草稿 -->
             <template v-else>
-              <input v-model="draft.title" class="title-edit" aria-label="记录标题" placeholder="输入标题" />
+              <input :id="fieldId(draft, 'title')" v-model="draft.title" class="title-edit" aria-label="记录标题" placeholder="输入标题" :aria-invalid="Boolean(issueFor(draft, 'title')) || undefined" :aria-describedby="fieldDescription(draft, 'title')" @input="onDraftTitleChange(draft)" />
+              <small v-if="issueFor(draft, 'title')" :id="fieldId(draft, 'title-error')" class="field-error">{{ issueFor(draft, 'title') }}</small>
 
               <div class="chips">
-                <label v-if="['expense', 'income', 'bill'].includes(draft.type)" class="amount-chip">¥ <input v-model.number="draft.amount" type="number" min="0" step="0.01" inputmode="decimal" aria-label="金额" /></label>
+                <label v-if="isFinancial(draft)" class="amount-chip">¥ <input :id="fieldId(draft, 'amount')" v-model.number="draft.amount" type="number" min="0.01" step="0.01" inputmode="decimal" aria-label="金额" :aria-invalid="Boolean(issueFor(draft, 'amount')) || undefined" :aria-describedby="fieldDescription(draft, 'amount')" /></label>
                 <label v-if="draft.course">{{ draft.course }}</label>
                 <span v-if="['expense', 'income', 'bill'].includes(draft.type) && categoryLabel(draft.category)" class="category-chip-wrap">
                   <button type="button" class="category-chip" :aria-expanded="categoryEditorId === draft.id" @click="toggleCategoryEditor(draft, $event)">{{ catInfo(draft.category).icon }} {{ categoryLabel(draft.category) }}</button>
@@ -567,6 +191,7 @@ onBeforeUnmount(() => {
                 </span>
                 <label v-if="draft.dateRange && !draft.date">时间范围：{{ draft.dateRange }}</label>
                 <label v-if="draft.date"><input v-model="draft.date" type="date" aria-label="日期" /></label>
+                <button v-else type="button" class="add-field" @click="expandedId = draft.id">{{ ['event', 'countdown', 'bill'].includes(draft.type) ? '补充日期' : '添加日期' }}</button>
                 <label v-if="draft.time"><input v-model="draft.time" type="time" aria-label="时间" /></label>
                 <label v-if="draft.endTime">至 {{ draft.endTime }}</label>
                 <label v-if="draft.location">地点：{{ draft.location }}</label>
@@ -574,6 +199,7 @@ onBeforeUnmount(() => {
                 <label v-if="draft.priority === 'high'">🔴 重要</label>
                 <label v-if="draft.account">{{ draft.account }}</label>
               </div>
+              <small v-if="issueFor(draft, 'amount')" :id="fieldId(draft, 'amount-error')" class="field-error">{{ issueFor(draft, 'amount') }}</small>
 
               <div v-for="question in draft.questions" :key="question.field" class="question">
                 <span>⚠ {{ question.label }}</span>
@@ -586,11 +212,11 @@ onBeforeUnmount(() => {
 
               <div v-if="draft.categoryUncertain && ['expense', 'income', 'bill'].includes(draft.type)" class="category-tip">
                 <span>建议分类：{{ categoryLabel(draft.category) }}<template v-if="draft.categoryAmbiguous">（描述包含多个消费内容）</template></span>
-                <button type="button" @click="expandedId = draft.id">选择其它分类</button>
+                <button type="button" @click="confirmCategory(draft)">确认分类</button><button type="button" @click="expandedId = draft.id">选择其它分类</button>
               </div>
 
-              <div v-if="expandedId === draft.id" class="details">
-                <label>类型<select v-model="draft.type" @change="onDraftTypeChange(draft)">
+              <div v-if="expandedId === draft.id" :id="fieldId(draft, 'details')" class="details">
+                <label>类型<select :id="fieldId(draft, 'type')" :value="draft.type" @change="onDraftTypeSelect(draft, $event)">
                   <option value="todo">待办</option>
                   <option value="homework">作业</option>
                   <option value="event">日程</option>
@@ -599,44 +225,65 @@ onBeforeUnmount(() => {
                   <option value="bill">固定账单</option>
                   <option value="countdown">重要日期</option>
                 </select></label>
-                <label v-if="!['expense', 'income', 'bill'].includes(draft.type)">课程<input v-model="draft.course" list="quick-course-options" /></label>
-                <label v-if="['expense', 'income', 'bill'].includes(draft.type)">分类<select v-model="draft.category" @change="confirmCategory(draft)"><option v-for="category in categoryOptions(draft)" :key="category.key" :value="category.key">{{ category.icon }} {{ category.name }}</option></select></label>
+                <label>日期{{ ['todo', 'homework'].includes(draft.type) ? '（可选）' : '' }}<input :id="fieldId(draft, 'date')" v-model="draft.date" type="date" :aria-invalid="Boolean(issueFor(draft, 'date')) || undefined" :aria-describedby="fieldDescription(draft, 'date')" /><small v-if="issueFor(draft, 'date')" :id="fieldId(draft, 'date-error')" class="field-error">{{ issueFor(draft, 'date') }}</small></label>
+                <label>{{ draft.type === 'event' ? '开始时间' : '时间（可选）' }}<input :id="fieldId(draft, 'time')" v-model="draft.time" type="time" :aria-invalid="Boolean(issueFor(draft, 'time')) || undefined" :aria-describedby="fieldDescription(draft, 'time')" /><small v-if="issueFor(draft, 'time')" :id="fieldId(draft, 'time-error')" class="field-error">{{ issueFor(draft, 'time') }}</small></label>
+                <label v-if="draft.type === 'event'">结束时间（可选）<input :id="fieldId(draft, 'endTime')" v-model="draft.endTime" type="time" :aria-invalid="Boolean(issueFor(draft, 'endTime')) || undefined" :aria-describedby="fieldDescription(draft, 'endTime')" /><small v-if="issueFor(draft, 'endTime')" :id="fieldId(draft, 'endTime-error')" class="field-error">{{ issueFor(draft, 'endTime') }}</small></label>
+                <label v-if="!isFinancial(draft)">地点（可选）<input v-model.trim="draft.location" placeholder="例如：教学楼 201" /></label>
+                <label v-if="!isFinancial(draft)">课程（可选）<input v-model="draft.course" :list="courseListId" @input="syncDraftCourse(draft)" /></label>
+                <label v-if="isFinancial(draft)">分类<select :id="fieldId(draft, 'category')" v-model="draft.category" :aria-invalid="Boolean(issueFor(draft, 'category')) || undefined" :aria-describedby="fieldDescription(draft, 'category')" @change="confirmCategory(draft)"><option v-for="category in categoryOptions(draft)" :key="category.key" :value="category.key">{{ category.icon }} {{ category.name }}</option></select><small v-if="issueFor(draft, 'category')" :id="fieldId(draft, 'category-error')" class="field-error">{{ issueFor(draft, 'category') }}</small></label>
                 <label v-if="['expense', 'income', 'bill'].includes(draft.type)">账户<input v-model.trim="draft.account" placeholder="例如：微信 / 现金" /></label>
-                <label>备注<textarea v-model="draft.note" rows="2" /></label>
-                <label v-if="draft.type === 'bill'">重复<select v-model="draft.cycle"><option value="weekly">每周</option><option value="monthly">每月</option><option value="quarterly">每季度</option><option value="yearly">每年</option></select></label>
+                <label v-if="['todo', 'homework'].includes(draft.type)">优先级<select v-model="draft.priority"><option value="normal">普通</option><option value="high">重要</option><option value="low">较低</option></select></label>
+                <label v-if="draft.type === 'bill'">重复<select :id="fieldId(draft, 'cycle')" v-model="draft.cycle"><option value="weekly">每周</option><option value="monthly">每月</option><option value="quarterly">每季度</option><option value="yearly">每年</option><option value="once">仅一次</option></select><small v-if="issueFor(draft, 'cycle')" class="field-error">{{ issueFor(draft, 'cycle') }}</small></label>
+                <label class="note-field">备注（可选）<textarea v-model="draft.note" rows="2" /></label>
               </div>
             </template>
           </article>
 
-          <p v-if="drafts.length > 1 && totalExpense" class="total">支出合计 ¥{{ totalExpense.toFixed(2) }}</p>
+          <div v-if="drafts.length > 1 && (totalExpense || totalIncome)" class="batch-total"><span v-if="totalExpense">支出合计 ¥{{ totalExpense.toFixed(2) }}</span><span v-if="totalIncome">收入合计 ¥{{ totalIncome.toFixed(2) }}</span></div>
         </section>
+      </fieldset>
 
         <p v-if="error" class="error" role="alert">{{ error }}</p>
         <div class="footer">
-          <p v-if="feedback" class="success" role="status">{{ feedback }}</p>
+          <div class="save-feedback"><p v-if="feedback" class="success" role="status">{{ feedback }}</p><button v-if="lastSaved.length" type="button" class="undo-save" :disabled="saving" @click="undoLastSaved">撤销刚才保存</button><small v-if="hasDrafts && !feedback">{{ saving ? '正在保存，请稍候…' : `将保存 ${selectedDrafts.length} 项记录` }}</small></div>
           <div v-if="hasDrafts" class="save-actions">
-            <button type="button" class="btn btn-primary" :disabled="saving" :aria-busy="saving || undefined" @click="saveAll(false)">{{ drafts.length > 1 ? '全部保存' : '保存' }}</button>
-            <button type="button" class="btn btn-ghost" :disabled="saving" :aria-busy="saving || undefined" @click="saveAll(true)">保存并继续</button>
+            <button type="button" class="btn btn-primary" :disabled="saving || !selectedDrafts.length || listening || clipboardLoading" :aria-busy="saving || undefined" @click="saveAll(false)">{{ saveLabel }}</button>
+            <button type="button" class="btn btn-ghost" :disabled="saving || !selectedDrafts.length || listening || clipboardLoading" :aria-busy="saving || undefined" @click="saveAll(true)">保存并继续</button>
           </div>
         </div>
 
-      <datalist id="quick-course-options"><option v-for="course in courses" :key="course.id" :value="course.name" /></datalist>
+      <datalist :id="courseListId"><option v-for="course in courses" :key="course.id" :value="course.name" /></datalist>
     </section>
   </Modal>
 </template>
 
 <style scoped>
 .quick-record{display:flex;flex-direction:column;gap:11px}
+.entry-fields{display:flex;flex-direction:column;gap:11px;min-width:0;margin:0;padding:0;border:0}
+.entry-fields:disabled{cursor:progress}
+.compose-heading{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:6px;color:var(--text);font-size:var(--fs-13)}
+.compose-heading small{color:var(--ink-soft);font-size:var(--fs-11)}
 .input-wrap{display:flex;align-items:flex-end;gap:7px;padding:6px 5px 6px 12px;border:1px solid var(--border-strong);border-radius:var(--radius-12);background:var(--card)}
 .input-wrap:focus-within{border-color:var(--primary);box-shadow:0 0 0 3px var(--primary-soft)}
 .smart-input{flex:1;min-width:0;min-height:58px;max-height:220px;padding:9px 0;border:0;background:transparent;resize:none;line-height:1.5;font:inherit;color:var(--text)}
 .mic{display:inline-flex;align-items:center;justify-content:center;gap:5px;min-width:44px;height:44px;padding:0 12px;border:0;border-radius:var(--radius-10);background:var(--primary-soft);font-size:var(--fs-17);cursor:pointer;touch-action:manipulation}
 .mic.on{color:var(--on-danger,#fff);background:var(--danger)}
-.example{margin-top:-5px;color:var(--ink-faint);font-size:var(--fs-11-5)}
-.action-row{display:flex;gap:7px;overflow-x:auto;padding-bottom:2px}
+.example{flex:1;min-width:0;margin:0;color:var(--ink-soft);font-size:var(--fs-11-5);line-height:1.6}
+.input-tools{display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin-top:-4px}
+.input-tools button,.selection-actions button,.undo-save{min-height:30px;padding:4px 7px;border:0;border-radius:var(--radius-6);background:var(--primary-soft);color:var(--primary);font:inherit;font-size:var(--fs-11-5);cursor:pointer}
+.desktop-key-hint{display:block}
+.mobile-key-hint{display:none}
+.draft-status{margin:0;color:var(--ink-soft);font-size:var(--fs-11)}
+.example-block{display:flex;flex-direction:column;gap:6px;padding:12px;border:1px solid var(--border);border-radius:var(--radius-12);background:var(--bg-tint)}
+.example-block p{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px;margin:0 0 3px;color:var(--text);font-size:var(--fs-12);font-weight:var(--fw-700)}
+.example-block small{color:var(--ink-soft);font-size:var(--fs-11);font-weight:var(--fw-500)}
+.example-entry{display:flex;justify-content:space-between;align-items:center;gap:8px;min-height:36px;padding:8px 10px;border:1px solid var(--border);border-radius:var(--radius-8);background:var(--card);color:var(--text);font:inherit;font-size:var(--fs-12);text-align:left;cursor:pointer}
+.example-entry span:first-child{min-width:0;overflow-wrap:anywhere}
+.example-entry span:last-child{flex-shrink:0;color:var(--primary)}
+.example-entry:hover{border-color:var(--primary);background:var(--primary-soft)}
+.action-row{display:flex;flex-wrap:wrap;gap:7px;padding-bottom:2px}
 .action-row button{flex:0 0 auto;min-height:34px;padding:7px 10px;color:var(--ink-soft);border:1px solid var(--border);border-radius:var(--radius-pill);background:var(--card);font-size:var(--fs-12);font-weight:var(--fw-700);touch-action:manipulation}
 .action-row button.on{color:var(--primary);border-color:var(--primary);background:var(--primary-soft)}
-.action-row .action-more{margin-left:auto}
 .voice-status{margin:0;color:var(--primary);font-size:var(--fs-12);font-weight:var(--fw-700)}
 .clipboard-hint{display:flex;gap:8px;align-items:center;padding:9px 10px;color:var(--ink-soft);font-size:var(--fs-12);border-radius:var(--radius-9);background:var(--bg)}
 .clipboard-hint span{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -650,7 +297,17 @@ onBeforeUnmount(() => {
 .recent-name{flex:1;min-width:0;overflow:hidden;font-size:var(--fs-12-5);font-weight:var(--fw-700);text-overflow:ellipsis;white-space:nowrap}
 .recent-row small{max-width:40%;overflow:hidden;color:var(--ink-soft);font-size:var(--fs-11);text-overflow:ellipsis;white-space:nowrap}
 .results{display:flex;flex-direction:column;gap:8px}
-.result-count,.total{margin:0;color:var(--ink-soft);font-size:var(--fs-12)}
+.results-heading{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px}
+.selection-actions{display:flex;gap:5px}
+.record-heading{display:flex;align-items:center;gap:7px;min-width:0}
+.record-heading input{width:17px;height:17px;accent-color:var(--primary)}
+.record-heading small{color:var(--ink-soft);font-size:var(--fs-11)}
+.record-card.excluded{border-style:dashed;background:var(--card)}
+.record-card.invalid{border-color:var(--danger)}
+.field-error{display:block;margin:4px 0;color:var(--danger);font-size:var(--fs-11-5);line-height:1.5}
+[aria-invalid="true"]{border-color:var(--danger)}
+.batch-total{display:flex;flex-wrap:wrap;gap:6px 14px;padding:10px 12px;border-radius:var(--radius-8);background:var(--primary-soft);color:var(--text);font-size:var(--fs-12);font-weight:var(--fw-700)}
+.result-count{margin:0;color:var(--ink-soft);font-size:var(--fs-12)}
 .record-card{padding:11px;border:1px solid var(--border);border-radius:var(--radius-11);background:var(--bg-tint)}
 .record-card.uncertain{border-color:color-mix(in srgb, var(--warning) 40%, var(--border));background:color-mix(in srgb, var(--warning) 10%, var(--card))}
 .record-head{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:var(--fs-12)}
@@ -677,6 +334,7 @@ onBeforeUnmount(() => {
 .chips input{width:92px;padding:0;border:0;background:transparent;font:inherit}
 .chips input[type="date"]{width:107px}
 .chips input[type="time"]{width:62px}
+.chips .add-field{min-height:28px;padding:3px 8px;color:var(--primary);font:inherit;font-size:var(--fs-11);border:1px dashed var(--border-strong);border-radius:var(--radius-6);background:var(--card);cursor:pointer}
 .category-chip-wrap{position:relative;display:inline-flex}
 .category-chip{min-height:28px;padding:3px 8px;color:var(--ink-soft);font-size:var(--fs-11);border:0;border-radius:var(--radius-6);background:var(--card);cursor:pointer}
 .category-chip:hover{color:var(--primary)}
@@ -688,8 +346,10 @@ onBeforeUnmount(() => {
 .details{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px;padding-top:10px;border-top:1px solid var(--border)}
 .details label{display:flex;flex-direction:column;gap:4px;color:var(--ink-soft);font-size:var(--fs-11)}
 .details textarea,.details input,.details select{width:100%;padding:6px 7px;font-size:var(--fs-12)}
-.details label:last-child{grid-column:1/-1}
-.footer{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:42px}
+.details .note-field{grid-column:1/-1}
+.footer{position:sticky;bottom:0;display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:42px;padding:8px 0 4px;background:var(--card)}
+.save-feedback{display:flex;flex-direction:column;align-items:flex-start;gap:5px;min-width:0}
+.save-feedback small{color:var(--ink-soft);font-size:var(--fs-11-5)}
 .success{margin:0;color:var(--success);font-size:var(--fs-12)}
 .error{margin:0;color:var(--danger);font-size:var(--fs-12)}
 .save-actions{display:flex;gap:8px;margin-left:auto}
@@ -698,9 +358,15 @@ onBeforeUnmount(() => {
 .category-chip,.category-picker button{min-width:44px;min-height:44px}
 }
 @media(max-width:520px){
+.action-row{flex-wrap:nowrap;overflow-x:auto}
+.compose-heading{flex-direction:column;gap:3px}
+.desktop-key-hint{display:none}
+.mobile-key-hint{display:inline}
+.example-entry,.input-tools button,.selection-actions button,.undo-save,.chips .add-field{min-height:44px}
 .details{grid-template-columns:1fr}
-.details label:last-child{grid-column:auto}
-.footer{position:sticky;bottom:0;background:var(--card);padding:8px 0 4px}
+.details .note-field{grid-column:auto}
+.footer{position:sticky;bottom:0;flex-wrap:wrap;background:var(--card);padding:8px 0 4px}
+.save-feedback{width:100%}
 .save-actions{width:100%}
 .save-actions .btn-primary{flex:1}
 .save-actions .btn-ghost{min-width:92px}

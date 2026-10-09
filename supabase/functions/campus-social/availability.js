@@ -1,65 +1,22 @@
+// 时区换算原语（zonedParts / dateInZone / wallTimeToEpoch 及其校验辅助）已迁到
+// src/composables/zonedTime.js —— 前端 4 个文件也要用同一份实现，放在函数目录里会让
+// "源码依赖部署目录"（依赖方向是反的）。这里 import 回来再把三个公开函数转出去，既让本文件
+// 内部继续按短名调用，也保持 './availability.js' 这个入口对既有引用可用。
+// 单一实现很重要：时区逻辑错一位就是"偶尔差一小时"，两份实现迟早漂移。
+import { dateInZone, formatter, validClock, validDate, wallTimeToEpoch, zonedParts } from '../../../src/composables/zonedTime.js'
+
+export { dateInZone, wallTimeToEpoch, zonedParts }
+
 const DAY_MS = 24 * 60 * 60 * 1000
 const MINUTE_MS = 60 * 1000
-const formatterCache = new Map()
 
 function pad(value) { return String(value).padStart(2, '0') }
 function dateText(year, month, day) { return `${year}-${pad(month)}-${pad(day)}` }
-function validDate(value) { return /^\d{4}-\d{2}-\d{2}$/.test(String(value || '')) && !Number.isNaN(Date.parse(`${value}T00:00:00Z`)) }
-function validClock(value) {
-  const match = /^(\d{2}):(\d{2})$/.exec(String(value || ''))
-  if (!match) return null
-  const hours = Number(match[1]); const minutes = Number(match[2])
-  return hours <= 23 && minutes <= 59 ? hours * 60 + minutes : null
-}
 
-function formatter(timeZone) {
-  if (!formatterCache.has(timeZone)) {
-    formatterCache.set(timeZone, new Intl.DateTimeFormat('en-US', {
-      timeZone, year: 'numeric', month: '2-digit', day: '2-digit',
-      hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
-    }))
-  }
-  return formatterCache.get(timeZone)
-}
-
-export function zonedParts(epochMs, timeZone) {
-  const values = Object.fromEntries(formatter(timeZone).formatToParts(new Date(epochMs)).map((part) => [part.type, part.value]))
-  return { year: Number(values.year), month: Number(values.month), day: Number(values.day), hour: Number(values.hour), minute: Number(values.minute), second: Number(values.second) }
-}
-
-export function dateInZone(epochMs, timeZone) {
-  const p = zonedParts(epochMs, timeZone)
-  return dateText(p.year, p.month, p.day)
-}
-
-export function addDate(date, days) {
+function addDate(date, days) {
   const [year, month, day] = String(date).split('-').map(Number)
   const next = new Date(Date.UTC(year, month - 1, day + days))
   return dateText(next.getUTCFullYear(), next.getUTCMonth() + 1, next.getUTCDate())
-}
-
-// Convert a local wall time to an instant by testing offsets around the target.
-// A nonexistent DST wall time produces null; an ambiguous fall-back time uses
-// the earlier instant for starts and the later instant for ends.
-export function wallTimeToEpoch(date, clock, timeZone, edge = 'start') {
-  const minutes = validClock(clock)
-  if (!validDate(date) || minutes === null) return null
-  const [year, month, day] = date.split('-').map(Number)
-  const desired = Date.UTC(year, month - 1, day, Math.floor(minutes / 60), minutes % 60)
-  const offsets = new Set()
-  for (let delta = -36; delta <= 36; delta += 6) {
-    const sample = desired + delta * 60 * MINUTE_MS
-    const p = zonedParts(sample, timeZone)
-    const represented = Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second)
-    offsets.add(represented - Math.floor(sample / 1000) * 1000)
-  }
-  const candidates = [...offsets].map((offset) => desired - offset).filter((candidate) => {
-    const p = zonedParts(candidate, timeZone)
-    return p.year === year && p.month === month && p.day === day
-      && p.hour === Math.floor(minutes / 60) && p.minute === minutes % 60
-  }).sort((a, b) => a - b)
-  if (!candidates.length) return null
-  return edge === 'end' ? candidates[candidates.length - 1] : candidates[0]
 }
 
 function mergeIntervals(intervals) {

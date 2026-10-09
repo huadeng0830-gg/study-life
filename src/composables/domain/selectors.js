@@ -20,10 +20,11 @@ function planningStateFromStatus(task, status) {
 }
 
 // 待办页一次装饰每条记录，再复用状态、截止时间和优先级，避免排序/筛选阶段重复派生。
+/** @param {import('../../types/domain').Task[]} tasks */
 export function selectTaskView(tasks = [], {
   now = clock.value,
   sortKey = 'due',
-  filter = TASK_PLAN_STATE.scheduled,
+  filter = String(TASK_PLAN_STATE.scheduled),
   showHistory = false,
 } = {}) {
   const counts = { unplanned: 0, scheduled: 0, done: 0, all: 0, archived: 0 }

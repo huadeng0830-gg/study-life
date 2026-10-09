@@ -1,5 +1,5 @@
 import { computed, ref, shallowRef } from 'vue'
-import { ACCOUNT_STORAGE_KEY, getSupabaseClient, getSupabaseConfig } from '../services/supabase.js'
+import { ACCOUNT_STORAGE_KEY, getSupabaseClient, getSupabaseConfig, verifyAccountCurrentPassword } from '../services/supabase.js'
 
 export const accountOpen = ref(false)
 export const accountUser = shallowRef(/** @type {import('@supabase/supabase-js').User | null} */ (null))
@@ -8,6 +8,23 @@ export const accountBusy = ref(false)
 export const accountAuthError = ref('')
 export const accountCallbackError = ref('')
 export const accountAvailable = computed(() => Boolean(getSupabaseConfig()))
+const RECOVERY_STORAGE_KEY = 'study-life-password-recovery'
+const recoveryUserId = ref(readRecoveryUserId())
+export const accountPasswordRecovery = computed(() => Boolean(accountUser.value && recoveryUserId.value === accountUser.value.id))
+
+function readRecoveryUserId() {
+  try { return sessionStorage.getItem(RECOVERY_STORAGE_KEY) || '' } catch { return '' }
+}
+
+function setPasswordRecovery(userId = '') {
+  recoveryUserId.value = userId
+  try {
+    if (userId) sessionStorage.setItem(RECOVERY_STORAGE_KEY, userId)
+    else sessionStorage.removeItem(RECOVERY_STORAGE_KEY)
+  } catch { /* Recovery remains available in memory when session storage is blocked. */ }
+}
+
+export function finishAccountPasswordRecovery() { setPasswordRecovery() }
 
 export function hasPersistedAccountSession() {
   try { return Boolean(localStorage.getItem(ACCOUNT_STORAGE_KEY)) } catch { return false }
@@ -18,11 +35,22 @@ export function normalizeAccountEmail(email) {
 }
 
 export function validateAccountForm({ email, password = '', confirmation = '', mode = 'register' }) {
-  const errors = {}
+  const errors = /** @type {Record<string, string>} */ ({})
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizeAccountEmail(email))) errors.email = '请输入有效的邮箱地址。'
+  if (mode === 'recovery') return errors
   if (!password) errors.password = '请输入密码。'
   else if (mode === 'register' && password.length < 8) errors.password = '密码至少需要 8 位。'
   if (mode === 'register' && password !== confirmation) errors.confirmation = '两次输入的密码不一致。'
+  return errors
+}
+
+export function validateAccountPassword({ password = '', confirmation = '', currentPassword = '', recovery = false }) {
+  const errors = /** @type {Record<string, string>} */ ({})
+  if (!recovery && !currentPassword) errors.currentPassword = '请输入当前密码。'
+  if (!password) errors.password = '请输入新密码。'
+  else if (password.length < 8) errors.password = '新密码至少需要 8 位。'
+  else if (!recovery && password === currentPassword) errors.password = '新密码不能与当前密码相同。'
+  if (password !== confirmation) errors.confirmation = '两次输入的密码不一致。'
   return errors
 }
 
@@ -42,11 +70,21 @@ export function accountErrorMessage(error) {
     over_request_rate_limit: '操作过于频繁，请稍后再试。',
     signup_disabled: '当前暂未开放注册，请稍后再试。',
     email_provider_disabled: '邮箱注册暂时不可用，请稍后再试。',
-    otp_expired: '验证链接已过期，请重新发送验证邮件。',
-    access_denied: '验证链接无效或已过期，请重新发送验证邮件。',
+    otp_expired: '邮件链接已过期，请重新发送邮件。',
+    access_denied: '邮件链接无效或已过期，请重新发送邮件。',
+    same_password: '新密码不能与原密码相同。',
+    current_password_required: '请输入当前密码，或通过邮箱重设密码。',
+    current_password_mismatch: '当前密码不正确，请重新输入或通过邮箱重设。',
+    reauthentication_needed: '需要重新验证身份，请通过邮箱重设密码。',
+    reauthentication_not_valid: '身份验证已失效，请重新发送密码重设邮件。',
+    session_not_found: '登录状态已失效，请重新登录。',
+    bad_jwt: '登录状态已失效，请重新登录。',
+    flow_state_not_found: '邮件链接无法在此设备验证，请在发送邮件的浏览器中打开，或重新发送邮件。',
+    flow_state_expired: '邮件链接已过期，请重新发送邮件。',
   }
   if (messages[code]) return messages[code]
   if (error?.status === 429) return '操作过于频繁，请稍后再试。'
+  if (error?.name === 'AuthPKCECodeVerifierMissingError') return '请在发送邮件的浏览器中打开链接，或在此设备重新发送邮件。'
   if (error?.name === 'AuthRetryableFetchError' || error?.name === 'TypeError' || error?.name === 'AbortError') {
     return '无法连接账号服务，请检查网络后重试。'
   }
@@ -74,6 +112,7 @@ function acceptSession(session) {
   authRevision++
   accountUser.value = session?.user || null
   accountReady.value = true
+  if (!session?.user || (recoveryUserId.value && recoveryUserId.value !== session.user.id)) setPasswordRecovery()
 }
 
 export async function initializeAccountAuth() {
@@ -85,6 +124,11 @@ export async function initializeAccountAuth() {
       if (!subscription) {
         const { data } = client.auth.onAuthStateChange((event, session) => {
           acceptSession(session)
+          if (event === 'PASSWORD_RECOVERY' && session?.user) {
+            setPasswordRecovery(session.user.id)
+            accountOpen.value = true
+            accountCallbackError.value = ''
+          }
           if (event === 'SIGNED_IN') {
             accountAuthError.value = ''
             accountCallbackError.value = ''
@@ -130,7 +174,8 @@ async function accountAction(action) {
     if (error) throw error
     return { ok: true, data }
   } catch (error) {
-    return { ok: false, code: error?.code, message: accountErrorMessage(error) }
+    const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : undefined
+    return { ok: false, code, message: accountErrorMessage(error) }
   } finally {
     accountBusy.value = false
   }
@@ -158,6 +203,7 @@ export async function loginAccount({ email, password }) {
   }))
   if (!result.ok) return result
   if (!result.data?.session) return { ok: false, message: '登录未完成，请稍后重试。' }
+  finishAccountPasswordRecovery()
   acceptSession(result.data.session)
   return { ok: true }
 }
@@ -207,7 +253,50 @@ export async function logoutAccount({ scope = 'local' } = {}) {
   }
 }
 
-const CALLBACK_PARAMS = ['access_token', 'refresh_token', 'expires_in', 'expires_at', 'token_type', 'type', 'error', 'error_code', 'error_description', 'code']
+export function accountPasswordRedirectUrl() {
+  // Desktop email confirmation discards tokens. Password recovery instead opens
+  // the web app, where the verified recovery session can set the new password.
+  if (window.studyLifeDesktop?.isDesktop) return 'https://study-life.pages.dev/'
+  return accountRedirectUrl()
+}
+
+export async function requestAccountPasswordReset(email) {
+  const normalized = normalizeAccountEmail(email)
+  const errors = validateAccountForm({ email: normalized, mode: 'recovery' })
+  if (errors.email) return { ok: false, errors, message: errors.email }
+  return accountAction((auth) => auth.resetPasswordForEmail(normalized, { redirectTo: accountPasswordRedirectUrl() }))
+}
+
+export async function updateAccountPassword({ password, confirmation, currentPassword = '' }) {
+  if (!accountUser.value) return { ok: false, message: '请先登录或打开密码重设邮件中的链接。' }
+  const userId = accountUser.value.id
+  const email = accountUser.value.email
+  const recovery = accountPasswordRecovery.value
+  const errors = validateAccountPassword({ password, confirmation, currentPassword, recovery })
+  if (Object.keys(errors).length) return { ok: false, errors }
+  const result = await accountAction(async (auth) => {
+    if (accountUser.value?.id !== userId) throw new Error('session_not_found')
+    if (!recovery) {
+      const verified = await verifyAccountCurrentPassword(email, currentPassword)
+      if (verified.error) return { data: null, error: verified.error }
+      if (verified.data?.user?.id !== userId || accountUser.value?.id !== userId) throw new Error('session_not_found')
+    }
+    // The installed auth-js SDK forwards UserAttributes using snake_case.
+    return auth.updateUser({ password, ...(!recovery ? { current_password: currentPassword } : {}) })
+  })
+  if (!result.ok) {
+    if (result.code === 'invalid_credentials') return { ...result, message: '当前密码不正确，请重新输入或通过邮箱重设。' }
+    return result
+  }
+  if (accountUser.value?.id !== userId || result.data?.user?.id !== userId) {
+    return { ok: false, message: '登录状态已变化，请重新打开账号面板。' }
+  }
+  accountUser.value = result.data.user
+  finishAccountPasswordRecovery()
+  return { ok: true }
+}
+
+const CALLBACK_PARAMS = ['access_token', 'refresh_token', 'expires_in', 'expires_at', 'token_type', 'type', 'error', 'error_code', 'error_description', 'code', 'flow_id']
 
 export function hasAccountCallback(href) {
   const url = new URL(href)
@@ -239,6 +328,9 @@ export async function prepareAccountCallback() {
           : await client.auth.setSession({ access_token: params.get('access_token'), refresh_token: params.get('refresh_token') })
         if (exchange.error) throw exchange.error
         acceptSession(exchange.data?.session || null)
+        if (exchange.data?.session?.user && (params.get('type') === 'recovery' || exchange.data.redirectType === 'recovery')) {
+          setPasswordRecovery(exchange.data.session.user.id)
+        }
       }
     }
   } catch (error) {

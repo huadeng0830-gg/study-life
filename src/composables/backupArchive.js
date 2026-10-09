@@ -31,6 +31,8 @@ export const BACKUP_STORAGE_KEYS = Object.freeze({
   countdownShowPast: 'sl_countdown_show_past',
   ocrVocabulary: 'sl_ocr_vocabulary',
   appearance: 'sl_appearance',
+  mobileNavigation: 'sl_navigation_mobile',
+  desktopNavigation: 'sl_navigation_desktop',
   wallpaperConfig: 'sl_wallpaper_config',
   autoWallpaperColor: 'sl_auto_wallpaper_color',
   wallpaperAccent: 'sl_wallpaper_accent',
@@ -54,18 +56,28 @@ export const BACKUP_MODULES = Object.freeze([
   { key: 'countdown', label: '重要日期', keys: ['sl_exams', 'sl_countdown_show_past'] },
   { key: 'checklists', label: '清单', keys: ['sl_checklists'] },
   { key: 'ledger', label: '账本', keys: ['sl_bills', 'sl_expenses', 'sl_ledger_categories', 'sl_ledger_freq', 'sl_ledger_fx', 'sl_ledger_budget', 'sl_ledger_templates'] },
-  { key: 'appearance', label: '外观与主题', keys: ['sl_theme', 'sl_custom_theme_color', 'sl_high_contrast', 'sl_auto_wallpaper_color', 'sl_wallpaper_accent', 'sl_appearance', 'sl_wallpaper_config', 'sl_performance_mode'] },
+  { key: 'appearance', label: '外观与主题', keys: ['sl_theme', 'sl_custom_theme_color', 'sl_high_contrast', 'sl_auto_wallpaper_color', 'sl_wallpaper_accent', 'sl_appearance', 'sl_wallpaper_config', 'sl_performance_mode', 'sl_navigation_mobile', 'sl_navigation_desktop'] },
   { key: 'atmosphere', label: '氛围与心情', keys: ['sl_festive_config', 'sl_festive_birthday_full', 'sl_mood_log', 'sl_festive_lunar', 'sl_ui_language'] },
   { key: 'reminders', label: '提醒记录', keys: ['sl_reminder_log'] },
 ])
+
+const BACKUP_ARRAY_FIELDS = ['courses', 'countdowns', 'tasks', 'events', 'focusSessions', 'courseCheckins', 'courseTemplates', 'checklists', 'bills', 'expenses', 'ledgerCategories', 'ledgerTemplates', 'scheduleExceptions', 'festiveLunar', 'reminderLog', 'taskCenterLog', 'archivedQuickNotes']
+const BACKUP_ARRAY_KEYS = new Set(BACKUP_ARRAY_FIELDS.map((field) => BACKUP_STORAGE_KEYS[field]))
 
 function readStored(storage, key, fallback) {
   try {
     const raw = storage?.getItem(key)
     if (raw === null || raw === undefined) return fallback
-    return JSON.parse(raw) ?? fallback
+    const value = JSON.parse(raw) ?? fallback
+    if (value !== null && BACKUP_ARRAY_KEYS.has(key) && !Array.isArray(value)) {
+      throw new Error('记录格式不正确')
+    }
+    if (key === BACKUP_STORAGE_KEYS.moodLog && (typeof value !== 'object' || Array.isArray(value))) throw new Error('记录格式不正确')
+    return value
   } catch (error) {
-    throw new Error(`无法备份本机数据 ${key}：JSON 内容损坏，已停止导出以保留原始数据。`, { cause: error })
+    const label = BACKUP_MODULES.find((module) => module.keys.includes(key))?.label || '本机数据'
+    const detail = error?.message === '记录格式不正确' ? '记录格式不正确' : 'JSON 内容损坏或无法读取'
+    throw new Error(`无法备份${label}：${detail}，已停止导出以保留原始数据。`, { cause: error })
   }
 }
 
@@ -79,9 +91,10 @@ function browserStorage() {
 
 /** 从本机持久化状态创建一份尚未附加可选壁纸与校验和的备份快照。 */
 export function createBackupSnapshot(storage = browserStorage()) {
+  if (!storage || typeof storage.getItem !== 'function') throw new Error('本机存储不可用，无法安全读取数据。请检查浏览器的存储权限后重试。')
   return {
     app: 'study-life',
-    version: 11,
+    version: 12,
     schema: 'study-life.backup/v1',
     exportedAt: new Date().toISOString(),
     data: {
@@ -113,6 +126,8 @@ export function createBackupSnapshot(storage = browserStorage()) {
       countdownShowPast: readStored(storage, BACKUP_STORAGE_KEYS.countdownShowPast, false),
       ocrVocabulary: readStored(storage, BACKUP_STORAGE_KEYS.ocrVocabulary, { courses: [], teachers: [], rooms: [], campuses: [] }),
       appearance: readStored(storage, BACKUP_STORAGE_KEYS.appearance, null),
+      mobileNavigation: readStored(storage, BACKUP_STORAGE_KEYS.mobileNavigation, null),
+      desktopNavigation: readStored(storage, BACKUP_STORAGE_KEYS.desktopNavigation, null),
       wallpaperConfig: readStored(storage, BACKUP_STORAGE_KEYS.wallpaperConfig, null),
       autoWallpaperColor: readStored(storage, BACKUP_STORAGE_KEYS.autoWallpaperColor, false),
       wallpaperAccent: readStored(storage, BACKUP_STORAGE_KEYS.wallpaperAccent, '#456fe8'),
@@ -172,7 +187,7 @@ function sanitizeWallpaperImages(value) {
 
 /** 校验并归一化导入内容，同时保留原文件实际携带的字段供恢复流程使用。 */
 export async function parseBackupArchive(value) {
-  if (!value || value.app !== 'study-life' || ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].includes(value.version) || !value.data) {
+  if (!value || value.app !== 'study-life' || ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].includes(value.version) || !value.data) {
     throw new Error('这不是有效的控制台备份文件')
   }
   if (value.version >= 7 && value.schema !== 'study-life.backup/v1') {
@@ -190,9 +205,17 @@ export async function parseBackupArchive(value) {
   if (!Array.isArray(data.courses) || !Array.isArray(data.countdowns)) {
     throw new Error('备份文件中的课程或重要日期数据不完整')
   }
+  for (const field of BACKUP_ARRAY_FIELDS) {
+    if (data[field] === null || data[field] === undefined || Array.isArray(data[field])) continue
+    const module = BACKUP_MODULES.find((item) => item.keys.includes(BACKUP_STORAGE_KEYS[field]))
+    throw new Error(`备份中的${module?.label || '记录'}格式不正确，恢复已停止，请在原设备重新导出。`)
+  }
+  if (data.moodLog !== null && data.moodLog !== undefined && (typeof data.moodLog !== 'object' || Array.isArray(data.moodLog))) {
+    throw new Error('备份中的心情记录格式不正确，恢复已停止。')
+  }
   return {
     ...value,
-    providedFields: [...backupProvidedFields(data)],
+    providedFields: [...backupProvidedFields(data)].filter((field) => data[field] !== null && data[field] !== undefined),
     data: {
       courses: data.courses,
       countdowns: data.countdowns,
@@ -240,16 +263,37 @@ export async function parseBackupArchive(value) {
   }
 }
 
-/** 根据备份真实携带字段推导将覆盖的本机数据分区。 */
-export function restoreBackupModuleLabels(backup, { storageKeys = BACKUP_STORAGE_KEYS, modules = BACKUP_MODULES } = {}) {
+/** 根据备份真实携带字段推导可选恢复分区，分类与实际存储映射保持同源。 */
+export function restoreBackupModuleOptions(backup, { storageKeys = BACKUP_STORAGE_KEYS, modules = BACKUP_MODULES } = {}) {
   if (!backup) return []
   const fields = backup.providedFields instanceof Set ? backup.providedFields : new Set(backup.providedFields || [])
-  const restoredKeys = Object.entries(storageKeys)
+  const sourceFields = Object.entries(storageKeys)
     .filter(([field]) => fields.has(field) && backup.data?.[field] !== null && backup.data?.[field] !== undefined)
-    .map(([, key]) => key)
-  const labels = modules
-    .filter((mod) => mod.keys.some((key) => restoredKeys.includes(key)))
-    .map((mod) => mod.label)
-  if (restoredKeys.some((key) => !modules.some((mod) => mod.keys.includes(key)))) labels.push('其它本机设置')
-  return labels
+  const options = modules.flatMap((mod) => {
+    const selectedFields = sourceFields
+      .filter(([, key]) => mod.keys.includes(key))
+      .map(([field]) => field)
+    return selectedFields.length ? [{ id: mod.key, label: mod.label, fields: selectedFields }] : []
+  })
+  const categorizedKeys = new Set(modules.flatMap((mod) => mod.keys))
+  const otherFields = sourceFields
+    .filter(([, key]) => !categorizedKeys.has(key))
+    .map(([field]) => field)
+  if (otherFields.length) options.push({ id: 'other', label: '其它本机设置', fields: otherFields })
+  return options
+}
+
+/** 给选择性恢复生成准确范围；未传选择时保持旧调用的“全部模块”行为。 */
+export function restoreBackupModuleLabels(backup, { storageKeys = BACKUP_STORAGE_KEYS, modules = BACKUP_MODULES, selectedModuleIds = null } = {}) {
+  const options = restoreBackupModuleOptions(backup, { storageKeys, modules })
+  const selected = selectedModuleIds ? new Set(selectedModuleIds) : null
+  return options.filter((option) => !selected || selected.has(option.id)).map((option) => option.label)
+}
+
+/** 返回选择的分区实际允许写入的备份字段。 */
+export function restoreBackupSelectedFields(backup, selectedModuleIds, { storageKeys = BACKUP_STORAGE_KEYS, modules = BACKUP_MODULES } = {}) {
+  const selected = new Set(selectedModuleIds || [])
+  return restoreBackupModuleOptions(backup, { storageKeys, modules })
+    .filter((option) => selected.has(option.id))
+    .flatMap((option) => option.fields)
 }

@@ -2,7 +2,7 @@ import { useDomainCommands } from '../domain/commands.js'
 
 export function useQuickRecordAdapters() {
   const domain = useDomainCommands()
-  const { courses } = domain
+  const courses = /** @type {import('vue').Ref<Array<{id: string, name: string}>>} */ (domain.courses)
 
   function savedResult(message, undo, entityType = '', entityId = '') {
     return {

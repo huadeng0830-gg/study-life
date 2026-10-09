@@ -5,6 +5,7 @@ const STORE_NAME = 'records'
 const DB_VERSION = 1
 const DB_OPEN_TIMEOUT = 800
 const DB_REQUEST_TIMEOUT = 1200
+const RESTORE_CHECKPOINT_KEY = '__restore_checkpoint_v1__'
 
 function managedKey(key) {
   return typeof key === 'string' && key.startsWith('sl_') && key !== 'sl_transfer_undo'
@@ -497,6 +498,31 @@ export async function mirrorLocalValues(records) {
     // 影子备份失败不影响本次恢复；localStorage 仍会保留已恢复的数据。
     mirrorErrorHandler?.(error, entries.map(([key]) => key))
   }
+}
+
+/**
+ * A durable, device-local checkpoint for an explicitly confirmed restore.
+ * It shares the vault database but does not use an `sl_*` key, so it is never
+ * mirrored as business data or included in account synchronization.
+ */
+export async function getRestoreCheckpoint() {
+  const db = await openVault()
+  if (!db) throw new Error('本地安全副本不可用，无法读取恢复点。')
+  const record = (await readRecords(db, [RESTORE_CHECKPOINT_KEY])).get(RESTORE_CHECKPOINT_KEY)
+  return record?.value ?? null
+}
+
+export async function saveRestoreCheckpoint(value) {
+  const db = await openVault()
+  if (!db) throw new Error('本地安全副本不可用，无法创建恢复点。')
+  await writeRecords(db, [[RESTORE_CHECKPOINT_KEY, value]])
+  return value
+}
+
+export async function clearRestoreCheckpoint() {
+  const db = await openVault()
+  if (!db) throw new Error('本地安全副本不可用，无法清除恢复点。')
+  await deleteRecords(db, [RESTORE_CHECKPOINT_KEY])
 }
 
 // Retired product data must be removed from the mirror as well as from

@@ -1,11 +1,12 @@
 <script setup>
 import { defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { accountOpen, accountUser } from '../composables/accountAuth.js'
 import { autoWallpaperColor, THEMES, themeKey } from '../composables/theme.js'
 import { originFromEvent, revealChange } from '../composables/motion.js'
 import { needsBackup } from '../composables/backupReminder.js'
 import { preloadCommonRoutes, preloadRoute } from '../router/routePreload.js'
-import { desktopNavigationGroups } from '../router/navigation.js'
+import { useNavigationViewModel } from '../composables/navigationViewModel.js'
 import { closeSearch, openSearch, searchOpen } from '../composables/globalSearch.js'
 import {
   createScrollLock,
@@ -34,65 +35,38 @@ const loadAccountPanel = () => import('./AccountPanel.vue')
 const loadDataManager = () => import('./DataManager.vue')
 const loadVersionUpdate = () => import('./VersionUpdateModal.vue')
 const loadAppearanceSettings = () => import('./AppearanceSettings.vue')
+const loadNavigationSettings = () => import('./NavigationSettings.vue')
 const loadQuickRecordSettings = () => import('./QuickRecordSettings.vue')
 const loadFocusSettings = () => import('./FocusSettings.vue')
 const loadFestiveSettings = () => import('./FestiveSettings.vue')
 const loadSearchPanel = () => import('./SearchPanel.vue')
 const AccountPanel = defineAsyncComponent(loadAccountPanel)
 const toolLoaders = Object.freeze({ account: loadAccountPanel, data: loadDataManager, update: loadVersionUpdate,
-  appearance: loadAppearanceSettings, focus: loadFocusSettings, festive: loadFestiveSettings, search: loadSearchPanel })
+  appearance: loadAppearanceSettings, navigation: loadNavigationSettings, focus: loadFocusSettings, festive: loadFestiveSettings, search: loadSearchPanel, capture: () => import('./QuickRecordPanel.vue') })
 const accountLabel = '我的账号'
 const DataManager = defineAsyncComponent(loadDataManager)
 const VersionUpdateModal = defineAsyncComponent(loadVersionUpdate)
 const AppearanceSettings = defineAsyncComponent(loadAppearanceSettings)
+const NavigationSettings = defineAsyncComponent(loadNavigationSettings)
 const QuickRecordSettings = defineAsyncComponent(loadQuickRecordSettings)
 const FocusSettings = defineAsyncComponent(loadFocusSettings)
-// 【节日与纪念日设置此前完全没有入口】
-// FestiveSettings.vue 从加进仓库起，全 `src/` 只有测试直接 import 它，Sidebar 从未挂载 ——
-// 于是「开关节日氛围 / 填生日 / 填开始使用日期 / 管理纪念日与农历纪念日」这一整块
-// 设置项，用户在任何界面都点不到（`sl_festive_config` 只能被备份/导入间接修改）。
-// 这里按既有工具面板的同一套接线补上入口：懒加载 + 预热 + 桌面按钮 + 手机「更多」格。
+// 氛围与纪念日设置通过桌面按钮和手机「更多」进入，按需加载并预热。
 const FestiveSettings = defineAsyncComponent(loadFestiveSettings)
 const SearchPanel = defineAsyncComponent(loadSearchPanel)
 
-const navGroups = desktopNavigationGroups
-const mobileLeadingItems = [
-  { path: '/', label: '首页', icon: '☀️' },
-]
-const mobileScheduleItems = [
-  { path: '/schedule', label: '课程', icon: '📅' },
-]
-const mobileTaskItems = [
-  { path: '/tasks', label: '待办', icon: '✅' },
-]
-const mobileTrailingItems = [
-  { path: '/bills', label: '账本', icon: '📒' },
-]
-const mobileMoreGroups = [
-  { label: '常用', items: [{ path: '/projects', label: '齐行', icon: '🧩' }, { path: '/together', label: '一起约', icon: '👥' }], tools: [{ key: 'account', label: '我的账号', icon: '👤' }, { key: 'update', label: '版本与更新', icon: '↻' }] },
-  { label: '工具与回顾', items: [
-    { path: '/exams', label: '重要日期', icon: '⏳' },
-    { path: '/events', label: '日程', icon: '🗓️' },
-    { path: '/review', label: '本周回顾', icon: '↺' },
-    { path: '/lists', label: '清单', icon: '☑️', subdued: true },
-  ], tools: [{ key: 'search', label: '搜索', icon: '🔍' }] },
-  { label: '个性化与专注', items: [], tools: [
-    { key: 'appearance', label: '个性化', icon: '🎨' },
-    { key: 'festive', label: '氛围与纪念日', icon: '🎉' },
-    { key: 'focus', label: '专注设置', icon: '⏱' },
-    { key: 'quick-record', label: '快速记录设置', icon: '⚡' },
-  ] },
-  { label: '账号、数据与系统', items: [], tools: [
-    { key: 'data', label: '数据管理', icon: '💾' },
-  ] },
-]
+const currentRoute = useRoute()
+const { desktopGroups: navGroups, bottomItems: mobileBottomItems, mobileBarItems,
+  moreHasCurrentPage: mobileMoreHasCurrentPage, moreGroups: mobileMoreGroups,
+  toggleGroup: toggleNavigationGroup } = useNavigationViewModel(currentRoute, accountLabel)
 const collapsed = ref(false)
 const showMobileMore = ref(false)
+const mobileKeyboardOpen = ref(false)
 const moreTriggerEl = ref(null)
 const moreSheetEl = ref(null)
 const showDataManager = ref(false)
 const showVersionUpdate = ref(false)
 const showAppearance = ref(false)
+const showNavigationSettings = ref(false)
 const showQuickRecordSettings = ref(false)
 const showFocusSettings = ref(false)
 const showFestiveSettings = ref(false)
@@ -104,6 +78,8 @@ const toast = ref({ open: false, message: '', type: 'info', actionLabel: '', und
 const props = defineProps({ quickRecordOpen: Boolean })
 const emit = defineEmits(['open-quick-record'])
 let warmupTimer = 0
+let keyboardFocusTimer = 0
+let viewportBaselineHeight = 0
 
 function openDataManager() {
   showDataManager.value = true
@@ -119,7 +95,37 @@ function warmRoute(path) {
   void preloadRoute(path)
 }
 
+function updateKeyboardVisibility() {
+  const editable = document.activeElement?.matches?.('input, textarea, select, [contenteditable="true"]')
+  const viewportHeight = Number(window.visualViewport?.height) || window.innerHeight || 0
+  const screenHeight = Number(window.screen?.height) || 0
+  if (!editable || (screenHeight && Math.abs(screenHeight - viewportBaselineHeight) > 160)) {
+    viewportBaselineHeight = Math.max(screenHeight, window.innerHeight || 0, viewportHeight)
+  }
+  const threshold = Math.max(120, viewportBaselineHeight * 0.18)
+  mobileKeyboardOpen.value = window.matchMedia('(max-width: 900px)').matches
+    && Boolean(editable)
+    && viewportBaselineHeight - viewportHeight > threshold
+}
+
+function onKeyboardFocusChange() {
+  window.clearTimeout(keyboardFocusTimer)
+  keyboardFocusTimer = window.setTimeout(updateKeyboardVisibility, 40)
+}
+
+function openNavigationSettings() {
+  showAppearance.value = false
+  showNavigationSettings.value = true
+}
+
 onMounted(() => {
+  viewportBaselineHeight = Math.max(window.screen?.height || 0, window.innerHeight || 0, window.visualViewport?.height || 0)
+  window.addEventListener('focusin', onKeyboardFocusChange)
+  window.addEventListener('focusout', onKeyboardFocusChange)
+  window.addEventListener('resize', updateKeyboardVisibility)
+  window.visualViewport?.addEventListener('resize', updateKeyboardVisibility)
+  window.visualViewport?.addEventListener('scroll', updateKeyboardVisibility)
+  updateKeyboardVisibility()
   // 桌面端在首屏空闲后预热最常点的入口；移动端仍保持按需下载，避免占用流量。
   if (window.matchMedia('(min-width: 901px)').matches) {
     warmupTimer = window.setTimeout(() => {
@@ -140,6 +146,12 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   window.clearTimeout(warmupTimer)
+  window.clearTimeout(keyboardFocusTimer)
+  window.removeEventListener('focusin', onKeyboardFocusChange)
+  window.removeEventListener('focusout', onKeyboardFocusChange)
+  window.removeEventListener('resize', updateKeyboardVisibility)
+  window.visualViewport?.removeEventListener('resize', updateKeyboardVisibility)
+  window.visualViewport?.removeEventListener('scroll', updateKeyboardVisibility)
   window.clearTimeout(drawerSettleTimer)
   // 侧边栏整个卸载时抽屉可能还开着：不清就会把滚动锁和遮罩栈一起留在 body 上。
   cleanupMobileMore()
@@ -377,6 +389,8 @@ function openMobileTool(key) {
   closeMobileMore()
   if (key === 'account') accountOpen.value = true
   else if (key === 'appearance') showAppearance.value = true
+  else if (key === 'navigation') openNavigationSettings()
+  else if (key === 'capture') emit('open-quick-record')
   else if (key === 'focus') showFocusSettings.value = true
   else if (key === 'festive') showFestiveSettings.value = true
   else if (key === 'quick-record') showQuickRecordSettings.value = true
@@ -390,7 +404,7 @@ function openMobileTool(key) {
   <!-- `drawer-open` 是**根节点**的打开态：抽屉与遮罩都在 .sidebar 内部，而 .sidebar 自己
        (position:fixed + z-index) 就是一个层叠上下文，里面的 z-index 再大也逃不出去——
        所以要在抽屉打开期间把根节点整体抬到 .task-pill 之上（见样式块里的层叠说明）。 -->
-  <aside class="sidebar" :class="{ collapsed, 'drawer-open': showMobileMore }">
+  <aside class="sidebar" :class="{ collapsed, 'drawer-open': showMobileMore, 'keyboard-open': mobileKeyboardOpen }">
     <div class="brand">
       <span class="brand-mark">UP</span>
       <span class="brand-copy">
@@ -400,79 +414,43 @@ function openMobileTool(key) {
     </div>
 
     <nav class="nav desktop-nav" aria-label="主要导航">
-      <section v-for="group in navGroups" :key="group.label" class="nav-group">
-        <span class="nav-group-title">{{ group.label }}</span>
-        <router-link
-          v-for="item in group.items"
-          :key="item.path"
-          :to="item.path"
-          class="nav-item"
-          active-class="active"
-          @pointerenter="warmRoute(item.path)"
-          @pointerdown="warmRoute(item.path)"
-          @focus="warmRoute(item.path)"
-        >
-          <span class="icon">{{ item.icon }}</span>
-          <span class="nav-label">{{ item.label }}</span>
-        </router-link>
+      <section v-for="group in navGroups" :key="group.id" class="nav-group">
+        <button type="button" class="nav-group-title" :aria-controls="`nav-group-${group.id}`" :aria-expanded="!group.collapsed" :title="collapsed ? group.label : undefined" @click="toggleNavigationGroup(group.id)">{{ group.label }}<span class="nav-group-chevron" aria-hidden="true">{{ group.collapsed ? '＋' : '−' }}</span></button>
+        <div v-show="!group.collapsed" :id="`nav-group-${group.id}`" class="nav-group-items">
+          <router-link
+            v-for="item in group.items"
+            :key="item.id"
+            :to="item.path"
+            class="nav-item"
+            exact-active-class="active"
+            :title="collapsed ? item.label : undefined"
+            @pointerenter="warmRoute(item.path)"
+            @pointerdown="warmRoute(item.path)"
+            @focus="warmRoute(item.path)"
+          >
+            <span class="icon">{{ item.icon }}</span>
+            <span class="nav-label">{{ item.label }}</span>
+          </router-link>
+        </div>
       </section>
     </nav>
 
-    <nav class="mobile-nav" aria-label="手机主要导航">
-      <router-link
-        v-for="item in mobileLeadingItems"
-        :key="item.path"
-        :to="item.path"
-        class="mobile-nav-item"
-        active-class="active"
-        @pointerdown="warmRoute(item.path)"
-      >
-        <span>{{ item.icon }}</span><small>{{ item.label }}</small>
-      </router-link>
-      <router-link
-        v-for="item in mobileScheduleItems"
-        :key="item.path"
-        :to="item.path"
-        class="mobile-nav-item"
-        active-class="active"
-        @pointerdown="warmRoute(item.path)"
-      >
-        <span>{{ item.icon }}</span><small>{{ item.label }}</small>
-      </router-link>
-      <router-link
-        v-for="item in mobileTaskItems"
-        :key="item.path"
-        :to="item.path"
-        class="mobile-nav-item"
-        active-class="active"
-        @pointerdown="warmRoute(item.path)"
-      >
-        <span>{{ item.icon }}</span><small>{{ item.label }}</small>
-      </router-link>
-      <button
-        class="mobile-nav-item mobile-ledger-trigger"
-        :class="{ active: props.quickRecordOpen }"
-        type="button"
-        :aria-expanded="props.quickRecordOpen"
-        aria-label="打开快速记录"
-        @click="emit('open-quick-record')"
-      >
-        <span>＋</span><small>记录</small>
+    <nav class="mobile-nav" :style="{ '--mobile-nav-count': mobileBarItems }" aria-label="手机主要导航">
+      <template v-for="item in mobileBottomItems" :key="item.id">
+        <router-link
+          :to="item.path"
+          class="mobile-nav-item"
+          exact-active-class="active"
+          :aria-label="item.mobileLabel || item.label"
+          @pointerdown="warmRoute(item.path)"
+        >
+          <span>{{ item.icon }}</span><small>{{ item.mobileLabel || item.label }}</small>
+        </router-link>
+      </template>
+      <button class="mobile-nav-item capture-trigger" type="button" aria-label="快速记录" aria-haspopup="dialog" @pointerenter="warmTool('capture')" @pointerdown="warmTool('capture')" @focus="warmTool('capture')" @click="openMobileTool('capture')">
+        <span aria-hidden="true">＋</span><small>快速记录</small>
       </button>
-      <router-link
-        v-for="item in mobileTrailingItems"
-        :key="item.path"
-        :to="item.path"
-        class="mobile-nav-item"
-        active-class="active"
-        @pointerdown="warmRoute(item.path)"
-      >
-        <span>{{ item.icon }}</span><small>{{ item.label }}</small>
-      </router-link>
-      <button class="mobile-nav-item mobile-search-trigger" type="button" aria-label="搜索" @click="openMobileTool('search')" @pointerdown="warmTool('search')">
-        <span>🔍</span><small>搜索</small>
-      </button>
-      <button ref="moreTriggerEl" class="mobile-nav-item more-trigger" :class="{ active: showMobileMore }" type="button" :aria-expanded="showMobileMore" @click="showMobileMore = !showMobileMore">
+      <button ref="moreTriggerEl" class="mobile-nav-item more-trigger" :class="{ active: showMobileMore || mobileMoreHasCurrentPage }" type="button" :aria-expanded="showMobileMore" @click="showMobileMore = !showMobileMore">
         <span>⋯</span><small>更多</small>
       </button>
     </nav>
@@ -501,7 +479,7 @@ function openMobileTool(key) {
         @pointercancel="onDrawerPointerCancel"
       >
         <div class="mobile-more-head"><b>更多功能</b><button type="button" class="tap-target" aria-label="关闭更多功能" @click="closeMobileMore(true)">×</button></div>
-        <div v-for="group in mobileMoreGroups" :key="group.label" class="mobile-more-group" :class="{ 'mobile-more-group-common': group.label === '常用' }">
+        <div v-for="group in mobileMoreGroups" :key="group.id" class="mobile-more-group" :class="{ 'mobile-more-group-common': group.id === 'common' }">
           <h3>{{ group.label }}</h3>
           <div class="mobile-more-grid">
             <router-link v-for="item in group.items" :key="item.path" :to="item.path" class="mobile-more-item" :class="{ subdued: item.subdued }" @click="closeMobileMore()" @pointerdown="warmRoute(item.path)">
@@ -541,6 +519,7 @@ function openMobileTool(key) {
           <span class="icon">🎨</span>
           <span class="nav-label">个性化</span>
         </button>
+        <button type="button" class="nav-item data-item appearance-item" aria-label="编辑导航" title="编辑导航" @pointerenter="warmTool('navigation')" @focus="warmTool('navigation')" @click="openNavigationSettings"><span class="icon" aria-hidden="true">☷</span><span class="nav-label">编辑导航</span></button>
         <button
           type="button"
           class="quick-add-button tap-target"
@@ -603,7 +582,8 @@ function openMobileTool(key) {
   <AccountPanel v-if="accountOpen" :open="accountOpen" @close="accountOpen = false" />
   <DataManager v-if="showDataManager" :open="showDataManager" @close="showDataManager = false" />
   <VersionUpdateModal v-if="showVersionUpdate" :open="showVersionUpdate" @close="showVersionUpdate = false" />
-  <AppearanceSettings v-if="showAppearance" :open="showAppearance" @close="showAppearance = false" />
+  <AppearanceSettings v-if="showAppearance" :open="showAppearance" @close="showAppearance = false" @edit-navigation="openNavigationSettings" />
+  <NavigationSettings v-if="showNavigationSettings" :open="showNavigationSettings" @close="showNavigationSettings = false" />
   <QuickRecordSettings v-if="showQuickRecordSettings" :open="showQuickRecordSettings" @close="showQuickRecordSettings = false" />
   <SearchPanel v-if="showSearch" :open="showSearch" @close="closeSearch()" />
   <FocusSettings v-if="showFocusSettings" :open="showFocusSettings" @close="showFocusSettings = false" />
@@ -669,6 +649,8 @@ function openMobileTool(key) {
 .nav {
   display: flex;
   flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
   gap: 14px;
   overflow-y: auto;
 }
@@ -687,6 +669,23 @@ function openMobileTool(key) {
   font-weight: var(--fw-800);
   letter-spacing: 0.1em;
 }
+.nav-group-title {
+  display: flex;
+  width: 100%;
+  min-height: 28px;
+  align-items: center;
+  justify-content: space-between;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.nav-group-title:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
+}
+.nav-group-chevron { color: var(--muted); font-size: var(--fs-13); }
+.nav-group-items { display: flex; flex-direction: column; gap: 5px; }
 .nav-item {
   position: relative;
   display: flex;
@@ -775,6 +774,9 @@ function openMobileTool(key) {
   gap: 4px;
   margin-top: auto;
   padding-top: 14px;
+  max-height: 46%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   border-top: 1px solid var(--border);
 }
 .sidebar-action-row {
@@ -895,18 +897,20 @@ function openMobileTool(key) {
     display: block;
   }
 
+  .sidebar.keyboard-open,
+  .sidebar.collapsed.keyboard-open { display: none; }
+
   .desktop-nav,
   .sidebar-foot { display: none; }
 
-  .mobile-nav { display: grid; grid-template-columns: repeat(7, minmax(44px, 1fr)); gap: 2px; width: 100%; min-width: 0; overflow-x: auto; scrollbar-width: none; }
-  .mobile-nav::-webkit-scrollbar { display: none; }
+  .mobile-nav { display: grid; grid-template-columns: repeat(var(--mobile-nav-count, 5), minmax(0, 1fr)); gap: 2px; width: 100%; min-width: 0; }
   .mobile-nav-item,
   .mobile-more-item {
     display: flex;
     align-items: center;
     justify-content: center;
     flex-direction: column;
-    min-width: 44px;
+    min-width: 0;
     min-height: 54px;
     gap: 2px;
     padding: 4px 2px;
@@ -922,14 +926,14 @@ function openMobileTool(key) {
   .mobile-nav-item small,
   .mobile-more-item small { overflow: hidden; max-width: 100%; font-size: var(--fs-11); line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
   .mobile-nav-item.active { color: var(--primary); font-weight: var(--fw-800); background: var(--primary-soft); }
-  .mobile-ledger-trigger { width: 100%; min-width: 0; min-height: 54px; color: var(--primary); border: 1px solid var(--primary); border-radius: var(--radius-10); background: var(--primary-soft); box-shadow: none; }
-  .mobile-ledger-trigger > span { display: grid; place-items: center; height: 22px; font-size: var(--fs-22); line-height: 22px; }
-  .mobile-ledger-trigger.active { color: var(--primary); background: var(--card); box-shadow: none; }
+  .capture-trigger { color: var(--primary); font-weight: var(--fw-750); }
+  .capture-trigger > span { width: 28px; border-radius: var(--radius-8); background: var(--primary-soft); }
+  .mobile-nav-item:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
   .more-trigger > span { font-size: var(--fs-25); font-weight: var(--fw-800); line-height: 18px; }
   /* 「更多功能」抽屉：遮罩铺满视口，面板贴**右**边缘的 off-canvas 形态
      （右锚不是随便挑的：右划关闭的手势方向必须与出场方向一致——面板往右滑出去，
      手指也往右拖；左锚 + 右划会出现"手指往右拖、松手却往左飞"的方向反转。
-     触发它的 .more-trigger 也是底栏 5 列里最右一格，原来的浮层本来就贴着 right:10px）。
+     触发它的 .more-trigger 固定在底栏最右一格，抽屉也贴着 right:10px）。
      宽度 min(86vw, 320px) 与 JS 侧的 drawerWidth() 是**同源常量**
      （见 composables/drawerDrag.js 的文件头：手势数学不量 rect，宽度靠常量复算）。 */
   .mobile-more-backdrop { position: fixed; inset: 0; z-index: 30; background: rgba(23, 33, 61, 0.42); touch-action: none; }
@@ -998,7 +1002,7 @@ function openMobileTool(key) {
     padding-left: max(3px, env(safe-area-inset-left));
     padding-right: max(3px, env(safe-area-inset-right));
   }
-  .mobile-nav { grid-template-columns: repeat(7, minmax(44px, 1fr)); gap: 0; }
+  .mobile-nav { grid-template-columns: repeat(var(--mobile-nav-count, 5), minmax(0, 1fr)); gap: 0; }
 }
 
 @media (min-width: 901px) {

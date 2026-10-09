@@ -62,6 +62,31 @@ describe('齐行与个人待办联动', () => {
     }))
   })
 
+  it('把齐行保存的断点同步到唯一个人待办，并保留结构相同的进度', () => {
+    const checkpoint = {
+      lastStep: '完成数据整理', blocker: '', nextStep: '导出图表',
+      resources: ['https://example.com/report'], updatedAt: '2026-10-09T02:00:00.000Z',
+    }
+    const domain = createDomain([{ id: 'local-1', title: '写报告', done: false, status: 'pending', sourceType: 'project-task', sourceId: 'team-1', relationId: 'project-1' }])
+    const serverTask = { id: 'team-1', title: '写报告', status: 'in_progress', assignmentStatus: 'accepted', assigneeId: 'user-1', workCheckpoint: checkpoint }
+
+    ensureProjectTaskTodo(serverTask, { id: 'project-1' }, domain)
+    expect(domain.tasks.value[0].workCheckpoint).toEqual(checkpoint)
+    expect(domain.updateTask).toHaveBeenCalledOnce()
+
+    ensureProjectTaskTodo({ ...serverTask, workCheckpoint: structuredClone(checkpoint) }, { id: 'project-1' }, domain)
+    expect(domain.updateTask).toHaveBeenCalledOnce()
+  })
+
+  it('在服务端还没有断点记录时不覆盖已有的本机进度', () => {
+    const localCheckpoint = { lastStep: '本机旧进度', nextStep: '继续本机记录', resources: [] }
+    const domain = createDomain([{ id: 'local-1', title: '写报告', workCheckpoint: localCheckpoint, done: false, status: 'pending', sourceType: 'project-task', sourceId: 'team-1', relationId: 'project-1' }])
+    ensureProjectTaskTodo({ id: 'team-1', title: '写报告', status: 'todo', assignmentStatus: 'accepted', assigneeId: 'user-1' }, { id: 'project-1' }, domain)
+
+    expect(domain.tasks.value[0].workCheckpoint).toEqual(localCheckpoint)
+    expect(domain.updateTask.mock.calls[0]?.[1]).not.toHaveProperty('workCheckpoint')
+  })
+
   it('成员退出或分工转交后保留个人记录并解除团队关联', () => {
     const domain = createDomain([{ id: 'local-1', title: '写报告', note: '成员自己的补充', done: true, sourceType: 'project-task', sourceId: 'team-1', relationId: 'project-1' }])
     expect(detachProjectTaskTodos('project-1', [], domain)).toBe(1)

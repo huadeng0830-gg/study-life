@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
 
-const adapter = vi.hoisted(() => ({ getSupabaseClient: vi.fn(), getSupabaseConfig: vi.fn() }))
+const adapter = vi.hoisted(() => ({ getSupabaseClient: vi.fn(), getSupabaseConfig: vi.fn(), verifyAccountCurrentPassword: vi.fn() }))
 vi.mock('../src/services/supabase.js', () => adapter)
 
 let account
@@ -14,6 +14,7 @@ beforeEach(async () => {
   vi.resetModules()
   vi.clearAllMocks()
   localStorage.clear()
+  sessionStorage.clear()
   window.history.replaceState(null, '', '/#/')
   adapter.getSupabaseConfig.mockReturnValue({ url: 'https://example.supabase.co', key: 'sb_publishable_example' })
   client = {
@@ -29,9 +30,12 @@ beforeEach(async () => {
       exchangeCodeForSession: vi.fn().mockResolvedValue({ data: { session }, error: null }),
       setSession: vi.fn().mockResolvedValue({ data: { session }, error: null }),
       resend: vi.fn().mockResolvedValue({ data: {}, error: null }),
+      resetPasswordForEmail: vi.fn().mockResolvedValue({ data: {}, error: null }),
+      updateUser: vi.fn().mockResolvedValue({ data: { user }, error: null }),
     },
   }
   adapter.getSupabaseClient.mockResolvedValue(client)
+  adapter.verifyAccountCurrentPassword.mockResolvedValue({ data: { user }, error: null })
   account = await import('../src/composables/accountAuth.js')
 })
 
@@ -176,6 +180,32 @@ describe('邮箱注册与账号生命周期', () => {
 })
 
 describe('邮箱回调和 Hash Router', () => {
+  it('隐式密码找回链接验证成功后进入重设模式，并清理令牌', async () => {
+    window.history.replaceState(null, '', '/#access_token=fictional-access&refresh_token=fictional-refresh&type=recovery')
+    await account.prepareAccountCallback()
+    expect(account.accountPasswordRecovery.value).toBe(true)
+    expect(sessionStorage.getItem('study-life-password-recovery')).toBe(user.id)
+    expect(window.location.hash).toBe('#/')
+    expect(account.accountOpen.value).toBe(true)
+  })
+
+  it('PKCE 回调根据 SDK 的恢复类型显示新密码表单', async () => {
+    window.history.replaceState(null, '', '/?code=fictional-code')
+    client.auth.exchangeCodeForSession.mockResolvedValue({ data: { session, redirectType: 'recovery' }, error: null })
+    await account.prepareAccountCallback()
+    expect(account.accountPasswordRecovery.value).toBe(true)
+    expect(window.location.search).toBe('')
+  })
+
+  it('失败的恢复链接不能开启密码修改权限', async () => {
+    window.history.replaceState(null, '', '/#access_token=fictional-access&refresh_token=fictional-refresh&type=recovery')
+    client.auth.setSession.mockResolvedValue({ data: {}, error: { code: 'otp_expired' } })
+    await account.prepareAccountCallback()
+    expect(account.accountPasswordRecovery.value).toBe(false)
+    expect(account.accountCallbackError.value).toContain('已过期')
+    expect(window.location.href).not.toContain('fictional-access')
+  })
+
   it('SDK 在路由启动前消费 fragment，之后清理令牌并打开账号面板', async () => {
     window.history.replaceState(null, '', '/?keep=demo#access_token=fictional-access&refresh_token=fictional-refresh&type=signup')
     client.auth.getSession.mockImplementation(async () => {
@@ -242,5 +272,114 @@ describe('前端配置的密钥边界', () => {
     expect(ACCOUNT_STORAGE_KEY.startsWith('sl_')).toBe(false)
     expect(supabaseClientOptions(false).auth).toMatchObject({ flowType: 'pkce', detectSessionInUrl: false })
     expect(supabaseClientOptions(true).auth).toMatchObject({ flowType: 'implicit', detectSessionInUrl: false })
+  })
+})
+
+describe('密码找回与修改', () => {
+  it('桌面版重设密码跳到网页表单，避免验证中转页丢弃恢复会话', async () => {
+    window.studyLifeDesktop = { isDesktop: true }
+    try {
+      expect((await account.requestAccountPasswordReset(user.email)).ok).toBe(true)
+      expect(client.auth.resetPasswordForEmail).toHaveBeenCalledWith(user.email, { redirectTo: 'https://study-life.pages.dev/' })
+    } finally { delete window.studyLifeDesktop }
+  })
+  it('找回只校验邮箱，规范化后通过安全回跳地址发送邮件', async () => {
+    expect(account.validateAccountForm({ email: user.email, mode: 'recovery' })).toEqual({})
+    expect((await account.requestAccountPasswordReset('invalid')).ok).toBe(false)
+    expect(client.auth.resetPasswordForEmail).not.toHaveBeenCalled()
+    expect((await account.requestAccountPasswordReset(' STUDENT@EXAMPLE.TEST ')).ok).toBe(true)
+    expect(client.auth.resetPasswordForEmail).toHaveBeenCalledWith(user.email, { redirectTo: window.location.origin + '/' })
+    expect(account.accountUser.value).toBeNull()
+  })
+
+  it('重复找回请求共享提交锁，网络错误后允许重试', async () => {
+    let finish
+    client.auth.resetPasswordForEmail.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    const pending = account.requestAccountPasswordReset(user.email)
+    await vi.waitFor(() => expect(finish).toBeTypeOf('function'))
+    expect((await account.requestAccountPasswordReset(user.email)).ok).toBe(false)
+    expect(client.auth.resetPasswordForEmail).toHaveBeenCalledTimes(1)
+    finish({ data: {}, error: { name: 'AuthRetryableFetchError' } })
+    expect((await pending).message).toContain('网络')
+    expect(account.accountBusy.value).toBe(false)
+    expect((await account.requestAccountPasswordReset(user.email)).ok).toBe(true)
+  })
+
+  it('未登录或表单无效不能更新密码，登录时要求当前密码与两次新密码', async () => {
+    expect((await account.updateAccountPassword({ password: 'NewExample123!', confirmation: 'NewExample123!' })).ok).toBe(false)
+    await account.loginAccount({ email: user.email, password: 'Example123!' })
+    const invalid = await account.updateAccountPassword({ currentPassword: '', password: 'short', confirmation: 'other' })
+    expect(Object.keys(invalid.errors)).toEqual(['currentPassword', 'password', 'confirmation'])
+    expect(client.auth.updateUser).not.toHaveBeenCalled()
+  })
+
+  it('已登录用户提交当前密码并完整保留新密码，不改动本机记录', async () => {
+    await account.loginAccount({ email: user.email, password: 'Example123!' })
+    localStorage.setItem('sl_tasks', '[{"id":"fictional-task"}]')
+    const password = '  New example password  '
+    const result = await account.updateAccountPassword({ currentPassword: 'Example123!', password, confirmation: password })
+    expect(result.ok).toBe(true)
+    expect(adapter.verifyAccountCurrentPassword).toHaveBeenCalledWith(user.email, 'Example123!')
+    expect(client.auth.updateUser).toHaveBeenCalledWith({ password, current_password: 'Example123!' })
+    expect(localStorage.getItem('sl_tasks')).toBe('[{"id":"fictional-task"}]')
+  })
+
+  it('当前密码验证失败时禁止更新新密码，原会话仍可使用', async () => {
+    await account.loginAccount({ email: user.email, password: 'Example123!' })
+    adapter.verifyAccountCurrentPassword.mockResolvedValue({ data: {}, error: { code: 'invalid_credentials' } })
+    const result = await account.updateAccountPassword({ currentPassword: 'WrongExample123!', password: 'NewExample123!', confirmation: 'NewExample123!' })
+    expect(result.ok).toBe(false)
+    expect(result.message).toContain('当前密码不正确')
+    expect(client.auth.updateUser).not.toHaveBeenCalled()
+    expect(account.accountUser.value).toEqual(user)
+  })
+
+  it('当前密码验证期间退出，验证响应不会继续更新密码', async () => {
+    await account.loginAccount({ email: user.email, password: 'Example123!' })
+    let finish
+    adapter.verifyAccountCurrentPassword.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    const pending = account.updateAccountPassword({ currentPassword: 'Example123!', password: 'NewExample123!', confirmation: 'NewExample123!' })
+    await vi.waitFor(() => expect(finish).toBeTypeOf('function'))
+    emitAuth('SIGNED_OUT', null)
+    finish({ data: { user }, error: null })
+    expect((await pending).ok).toBe(false)
+    expect(client.auth.updateUser).not.toHaveBeenCalled()
+  })
+
+  it('通过已验证恢复会话设置密码，无需旧密码，成功后退出恢复状态', async () => {
+    await account.initializeAccountAuth()
+    emitAuth('PASSWORD_RECOVERY', session)
+    expect(account.accountPasswordRecovery.value).toBe(true)
+    expect(account.accountOpen.value).toBe(true)
+    const result = await account.updateAccountPassword({ password: 'NewExample123!', confirmation: 'NewExample123!' })
+    expect(result.ok).toBe(true)
+    expect(adapter.verifyAccountCurrentPassword).not.toHaveBeenCalled()
+    expect(client.auth.updateUser).toHaveBeenCalledWith({ password: 'NewExample123!' })
+    expect(account.accountPasswordRecovery.value).toBe(false)
+    expect(sessionStorage.getItem('study-life-password-recovery')).toBeNull()
+  })
+
+  it('恢复状态在刷新后保留，但不会跨账号沿用', async () => {
+    sessionStorage.setItem('study-life-password-recovery', user.id)
+    vi.resetModules()
+    account = await import('../src/composables/accountAuth.js')
+    client.auth.getSession.mockResolvedValue({ data: { session }, error: null })
+    await account.initializeAccountAuth()
+    expect(account.accountPasswordRecovery.value).toBe(true)
+    emitAuth('SIGNED_IN', { user: { id: 'another-fictional-account', email: 'other@example.test' } })
+    expect(account.accountPasswordRecovery.value).toBe(false)
+    expect(sessionStorage.getItem('study-life-password-recovery')).toBeNull()
+  })
+
+  it('更新期间收到退出事件，迟到响应不会恢复旧账号', async () => {
+    await account.loginAccount({ email: user.email, password: 'Example123!' })
+    let finish
+    client.auth.updateUser.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    const pending = account.updateAccountPassword({ currentPassword: 'Example123!', password: 'NewExample123!', confirmation: 'NewExample123!' })
+    await vi.waitFor(() => expect(finish).toBeTypeOf('function'))
+    emitAuth('SIGNED_OUT', null)
+    finish({ data: { user }, error: null })
+    expect((await pending).ok).toBe(false)
+    expect(account.accountUser.value).toBeNull()
   })
 })

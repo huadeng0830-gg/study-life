@@ -16,7 +16,9 @@
 // 【去重必须落盘】只用内存 Set 的话，刷新页面会重复提醒；接入云同步后两台设备
 // 还会各响一次。所以 fired 记录写进一个新的存储键，跟着数据一起同步。
 import { clock, useStoredRef } from './store/core.js'
-import { policyDateTime, settings } from './settingsPolicy.js'
+import { policyDateKey, policyDateTime, settings } from './settingsPolicy.js'
+import { countdownTarget } from './store/countdown.js'
+import { isArchived, isTaskActionable } from './domain/state.js'
 
 // 直接注册存储 ref，而不是从某个 barrel import —— 后者会把本模块拉进
 // store → domain → … 的依赖链，而这个调度器只需要读三份集合。
@@ -74,8 +76,8 @@ function pruneLog(nowMs) {
   logEntries = logEntries.filter((item) => Number(item.firedAt) > cutoff)
 }
 
-function markFired(key, nowMs) {
-  logEntries = [...logEntries.filter((item) => item.key !== key), { key, firedAt: nowMs }]
+function markFired(key, nowMs, signature = '') {
+  logEntries = [...logEntries.filter((item) => item.key !== key), { key, firedAt: nowMs, ...(signature ? { signature } : {}) }]
   writeLog()
 }
 
@@ -115,7 +117,7 @@ export function collectDueReminders(nowMs = Date.now()) {
   const horizon = nowMs + SCHEDULE_HORIZON_MS
   const due = []
   pruneLog(nowMs)
-  const firedKeys = new Set(logEntries.map((item) => item.key))
+  const firedEntries = new Map(logEntries.map((item) => [item.key, item]))
   const queuedKeys = new Set()
 
   const push = (kind, item, date, time, rawMinutes) => {
@@ -131,7 +133,10 @@ export function collectDueReminders(nowMs = Date.now()) {
     const fireAt = dueAt - minutes * 60_000
     if (fireAt > horizon || fireAt < windowStart) return
     const key = reminderKey(kind, item.id)
-    if (firedKeys.has(key) || queuedKeys.has(key)) return
+    // An event's time/reminder change schedules a new notification; title-only edits do not.
+    const signature = kind === 'event' ? `${dueAt}:${minutes}` : ''
+    const fired = firedEntries.get(key)
+    if ((fired && (!signature || !fired.signature || fired.signature === signature)) || queuedKeys.has(key)) return
     queuedKeys.add(key)
     due.push({
       key,
@@ -140,21 +145,26 @@ export function collectDueReminders(nowMs = Date.now()) {
       body: `${minutes > 0 ? `${minutes} 分钟后` : '就是现在'}：${String(item.title || item.name || '').trim()}`,
       fireAt,
       minutes,
+      ...(signature ? { signature } : {}),
       at: `${date} ${time || '23:59'}`,
     })
   }
 
   for (const task of tasks.value || []) {
-    if (task?.done || task?.status === 'done' || task?.status === 'completed' || task?.archivedAt || task?.active === false) continue
+    if (!isTaskActionable(task, new Date(nowMs)) || task?.status === 'done' || task?.active === false) continue
     push('task', task, task?.dueDate, task?.dueTime, task?.reminderMinutes ?? policy.task)
   }
   for (const item of events.value || []) {
-    if (item?.archivedAt || item?.active === false) continue
+    if (item?.archivedAt || item?.status === 'archived' || item?.active === false || item?.deletedAt || item?.tombstone || item?.reminderEnabled === false) continue
     push('event', item, item?.date, item?.time, item?.reminderMinutes ?? policy.event)
   }
   for (const item of milestones.value || []) {
-    if (item?.archivedAt || item?.active === false) continue
-    push('milestone', item, item?.date, item?.time, item?.reminderMinutes ?? policy.milestone)
+    if (isArchived(item) || item?.active === false) continue
+    // Resolve from the catch-up window's start: using "now" would skip a
+    // recently passed annual occurrence and lose its catch-up notification.
+    const target = item?.repeat === 'yearly' ? countdownTarget(item, new Date(windowStart)) : null
+    const date = target ? policyDateKey(target) : item?.date
+    push('milestone', item, date, item?.time, item?.reminderMinutes ?? policy.milestone)
   }
 
   return due.sort((left, right) => left.fireAt - right.fireAt)
@@ -165,7 +175,7 @@ function fire(entry) {
   // another tab/device can suppress a duplicate before the next scheduler tick.
   logEntries = readLog()
   pruneLog(Date.now())
-  if (logEntries.some((item) => item.key === entry.key)) return false
+  if (logEntries.some((item) => item.key === entry.key && (!entry.signature || !item.signature || item.signature === entry.signature))) return false
   if (notifyPermission() !== 'granted') return false
   try {
     const notification = new Notification(`三两事 · ${entry.kind === 'task' ? '待办' : entry.kind === 'event' ? '日程' : '重要节点'}提醒`, {
@@ -173,7 +183,7 @@ function fire(entry) {
       tag: entry.key,
     })
     // Only consume the catch-up window after the browser accepted the notification.
-    markFired(entry.key, Date.now())
+    markFired(entry.key, Date.now(), entry.signature)
     try { notification.onclick = () => { try { window.focus() } catch {}; notification.close() } } catch {}
     return true
   } catch {

@@ -581,7 +581,10 @@ export async function restoreStoredValues(values, { markChanged = true } = {}) {
           suppressedRestoreRefs.add(state)
           suppressedRefs.push(state)
         }
-        state.value = value
+        // 本机恢复点可携带空配置。磁盘保留 null，运行时使用与重新载入相同的默认值。
+        state.value = value === null && storedDefaults.has(key)
+          ? normalizeStoredValue(value, storedDefaults.get(key)).value
+          : value
       }
     }
     // Let Vue flush the restore watchers before clearing their one-shot guard.

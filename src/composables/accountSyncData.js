@@ -99,6 +99,17 @@ function isValidKeyValue(key, value) {
     return (v.quotes === undefined || Array.isArray(v.quotes))
       && (v.homeModules === undefined || Array.isArray(v.homeModules))
   }
+  if (key === 'sl_navigation_mobile') {
+    return value.length <= 32 && value.every((id) => typeof id === 'string' && id.length <= 64)
+      && new Set(value).size === value.length
+  }
+  if (key === 'sl_navigation_desktop') {
+    return value.length <= 16 && value.every((group) => isPlainObject(group)
+      && typeof group.id === 'string' && group.id.length <= 40
+      && typeof group.label === 'string' && group.label.length <= 80
+      && Array.isArray(group.items) && group.items.length <= 64
+      && group.items.every((id) => typeof id === 'string' && id.length <= 64))
+  }
   if (key === 'sl_wallpaper_config') {
     const v = value
     return v.targets === undefined || isPlainObject(v.targets)

@@ -186,7 +186,12 @@ export function ensureProjectTaskTodo(task, project, domain = useDomainCommands(
       completedAt,
       relationId: project.id,
     }
-    const changed = Object.entries(update).some(([key, value]) => existing[key] !== value)
+    if (Object.hasOwn(task, 'workCheckpoint')) update.workCheckpoint = task.workCheckpoint
+    const changed = Object.entries(update).some(([key, value]) => {
+      if (key === 'workCheckpoint') return JSON.stringify(existing[key] ?? null) !== JSON.stringify(value ?? null)
+      if (key === 'completedAt') return (existing[key] || null) !== (value || null)
+      return existing[key] !== value
+    })
     rememberProjectTaskDone(existing.id, done)
     if (changed) domain.updateTask(existing.id, update)
     rememberProjectTaskDone(existing.id, done)
@@ -201,6 +206,7 @@ export function ensureProjectTaskTodo(task, project, domain = useDomainCommands(
     sourceId: task.id,
     relationId: project.id,
     createdFrom: 'project-team',
+    ...(Object.hasOwn(task, 'workCheckpoint') ? { workCheckpoint: task.workCheckpoint } : {}),
   })
   rememberProjectTaskDone(created.id, false)
   if (done) {

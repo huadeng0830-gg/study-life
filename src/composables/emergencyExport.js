@@ -9,6 +9,7 @@ const BACKUP_FIELDS = Object.freeze({
   sl_ledger_budget: 'ledgerBudget', sl_ledger_templates: 'ledgerTemplates', sl_timecfg: 'timeConfig', sl_semester: 'semester',
   sl_schedule_exceptions: 'scheduleExceptions', sl_schedule_note: 'scheduleNote', sl_theme: 'theme', sl_custom_theme_color: 'customThemeColor',
   sl_high_contrast: 'highContrast',
+  sl_navigation_mobile: 'mobileNavigation', sl_navigation_desktop: 'desktopNavigation',
   sl_countdown_show_past: 'countdownShowPast', sl_ocr_vocabulary: 'ocrVocabulary', sl_appearance: 'appearance',
   sl_wallpaper_config: 'wallpaperConfig', sl_auto_wallpaper_color: 'autoWallpaperColor', sl_wallpaper_accent: 'wallpaperAccent',
   sl_performance_mode: 'performanceMode', sl_festive_config: 'festiveConfig', sl_festive_birthday_full: 'festiveBirthdayFull',

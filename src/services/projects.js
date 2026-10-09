@@ -19,7 +19,20 @@ export const PROJECT_TASK_STATUS = Object.freeze({ todo: '待开始', in_progres
 export const PROJECT_TASK_PRIORITY = Object.freeze({ low: '较低', normal: '普通', high: '较高', urgent: '紧急' })
 
 export function newProjectId() {
-  return globalThis.crypto?.randomUUID?.() || ''
+  const uuid = globalThis.crypto?.randomUUID?.()
+  if (uuid) return uuid
+  // randomUUID 只在**安全上下文**可用（https / localhost）。桌面版以 file:// 打开、
+  // 旧浏览器缺少该方法时都拿不到值，原来的 `|| ''` 会让调用方拿着空字符串去建项目，
+  // 于是创建失败并弹出「无法生成安全项目编号」。这里手工拼一个 v4 UUID：
+  // 形状必须与 randomUUID 完全一致，否则成果文件路径会被上面的 UUID_PATTERN 拒绝
+  // （version 位固定 4、variant 位固定 10xx，即 pattern 里的 [1-8] 与 [89ab]）。
+  const bytes = new Uint8Array(16)
+  if (globalThis.crypto?.getRandomValues) globalThis.crypto.getRandomValues(bytes)
+  else for (let index = 0; index < 16; index += 1) bytes[index] = Math.floor(Math.random() * 256)
+  bytes[6] = (bytes[6] & 0x0f) | 0x40
+  bytes[8] = (bytes[8] & 0x3f) | 0x80
+  const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
 }
 
 export function normalizeProjectForm(value = {}) {

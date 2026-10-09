@@ -35,7 +35,7 @@ npx supabase db push
 npx supabase functions deploy campus-social --project-ref xyuwjmswqmxfwtyzakan
 ```
 
-生产环境当前已应用上述迁移，`campus-social` 已部署为 v2，JWT 验证开启。修改数据库时新增迁移文件，不要改写已应用的迁移；涉及迁移的发布先执行 `db push`，再部署函数，最后重建并发布 Cloudflare Pages。
+生产环境当前已应用上述迁移及任务续接工作台迁移，`campus-social` 已部署为 v3，JWT 验证开启。修改数据库时新增迁移文件，不要改写已应用的迁移；涉及迁移的发布先执行 `db push`，再部署函数，最后重建并发布 Cloudflare Pages。
 
 ## 验收
 

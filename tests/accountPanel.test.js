@@ -2,7 +2,7 @@
 import { createApp, h, nextTick } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const adapter = vi.hoisted(() => ({ getSupabaseClient: vi.fn(), getSupabaseConfig: vi.fn() }))
+const adapter = vi.hoisted(() => ({ getSupabaseClient: vi.fn(), getSupabaseConfig: vi.fn(), verifyAccountCurrentPassword: vi.fn() }))
 vi.mock('../src/services/supabase.js', () => adapter)
 
 let app
@@ -10,6 +10,7 @@ let host
 let client
 let account
 let clearAnnouncement
+let emitAuth
 const user = { id: 'fictional-account', email: 'student@example.test' }
 const session = { user }
 
@@ -17,18 +18,25 @@ beforeEach(async () => {
   vi.resetModules()
   vi.clearAllMocks()
   localStorage.clear()
+  sessionStorage.clear()
   adapter.getSupabaseConfig.mockReturnValue({ url: 'https://example.supabase.co', key: 'sb_publishable_example' })
   client = {
     auth: {
       getSession: vi.fn().mockResolvedValue({ data: { session: null }, error: null }),
-      onAuthStateChange: vi.fn(() => ({ data: { subscription: { unsubscribe: vi.fn() } } })),
+      onAuthStateChange: vi.fn(listener => {
+        emitAuth = listener
+        return { data: { subscription: { unsubscribe: vi.fn() } } }
+      }),
       signUp: vi.fn().mockResolvedValue({ data: { user, session: null }, error: null }),
       signInWithPassword: vi.fn().mockResolvedValue({ data: { user, session }, error: null }),
       signOut: vi.fn().mockResolvedValue({ error: null }),
       resend: vi.fn().mockResolvedValue({ data: {}, error: null }),
+      resetPasswordForEmail: vi.fn().mockResolvedValue({ data: {}, error: null }),
+      updateUser: vi.fn().mockResolvedValue({ data: { user }, error: null }),
     },
   }
   adapter.getSupabaseClient.mockResolvedValue(client)
+  adapter.verifyAccountCurrentPassword.mockResolvedValue({ data: { user }, error: null })
   account = await import('../src/composables/accountAuth.js')
   ;({ clearAnnouncement } = await import('../src/composables/liveRegion.js'))
 })
@@ -39,6 +47,7 @@ afterEach(() => {
   app = null
   host = null
   clearAnnouncement?.()
+  vi.useRealTimers()
   vi.restoreAllMocks()
 })
 
@@ -133,6 +142,11 @@ describe('注册面板的实际表单行为', () => {
     await submit()
     await vi.waitFor(() => expect(document.querySelector('#account-summary-title')).toBeTruthy())
     expect(document.querySelector('.account-summary').textContent).toContain(user.email)
+    await click('账号安全')
+    await click('退出当前设备')
+    expect(client.auth.signOut).not.toHaveBeenCalled()
+    expect(localStorage.getItem('sl_tasks')).not.toBeNull()
+    expect(document.querySelectorAll('[role="dialog"]')).toHaveLength(2)
     await click('退出并清除本机数据')
     await vi.waitFor(() => expect(document.querySelector('#account-email')).toBeTruthy())
     await vi.waitFor(() => expect(document.querySelector('.account-success')).toBeTruthy())
@@ -147,7 +161,7 @@ describe('注册面板的实际表单行为', () => {
     await fill('#account-email', user.email)
     await fill('#account-password', 'Wrong123!')
     await submit()
-    await vi.waitFor(() => expect(document.querySelector('#account-form-error')).toBeTruthy())
+    await vi.waitFor(() => expect(document.querySelector('#account-form-error').textContent).toContain('邮箱或密码不正确'))
     expect(document.querySelector('#account-form-error').textContent).toContain('邮箱或密码不正确')
     expect(document.querySelector('button[type="submit"]').disabled).toBe(false)
     expect(document.querySelector('#account-password').disabled).toBe(false)
@@ -159,5 +173,83 @@ describe('注册面板的实际表单行为', () => {
     expect(document.querySelector('.account-service-note').textContent).toContain('本机功能仍可使用')
     expect(document.querySelector('button[type="submit"]').disabled).toBe(true)
     expect(client.auth.signUp).not.toHaveBeenCalled()
+  })
+
+  it('忘记密码保留已输入邮箱，仅提交邮箱并给出不泄漏账号存在性的反馈', async () => {
+    await mountPanel()
+    await fill('#account-email', user.email)
+    await fill('#account-password', 'Example123!')
+    await click('忘记密码？')
+    expect(document.querySelector('#account-email').value).toBe(user.email)
+    expect(document.querySelector('#account-password')).toBeNull()
+    await submit()
+    await vi.waitFor(() => expect(document.querySelector('#account-recovery-title')).toBeTruthy())
+    expect(document.querySelector('.account-confirmation').textContent).toContain('如果')
+    expect(document.querySelector('.account-confirmation button').disabled).toBe(true)
+    expect(client.auth.resetPasswordForEmail).toHaveBeenCalledTimes(1)
+    await click('返回登录')
+    expect(document.querySelector('#account-password').value).toBe('')
+  })
+
+  it('重开面板后邮件冷却继续计时，到期后可以发送', async () => {
+    sessionStorage.setItem('study-life-resend-cooldown', String(Date.now() + 2000))
+    await mountPanel()
+    await click('忘记密码？')
+    expect(document.querySelector('button[type="submit"]').disabled).toBe(true)
+    app.unmount()
+    host.remove()
+    vi.useFakeTimers()
+    await mountPanel()
+    await click('忘记密码？')
+    await vi.advanceTimersByTimeAsync(2500)
+    expect(document.querySelector('button[type="submit"]').disabled).toBe(false)
+  })
+
+  it('邮箱找回成功回跳后直接显示新密码表单，保存后返回概览', async () => {
+    await mountPanel()
+    emitAuth('PASSWORD_RECOVERY', session)
+    await nextTick()
+    expect(document.querySelector('#account-new-password')).toBeTruthy()
+    expect(document.querySelector('#account-current-password')).toBeNull()
+    await fill('#account-new-password', 'NewExample123!')
+    await fill('#account-new-confirmation', 'NewExample123!')
+    document.querySelector('.account-password-form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await vi.waitFor(() => expect(document.querySelector('#account-details-title')).toBeTruthy())
+    expect(document.querySelector('.account-success').textContent).toContain('密码已更新')
+    expect(document.querySelector('#account-new-password')).toBeNull()
+    expect(document.activeElement.id).toBe('account-summary-title')
+  })
+
+  it('新密码校验会聚焦错误字段，失败后保留输入供修改', async () => {
+    await mountPanel()
+    emitAuth('PASSWORD_RECOVERY', session)
+    await nextTick()
+    document.querySelector('.account-password-form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await nextTick()
+    await nextTick()
+    expect(document.activeElement.id).toBe('account-new-password')
+    expect(client.auth.updateUser).not.toHaveBeenCalled()
+    client.auth.updateUser.mockResolvedValue({ data: {}, error: { code: 'weak_password' } })
+    await fill('#account-new-password', 'NewExample123!')
+    await fill('#account-new-confirmation', 'NewExample123!')
+    document.querySelector('.account-password-form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await vi.waitFor(() => expect(document.querySelector('.account-security .account-error').textContent).toContain('密码强度不足'))
+    expect(document.querySelector('#account-new-password').value).toBe('NewExample123!')
+    expect(document.querySelector('.account-password-form button[type="submit"]').disabled).toBe(false)
+  })
+
+  it('取消退出确认保留会话和数据，账号概览不显示危险操作', async () => {
+    await mountPanel()
+    emitAuth('SIGNED_IN', session)
+    await nextTick()
+    expect([...document.querySelectorAll('button')].some(button => button.textContent.includes('退出当前设备'))).toBe(false)
+    localStorage.setItem('sl_tasks', '[{"id":"fictional-task"}]')
+    await click('账号安全')
+    await click('退出所有设备')
+    expect(document.querySelector('.message').textContent).toContain('未同步')
+    await click('取消')
+    expect(account.accountUser.value).toEqual(user)
+    expect(localStorage.getItem('sl_tasks')).not.toBeNull()
+    expect(client.auth.signOut).not.toHaveBeenCalled()
   })
 })

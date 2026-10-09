@@ -9,6 +9,8 @@ import DomainCsvImportButton from '../components/DomainCsvImportButton.vue'
 import SwipeActionItem from '../components/SwipeActionItem.vue'
 import VirtualList from '../components/VirtualList.vue'
 import Toast from '../components/Toast.vue'
+import TaskWorkCheckpointFields from '../components/tasks/TaskWorkCheckpointFields.vue'
+import TaskWorkSession from '../components/tasks/TaskWorkSession.vue'
 import { appearance } from '../composables/appearance.js'
 import { findUniqueCourseByName } from '../composables/courseLinks.js'
 import { classifyTasks } from '../composables/smartClassify.js'
@@ -18,27 +20,67 @@ import { TASK_PLAN_STATE, isArchived, taskPlanningState, taskStatus } from '../c
 import { addAppDays, appCalendarDaysBetween, appDateTime, appNow, appToday, formatAppDate } from '../composables/timeContext.js'
 import { clearFocusFromRoute, focusElementWhenReady, readFocusQuery } from '../composables/focusNavigation.js'
 import { useTaskEditor } from '../composables/tasks/useTaskEditor.js'
+import { taskTimeComparison } from '../composables/tasks/taskWorkProgress.js'
+import { useTaskWorkSession } from '../composables/tasks/useTaskWorkSession.js'
 import TaskBoard from '../components/task-views/TaskBoard.vue'
 import TaskCalendar from '../components/task-views/TaskCalendar.vue'
 import { buildTaskBoard, buildTaskMonthGrid, shiftTaskMonth, taskMonthFromQuery, taskMonthLabel, taskViewModeFromQuery } from '../composables/taskViews.js'
 import { TASK_REPEATS, taskRepeatLabel } from '../composables/taskRecurrence.js'
+import { filterTaskWorkspace, isValidPlanningDate, taskWorkspaceSummary } from '../composables/planningViews.js'
+import { useDebouncedRef } from '../composables/useDebouncedRef.js'
+import { defaultReminderMinutes } from '../composables/settingsPolicy.js'
 
 const domain = useDomainCommands()
-const { tasks, courses } = domain
+/** @type {import('vue').Ref<import('../types/domain').Course[]>} */
+const courses = domain.courses
+/** @type {import('vue').Ref<import('../types/domain').Task[]>} */
+const tasks = domain.tasks
 const route = useRoute()
 const router = useRouter()
 const showNotice = ref(false)
 const noticeMessage = ref('')
+/** @type {import('vue').Ref<string>} */
 const filter = ref(TASK_PLAN_STATE.scheduled)
 const filterTouched = ref(false)
 const showHistory = ref(false)
 const focusedTaskId = ref('')
 const focusMessage = ref('')
 const sortKey = ref('due')
+const query = ref('')
+const searchQuery = useDebouncedRef(query)
+const priorityFilter = ref('all')
+const periodFilter = ref('all')
+/** @type {import('vue').Ref<import('../types/domain').Task | null>} */
 const rescheduleTarget = ref(null)
 const rescheduleDate = ref('')
-const toast = ref({ open: false, message: '', type: 'info', actionLabel: '', undoFn: null, viewFn: null, duration: 3200 })
+const rescheduleTime = ref('')
+const rescheduleError = ref('')
+/** @type {import('vue').Ref<{ open: boolean, message: string, type: string, actionLabel: string, undoFn?: () => unknown, viewFn?: () => unknown, duration: number }>} */
+const toast = ref({ open: false, message: '', type: 'info', actionLabel: '', duration: 3200 })
 const openSwipeItemId = ref('')
+/** @type {import('vue').Ref<HTMLDetailsElement | null>} */
+const taskTools = ref(null)
+
+function closeTaskTools() {
+  if (taskTools.value) taskTools.value.open = false
+}
+
+/** @param {MouseEvent} event */
+function dismissTaskTools(event) {
+  const target = /** @type {Node | null} */ (event.target)
+  if (target && taskTools.value?.open && !taskTools.value.contains(target)) closeTaskTools()
+}
+
+function openNotice() {
+  closeTaskTools()
+  showNotice.value = true
+}
+const {
+  task: workSessionTask, draft: workSessionDraft, error: workSessionError, busy: workSessionBusy,
+  statusLabel: workSessionStatusLabel, startLabel: workSessionStartLabel,
+  open: openTaskWorkSession, close: closeTaskWorkSession, updateField: updateWorkSessionField,
+  start: startTaskWork, save: saveTaskWorkProgress,
+} = useTaskWorkSession({ domain, openProjectTask, notify: showToast })
 
 const {
   showForm,
@@ -48,6 +90,9 @@ const {
   titleInput,
   dueDateInput,
   repeatEndDateInput,
+  estimateInput,
+  actualInput,
+  reminderInput,
   form,
   deleteTarget,
   saveConflict,
@@ -57,13 +102,20 @@ const {
   save,
   confirmConflictSave,
   remove,
-} = useTaskEditor({ domain, tasks, courses, events: domain.events })
+} = useTaskEditor({ domain, tasks, courses, events: domain.events, onSaved: (message) => showToast(message, { type: 'success' }) })
 
-watch(() => route.query.new, (value) => {
+watch(() => [route.query.new, route.query.courseId], ([value, courseId]) => {
   if (value !== '1') return
   openAdd()
+  /** @type {import('../types/domain').Course | undefined} */
+  const linkedCourse = courses.value.find((course) => String(course.id) === String(courseId || '') && !isArchived(course) && !course.deletedAt && !course.tombstone)
+  if (linkedCourse) {
+    form.value.courseId = linkedCourse.id
+    form.value.course = linkedCourse.name
+  }
   const query = { ...route.query }
   delete query.new
+  delete query.courseId
   void router.replace({ query })
 }, { immediate: true })
 
@@ -79,9 +131,11 @@ function selectFilter(value) {
   filterTouched.value = true
   showHistory.value = false
   filter.value = value
+  periodFilter.value = 'all'
 }
 
 function smartOrganize() {
+  closeTaskTools()
   const { list, changed } = classifyTasks(tasks.value, courses.value)
   list.forEach((next, index) => {
     const current = tasks.value[index]
@@ -100,6 +154,7 @@ function smartOrganize() {
 }
 
 function importCsvTasks(rows) {
+  closeTaskTools()
   let imported = 0
   for (const row of rows) {
     const completed = row.completed
@@ -135,7 +190,7 @@ function toggleTask(task) {
 
 function openProjectTask(task) {
   if (!task?.relationId) return
-  void router.push({ path: '/projects', query: { project: task.relationId } })
+  void router.push({ path: '/projects', query: { project: task.relationId, ...(task.sourceId ? { task: task.sourceId } : {}) } })
 }
 
 function openEditTask(task) {
@@ -153,13 +208,23 @@ function openReschedule(task) {
   if (task?.sourceType === 'project-task') { openProjectTask(task); return }
   rescheduleTarget.value = task
   rescheduleDate.value = addAppDays(appToday.value, 1)
+  rescheduleTime.value = task.dueTime || ''
+  rescheduleError.value = ''
 }
 
 function saveReschedule() {
-  if (!rescheduleTarget.value || !rescheduleDate.value) return
+  if (!rescheduleTarget.value) return
+  if (!isValidPlanningDate(rescheduleDate.value)) {
+    rescheduleError.value = '请选择有效的截止日期'
+    return
+  }
   if (rescheduleTarget.value.sourceType === 'project-task') { openProjectTask(rescheduleTarget.value); rescheduleTarget.value = null; return }
-  domain.updateTask(rescheduleTarget.value.id, { dueDate: rescheduleDate.value, status: 'pending', done: false, completedAt: null })
+  const target = tasks.value.find((task) => task.id === rescheduleTarget.value.id)
+  if (!target) { rescheduleError.value = '这条待办已不存在，请关闭后刷新列表。'; return }
+  const before = { dueDate: target.dueDate, dueTime: target.dueTime, repeatAnchorDay: target.repeatAnchorDay }
+  domain.updateTask(target.id, { dueDate: rescheduleDate.value, dueTime: rescheduleTime.value })
   rescheduleTarget.value = null
+  showToast('截止日期已重新安排', { type: 'success', actionLabel: '撤销', undoFn: () => domain.updateTask(target.id, before), duration: 6000 })
 }
 
 function swipeLabel(task, direction) {
@@ -219,7 +284,8 @@ function showNoticeMessage(message) {
   }, 3500)
 }
 
-function showToast(message, { type = 'info', actionLabel = '', undoFn = null, viewFn = null, duration = 3200 } = {}) {
+/** @param {string} message @param {{ type?: string, actionLabel?: string, undoFn?: () => unknown, viewFn?: () => unknown, duration?: number }} [options] */
+function showToast(message, { type = 'info', actionLabel = '', undoFn = undefined, viewFn = undefined, duration = 3200 } = {}) {
   toast.value = { open: true, message, type, actionLabel, undoFn, viewFn, duration }
 }
 
@@ -235,6 +301,7 @@ function dueTimestamp(task) {
 }
 
 function dueInfo(task) {
+  if (taskStatus(task) === 'completed') return { text: task.completedAt ? `完成于 ${formatAppDate(task.completedAt, { withWeekday: false })}` : '已完成', cls: 'completed' }
   if (!task.dueDate) return { text: '无截止日期', cls: '' }
   const today = appToday.value
   const days = appCalendarDaysBetween(today, task.dueDate)
@@ -253,6 +320,53 @@ const taskView = computed(() => selectTaskView(tasks.value, {
 }))
 
 const counts = computed(() => taskView.value.counts)
+const workspaceSummary = computed(() => taskWorkspaceSummary(tasks.value, appNow.value))
+const courseNamesById = computed(() => new Map(courses.value.map((course) => [course.id, course.name])))
+const hasWorkspaceFilters = computed(() => Boolean(query.value.trim() || priorityFilter.value !== 'all' || periodFilter.value !== 'all'))
+const defaultTaskReminder = computed(() => defaultReminderMinutes('task'))
+
+function applyWorkspaceFilters(items) {
+  return filterTaskWorkspace(items, { query: searchQuery.value, priority: priorityFilter.value, period: periodFilter.value, now: appNow.value, courseNames: courseNamesById.value })
+}
+
+function resetWorkspaceFilters() {
+  query.value = ''
+  searchQuery.flush('')
+  priorityFilter.value = 'all'
+  periodFilter.value = 'all'
+}
+
+function selectPeriod(value) {
+  periodFilter.value = value
+  if (value !== 'all') { filter.value = 'all'; filterTouched.value = true; showHistory.value = false }
+}
+
+/** @param {Event} event */
+function changePeriod(event) {
+  const target = /** @type {HTMLSelectElement | null} */ (event.target)
+  if (target) selectPeriod(target.value)
+}
+
+/** @param {unknown} value @returns {value is import('../types/domain').Task} */
+function isTaskRow(value) {
+  return Boolean(value && typeof value === 'object' && 'title' in value)
+}
+
+function selectOverview(value) {
+  resetWorkspaceFilters()
+  selectPeriod(value)
+  if (viewMode.value !== 'list') setViewMode('list')
+}
+
+function setFormDueDate(offset) {
+  form.value.dueDate = offset === null ? '' : addAppDays(appToday.value, offset)
+  if (offset === null) form.value.dueTime = ''
+  clearFormError('dueDate')
+}
+
+function openRelatedMilestone(task) {
+  if (task.sourceId) void router.push({ path: '/exams', query: { focus: task.sourceId } })
+}
 
 // 看板、月历都以当前未归档待办为数据源；列表筛选器只影响列表，避免“已安排”把
 // 无截止日的待办从看板里藏掉。状态列与日期格分别由纯选择器派生。
@@ -260,12 +374,12 @@ const viewMode = computed(() => taskViewModeFromQuery(route.query.view))
 const monthKey = computed(() => taskMonthFromQuery(route.query.month, appToday.value))
 const todayMonth = computed(() => appToday.value.slice(0, 7))
 const calendarDate = ref('')
-const allCurrentTasks = computed(() => selectTaskView(tasks.value, {
+const allCurrentTasks = computed(() => applyWorkspaceFilters(selectTaskView(tasks.value, {
   now: appNow.value,
   sortKey: sortKey.value,
   filter: 'all',
   showHistory: false,
-}).visible)
+}).visible))
 const boardColumns = computed(() => buildTaskBoard(allCurrentTasks.value))
 const monthGrid = computed(() => buildTaskMonthGrid(monthKey.value, allCurrentTasks.value))
 const calendarTasks = computed(() => monthGrid.value.byDate.get(calendarDate.value) ?? [])
@@ -291,6 +405,7 @@ function setViewMode(mode) {
 
 function setHistory() {
   showHistory.value = !showHistory.value
+  resetWorkspaceFilters()
   if (showHistory.value && viewMode.value !== 'list') setViewMode('list')
 }
 
@@ -350,6 +465,7 @@ function confirmDelete() {
 
 // 空状态文案按当前筛选变化
 const emptyInfo = computed(() => {
+  if (hasWorkspaceFilters.value) return { icon: '⌕', title: '没有符合条件的待办', description: '试试其他关键词、优先级或时间范围。', hint: '', action: '清除筛选' }
   if (showHistory.value) return { icon: '▱', title: '还没有归档待办', description: '已完成事项可以归档到这里，当前清单会更清爽。', hint: '', action: '' }
   if (tasks.value.length === 0) {
     return {
@@ -374,10 +490,11 @@ const emptyInfo = computed(() => {
   return { icon: '✦', title: '这个列表暂时是空的', description: '', hint: '', action: '' }
 })
 
-const visibleTasks = computed(() => taskView.value.visible)
+const visibleTasks = computed(() => applyWorkspaceFilters(taskView.value.visible))
 
 function emptyAction() {
-  if (emptyInfo.value.action === '查看待安排') selectFilter(TASK_PLAN_STATE.unplanned)
+  if (hasWorkspaceFilters.value) resetWorkspaceFilters()
+  else if (emptyInfo.value.action === '查看待安排') selectFilter(TASK_PLAN_STATE.unplanned)
   else openAdd()
 }
 
@@ -406,6 +523,14 @@ async function focusRouteTask() {
     return
   }
   showHistory.value = isArchived(task)
+  resetWorkspaceFilters()
+  filterTouched.value = true
+  if (viewMode.value !== 'list') {
+    const nextQuery = { ...route.query }
+    delete nextQuery.view
+    delete nextQuery.month
+    await router.replace({ query: nextQuery })
+  }
   if (!showHistory.value) {
     const state = taskPlanningState(task, appNow.value)
     filter.value = state === TASK_PLAN_STATE.completed ? TASK_PLAN_STATE.completed : state === TASK_PLAN_STATE.scheduled ? TASK_PLAN_STATE.scheduled : TASK_PLAN_STATE.unplanned
@@ -443,10 +568,22 @@ function taskFocusSummary(task) {
   const minutes = Math.max(1, Math.round(seconds / 60))
   return `已专注 ${count} 次 · ${minutes} 分钟`
 }
+
+function taskCheckpointCue(task) {
+  const checkpoint = task?.workCheckpoint
+  if (checkpoint?.nextStep) return `下一步：${checkpoint.nextStep}`
+  if (checkpoint?.blocker) return `上次卡在：${checkpoint.blocker}`
+  if (checkpoint?.lastStep) return `上次做到：${checkpoint.lastStep}`
+  return ''
+}
+
+function updateTaskCheckpointField(field, value) {
+  form.value[field] = value
+}
 </script>
 
 <template>
-  <div class="page tasks-page">
+  <div class="page tasks-page" @click.capture="dismissTaskTools">
     <header class="page-head">
       <div class="page-head-main">
         <h1 class="page-title">待办</h1>
@@ -460,12 +597,24 @@ function taskFocusSummary(task) {
             <option v-for="s in SORTS" :key="s.key" :value="s.key">{{ s.label }}</option>
           </select>
         </label>
-        <button class="btn btn-ghost" @click="smartOrganize">✦ 一键整理</button>
-        <button class="btn btn-ghost" @click="showNotice = true">📋 粘贴通知</button>
-        <DomainCsvImportButton kind="tasks" :records="tasks" @import="importCsvTasks" />
+        <details ref="taskTools" class="task-tools" @keydown.esc.stop.prevent="closeTaskTools">
+          <summary class="btn btn-ghost">更多操作</summary>
+          <div class="task-tools-menu">
+            <button type="button" class="btn btn-ghost" @click="smartOrganize">✦ 一键整理</button>
+            <button type="button" class="btn btn-ghost" @click="openNotice">📋 粘贴通知</button>
+            <DomainCsvImportButton kind="tasks" :records="tasks" @import="importCsvTasks" />
+          </div>
+        </details>
         <button class="btn btn-primary" @click="openAdd">＋ 添加待办</button>
       </div>
     </header>
+
+    <div v-if="tasks.length && !showHistory" class="task-overview" role="group" aria-label="待办概览">
+      <button type="button" class="card overview-item" :class="{ selected: periodFilter === 'today' }" :aria-pressed="periodFilter === 'today'" @click="selectOverview('today')"><span>今天到期</span><b>{{ workspaceSummary.today }}</b><small>待完成事项</small></button>
+      <button type="button" class="card overview-item overdue-overview" :class="{ selected: periodFilter === 'overdue' }" :aria-pressed="periodFilter === 'overdue'" @click="selectOverview('overdue')"><span>已逾期</span><b>{{ workspaceSummary.overdue }}</b><small>完成或重新安排</small></button>
+      <button type="button" class="card overview-item" :class="{ selected: periodFilter === 'week' }" :aria-pressed="periodFilter === 'week'" @click="selectOverview('week')"><span>未来 7 天</span><b>{{ workspaceSummary.week }}</b><small>含今天</small></button>
+      <button type="button" class="card overview-item" :class="{ selected: periodFilter === 'unplanned' }" :aria-pressed="periodFilter === 'unplanned'" @click="selectOverview('unplanned')"><span>待安排日期</span><b>{{ workspaceSummary.unplanned }}</b><small>给想法安排时间</small></button>
+    </div>
 
     <p v-if="noticeMessage" class="notice-success" role="status">✓ {{ noticeMessage }}</p>
     <p v-if="csvImportMessage" class="notice-success" role="status">✓ {{ csvImportMessage }}</p>
@@ -488,8 +637,15 @@ function taskFocusSummary(task) {
       </div>
     </div>
 
+    <section class="card workspace-filters" aria-label="搜索和筛选待办">
+      <div class="workspace-search"><label class="sr-only" for="tasks-search">搜索待办</label><input id="tasks-search" v-model="query" type="search" placeholder="搜索待办、课程、备注或下一步" /><button v-if="query" type="button" class="link-btn" aria-label="清除待办搜索" @click="query = ''; searchQuery.flush('')">×</button></div>
+      <label class="workspace-select"><span>优先级</span><select v-model="priorityFilter"><option value="all">全部优先级</option><option value="high">高优先级</option><option value="normal">普通</option><option value="low">低优先级</option></select></label>
+      <label v-if="!showHistory" class="workspace-select"><span>范围</span><select :value="periodFilter" @change="changePeriod"><option value="all">全部日期</option><option value="today">今天到期</option><option value="overdue">已逾期</option><option value="week">未来 7 天</option><option value="unplanned">待安排日期</option></select></label>
+      <div class="workspace-result"><span role="status">{{ viewMode === 'list' ? visibleTasks.length : allCurrentTasks.length }} 项待办</span><button v-if="hasWorkspaceFilters" type="button" class="link-btn" @click="resetWorkspaceFilters">清除筛选</button></div>
+    </section>
+
     <EmptyState :level="2"
-      v-if="viewMode === 'list' && visibleTasks.length === 0"
+      v-if="(viewMode === 'list' && visibleTasks.length === 0) || (viewMode !== 'list' && hasWorkspaceFilters && allCurrentTasks.length === 0)"
       class="empty-box card"
       :icon="emptyInfo.icon"
       :title="emptyInfo.title"
@@ -530,8 +686,9 @@ function taskFocusSummary(task) {
       @toggle="toggleTask"
     />
 
-    <VirtualList v-else-if="viewMode === 'list'" v-slot="{ item: task }" class="task-list" :items="visibleTasks" :estimated-height="62" :gap="8" :threshold="40" :reveal-key="focusedTaskId">
+    <VirtualList v-else-if="viewMode === 'list'" v-slot="{ item: task }" class="task-list" :items="visibleTasks" :estimated-height="74" :gap="8" :threshold="40" :reveal-key="focusedTaskId">
       <SwipeActionItem
+        v-if="isTaskRow(task)"
         :left-label="swipeLabel(task, 'left')"
         :right-label="swipeLabel(task, 'right')"
         :left-tone="swipeTone('left')"
@@ -559,23 +716,30 @@ function taskFocusSummary(task) {
             {{ taskStatus(task) === 'completed' ? '✓' : '' }}
           </button>
 
-<span v-if="taskFocusSummary(task)" class="course-tag focus-tag">{{ taskFocusSummary(task) }}</span>
           <div class="task-main">
             <div class="task-topline">
-              <h2>{{ task.title }}</h2>
+              <h2><button type="button" class="task-title-button" :title="task.title" @click.stop="openEditTask(task)">{{ task.title }}</button></h2>
+            </div>
+            <div class="task-meta">
               <span class="priority" :class="task.priority ?? 'normal'">
                 {{ PRIORITIES[task.priority]?.label ?? '普通' }}
               </span>
               <span v-if="taskCourseName(task)" class="course-tag">{{ taskCourseName(task) }}</span>
-              <span v-if="task.estimateMinutes" class="course-tag">{{ task.estimateMinutes }} 分钟</span>
+              <span v-if="taskTimeComparison(task)" class="course-tag time-comparison">{{ taskTimeComparison(task) }}</span>
+              <span v-if="taskFocusSummary(task)" class="course-tag focus-tag">{{ taskFocusSummary(task) }}</span>
+              <span v-if="taskRepeatText(task)" class="course-tag">↻ {{ taskRepeatText(task) }}</span>
+              <span v-if="task.status === 'in_progress' && !isArchived(task) && !task.done" class="course-tag">进行中</span>
             </div>
-            <p v-if="task.note">{{ task.note }}</p>
+            <p v-if="task.note" :title="task.note">{{ task.note }}</p>
+            <p v-if="taskCheckpointCue(task)" class="checkpoint-cue" :title="taskCheckpointCue(task)">{{ taskCheckpointCue(task) }}</p>
+            <button v-if="task.sourceType === 'milestone-review' && task.sourceId" type="button" class="milestone-link" @click.stop="openRelatedMilestone(task)">查看关联重要日期 →</button>
           </div>
 
           <span class="due" :class="dueInfo(task).cls">{{ dueInfo(task).text }}</span>
 
           <div class="more" @click.stop>
-            <button v-if="task.sourceType === 'project-task'" class="link-btn" aria-label="查看所属项目" title="查看所属项目" @click.stop="openProjectTask(task)">查看项目</button>
+            <button v-if="task.sourceType === 'project-task'" class="link-btn" :aria-label="task.workCheckpoint?.nextStep ? `继续齐行任务：${task.title}` : `打开齐行工作台：${task.title}`" :title="task.workCheckpoint?.nextStep ? '查看齐行上次进度并继续' : '打开齐行工作台'" @click.stop="openProjectTask(task)">{{ task.workCheckpoint?.nextStep ? '继续' : '查看项目' }}</button>
+            <button v-if="task.sourceType !== 'project-task' && !isArchived(task) && taskStatus(task) !== 'completed'" class="link-btn continue-link" :aria-label="task.workCheckpoint?.nextStep ? `继续待办：${task.title}` : `开始待办：${task.title}`" :title="task.workCheckpoint?.nextStep ? '查看上次进度并继续' : '开始并记录任务进度'" @click.stop="openTaskWorkSession(task)">{{ task.workCheckpoint?.nextStep ? '继续' : task.status === 'in_progress' ? '工作台' : '开始' }}</button>
             <button v-if="task.sourceType !== 'project-task' && !isArchived(task) && taskStatus(task) === 'overdue'" class="link-btn reschedule-link" title="重新安排日期" @click.stop="openReschedule(task)">重新安排</button>
             <button v-if="task.sourceType !== 'project-task' && isArchived(task)" class="link-btn" aria-label="恢复待办" title="恢复待办" @click="domain.restoreTask(task.id)">↶</button>
             <button v-if="task.sourceType !== 'project-task'" class="link-btn" aria-label="编辑待办" title="编辑待办" @click="openEditTask(task)">✎</button>
@@ -587,9 +751,9 @@ function taskFocusSummary(task) {
     </VirtualList>
 
     <Modal v-if="showForm" :open="showForm" :title="editingId ? '编辑待办' : '添加待办'" @close="showForm = false">
-      <div class="form">
+      <form class="form" novalidate @submit.prevent="save">
         <label for="tasks-title">待办内容 *</label>
-        <input id="tasks-title" ref="titleInput" v-model="form.title" placeholder="例如：完成高数第三章作业" :aria-invalid="errorField === 'title' || undefined" :aria-describedby="errorField === 'title' ? 'tasks-form-error' : undefined" @input="clearFormError('title')" />
+        <input id="tasks-title" ref="titleInput" v-model="form.title" maxlength="200" placeholder="例如：完成高数第三章作业" :aria-invalid="errorField === 'title' || undefined" :aria-describedby="errorField === 'title' ? 'tasks-form-error' : undefined" @input="clearFormError('title')" />
 
         <label for="tasks-course">所属课程或类别</label>
         <input id="tasks-course" v-model="form.course" list="course-options" placeholder="选填，可直接输入" @change="linkCourseFromName" />
@@ -608,6 +772,9 @@ function taskFocusSummary(task) {
           </div>
         </div>
 
+        <div class="date-shortcuts" role="group" aria-label="快速选择截止日期"><button type="button" :aria-pressed="form.dueDate === appToday" @click="setFormDueDate(0)">今天</button><button type="button" :aria-pressed="form.dueDate === addAppDays(appToday, 1)" @click="setFormDueDate(1)">明天</button><button type="button" :aria-pressed="form.dueDate === addAppDays(appToday, 7)" @click="setFormDueDate(7)">一周后</button><button type="button" :aria-pressed="!form.dueDate" @click="setFormDueDate(null)">暂不安排</button></div>
+        <small v-if="!form.dueDate" class="repeat-hint">未设置日期的事项会留在“待安排日期”，随时可以补上。</small>
+
         <label for="tasks-priority">优先级</label>
         <select id="tasks-priority" v-model="form.priority">
           <option value="high">高优先级</option>
@@ -615,25 +782,40 @@ function taskFocusSummary(task) {
           <option value="low">低优先级</option>
         </select>
 
+        <label for="tasks-note">备注</label>
+        <textarea id="tasks-note" v-model="form.note" rows="2" placeholder="选填，记下要求、地点或准备事项"></textarea>
+
+        <details class="task-details" :open="Boolean((editingId && (form.repeat !== 'none' || form.estimateMinutes || form.actualMinutes)) || ['estimateMinutes', 'actualMinutes', 'reminderMinutes', 'repeatEndDate'].includes(errorField))">
+        <summary>时长、重复与提醒 <small>按需设置</small></summary>
         <div class="form-row">
-          <div><label for="tasks-estimate-minutes">预计时长（分钟）</label><input id="tasks-estimate-minutes" v-model="form.estimateMinutes" type="number" min="0" inputmode="numeric" placeholder="选填" /></div>
-          <div><label for="tasks-repeat">重复</label><select id="tasks-repeat" v-model="form.repeat"><option v-for="rule in TASK_REPEATS" :key="rule.value" :value="rule.value">{{ rule.value === 'none' ? rule.label : `${rule.label}（完成后生成下一期）` }}</option></select></div>
+          <div><label for="tasks-estimate-minutes">预计时长（分钟）</label><input id="tasks-estimate-minutes" ref="estimateInput" v-model="form.estimateMinutes" type="number" min="0" step="0.1" inputmode="decimal" placeholder="选填" :aria-invalid="errorField === 'estimateMinutes' || undefined" @input="clearFormError('estimateMinutes')" /></div>
+          <div><label for="tasks-actual-minutes">实际用时（分钟）</label><input id="tasks-actual-minutes" ref="actualInput" v-model="form.actualMinutes" type="number" min="0" step="0.1" inputmode="decimal" placeholder="专注计时会自动累计" :aria-invalid="errorField === 'actualMinutes' || undefined" @input="clearFormError('actualMinutes')" /></div>
         </div>
+        <label for="tasks-repeat">重复</label>
+        <select id="tasks-repeat" v-model="form.repeat"><option v-for="rule in TASK_REPEATS" :key="rule.value" :value="rule.value">{{ rule.value === 'none' ? rule.label : `${rule.label}（完成后生成下一期）` }}</option></select>
         <label v-if="form.repeat !== 'none'" for="tasks-repeat-end">重复结束日期</label>
         <input v-if="form.repeat !== 'none'" id="tasks-repeat-end" ref="repeatEndDateInput" v-model="form.repeatEndDate" type="date" :min="form.dueDate || undefined" :disabled="!form.dueDate" :aria-invalid="errorField === 'repeatEndDate' || undefined" :aria-describedby="errorField === 'repeatEndDate' ? 'tasks-form-error' : undefined" @input="clearFormError('repeatEndDate')" />
         <small v-if="form.repeat !== 'none'" class="repeat-hint">完成后按重复规则生成下一期；需要设置截止日期，结束日期含当天，留空则持续重复。</small>
 
-        <label for="tasks-note">备注</label>
-        <textarea id="tasks-note" v-model="form.note" rows="3" placeholder="选填"></textarea>
+        <label for="tasks-reminder">提前提醒（分钟）</label>
+        <input id="tasks-reminder" ref="reminderInput" v-model="form.reminderMinutes" type="number" min="0" step="1" :disabled="!form.dueDate" :placeholder="`默认提前 ${defaultTaskReminder} 分钟`" :aria-invalid="errorField === 'reminderMinutes' || undefined" aria-describedby="tasks-reminder-hint" @input="clearFormError('reminderMinutes')" />
+        <small id="tasks-reminder-hint" class="repeat-hint">0 表示到点提醒，留空使用默认设置。未填时间按 23:59 计算；应用打开且允许通知时提醒。</small>
+        </details>
+
+        <TaskWorkCheckpointFields :form="form" :task="tasks.find((task) => task.id === editingId)" :editing="Boolean(editingId)" @update:field="updateTaskCheckpointField" />
 
         <p v-if="error" id="tasks-form-error" class="error" role="alert">{{ error }}</p>
         <div class="actions">
-          <button v-if="editingId" class="btn btn-danger" @click="remove">删除</button>
-          <button class="btn btn-primary" @click="save">保存</button>
+          <button v-if="editingId" type="button" class="btn btn-danger" @click="remove">删除</button>
+          <button type="button" class="btn" @click="showForm = false">取消</button>
+          <button type="submit" class="btn btn-primary">保存</button>
         </div>
-      </div>
+      </form>
     </Modal>
 
+    <TaskWorkSession :open="Boolean(workSessionTask)" :task="workSessionTask" :checkpoint="workSessionTask?.workCheckpoint" :form="workSessionDraft"
+      :status-label="workSessionStatusLabel" :start-label="workSessionStartLabel" :can-start="Boolean(workSessionTask)" :can-save="Boolean(workSessionTask)"
+      :busy="workSessionBusy" :error="workSessionError" @close="closeTaskWorkSession" @start="startTaskWork" @save="saveTaskWorkProgress" @update:field="updateWorkSessionField" />
     <NoticePaste
       :open="showNotice"
       :tasks="tasks"
@@ -655,319 +837,17 @@ function taskFocusSummary(task) {
       @confirm="confirmConflictSave"
     />
     <Modal v-if="rescheduleTarget" :open="Boolean(rescheduleTarget)" title="重新安排日期" @close="rescheduleTarget = null">
-      <div class="reschedule-form">
+      <form class="reschedule-form" novalidate @submit.prevent="saveReschedule">
         <p>为“{{ rescheduleTarget.title }}”选择一个新的截止日期。</p>
-        <label>新的截止日期<input v-model="rescheduleDate" type="date" /></label>
-        <div class="actions"><button class="btn" @click="rescheduleTarget = null">取消</button><button class="btn btn-primary" @click="saveReschedule">保存日期</button></div>
-      </div>
+        <label>新的截止日期<input v-model="rescheduleDate" type="date" :aria-invalid="Boolean(rescheduleError) || undefined" @input="rescheduleError = ''" /></label>
+        <div class="date-shortcuts" role="group" aria-label="快速重新安排日期"><button type="button" @click="rescheduleDate = appToday; rescheduleError = ''">今天</button><button type="button" @click="rescheduleDate = addAppDays(appToday, 1); rescheduleError = ''">明天</button><button type="button" @click="rescheduleDate = addAppDays(appToday, 7); rescheduleError = ''">一周后</button></div>
+        <label>截止时间（选填）<input v-model="rescheduleTime" type="time" /></label>
+        <p v-if="rescheduleError" class="error" role="alert">{{ rescheduleError }}</p>
+        <div class="actions"><button type="button" class="btn" @click="rescheduleTarget = null">取消</button><button type="submit" class="btn btn-primary">保存日期</button></div>
+      </form>
     </Modal>
     <Toast v-model:open="toast.open" :message="toast.message" :type="toast.type" :action-label="toast.actionLabel" :undo-fn="toast.undoFn" :view-fn="toast.viewFn" :duration="toast.duration" @action="() => {}" @close="toast.open = false" />
   </div>
 </template>
 
-<style scoped>
-.page {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-.sort-select {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  color: var(--ink-faint);
-  font-size: var(--fs-12);
-  font-weight: var(--fw-600);
-}
-.sort-select select {
-  padding: 7px 9px;
-  font-size: var(--fs-12-5);
-}
-.task-view-toolbar { align-self: flex-start; }
-.task-view-toolbar > button { min-height: 38px; }
-.task-controls { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
-.repeat-hint { margin-top: -3px; color: var(--ink-faint); font-size: var(--fs-11); line-height: 1.5; }
-.notice-success {
-  padding: 8px 12px;
-  color: var(--success);
-  font-size: var(--fs-12-5);
-  border: 1px solid color-mix(in srgb, var(--success) 32%, var(--border));
-  border-radius: var(--radius-9);
-  background: color-mix(in srgb, var(--success) 8%, var(--card));
-}
-.task-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.task-list :deep(.swipe-item) {
-  border-radius: var(--card-radius);
-}
-.empty-box {
-  max-width: 640px;
-  width: 100%;
-  margin: 0 auto;
-}
-.task {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 11px 14px;
-  cursor: pointer;
-  transition: transform var(--dur-fast) var(--ease-standard), box-shadow var(--dur-fast) var(--ease-standard), border-color var(--dur-fast) var(--ease-standard);
-}
-.task:hover {
-  border-color: var(--border-strong);
-  box-shadow: var(--shadow-md);
-}
-.reschedule-link { flex: 0 0 auto; padding-inline: 5px; color: var(--primary); }
-.reschedule-form { display: flex; flex-direction: column; gap: 14px; }
-.reschedule-form p { color: var(--ink-soft); font-size: var(--fs-13); line-height: 1.5; }
-.reschedule-form label { display: flex; flex-direction: column; gap: 6px; color: var(--ink-soft); font-size: var(--fs-12); font-weight: var(--fw-700); }
-.reschedule-form input { width: 100%; }
-.reschedule-form .actions { display: flex; justify-content: flex-end; gap: 8px; }
-.task.done {
-  opacity: 0.55;
-}
-.urgent-bar {
-  position: absolute;
-  left: -1px;
-  top: 10px;
-  bottom: 10px;
-  width: 3px;
-  border-radius: var(--radius-pill);
-  background: var(--danger);
-}
-.check {
-  display: grid;
-  place-items: center;
-  width: 24px;
-  height: 24px;
-  flex: 0 0 24px;
-  font-weight: var(--fw-800);
-  font-size: var(--fs-13);
-  border: 2px solid #767f94;
-  border-radius: var(--radius-8);
-  background: var(--card);
-  transition: background var(--dur-fast) var(--ease-standard), border-color var(--dur-fast) var(--ease-standard);
-}
-.check:hover {
-  border-color: #19a878;
-}
-/* 勾选态白勾必须压在够深的绿上：#19a878/#fff 只有 3.04:1（AA 要 4.5:1），压到 #0c8058 得 4.95:1。 */
-.check.checked {
-  color: #fff;
-  border-color: #0c8058;
-  background: #0c8058;
-}
-.task-main {
-  flex: 1;
-  min-width: 0;
-}
-.task-topline {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  min-width: 0;
-}
-.task-topline h2 {
-  overflow: hidden;
-  font-size: var(--fs-14);
-  font-weight: var(--fw-650);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.task.done .task-topline h2 {
-  text-decoration: line-through;
-}
-.priority,
-.course-tag {
-  flex: 0 0 auto;
-  padding: 2px 7px;
-  font-size: var(--fs-10-5);
-  font-weight: var(--fw-700);
-  border-radius: var(--radius-5);
-}
-/* 语义标签一律保证 ≥4.5:1（原来 #d43f3f/#feecec 是 4.02、
-   #7b55d4/#f1ebff 是 4.42、#b86b16/#fff5df 是 3.76，都不到 AA）。
-   高优先用 --danger + color-mix 底，暗色主题下也自动成立。 */
-.priority.high {
-  color: var(--danger);
-  background: color-mix(in srgb, var(--danger) 12%, var(--card));
-}
-.priority.normal {
-  color: var(--primary);
-  background: var(--primary-soft);
-}
-.priority.low {
-  color: var(--ink-soft);
-  background: var(--bg-tint);
-}
-.course-tag {
-  max-width: 150px;
-  overflow: hidden;
-  color: var(--primary);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  background: var(--primary-soft);
-}
-.course-tag.focus-tag {
-  color: var(--success);
-  background: color-mix(in srgb, var(--success) 10%, var(--card));
-}
-.task-main p {
-  overflow: hidden;
-  margin-top: 3px;
-  color: var(--ink-soft);
-  font-size: var(--fs-11-5);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.due {
-  flex: 0 0 auto;
-  max-width: 170px;
-  color: var(--ink-soft);
-  font-size: var(--fs-12);
-  font-weight: var(--fw-600);
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
-.due.today,
-.due.soon {
-  padding: 4px 8px;
-  color: var(--warning);
-  font-weight: var(--fw-800);
-  border-radius: var(--radius-6);
-  background: color-mix(in srgb, var(--warning) 12%, var(--card));
-}
-.due.overdue {
-  padding: 4px 8px;
-  color: var(--danger);
-  font-weight: var(--fw-800);
-  border-radius: var(--radius-6);
-  background: color-mix(in srgb, var(--danger) 12%, var(--card));
-}
-.more {
-  display: flex;
-  gap: 2px;
-  opacity: 0;
-  transition: opacity var(--dur-fast) var(--ease-standard);
-}
-.task:hover .more,
-.task:focus-within .more {
-  opacity: 1;
-}
-@media (hover: none) {
-  .more {
-    opacity: 1;
-  }
-}
-.form {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.form label {
-  margin-top: 6px;
-  color: var(--ink-soft);
-  font-size: var(--fs-13);
-}
-.form input,
-.form select,
-.form textarea {
-  width: 100%;
-}
-.form-row {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-}
-.form-row > div {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.error {
-  color: var(--danger);
-  font-size: var(--fs-13);
-}
-.actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-  margin-top: 14px;
-}
-.actions .btn-danger {
-  margin-right: auto;
-}
-
-@media (max-width: 760px) {
-  .page-head {
-    align-items: stretch;
-    flex-direction: column;
-  }
-  .page-actions {
-    justify-content: space-between;
-  }
-  .task {
-    align-items: flex-start;
-    flex-wrap: wrap;
-    padding: 12px 13px;
-  }
-  .task-main {
-    /* flex-basis 不是 auto 就会盖掉 width：这条原来写的是 width、从未生效，窄屏标题被挤成 0 宽 */
-    flex: 1 1 calc(100% - 38px); }
-  .due {
-    margin-left: 36px;
-  }
-  .more {
-    margin-left: auto;
-  }
-  .form-row {
-    grid-template-columns: 1fr;
-  }
-}
-
-@media (min-width: 901px) {
-  .tasks-page > .page-head {
-    align-items: center;
-  }
-  .tasks-page .page-actions {
-    max-width: 720px;
-    justify-content: flex-end;
-    gap: 8px;
-  }
-  .tasks-page .task-controls {
-    flex-direction: row;
-    align-items: center;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 10px 14px;
-    padding: 10px 12px;
-    border: 1px solid var(--border);
-    border-radius: var(--radius-12);
-    background: var(--card);
-  }
-  .tasks-page .task-view-toolbar {
-    align-self: auto;
-    flex: none;
-  }
-  .tasks-page .task-toolbar {
-    max-width: 100%;
-    overflow-x: auto;
-  }
-  .tasks-page .task-list {
-    width: 100%;
-    max-width: 1160px;
-    align-self: center;
-  }
-}
-@media (max-width: 900px) {
-  .check {
-    width: 44px;
-    height: 44px;
-    flex-basis: 44px;
-  }
-}
-</style>
+<style scoped src="./tasks.css"></style>

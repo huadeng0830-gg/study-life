@@ -50,3 +50,20 @@ export async function getSupabaseClient() {
   }
   return clientPromise
 }
+
+// Verify the old password without replacing or broadcasting the active session.
+// Supabase only enforces current_password when its server policy is enabled.
+export async function verifyAccountCurrentPassword(email, password) {
+  const config = getSupabaseConfig()
+  if (!config) throw new Error('account_unavailable')
+  const { createClient } = await import('@supabase/supabase-js')
+  const verifier = createClient(config.url, config.key, {
+    auth: { storageKey: 'study-life-password-check', persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+  })
+  const result = await verifier.auth.signInWithPassword({ email, password })
+  if (result.data?.session) {
+    const { error } = await verifier.auth.signOut({ scope: 'local' })
+    if (error) throw error
+  }
+  return { data: { user: result.data?.user || null }, error: result.error }
+}

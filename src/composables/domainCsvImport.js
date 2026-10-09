@@ -2,6 +2,7 @@
 // encoding, RFC 4180 parser, and bounded header scan so UTF-8/GBK exports and
 // preamble rows behave consistently across importers.
 import { decodeBillText, findHeader, parseCsv, splitDateTime } from './ledgerBillImport.js'
+import { eventInputError } from './events/eventFields.js'
 
 const MAX_IMPORT_ROWS = 2000
 
@@ -134,7 +135,7 @@ function parseRecord(kind, row, map) {
 
   if (kind === 'events') {
     if (!title) return null
-    return {
+    const event = {
       title,
       date: dateParts.date,
       time,
@@ -145,6 +146,7 @@ function parseRecord(kind, row, map) {
       sourceText: [title, body].filter(Boolean).join('\n'),
       externalId,
     }
+    return eventInputError(event) ? null : event
   }
 
   throw new Error('未知的 CSV 导入类型')

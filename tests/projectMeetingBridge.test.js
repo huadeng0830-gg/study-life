@@ -67,4 +67,52 @@ describe('齐行讨论与个人日程联动', () => {
     expect(detachProjectMeetingEvents(project.id, domain, 'user-1')).toBe(1)
     expect(domain.events.value[0]).toMatchObject({ title: '已退出：小组讨论：模型评审', sourceType: 'project-meeting' })
   })
+
+  // 【前缀叠加回归】状态前缀是叠在日程标题上的，所以每次同步都必须能把它剥干净再重新加。
+  // 原来剥离用的正则漏了「已拒绝：」，而前缀判定在"有人拒绝 + 讨论仍 open"时正会产出它。
+  // 拒绝一次之后，这个函数每被调用一次标题就多一层前缀——而它在每次 loadProject 都会跑
+  // （120 秒自动刷新、切换项目、手动刷新），标题因此无限膨胀。
+  it('拒绝过一次后反复同步，标题前缀不会层层叠加', () => {
+    const domain = createDomain()
+    syncProjectMeetingEvents(project.id, [meeting], project, domain, 'user-1')
+    const declined = { ...meeting, status: 'open', participants: [{ userId: 'user-1', status: 'declined' }] }
+
+    expect(syncProjectMeetingEvents(project.id, [declined], project, domain, 'user-1')).toBe(1)
+    expect(domain.events.value[0].title).toBe('已拒绝：小组讨论：模型评审')
+
+    // 后续同步不应再改动标题，也不应再报告"有变更"。
+    for (let round = 0; round < 4; round += 1) {
+      expect(syncProjectMeetingEvents(project.id, [declined], project, domain, 'user-1')).toBe(0)
+      expect(domain.events.value[0].title).toBe('已拒绝：小组讨论：模型评审')
+    }
+  })
+
+  it('前缀在各状态之间来回切换时也能干净地换掉', () => {
+    const domain = createDomain()
+    const cancelled = { ...meeting, status: 'cancelled' }
+    const declined = { ...meeting, status: 'open', participants: [{ userId: 'user-1', status: 'declined' }] }
+
+    // 先让本人接受，日程才会被创建（前缀才有载体可改）。
+    syncProjectMeetingEvents(project.id, [meeting], project, domain, 'user-1')
+    expect(domain.events.value[0].title).toBe('小组讨论：模型评审')
+
+    // 待确认 → 已拒绝 → 已取消 → 重新确认，任何序列都不该留下多层前缀。
+    for (const state of [{ ...meeting, status: 'open' }, declined, cancelled, { ...meeting, status: 'open' }]) {
+      syncProjectMeetingEvents(project.id, [state], project, domain, 'user-1')
+    }
+    expect(domain.events.value[0].title).toBe('待确认：小组讨论：模型评审')
+
+    syncProjectMeetingEvents(project.id, [meeting], project, domain, 'user-1')
+    expect(domain.events.value[0].title).toBe('小组讨论：模型评审')
+    syncProjectMeetingEvents(project.id, [declined], project, domain, 'user-1')
+    expect(domain.events.value[0].title).toBe('已拒绝：小组讨论：模型评审')
+  })
+
+  it('状态未变化时 changed 返回 0，调用方才能判断有无实际写入', () => {
+    const domain = createDomain()
+    const declined = { ...meeting, status: 'open', participants: [{ userId: 'user-1', status: 'declined' }] }
+    syncProjectMeetingEvents(project.id, [declined], project, domain, 'user-1')
+    // 重复同一状态不应被算成一次变更。
+    expect(syncProjectMeetingEvents(project.id, [declined], project, domain, 'user-1')).toBe(0)
+  })
 })

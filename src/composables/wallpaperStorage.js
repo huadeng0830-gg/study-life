@@ -89,6 +89,22 @@ export async function listWallpapers() {
   }
 }
 
+/** Replace the wallpaper store from a trusted local recovery checkpoint. */
+export async function restoreWallpapersSnapshot(images = {}) {
+  const entries = Object.entries(images || {}).filter(([target, blob]) => typeof target === 'string' && blob)
+  const db = await openDb()
+  try {
+    const transaction = db.transaction(STORE_NAME, 'readwrite')
+    const store = transaction.objectStore(STORE_NAME)
+    store.clear()
+    for (const [target, blob] of entries) store.put(blob, target)
+    await transactionDone(transaction)
+    wallpaperRevision.value++
+  } finally {
+    db.close()
+  }
+}
+
 async function listWallpaperTargets() {
   const db = await openDb()
   try {

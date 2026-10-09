@@ -188,7 +188,7 @@ describe('QuickRecord 业务适配与撤销', () => {
     const task = domain.createTask({ id: 'focus-task', title: '专注任务' })
     const before = task.updatedAt
     domain.recordTaskFocusSession(task.id, { actualFocusSeconds: 1500, endedAt: '2026-09-02T10:00:00.000Z' })
-    expect(task).toMatchObject({ focusCount: 1, focusTotalSeconds: 1500, lastFocusedAt: '2026-09-02T10:00:00.000Z' })
+    expect(task).toMatchObject({ focusCount: 1, focusTotalSeconds: 1500, actualMinutes: 25, lastFocusedAt: '2026-09-02T10:00:00.000Z' })
     expect(task.updatedAt).not.toBe(before)
     domain.completeTask(task.id)
     expect(task).toMatchObject({ done: true, status: 'completed' })

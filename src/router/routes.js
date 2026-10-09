@@ -57,19 +57,19 @@ function asyncRoute(path) {
 
 export const routes = [
   // meta.title 用于两处：标签页标题，以及路由切换时的读屏播报。
-  { path: '/', name: 'today', meta: { title: '今天' }, component: asyncRoute('/') },
+  { path: '/', name: 'today', meta: { title: '今天', navigation: { id: 'today', icon: '☀️', groupId: 'workspace', groupLabel: '今日', defaultDesktop: true, shortcut: 1 } }, component: asyncRoute('/') },
   { path: '/today', redirect: '/' },
-  { path: '/schedule', name: 'schedule', meta: { title: '课程表' }, component: asyncRoute('/schedule') },
-  { path: '/course', name: 'course-archive', meta: { title: '课程档案' }, component: asyncRoute('/course') },
-  { path: '/tasks', name: 'tasks', meta: { title: '待办' }, component: asyncRoute('/tasks') },
-  { path: '/exams', name: 'exams', meta: { title: '重要日期' }, component: asyncRoute('/exams') },
-  { path: '/events', name: 'events', meta: { title: '日程' }, component: asyncRoute('/events') },
-  { path: '/lists', name: 'lists', meta: { title: '清单' }, component: asyncRoute('/lists') },
-  { path: '/bills', name: 'bills', meta: { title: '账本' }, component: asyncRoute('/bills') },
-  { path: '/review', name: 'review', meta: { title: '回顾' }, component: asyncRoute('/review') },
+  { path: '/schedule', name: 'schedule', meta: { title: '课程表', navigation: { id: 'schedule', icon: '📅', mobileLabel: '学习', groupId: 'learning', groupLabel: '学习', defaultDesktop: true, shortcut: 2 } }, component: asyncRoute('/schedule') },
+  { path: '/course', name: 'course-archive', meta: { title: '课程进度', navigation: { id: 'course', icon: '📚', groupId: 'learning', groupLabel: '学习', defaultDesktop: true } }, component: asyncRoute('/course') },
+  { path: '/tasks', name: 'tasks', meta: { title: '待办', navigation: { id: 'tasks', icon: '✅', groupId: 'learning', groupLabel: '学习', defaultDesktop: true, shortcut: 3 } }, component: asyncRoute('/tasks') },
+  { path: '/exams', name: 'exams', meta: { title: '重要日期', navigation: { id: 'exams', icon: '⏳', groupId: 'learning', groupLabel: '学习', defaultDesktop: true, shortcut: 4 } }, component: asyncRoute('/exams') },
+  { path: '/events', name: 'events', meta: { title: '日程', navigation: { id: 'events', icon: '🗓️', groupId: 'schedule', groupLabel: '日程', defaultDesktop: true, shortcut: 7 } }, component: asyncRoute('/events') },
+  { path: '/lists', name: 'lists', meta: { title: '清单', navigation: { id: 'lists', icon: '☑️', groupId: 'other', groupLabel: '其他', defaultDesktop: true, shortcut: 5 } }, component: asyncRoute('/lists') },
+  { path: '/bills', name: 'bills', meta: { title: '账本', navigation: { id: 'bills', icon: '📒', groupId: 'other', groupLabel: '其他', defaultDesktop: true, shortcut: 6 } }, component: asyncRoute('/bills') },
+  { path: '/review', name: 'review', meta: { title: '回顾', navigation: { id: 'review', icon: '↺', groupId: 'other', groupLabel: '其他', defaultDesktop: true, shortcut: 8 } }, component: asyncRoute('/review') },
   // Keep old bookmarks usable after the standalone Notes page was retired.
   { path: '/notes', redirect: '/' },
-  { path: '/together', name: 'together', meta: { title: '一起约' }, component: asyncRoute('/together') },
-  { path: '/projects', name: 'projects', meta: { title: '齐行' }, component: asyncRoute('/projects') },
+  { path: '/together', name: 'together', meta: { title: '一起约', navigation: { id: 'together', icon: '👥', groupId: 'schedule', groupLabel: '日程', defaultDesktop: true } }, component: asyncRoute('/together') },
+  { path: '/projects', name: 'projects', meta: { title: '齐行', navigation: { id: 'projects', icon: '🧩', groupId: 'qixing', groupLabel: '齐行', defaultDesktop: true } }, component: asyncRoute('/projects') },
   { path: '/:pathMatch(.*)*', name: 'not-found', meta: { title: '页面不存在' }, component: NotFoundView },
 ]

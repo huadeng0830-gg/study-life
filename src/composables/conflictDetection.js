@@ -1,5 +1,5 @@
 import { currentTimes, periodIndex } from './store/timeConfig.js'
-import { scheduleDateContext, courseInWeek, dateForWeekDay } from './store/schedule.js'
+import { courseInWeek } from './store/schedule.js'
 import { isActiveEntity } from './domain/state.js'
 
 /** @typedef {{ start: number, end: number }} TimeRange */
@@ -44,14 +44,15 @@ function periodToMinutes(period) {
 
 /**
  * @param {Course} course
- * @param {number} week
  * @returns {TimeRange|null}
  */
-function getCourseTimeRange(course, week) {
-  scheduleDateContext(dateForWeekDay(week, course.day))
-  // 课程上存的是 start / end 两个节次 id，不是 startPeriod / endPeriod
-  // （见 domain/commands.js 的 createCourse）。原来解构不存在的字段，
-  // 就算把上面的 .value 修好也永远拿到 undefined，一次冲突都检测不出来。
+function getCourseTimeRange(course) {
+  // 这里原本有一行 `scheduleDateContext(dateForWeekDay(week, course.day))`，返回值被直接
+  // 丢弃，旁边还留着"就算把上面的 .value 修好也拿不到值"的注释——但 scheduleDateContext
+  // 是**普通函数**、本来就没有 .value，那条路是走不通的。两次调用都没有任何副作用，
+  // 属于死代码，连同误导性的注释一起删掉。
+  // 真正生效的是下面这段：课程上存的是 start / end 两个节次 id，不是 startPeriod / endPeriod
+  // （见 domain/commands.js 的 createCourse）。
   const start = periodToMinutes(course.start)
   const end = periodToMinutes(course.end)
   if (start.start === 0 && end.end === 0) return null
@@ -104,8 +105,8 @@ export function detectCourseConflicts(newCourse, existingCourses = [], targetWee
     if (!weekMatches(course, checkWeek)) continue
     if (!weekMatches(newCourse, checkWeek)) continue
 
-    const existingRange = getCourseTimeRange(course, checkWeek)
-    const newRange = getCourseTimeRange(newCourse, checkWeek)
+    const existingRange = getCourseTimeRange(course)
+    const newRange = getCourseTimeRange(newCourse)
 
     if (timeOverlap(existingRange, newRange)) {
       conflicts.push({

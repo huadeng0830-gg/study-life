@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { accountOpen, accountUser } from '../composables/accountAuth.js'
 import { formatDateTime } from '../composables/intlFormatters.js'
 import { announce as announceLive, announceAlert } from '../composables/liveRegion.js'
-import { dateInZone, wallTimeToEpoch, zonedParts } from '../../supabase/functions/campus-social/availability.js'
+import { dateInZone, wallTimeToEpoch, zonedParts } from '../composables/zonedTime.js'
 import { ensureSocialScheduleReady, socialRequest, subscribeSocialNotifications } from '../services/social.js'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 
@@ -173,6 +173,13 @@ function resetAccountData() {
   friendsError.value = ''
   invitationsError.value = ''
   notificationsError.value = ''
+  // 这些加载标志也必须清掉：generation++ 会让在途请求的 finally 里的
+  // `if (token === generation)` 判定为假，于是它不会替我们复位。少了这一步，
+  // 在账号切换途中退出的那一次加载会把 busy 永久留在 true（页面上就一直显示
+  // 「正在读取好友资料…」或「正在核对双方课表…」）。
+  profileLoading.value = false
+  pageLoading.value = false
+  availabilityBusy.value = false
 }
 
 async function loadProfile(token = generation) {
@@ -360,6 +367,12 @@ async function confirmRemoveFriend() {
 
 async function queryAvailability(days = availabilityDays.value) {
   if (!selectedFriendId.value || availabilityBusy.value) return
+  // 记住这次查询是给谁算的。请求途中切换好友时（好友列表的点击只清空 availability，
+  // 不会重新发起查询），旧响应会覆盖 availability，于是**新好友的名字下面显示的是旧好友
+  // 的空闲时段**；此时选时段建邀约，收件人是新好友、时间却按旧好友的算。
+  // 其余加载函数都有这一层守卫（loadFriends 等用 generation、齐行 loadProject 用
+  // detailLoadSequence + selectedProjectId），这里补齐。
+  const friendId = selectedFriendId.value
   availabilityDays.value = days
   availabilityBusy.value = true
   availabilityError.value = ''
@@ -369,12 +382,14 @@ async function queryAvailability(days = availabilityDays.value) {
   announce('', '')
   try {
     await ensureSocialScheduleReady()
-    const result = await socialRequest('availability_query', { friendId: selectedFriendId.value, days })
+    const result = await socialRequest('availability_query', { friendId, days })
+    if (selectedFriendId.value !== friendId) return
     availability.value = result
     if (!result.known) availabilityError.value = '暂时无法确认双方在这段日期内的课表是否完整。请检查课表完整日期和同步状态。'
     else if (!result.intervals?.length) availabilityError.value = ''
-  } catch (error) { availabilityError.value = error.message }
-  finally { availabilityBusy.value = false }
+  } catch (error) {
+    if (selectedFriendId.value === friendId) availabilityError.value = error.message
+  } finally { availabilityBusy.value = false }
 }
 
 function chooseSlot(slot) {

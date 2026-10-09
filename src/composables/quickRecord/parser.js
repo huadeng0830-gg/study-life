@@ -51,7 +51,7 @@ function timeOf(source, schedule) {
   // 先去掉“下周一”这类日期词，避免解析时间时把“一两”连在一起。
   const text = original.replace(/(下|本|这)?(?:周|星期)[一二三四五六日天]/g, ' ')
   const colon = text.match(/(凌晨|早上|上午|中午|下午|晚上|夜里)?\s*(\d{1,2})[:：](\d{2})/)
-  const point = text.match(/(凌晨|早上|上午|中午|下午|晚上|夜里)?\s*([零〇一二两三四五六七八九十\d]{1,3})[点时](?:半|[零〇一二两三四五六七八九十\d]{1,3}分?)?/)
+  const point = text.match(/(凌晨|早上|上午|中午|下午|晚上|夜里)?\s*([零〇一二两三四五六七八九十\d]{1,3})[点时](半|[零〇一二两三四五六七八九十\d]{1,3}分?)?/)
   const match = colon || point
   if (!match) return ''
   const period = match[1] || ''
@@ -67,7 +67,10 @@ function timeOf(source, schedule) {
 }
 
 function cleanTaskTitle(source, fallback) {
-  return String(fallback || source || '')
+  const title = fallback && fallback !== '待处理通知' ? fallback : String(source || '')
+    .replace(/^(?:今天|明天|后天|大后天|昨天|(?:本|这|下)?(?:周|星期)[一二三四五六日天])\s*/g, '')
+    .replace(/(?:凌晨|早上|上午|中午|下午|晚上|夜里)?\s*(?:\d{1,2}[:：]\d{2}|[零〇一二两三四五六七八九十\d]{1,3}[点时](?:半|[零〇一二两三四五六七八九十\d]{1,3}分?)?)\s*/g, '')
+  return String(title || source || '')
     .replace(/^(提醒我|记得|请|请于|请在|务必|必须|需要)+/g, '')
     .replace(/^(前|之前|以前|截止|截至)\s*/g, '')
     .replace(/(重要|紧急)$/g, '')
@@ -77,17 +80,18 @@ function cleanTaskTitle(source, fallback) {
 function splitStatements(text, forcedType = '') {
   const source = String(text ?? '').trim()
   if (!source) return []
-  const lines = source.split(/\n+/).map((item) => item.trim()).filter(Boolean)
-  if (lines.length > 1) return lines.map((statement) => ({ statement, amount: null, title: '' }))
+  const lines = source.split(/[\n；;]+/).map((item) => item.trim().replace(/^(?:[-*•]\s+|\d+[)、]\s*|\d+\.\s+)/, '')).filter(Boolean)
+  if (lines.length > 1) return lines.flatMap((statement) => splitStatements(statement, forcedType))
 
   const amounts = extractAmounts(source)
-  if (amounts.length >= 2 && !INCOME_WORDS.test(source) && !BILL_WORDS.test(source)) {
+  if (amounts.length >= 2 && (!forcedType || forcedType === 'expense') && !INCOME_WORDS.test(source) && !BILL_WORDS.test(source)) {
     return amounts.map((amount, index) => {
       const before = source.slice(index ? amounts[index - 1].end : 0, amount.start)
       const after = source.slice(amount.end, index + 1 < amounts.length ? amounts[index + 1].start : source.length)
       const afterName = /^\s*的\s*([^，,。；;]+)/.exec(after)?.[1] || ''
-      const raw = (afterName || before || `支出 ${amount.amount}元`).trim()
-      return { statement: raw, amount: amount.amount, title: '' }
+      const title = buildExpenseTitle((afterName || before).trim())
+      const raw = source.slice(index ? amounts[index - 1].end : 0, amount.end) + (afterName ? after.slice(0, after.indexOf(afterName) + afterName.length) : '')
+      return { statement: raw.replace(/^[\s，,。；;]+|[\s，,。；;]+$/g, ''), amount: amount.amount, title }
     })
   }
 
@@ -135,6 +139,11 @@ function questionsFor(type, source, schedule, amount) {
   return []
 }
 
+/**
+ * @param {string} statement
+ * @param {{courses?: Array<{id: string, name: string}>, now?: Date, forcedType?: string, context?: import('./contracts').QuickRecordContext}} options
+ * @returns {import('./contracts').QuickRecordDraft | null}
+ */
 function parseStatement(statement, { courses = [], now = new Date(), forcedType = '', context = {} } = {}) {
   const source = String(statement ?? '').trim()
   if (!source) return null
@@ -160,7 +169,7 @@ function parseStatement(statement, { courses = [], now = new Date(), forcedType 
     raw: source,
     title: '',
     course: schedule.course || context.courseName || '',
-    courseId: context.courseId || '',
+    courseId: courses.find((course) => course.name === schedule.course)?.id || context.courseId || '',
     date: schedule.date || relativeCountdownDate || '',
     dateRange: schedule.dateRange || '',
     time: timeOf(source, schedule),
@@ -216,6 +225,11 @@ function parseStatement(statement, { courses = [], now = new Date(), forcedType 
   return base
 }
 
+/**
+ * @param {string} text
+ * @param {{courses?: Array<{id: string, name: string}>, now?: Date, forcedType?: string, context?: import('./contracts').QuickRecordContext}} options
+ * @returns {import('./contracts').QuickRecordDraft[]}
+ */
 export function parseQuickRecord(text, { courses = [], now = new Date(), forcedType = '', context = {} } = {}) {
   // Ignore legacy/unknown modes (including the removed free-note mode) and
   // classify the text through the same structured-record path as auto mode.
@@ -235,5 +249,5 @@ export function parseQuickRecord(text, { courses = [], now = new Date(), forcedT
       }
       return draft
     })
-    .filter(Boolean)
+    .filter((draft) => draft !== null)
 }

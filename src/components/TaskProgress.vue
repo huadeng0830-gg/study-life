@@ -7,9 +7,10 @@ const props = defineProps({
   activityAgeSeconds: { type: Number, default: null },
   stalled: Boolean,
   compact: Boolean,
+  dismissible: Boolean,
 })
 
-defineEmits(['cancel', 'retry', 'continue', 'wait'])
+defineEmits(['cancel', 'retry', 'continue', 'wait', 'dismiss'])
 
 const ICONS = {
   waiting: '○',
@@ -74,11 +75,12 @@ const stateText = computed(() => ({
     <p v-if="task.retainedResult" class="task-retained">已完成的结果已保留，可以重试失败步骤或使用当前结果继续。</p>
     <p v-if="task.error" class="task-error" role="alert">{{ task.error }}</p>
 
-    <div v-if="stalled || task.canCancel || task.canRetry || task.retainedResult" class="task-actions">
+    <div v-if="stalled || task.canCancel || task.canRetry || task.retainedResult || (dismissible && task.status !== 'running')" class="task-actions">
       <button v-if="stalled" type="button" class="btn btn-sm btn-ghost" @click="$emit('wait')">继续等待</button>
       <button v-if="task.canCancel" type="button" class="btn btn-sm" @click="$emit('cancel')">取消任务</button>
       <button v-if="task.canRetry" type="button" class="btn btn-sm btn-ghost" @click="$emit('retry')">重试当前步骤</button>
       <button v-if="task.retainedResult" type="button" class="btn btn-sm btn-primary" @click="$emit('continue')">使用当前结果</button>
+      <button v-if="dismissible && task.status !== 'running'" type="button" class="btn btn-sm btn-ghost" @click="$emit('dismiss')">收起进度</button>
     </div>
   </section>
 </template>

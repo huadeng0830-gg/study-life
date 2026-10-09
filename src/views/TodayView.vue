@@ -432,7 +432,7 @@ function countdownLabel(item) {
 
     <MemoryView :open="showMemory" @close="showMemory = false" />
     <Modal v-if="eventDetail" :open="Boolean(eventDetail)" title="日程详情" medium @close="eventDetail = null">
-      <div class="event-detail" :data-focus-id="eventDetail.id"><h3>{{ eventDetail.title }}</h3><p>{{ eventDetail.date || '待安排' }}<template v-if="eventDetail.time"> · {{ eventDetail.time }}</template><template v-if="eventDetail.endTime">–{{ eventDetail.endTime }}</template></p><p v-if="eventDetail.location">地点：{{ eventDetail.location }}</p><p v-if="eventDetail.courseName">课程：{{ eventDetail.courseName }}</p><p v-if="eventDetail.note" class="event-detail-note">{{ eventDetail.note }}</p></div>
+      <div class="event-detail" :data-focus-id="eventDetail.id"><h3>{{ eventDetail.title }}</h3><p>{{ eventDetail.date || '待安排' }}<template v-if="eventDetail.time"> · {{ eventDetail.time }}</template><template v-if="eventDetail.endTime">–{{ eventDetail.endTime }}</template></p><p v-if="eventDetail.location">地点：{{ eventDetail.location }}</p><p v-if="eventDetail.courseName">课程：{{ eventDetail.courseName }}</p><p v-if="eventDetail.note" class="event-detail-note">{{ eventDetail.note }}</p><router-link class="btn btn-primary" :to="focusLocation('/events', eventDetail.id)" @click="eventDetail = null">管理这条日程</router-link></div>
     </Modal>
   </div>
   </div>

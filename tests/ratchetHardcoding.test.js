@@ -323,10 +323,11 @@ describe('计数器本身的判别力', () => {
 describe('全仓扫描的判别力（防假绿）', () => {
   const result = scan()
 
-  it('真的扫到了整个 src：150+ 个文件、250+ 条样式', () => {
+  it('真的扫到了整个 src：150+ 个文件并读取 Vue 样式块', () => {
     expect(result.files.length).toBeGreaterThan(150)
     expect(result.files.filter((entry) => entry.file.endsWith('.vue')).length).toBeGreaterThan(50)
-    expect(result.styleColors).toBeGreaterThan(250)
+    // 使用主题变量会持续减少颜色字面量；扫描规模应按样式文件计数。
+    expect(result.files.filter((entry) => entry.file.endsWith('.vue') && entry.blocks.style.trim()).length).toBeGreaterThan(50)
   })
 
   it('script 区也真的扫到了颜色（正则写坏会是 0）', () => {

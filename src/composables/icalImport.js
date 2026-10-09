@@ -204,11 +204,18 @@ function convertEvent(raw, displayTimeZone) {
       time: start.time,
       endTime,
       location,
-      courseName: '',
+      courseName: textValue(raw['X-SANLIANGSHI-COURSE']),
       note,
       sourceText: 'ics:' + identity,
+      ...(raw['X-SANLIANGSHI-REMINDER-ENABLED'] ? { reminderEnabled: textValue(raw['X-SANLIANGSHI-REMINDER-ENABLED']).toUpperCase() !== 'FALSE' } : {}),
+      ...(/^\d+$/.test(textValue(raw['X-SANLIANGSHI-REMINDER-MINUTES'])) && Number.isSafeInteger(Number(textValue(raw['X-SANLIANGSHI-REMINDER-MINUTES'])))
+        ? { reminderMinutes: Number(textValue(raw['X-SANLIANGSHI-REMINDER-MINUTES'])) } : {}),
     },
   }
+}
+
+export function eventImportFingerprint(event) {
+  return JSON.stringify(['title', 'date', 'time', 'endTime', 'location', 'note'].map((field) => String(event?.[field] || '').trim().replace(/\r\n?/g, '\n')))
 }
 
 export function parseIcsCalendar(text, { existingEvents = [], timezone = 'local' } = {}) {
@@ -217,10 +224,13 @@ export function parseIcsCalendar(text, { existingEvents = [], timezone = 'local'
   const blocks = eventBlocks(unfoldLines(source))
   if (blocks.length > MAX_ICS_EVENTS) throw new Error('单个文件最多导入 500 条日程。')
 
-  const existing = new Set((Array.isArray(existingEvents) ? existingEvents : [])
+  const current = (Array.isArray(existingEvents) ? existingEvents : []).filter((event) => event && !event.deletedAt && !event.tombstone)
+  const existingContent = new Set(current.map(eventImportFingerprint))
+  const existing = new Set(current
     .map((event) => String(event?.sourceText || ''))
     .filter((value) => value.startsWith('ics:')))
   const seen = new Set()
+  const seenContent = new Set()
   const events = []
   let duplicates = 0
   let skippedRecurrence = 0
@@ -239,11 +249,13 @@ export function parseIcsCalendar(text, { existingEvents = [], timezone = 'local'
       continue
     }
     const key = converted.event.sourceText
-    if (existing.has(key) || seen.has(key)) {
+    const contentKey = eventImportFingerprint(converted.event)
+    if (existing.has(key) || seen.has(key) || existingContent.has(contentKey) || seenContent.has(contentKey)) {
       duplicates += 1
       continue
     }
     seen.add(key)
+    seenContent.add(contentKey)
     events.push(converted.event)
   }
 

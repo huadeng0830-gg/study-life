@@ -1,14 +1,15 @@
 import { computed } from 'vue'
 import { periodIndex, timeConfig } from '../store/timeConfig.js'
-import { coursesForDate, coursesForDates, dateForWeekDay, scheduleExceptionForDate } from '../store/schedule.js'
+import { coursesForDate, coursesForDates, dateForWeekDay, scheduleExceptionsForDate } from '../store/schedule.js'
 
 export function useScheduleGrid(courses, viewWeek, mobileView, mobileDay) {
   const DAYS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
 
   const viewDates = computed(() => DAYS.map((_, day) => dateForWeekDay(viewWeek.value, day)))
 
+  // 当日**全部**例外：一天可能既有整天停课又有单节课停上（原来是单条，取不到后者）。
   const viewExceptions = computed(() =>
-    viewDates.value.map((date) => scheduleExceptionForDate(date))
+    viewDates.value.map((date) => scheduleExceptionsForDate(date))
   )
 
   const visibleCourses = computed(() =>

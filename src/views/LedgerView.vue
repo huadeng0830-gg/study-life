@@ -491,7 +491,7 @@ const {
   expandedCategory, showAllReviewCats, reviewCategoryRows, reviewCategorySum,
   visibleCategoryRows, hiddenCategoryCount,
   toggleReviewCategory, revealReviewCategory, openReviewCategoryFromHome,
-  reviewMyShareNote, calendarCells, selectedDay, selectedDayInfo, reviewTrendMonths,
+  reviewMyShareNote, calendarCells, selectedDay, selectedDayInfo, reviewTrendMonths, earliestTrendMonth, setTrendEndMonth,
 } = useLedgerReview({ personalAmount, ledgerToday, tab, fx })
 
 /* ================= 分类管理 ================= */
@@ -641,6 +641,7 @@ const {
     <div v-else role="tabpanel" aria-labelledby="ledger-tab-review">
       <ReviewPanel
         :monthly-trend="reviewTrendMonths"
+        :earliest-trend-month="earliestTrendMonth"
         :trend-currency="baseCurrency"
         :review-label="reviewLabel"
         :review-month="reviewMonth"
@@ -673,6 +674,7 @@ const {
         :open-detail="openDetail"
         @selected-day-change="selectedDay = $event"
         @jump-to-month="jumpToMonth"
+        @trend-end-month-change="setTrendEndMonth"
         @update:showAllReviewCats="showAllReviewCats = $event"
       />
     </div>

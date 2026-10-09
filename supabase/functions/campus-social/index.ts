@@ -8,6 +8,7 @@ import {
   mutualFreeIntervals,
   userFreeIntervals,
 } from './availability.js'
+import { normalizeTaskWorkCheckpoint } from '../../../src/composables/tasks/taskWorkProgress.js'
 
 const supabaseUrl = Deno.env.get('SUPABASE_URL') || ''
 const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || ''
@@ -88,6 +89,16 @@ function assertTimestamp(value: unknown, label: string) {
   const epoch = Date.parse(text)
   if (!Number.isFinite(epoch)) throw new ApiError('invalid_input', `${label}格式不正确。`)
   return new Date(epoch).toISOString()
+}
+
+function assertTimestampPreserved(value: unknown, label: string) {
+  const text = cleanText(value, 64, label, true)
+  if (!/(?:Z|[+-]\d{2}:\d{2})$/i.test(text) || !Number.isFinite(Date.parse(text))) {
+    throw new ApiError('invalid_input', `${label}格式不正确。`)
+  }
+  // Checkpoint versions are compared exactly to Postgres timestamptz values;
+  // keep fractional seconds intact instead of rounding them through Date.
+  return text
 }
 
 function normalizeAdjustmentData(type: string, value: unknown) {
@@ -224,6 +235,28 @@ async function dispatch(userId: string, action: string, payload: Record<string, 
 
 async function projectDispatch(userId: string, action: string, payload: Record<string, unknown> = {}) {
   const { data, error } = await admin.rpc('project_dispatch', { p_action: action, p_actor_id: userId, p_payload: payload })
+  if (error) dbError(error)
+  return data
+}
+
+function normalizeProjectWorkCheckpoint(value: unknown) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new ApiError('invalid_input', '进度内容格式不正确。')
+  const normalized = normalizeTaskWorkCheckpoint(value as Record<string, unknown>) || { lastStep: '', blocker: '', nextStep: '', resources: [] }
+  const { updatedAt: _clientTimestamp, ...checkpoint } = normalized
+  return checkpoint
+}
+
+async function projectTaskCheckpoints(userId: string, projectId: string) {
+  const { data, error } = await admin.rpc('project_task_checkpoints', { p_actor_id: userId, p_project_id: projectId })
+  if (error) dbError(error)
+  return data
+}
+
+async function projectTaskCheckpointSave(userId: string, projectId: string, taskId: string, checkpoint: unknown, expectedUpdatedAt: string | null) {
+  const { data, error } = await admin.rpc('project_task_checkpoint_save', {
+    p_actor_id: userId, p_project_id: projectId, p_task_id: taskId,
+    p_checkpoint: normalizeProjectWorkCheckpoint(checkpoint), p_expected_updated_at: expectedUpdatedAt,
+  })
   if (error) dbError(error)
   return data
 }
@@ -737,6 +770,11 @@ async function handle(user: any, action: string, payload: any) {
     case 'project_task_events': return projectDispatch(user.id, 'task_events', {
       projectId: assertUUID(payload.projectId, '项目'), taskId: assertUUID(payload.taskId, '任务'),
     })
+    case 'project_task_checkpoints': return projectTaskCheckpoints(user.id, assertUUID(payload.projectId, '项目'))
+    case 'project_task_checkpoint_save': return projectTaskCheckpointSave(
+      user.id, assertUUID(payload.projectId, '项目'), assertUUID(payload.taskId, '任务'), payload.checkpoint,
+      payload.expectedUpdatedAt ? assertTimestampPreserved(payload.expectedUpdatedAt, '进度版本') : null,
+    )
     case 'project_milestone_create': return projectDispatch(user.id, 'milestone_create', {
       projectId: assertUUID(payload.projectId, '项目'), id: assertUUID(payload.id, '里程碑'),
       title: cleanText(payload.title, 160, '里程碑名称', true), description: cleanText(payload.description, 2000, '里程碑说明'),

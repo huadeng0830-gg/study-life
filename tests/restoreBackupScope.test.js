@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest'
-import { BACKUP_MODULES, BACKUP_STORAGE_KEYS, restoreBackupModuleLabels } from '../src/composables/backupArchive.js'
+import { BACKUP_MODULES, BACKUP_STORAGE_KEYS, restoreBackupModuleLabels, restoreBackupModuleOptions, restoreBackupSelectedFields } from '../src/composables/backupArchive.js'
 
 /**
  * 「从备份恢复」的确认文案必须**等于真实恢复范围**。
@@ -53,6 +53,19 @@ describe('备份恢复范围：文案必须由真源算出', () => {
     expect(labels).toEqual(['课程与课表'])
     expect(labels).not.toContain('账本')
     expect(labels).not.toContain('清单')
+  })
+
+  it('按所选分区只生成对应的存储写入字段', async () => {
+    const backup = backupWith(['courses', 'countdowns', 'tasks', 'theme'])
+    const options = restoreBackupModuleOptions(backup)
+    expect(options.map(({ id }) => id)).toEqual(['courses', 'tasks', 'countdown', 'appearance'])
+    const selected = restoreBackupSelectedFields(backup, ['tasks', 'appearance'])
+    const { buildBackupRestoreValues } = await import('../src/composables/backupRestore.js')
+    expect(buildBackupRestoreValues(backup.data, selected, BACKUP_STORAGE_KEYS)).toEqual({
+      sl_tasks: [],
+      sl_theme: 'blue',
+    })
+    expect(restoreBackupModuleLabels(backup, { selectedModuleIds: ['tasks', 'appearance'] })).toEqual(['待办与快速记录', '外观与主题'])
   })
 
   it('旧版备份（只有三项）不会把新模块写成"将被覆盖"', () => {

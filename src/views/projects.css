@@ -84,6 +84,12 @@
 .project-task-status.state-review { background: color-mix(in srgb, var(--warning) 12%, var(--card)); color: var(--ink-soft); }
 .project-task-status.state-completed { background: color-mix(in srgb, var(--success) 10%, var(--card)); color: var(--success); }
 .project-task-description { margin: 5px 0 0; color: var(--ink-soft); font-size: var(--fs-12); line-height: 1.5; white-space: pre-wrap; }
+.project-task-work-progress { display: flex; flex-direction: column; gap: 4px; margin-top: 7px; padding-left: 9px; border-left: 2px solid var(--primary); font-size: var(--fs-12); }
+.project-task-work-progress p { margin: 0; color: var(--primary); overflow-wrap: anywhere; }
+.project-task-work-progress p b, .project-task-work-resources b { margin-right: 6px; color: var(--ink-soft); font-size: var(--fs-11); }
+.project-task-work-resources { display: flex; flex-direction: column; gap: 3px; }
+.project-task-work-resources a { overflow-wrap: anywhere; color: var(--primary); }
+.project-task-work-progress small { color: var(--muted); font-size: var(--fs-10); }
 .project-task-meta { display: flex; flex-wrap: wrap; gap: 4px 12px; margin-top: 6px; color: var(--muted); font-size: var(--fs-11); }
 .project-task-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 6px; }
 .project-subtasks { display: grid; gap: 5px; margin: 3px 0 0 14px; padding-left: 11px; border-left: 1px solid var(--border-strong); }

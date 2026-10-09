@@ -110,4 +110,33 @@ describe('提醒调度器', () => {
     const now = utc('2026-10-04', '08:00')
     expect(scheduler.collectDueReminders(now).map((item) => item.key)).not.toContain('task:t5')
   })
+
+  it('年度日期按本次发生日期提醒，刚过时仍在补响窗口内', async () => {
+    const scheduler = await freshModules()
+    const { useStoredRef } = await import('../src/composables/store/core.js')
+    useStoredRef('sl_exams', []).value = [{ id: 'annual', name: '生日', date: '2020-10-04', time: '11:30', repeat: 'yearly', reminderMinutes: 0 }]
+    const reminders = scheduler.collectDueReminders(utc('2026-10-04', '11:35'))
+    expect(reminders).toContainEqual(expect.objectContaining({ key: 'milestone:annual', at: '2026-10-04 11:30', fireAt: utc('2026-10-04', '11:30') }))
+  })
+
+  it('年度闰日生日在平年最后一天提醒，跨年提前提醒落在上一年', async () => {
+    const scheduler = await freshModules()
+    const { useStoredRef } = await import('../src/composables/store/core.js')
+    const milestones = useStoredRef('sl_exams', [])
+    milestones.value = [{ id: 'leap', name: '闰日生日', date: '2024-02-29', time: '12:00', repeat: 'yearly', reminderMinutes: 0 }]
+    expect(scheduler.collectDueReminders(utc('2027-02-28', '12:00'))).toContainEqual(expect.objectContaining({ key: 'milestone:leap', at: '2027-02-28 12:00' }))
+    milestones.value = [{ id: 'new-year', name: '新年纪念日', date: '2020-01-01', time: '12:00', repeat: 'yearly', reminderMinutes: 1440 }]
+    expect(scheduler.collectDueReminders(utc('2026-12-31', '12:00'))).toContainEqual(expect.objectContaining({ key: 'milestone:new-year', fireAt: utc('2026-12-31', '12:00') }))
+  })
+
+  it('取消或用 status 归档的任务和重要日期不再提醒', async () => {
+    seed([
+      { id: 'cancelled', title: '已取消', status: 'cancelled', dueDate: '2026-10-04', dueTime: '11:35', reminderMinutes: 0 },
+      { id: 'archived', title: '已归档', status: 'archived', dueDate: '2026-10-04', dueTime: '11:35', reminderMinutes: 0 },
+    ])
+    const scheduler = await freshModules()
+    const { useStoredRef } = await import('../src/composables/store/core.js')
+    useStoredRef('sl_exams', []).value = [{ id: 'archived-date', name: '已归档日期', status: 'archived', date: '2026-10-04', time: '11:35', reminderMinutes: 0 }]
+    expect(scheduler.collectDueReminders(utc('2026-10-04', '11:35'))).toEqual([])
+  })
 })

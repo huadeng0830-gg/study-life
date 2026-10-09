@@ -39,6 +39,15 @@ export function chineseNumber(value) {
 export function extractAmounts(text) {
   const source = String(text ?? '')
   const candidates = []
+  const nonMoneyRanges = []
+  for (const pattern of [
+    /\d{4}[-/.]\d{1,2}[-/.]\d{1,2}/g,
+    /\d{1,2}[:：]\d{2}(?:[:：]\d{2})?/g,
+    /第\s*\d+(?:\s*[章节页题套次个项])?/g,
+    /\d+(?:\.\d+)?\s*(?:分钟|小时|秒钟|公里|毫升|千克|[年月日号点时天分秒个次人岁级楼页项章题套本件杯份张节])/g,
+  ]) {
+    for (const match of source.matchAll(pattern)) nonMoneyRanges.push([match.index, match.index + match[0].length])
+  }
 
   function addFromMatch(match, amount, raw) {
     if (!match && match !== 0) return
@@ -46,6 +55,7 @@ export function extractAmounts(text) {
     const matchedText = String(raw ?? match[0])
     const end = start + matchedText.length
     if (/[\d.-]/.test(source[start - 1] || '') || /[\d.]/.test(source[end] || '')) return
+    if (nonMoneyRanges.some(([from, to]) => start < to && end > from)) return
     if (!(end > start) || !(amount > 0)) return
     candidates.push({ start, end, amount, raw: matchedText })
   }
@@ -56,7 +66,7 @@ export function extractAmounts(text) {
   }
 
   // 2) 阿拉伯数字 + 块/块X：12块、12块5、12.5块
-  for (const match of source.matchAll(/(\d+(?:\.\d{1,2})?)\s*块\s*([零〇一二两三四五六七八九\d])?/gi)) {
+  for (const match of source.matchAll(/(\d+(?:\.\d{1,2})?)\s*块(?:钱)?\s*([零〇一二两三四五六七八九\d])?/gi)) {
     const first = Number(match[1])
     if (!Number.isFinite(first)) continue
     const amount = match[2] ? first + cnDigit(match[2]) / 10 : first
@@ -69,7 +79,7 @@ export function extractAmounts(text) {
   }
 
   // 4) 中文数字 + 块/块X：五块、五块五、十二块、十二块五
-  for (const match of source.matchAll(/([零〇一二两三四五六七八九十百]+)\s*块\s*([零〇一二两三四五六七八九\d])?/gi)) {
+  for (const match of source.matchAll(/([零〇一二两三四五六七八九十百]+)\s*块(?:钱)?\s*([零〇一二两三四五六七八九\d])?/gi)) {
     const first = chineseNumber(match[1])
     if (!(first > 0)) continue
     const amount = match[2] ? first + cnDigit(match[2]) / 10 : first
@@ -87,8 +97,7 @@ export function extractAmounts(text) {
   if (tail) {
     const start = source.lastIndexOf(tail[1])
     if (start >= 0) {
-      const end = start + tail[1].length
-      candidates.push({ start, end, amount: Number(tail[1]), raw: tail[1] })
+      addFromMatch({ index: start, 0: tail[1] }, Number(tail[1]), tail[1])
     }
   }
 
@@ -97,7 +106,7 @@ export function extractAmounts(text) {
     const next = source.slice(match.index + match[0].length, match.index + match[0].length + 1)
     const previous = source[match.index - 1] || ''
     // 数字后接时长/序号/数量单位时不是金额：5分钟、2小时、3次、4号楼等。
-    if (/^[年月日号点时天分秒个次人岁级楼页项]/.test(next) || /第\s*$/.test(previous)) continue
+    if (/^[年月日号点时天分秒个次人岁级楼页项章题套本件杯份张节]/.test(next) || /第\s*$/.test(previous)) continue
     const amount = Number(match[1])
     addFromMatch(match, amount, match[0])
   }
@@ -129,6 +138,7 @@ export function hasAmbiguousAmount(text) {
 }
 
 // 日期/时间/课程/优先级等，复用 noticeParser 已比较成熟的时间解析能力。
+/** @param {string} text @param {Array<{id: string, name: string}>} courses @param {Date} now */
 export function extractSchedule(text, courses = [], now = new Date()) {
   const parsed = parseNotice(text, courses, now)
   return {

@@ -66,7 +66,7 @@ async function importBackup(payload) {
 }
 
 function errorText() {
-  return document.querySelector('.error')?.textContent?.trim() || ''
+  return document.querySelector('.restore-error')?.textContent?.trim() || ''
 }
 
 describe('备份文件完整性校验', () => {

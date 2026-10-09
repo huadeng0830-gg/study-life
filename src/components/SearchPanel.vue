@@ -165,7 +165,7 @@ const allGroups = computed(() => {
     updatedAt: item.updatedAt,
     meta: item.date || '',
     archived: isArchived(item),
-    to: focusLocation('/', item.id, { section: 'event' }),
+    to: focusLocation('/events', item.id),
   })))
   if (events) out.push(events)
 

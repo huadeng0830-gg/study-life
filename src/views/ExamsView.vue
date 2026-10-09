@@ -9,32 +9,52 @@ import ContextMenu from '../components/ContextMenu.vue'
 import Toast from '../components/Toast.vue'
 import {
   fmtCountdownDate,
-  sortCountdowns,
   useStoredRef,
 } from '../composables/store'
 import { useDomainCommands } from '../composables/domain/commands.js'
 import { isArchived, isTaskActionable, taskStatus } from '../composables/domain/state.js'
 import { menuPlacementFor } from '../composables/menuPlacement.js'
 import { createLongPress } from '../composables/longPress.js'
-import { appToday } from '../composables/timeContext.js'
+import { addAppDays, appNow, appToday } from '../composables/timeContext.js'
+import { defaultReminderMinutes } from '../composables/settingsPolicy.js'
+import { isValidPlanningDate, selectMilestoneWorkspace } from '../composables/planningViews.js'
+import { useDebouncedRef } from '../composables/useDebouncedRef.js'
+import { countdownState } from '../composables/store/countdown.js'
 import { clearFocusFromRoute, focusElementWhenReady, readFocusQuery } from '../composables/focusNavigation.js'
 
 const CATEGORIES = ['学习', '生活', '纪念日', '项目', '其他']
 const domain = useDomainCommands()
-const { milestones: exams, courses, tasks } = domain
+/** @type {import('vue').Ref<import('../types/domain').Milestone[]>} */
+const exams = domain.milestones
+/** @type {import('vue').Ref<import('../types/domain').Course[]>} */
+const courses = domain.courses
+/** @type {import('vue').Ref<import('../types/domain').Task[]>} */
+const tasks = domain.tasks
 const route = useRoute()
 const router = useRouter()
 const showPast = useStoredRef('sl_countdown_show_past', false)
 const showHistory = ref(false)
 const showForm = ref(false)
+/** @type {import('vue').Ref<string | null>} */
 const editingId = ref(null)
 const error = ref('')
+const errorField = ref('')
+/** @type {import('vue').Ref<HTMLInputElement | null>} */
+const nameInput = ref(null)
+/** @type {import('vue').Ref<HTMLInputElement | null>} */
+const dateInput = ref(null)
+const query = ref('')
+const searchQuery = useDebouncedRef(query)
+const categoryFilter = ref('all')
+const periodFilter = ref('all')
+const sortKey = ref('date')
 const form = ref(emptyForm())
 const deleteTarget = ref(null)
 const reviewMessage = ref('')
 const focusMessage = ref('')
 const focusedMilestoneId = ref('')
-const toast = ref({ open: false, message: '', type: 'info', actionLabel: '', undoFn: null, viewFn: null, duration: 3200 })
+/** @type {import('vue').Ref<{ open: boolean, message: string, type: string, actionLabel: string, undoFn?: () => unknown, viewFn?: () => unknown, duration: number }>} */
+const toast = ref({ open: false, message: '', type: 'info', actionLabel: '', duration: 3200 })
 let focusHandled = ''
 
 function emptyForm() {
@@ -48,12 +68,14 @@ function emptyForm() {
     pinned: false,
     courseId: '',
     reviewProgress: 0,
+    reminderMinutes: '',
   }
 }
 
 function openAdd() {
   editingId.value = null
   error.value = ''
+  errorField.value = ''
   form.value = emptyForm()
   showForm.value = true
 }
@@ -61,6 +83,7 @@ function openAdd() {
 function openEdit(item) {
   editingId.value = item.id
   error.value = ''
+  errorField.value = ''
   form.value = {
     name: item.name,
     date: item.date,
@@ -71,6 +94,7 @@ function openEdit(item) {
     pinned: Boolean(item.pinned),
     courseId: item.courseId ?? '',
     reviewProgress: Number(item.reviewProgress ?? 0),
+    reminderMinutes: String(item.reminderMinutes ?? ''),
   }
   showForm.value = true
 }
@@ -78,10 +102,20 @@ function openEdit(item) {
 function save() {
   if (!form.value.name.trim()) {
     error.value = '请填写重要日期名称'
+    errorField.value = 'name'
+    void nextTick(() => nameInput.value?.focus())
     return
   }
-  if (!form.value.date) {
-    error.value = '请选择目标日期'
+  if (!isValidPlanningDate(form.value.date)) {
+    error.value = '请选择有效的目标日期'
+    errorField.value = 'date'
+    void nextTick(() => dateInput.value?.focus())
+    return
+  }
+  const reminder = String(form.value.reminderMinutes).trim()
+  if (reminder && (!Number.isFinite(Number(reminder)) || Number(reminder) < 0)) {
+    error.value = '提醒提前量需要是大于或等于 0 的分钟数'
+    errorField.value = 'reminder'
     return
   }
   const isStudyCountdown = form.value.category === '学习'
@@ -96,14 +130,30 @@ function save() {
     courseId: isStudyCountdown ? form.value.courseId : '',
     courseName: isStudyCountdown ? (courses.value.find((course) => course.id === form.value.courseId)?.name ?? '') : '',
     reviewProgress: isStudyCountdown ? Math.max(0, Math.min(100, Number(form.value.reviewProgress) || 0)) : 0,
+    reminderMinutes: defaultReminderMinutes('milestone', reminder),
   }
   if (editingId.value) {
-    domain.updateMilestone(editingId.value, data)
+    if (!domain.updateMilestone(editingId.value, data)) {
+      error.value = '这条重要日期已不存在，请关闭后重新添加。'
+      return
+    }
   } else {
     domain.createMilestone({ ...data, kind: form.value.category === '学习' ? 'exam' : 'countdown', createdFrom: 'manual' })
   }
   showForm.value = false
+  showToast(editingId.value ? '重要日期已更新' : '重要日期已添加', { type: 'success' })
 }
+
+function clearFormError(field) {
+  if (errorField.value === field) { error.value = ''; errorField.value = '' }
+}
+
+function setFormDate(offset) {
+  form.value.date = addAppDays(appToday.value, offset)
+  clearFormError('date')
+}
+
+const defaultReminder = computed(() => defaultReminderMinutes('milestone'))
 
 function remove() {
   const item = exams.value.find((entry) => entry.id === editingId.value)
@@ -111,11 +161,54 @@ function remove() {
   if (item) deleteTarget.value = item
 }
 
-function showToast(message, { type = 'info', actionLabel = '', undoFn = null, viewFn = null, duration = 3200 } = {}) {
+/** @param {string} message @param {{ type?: string, actionLabel?: string, undoFn?: () => unknown, viewFn?: () => unknown, duration?: number }} [options] */
+function showToast(message, { type = 'info', actionLabel = '', undoFn = undefined, viewFn = undefined, duration = 3200 } = {}) {
   toast.value = { open: true, message, type, actionLabel, undoFn, viewFn, duration }
 }
 
-const sorted = computed(() => sortCountdowns(exams.value))
+const courseNamesById = computed(() => new Map(courses.value.map((course) => [course.id, course.name])))
+const milestoneView = computed(() => selectMilestoneWorkspace(exams.value, {
+  now: appNow.value, query: searchQuery.value, category: categoryFilter.value,
+  period: periodFilter.value, sortKey: sortKey.value, showPast: showPast.value,
+  showHistory: showHistory.value, courseNames: courseNamesById.value,
+}))
+const summary = computed(() => milestoneView.value.summary)
+const hasFilters = computed(() => Boolean(query.value.trim() || categoryFilter.value !== 'all' || periodFilter.value !== 'all'))
+
+function resetFilters() {
+  query.value = ''
+  searchQuery.flush('')
+  categoryFilter.value = 'all'
+  periodFilter.value = 'all'
+}
+
+function selectOverview(period) {
+  resetFilters()
+  showHistory.value = false
+  showPast.value = period === 'past'
+  periodFilter.value = period
+}
+
+function setHistory() {
+  showHistory.value = !showHistory.value
+  resetFilters()
+}
+
+const emptyInfo = computed(() => {
+  if (hasFilters.value) return { title: '没有符合条件的重要日期', description: '试试其他关键词、类型或时间范围。', action: '清除筛选' }
+  if (showHistory.value) return { title: '还没有归档的重要日期', description: '归档后会保留在这里，随时可以恢复。', action: '返回当前' }
+  if (summary.value.past) return { title: '当前没有即将到来的重要日期', description: `有 ${summary.value.past} 项已结束，可以查看或添加下一个日期。`, action: '查看已结束' }
+  if (summary.value.archived) return { title: '当前列表暂时为空', description: `有 ${summary.value.archived} 项重要日期已归档，可以在历史中查看或恢复。`, action: '查看历史' }
+  return { title: '还没有重要日期', description: '先记下一场考试、一个生日或下次交付日期。', action: '＋ 添加重要日期' }
+})
+
+function emptyAction() {
+  if (hasFilters.value) resetFilters()
+  else if (showHistory.value) setHistory()
+  else if (summary.value.past) selectOverview('past')
+  else if (summary.value.archived) setHistory()
+  else openAdd()
+}
 
 // 卡片上这些派生值原来全部在模板里现算：tileOf / courseLabel 各调 2 次、
 // timelineOf 调 4 次，而 reviewSummary 每次都要**遍历整份待办表**（reviewTasksFor
@@ -136,27 +229,32 @@ const reviewTasksBySourceId = computed(() => {
 })
 
 const visibleItems = computed(() => {
-  const source = showHistory.value ? sorted.value.filter((item) => isArchived(item)) : sorted.value.filter((item) => !isArchived(item))
-  const filtered = showHistory.value || showPast.value ? source : source.filter((item) => !item.countdown.isPast)
   const grouped = reviewTasksBySourceId.value
-  return filtered.map((item) => ({
+  return milestoneView.value.visible.map((item) => ({
     ...item,
     tile: tileOf(item),
     course: courseLabel(item),
     timeline: timelineOf(item),
     review: reviewSummaryOf(item, grouped.get(item.id)),
+    activeReview: (grouped.get(item.id) || []).find((task) => isTaskActionable(task)),
+    progress: Math.max(0, Math.min(100, Number(item.reviewProgress) || 0)),
   }))
 })
+
+/** @param {unknown} value @returns {value is (typeof visibleItems.value)[number]} */
+function isMilestoneCard(value) {
+  return Boolean(value && typeof value === 'object' && 'countdown' in value)
+}
 
 function createReviewTask(item, event) {
   event?.stopPropagation()
   const existing = tasks.value.find((task) => isTaskActionable(task) && task.sourceType === 'milestone-review' && task.sourceId === item.id)
   if (existing) {
-    reviewMessage.value = `“${item.name}”已有待完成的复习任务`
+    void router.push({ path: '/tasks', query: { focus: existing.id } })
     return
   }
   const course = courses.value.find((entry) => entry.id === item.courseId)
-  domain.createTask({
+  const task = domain.createTask({
     title: `复习：${item.name}`,
     kind: 'review',
     courseId: item.courseId || '',
@@ -170,6 +268,13 @@ function createReviewTask(item, event) {
     sourceId: item.id,
   })
   reviewMessage.value = `已安排“${item.name}”的 25 分钟复习，可在今天页开始专注`
+  showToast('已安排 25 分钟复习', { type: 'success', actionLabel: '查看待办', viewFn: () => router.push({ path: '/tasks', query: { focus: task.id } }), duration: 6000 })
+}
+
+function openReviewTasks(item) {
+  const list = reviewTasksBySourceId.value.get(item.id) || []
+  const target = list.find((task) => isTaskActionable(task)) || list.at(-1)
+  if (target) void router.push({ path: '/tasks', query: { focus: target.id } })
 }
 
 function reviewTasksFor(item) {
@@ -180,7 +285,7 @@ function reviewTasksFor(item) {
 function reviewSummaryOf(item, reviewTasks) {
   const list = reviewTasks ?? reviewTasksFor(item)
   if (!list.length) return ''
-  const completed = list.filter((task) => taskStatus(task) === 'completed').length
+  const completed = list.filter((task) => task.done || taskStatus(task) === 'completed').length
   return `复习任务 ${completed}/${list.length}`
 }
 
@@ -224,15 +329,17 @@ const todayKey = computed(() => appToday.value)
 function tileOf(item) {
   const t = item.countdown.target
   if (!t) return { month: '--', day: '--' }
-  return { month: pad2(item.date.slice(5, 7)), day: pad2(item.date.slice(8, 10)) }
+  return { month: pad2(item.occurrenceDate.slice(5, 7)), day: pad2(item.occurrenceDate.slice(8, 10)) }
 }
 
 // 短日期行：8月30日 · 周日（含时间时追加），不再与「本周日」等信息重复
 function shortDateOf(item) {
   const t = item.countdown.target
   if (!t) return fmtCountdownDate(item, null)
-  const weekday = new Date(`${item.date}T00:00:00Z`).getUTCDay()
-  let text = `${Number(item.date.slice(5, 7))}月${Number(item.date.slice(8, 10))}日 · ${WEEKDAYS[weekday]}`
+  const date = item.occurrenceDate
+  const weekday = new Date(`${date}T00:00:00Z`).getUTCDay()
+  const year = date.slice(0, 4) !== todayKey.value.slice(0, 4) ? `${date.slice(0, 4)}年` : ''
+  let text = `${year}${Number(date.slice(5, 7))}月${Number(date.slice(8, 10))}日 · ${WEEKDAYS[weekday]}`
   if (item.time) text += ` ${item.time}`
   return text
 }
@@ -242,8 +349,8 @@ function timelineOf(item) {
   const t = item.countdown.target
   if (!t) return null
   const start = `${Number(todayKey.value.slice(5, 7))}/${Number(todayKey.value.slice(8, 10))}`
-  const end = `${Number(item.date.slice(5, 7))}/${Number(item.date.slice(8, 10))}`
-  const sameDay = item.date === todayKey.value
+  const end = `${Number(item.occurrenceDate.slice(5, 7))}/${Number(item.occurrenceDate.slice(8, 10))}`
+  const sameDay = item.occurrenceDate === todayKey.value
   return { start, end, sameDay }
 }
 
@@ -258,7 +365,8 @@ async function focusRouteMilestone() {
     return
   }
   showHistory.value = isArchived(item)
-  showPast.value = showHistory.value || Boolean(item.countdown?.isPast)
+  resetFilters()
+  showPast.value = showHistory.value || countdownState(item, appNow.value).isPast
   focusedMilestoneId.value = id
   await nextTick()
   const element = await focusElementWhenReady(id)
@@ -394,7 +502,7 @@ function confirmDelete() {
 }
 
 function courseLabel(item) {
-  return courses.value.find((course) => course.id === item.courseId)?.name ?? item.courseName ?? ''
+  return courseNamesById.value.get(item.courseId) ?? item.courseName ?? ''
 }
 
 </script>
@@ -407,33 +515,44 @@ function courseLabel(item) {
         <p class="page-desc">考试、生日、纪念日和重要截止都可以放在这里。</p>
       </div>
       <div class="page-actions">
-        <button class="btn btn-ghost" :aria-expanded="showHistory" @click="showHistory = !showHistory">{{ showHistory ? '返回当前' : '历史' }}</button>
-        <label class="past-toggle">
+        <button class="btn btn-ghost" :aria-expanded="showHistory" @click="setHistory">{{ showHistory ? '返回当前' : `历史 ${summary.archived || ''}` }}</button>
+        <label v-if="!showHistory" class="past-toggle">
           <input v-model="showPast" type="checkbox" />
           显示已结束
         </label>
         <button class="btn btn-primary" @click="openAdd">＋ 添加重要日期</button>
       </div>
     </header>
+
+    <div v-if="exams.length && !showHistory" class="date-overview" role="group" aria-label="重要日期概览">
+      <button type="button" class="card overview-item" :class="{ selected: periodFilter === 'all' && !showPast }" :aria-pressed="periodFilter === 'all' && !showPast" @click="selectOverview('all')"><span>即将到来</span><b>{{ summary.upcoming }}</b><small>全部当前日期</small></button>
+      <button type="button" class="card overview-item" :class="{ selected: periodFilter === 'week' }" :aria-pressed="periodFilter === 'week'" @click="selectOverview('week')"><span>未来 7 天</span><b>{{ summary.week }}</b><small>含今天</small></button>
+      <button type="button" class="card overview-item" :class="{ selected: periodFilter === 'pinned' }" :aria-pressed="periodFilter === 'pinned'" @click="selectOverview('pinned')"><span>已置顶</span><b>{{ summary.pinned }}</b><small>优先关注</small></button>
+      <button type="button" class="card overview-item" :class="{ selected: periodFilter === 'past' }" :aria-pressed="periodFilter === 'past'" @click="selectOverview('past')"><span>已结束</span><b>{{ summary.past }}</b><small>查看与归档</small></button>
+    </div>
+
+    <section class="card date-filters" aria-label="重要日期筛选">
+      <div class="filter-topline">
+        <div class="date-search"><label class="sr-only" for="dates-search">搜索重要日期</label><input id="dates-search" v-model="query" type="search" placeholder="搜索名称、课程、地点或备注" /><button v-if="query" type="button" class="link-btn" aria-label="清除重要日期搜索" @click="query = ''; searchQuery.flush('')">×</button></div>
+        <label v-if="!showHistory" class="filter-select"><span>范围</span><select v-model="periodFilter"><option value="all">全部日期</option><option value="week">未来 7 天</option><option value="month">未来 30 天</option><option value="pinned">已置顶</option><option value="past">已结束</option></select></label>
+        <label class="filter-select"><span>排序</span><select v-model="sortKey"><option value="date">最近日期优先</option><option value="name">按名称</option><option value="created">最近添加优先</option></select></label>
+      </div>
+      <div class="filter-bottomline">
+        <div class="segmented category-filters" role="group" aria-label="重要日期类型"><button type="button" :class="{ on: categoryFilter === 'all' }" :aria-pressed="categoryFilter === 'all'" @click="categoryFilter = 'all'">全部类型</button><button v-for="category in CATEGORIES" :key="category" type="button" :class="{ on: categoryFilter === category }" :aria-pressed="categoryFilter === category" @click="categoryFilter = category">{{ category }}</button></div>
+        <div class="filter-result"><span role="status">{{ visibleItems.length }} 项{{ showHistory ? '归档日期' : '重要日期' }}</span><button v-if="hasFilters" type="button" class="link-btn" @click="resetFilters">清除筛选</button></div>
+      </div>
+    </section>
     <p v-if="reviewMessage" class="review-message" role="status">✓ {{ reviewMessage }}</p>
     <p v-if="focusMessage" class="review-message" role="status">{{ focusMessage }}</p>
 
     <EmptyState :level="2"
-      v-if="exams.length === 0"
+      v-if="visibleItems.length === 0"
       class="card empty-box"
       icon="⏳"
-      title="还没有重要日期"
-      description="添加一个重要日期，未来的自己会感谢你。"
-      primary-label="＋ 添加重要日期"
-      @primary="openAdd"
-    />
-
-    <EmptyState :level="2"
-      v-else-if="visibleItems.length === 0"
-      class="card empty-box"
-      icon="✦"
-      title="已结束的重要日期已隐藏"
-      description="可在右上角重新显示已结束的项目。"
+      :title="emptyInfo.title"
+      :description="emptyInfo.description"
+      :primary-label="emptyInfo.action"
+      @primary="emptyAction"
     />
 
     <VirtualList
@@ -442,13 +561,14 @@ function courseLabel(item) {
       :class="[isNarrow ? 'narrow' : 'grid', { 'no-anim': visibleItems.length > EXAM_LIST_THRESHOLD }]"
       :items="visibleItems"
       item-key="id"
-      :estimated-height="174"
+      :estimated-height="240"
       :gap="14"
       :threshold="isNarrow ? EXAM_LIST_THRESHOLD : Number.MAX_SAFE_INTEGER"
       :reveal-key="focusedMilestoneId"
     >
       <template #default="{ item }">
         <div
+          v-if="isMilestoneCard(item)"
           class="card exam cvi-card"
           :class="{ finished: item.countdown.isPast, pinned: item.pinned, hot: item.countdown.cls === 'hot' && !item.countdown.isPast, 'menu-open': openMenuId === item.id, 'focus-target-highlight': focusedMilestoneId === item.id }"
           :data-focus-id="item.id"
@@ -464,11 +584,14 @@ function courseLabel(item) {
           <div class="meta-row">
             <span class="category">{{ item.category ?? '其他' }}</span>
             <span v-if="item.repeat === 'yearly'" class="repeat-tag">每年重复</span>
+            <span v-if="item.pinned" class="repeat-tag">置顶</span>
+            <span v-if="isArchived(item)" class="repeat-tag">已归档</span>
           </div>
           <button
             type="button"
             class="menu-btn"
-            aria-label="更多操作"
+            :aria-label="`重要日期「${item.name}」的更多操作`"
+            :aria-expanded="openMenuId === item.id"
             @click="toggleMenu(item, $event)"
           >···</button>
           <div v-if="openMenuId === item.id" class="card-menu" :class="menuPlacement" @click.stop>
@@ -487,20 +610,25 @@ function courseLabel(item) {
             <b>{{ item.tile.day }}</b>
           </div>
           <div class="exam-info">
-            <div class="name">{{ item.name }}</div>
+            <h2 class="name"><button type="button" :title="item.name" @pointerdown.stop @click.stop="openEdit(item)">{{ item.name }}</button></h2>
             <div class="date">{{ shortDateOf(item) }}</div>
-            <div v-if="item.category === '学习' && item.course" class="loc">{{ item.course }} · 复习 {{ item.reviewProgress || 0 }}%</div>
-            <div v-if="item.review" class="loc">{{ item.review }}</div>
-            <div v-if="item.location" class="loc">{{ item.location }}</div>
+            <div v-if="item.category === '学习' && item.course" class="loc" :title="item.course">{{ item.course }}</div>
+            <div v-if="item.location" class="loc" :title="item.location">{{ item.location }}</div>
           </div>
           <div class="count" :class="item.countdown.cls">
-            <span v-if="item.countdown.relativeText" class="countdown-human">{{ item.countdown.relativeText }}</span>
+            <span v-if="item.countdown.relativeText && (item.countdown.isPast || Number(item.countdown.days) < 3)" class="countdown-human">{{ item.countdown.relativeText }}</span>
             <template v-else>
               <small v-if="!item.countdown.isPast && /^\d+$/.test(String(item.countdown.text))">还有</small>
               <span class="num" :class="{ tiny: !/^\d+$/.test(String(item.countdown.text)) }">{{ item.countdown.text }}</span>
               <span v-if="item.countdown.label && /^\d+$/.test(String(item.countdown.text))" class="unit">{{ item.countdown.label }}</span>
             </template>
           </div>
+        </div>
+
+        <div v-if="item.category === '学习'" class="review-progress">
+          <div class="progress-caption"><span>复习完成度</span><b>{{ item.progress }}%</b></div>
+          <progress :value="item.progress" max="100" :aria-label="`${item.name}复习完成度`"></progress>
+          <button v-if="item.review" type="button" class="review-link" @click.stop="openReviewTasks(item)">{{ item.review }} · 查看待办 →</button>
         </div>
 
         <!-- 底部轻量时间轴 -->
@@ -510,26 +638,28 @@ function courseLabel(item) {
           <span class="tl-label strong">{{ item.timeline.end }}</span>
           <span class="tl-dot" :class="{ on: item.timeline.sameDay }"></span>
         </div>
-        <button v-if="item.category === '学习' && !item.countdown.isPast" type="button" class="review-action" @click="createReviewTask(item, $event)">{{ item.review ? '再安排 25 分钟复习' : '安排 25 分钟复习' }}</button>
+        <button v-if="item.category === '学习' && !item.countdown.isPast && !isArchived(item)" type="button" class="review-action" @click="createReviewTask(item, $event)">{{ item.activeReview ? '继续复习 →' : item.review ? '再安排 25 分钟复习' : '安排 25 分钟复习' }}</button>
       </div>
       </template>
     </VirtualList>
 
     <Modal v-if="showForm" :open="showForm" :title="editingId ? '编辑重要日期' : '添加重要日期'" @close="showForm = false">
-      <div class="form">
+      <form class="form" novalidate @submit.prevent="save">
         <label for="exams-name">名称 *</label>
-        <input id="exams-name" v-model="form.name" placeholder="例如：期末考试、生日或项目截止日" />
+        <input id="exams-name" ref="nameInput" v-model="form.name" maxlength="200" :aria-invalid="errorField === 'name' || undefined" :aria-describedby="errorField === 'name' ? 'dates-form-error' : undefined" placeholder="例如：期末考试、生日或项目截止日" @input="clearFormError('name')" />
 
         <div class="form-row">
           <div>
             <label for="exams-target-date">目标日期 *</label>
-            <input id="exams-target-date" v-model="form.date" type="date" />
+            <input id="exams-target-date" ref="dateInput" v-model="form.date" type="date" :aria-invalid="errorField === 'date' || undefined" :aria-describedby="errorField === 'date' ? 'dates-form-error' : undefined" @input="clearFormError('date')" />
           </div>
           <div>
             <label for="exams-time">具体时间</label>
             <input id="exams-time" v-model="form.time" type="time" />
           </div>
         </div>
+
+        <div class="date-shortcuts" role="group" aria-label="快速选择目标日期"><button type="button" :aria-pressed="form.date === appToday" @click="setFormDate(0)">今天</button><button type="button" :aria-pressed="form.date === addAppDays(appToday, 1)" @click="setFormDate(1)">明天</button><button type="button" :aria-pressed="form.date === addAppDays(appToday, 7)" @click="setFormDate(7)">一周后</button></div>
 
         <div class="form-row">
           <div>
@@ -547,8 +677,14 @@ function courseLabel(item) {
           </div>
         </div>
 
+        <small v-if="form.repeat === 'yearly'" class="field-hint">按公历每年重复，卡片显示下一次日期；2 月 29 日在平年按 2 月最后一天显示。</small>
+
         <label for="exams-location">备注或地点</label>
-        <input id="exams-location" v-model="form.location" placeholder="选填，例如：教学楼 A101" />
+        <textarea id="exams-location" v-model="form.location" rows="2" placeholder="选填，例如：教学楼 A101；携带证件和文具"></textarea>
+
+        <label for="dates-reminder">提前提醒（分钟）</label>
+        <input id="dates-reminder" v-model="form.reminderMinutes" type="number" min="0" step="1" :placeholder="`默认提前 ${defaultReminder} 分钟`" :aria-invalid="errorField === 'reminder' || undefined" aria-describedby="dates-reminder-hint" @input="clearFormError('reminder')" />
+        <small id="dates-reminder-hint" class="field-hint">0 表示到点提醒，留空使用默认设置。未填时间按 23:59 计算；应用打开且允许通知时提醒。</small>
 
         <div v-if="form.category === '学习'" class="form-row">
           <div><label for="exams-course">关联课程</label><select id="exams-course" v-model="form.courseId"><option value="">暂不关联</option><option v-for="course in courses" :key="course.id" :value="course.id">{{ course.name }}</option></select></div>
@@ -560,13 +696,14 @@ function courseLabel(item) {
           在列表顶部显示
         </label>
 
-        <p v-if="error" class="error" role="alert">{{ error }}</p>
+        <p v-if="error" id="dates-form-error" class="error" role="alert">{{ error }}</p>
 
         <div class="actions">
-          <button v-if="editingId" class="btn btn-danger" @click="remove">删除</button>
-          <button class="btn btn-primary" @click="save">保存</button>
+          <button v-if="editingId" type="button" class="btn btn-danger" @click="remove">删除</button>
+          <button type="button" class="btn" @click="showForm = false">取消</button>
+          <button type="submit" class="btn btn-primary">保存</button>
         </div>
-      </div>
+      </form>
     </Modal>
 
     <ConfirmDialog
@@ -591,303 +728,4 @@ function courseLabel(item) {
   </div>
 </template>
 
-<style scoped>
-.page {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-.page-actions {
-  gap: 14px;
-}
-.past-toggle {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: var(--ink-soft);
-  font-size: var(--fs-12-5);
-  cursor: pointer;
-  white-space: nowrap;
-}
-.past-toggle input,
-.pin-option input {
-  accent-color: var(--primary);
-}
-.empty-box {
-  max-width: 640px;
-  width: 100%;
-  margin: 0 auto;
-}
-/* ---------- 倒计时卡：日期牌 + 主体 + 大数字 + 轻量时间轴 ---------- */
-.list {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-.list.grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-}
-.list.no-anim .exam {
-  animation: none;
-}
-.exam {
-  position: relative;
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  padding: 18px 20px 16px;
-  cursor: pointer;
-  transition: transform var(--dur-base) var(--ease-standard), box-shadow var(--dur-base) var(--ease-standard), border-color var(--dur-base) var(--ease-standard);
-  animation: exam-in var(--dur-base) var(--ease-out) both;
-}
-@keyframes exam-in {
-  from { opacity: 0; transform: translateY(4px); }
-}
-.exam:hover {
-  transform: translateY(-2px);
-  border-color: var(--border-strong);
-  box-shadow: var(--shadow-md);
-}
-.exam.finished { opacity: 0.6; }
-.exam.pinned { border-color: color-mix(in srgb, var(--primary) 30%, var(--card)); background: linear-gradient(180deg, var(--bg-tint), var(--card)); }
-.exam.hot { border-color: color-mix(in srgb, var(--danger) 30%, var(--card)); }
-.exam.menu-open { z-index: 10; overflow: visible; content-visibility: visible; contain: none; }
-
-/* 顶部标签：小号浅色，不抢标题 */
-.exam-top { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.meta-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.category,
-.repeat-tag {
-  padding: 2.5px 8px;
-  color: var(--ink-faint);
-  font-size: var(--fs-10-5);
-  font-weight: var(--fw-650);
-  border-radius: var(--radius-6);
-  background: var(--bg-tint);
-}
-.category { color: var(--primary); background: var(--primary-soft); }
-.repeat-tag { color: var(--primary); background: var(--primary-soft); }
-.menu-btn {
-  display: grid;
-  place-items: center;
-  width: 28px;
-  height: 24px;
-  flex: 0 0 auto;
-  color: var(--ink-faint);
-  font-size: var(--fs-13);
-  font-weight: var(--fw-900);
-  letter-spacing: 0.05em;
-  border: none;
-  border-radius: var(--radius-7);
-  background: transparent;
-  cursor: pointer;
-  transition: background var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard);
-}
-.menu-btn:hover { color: var(--ink-soft); background: var(--bg); }
-.card-menu {
-  position: absolute;
-  top: 26px;
-  right: 0;
-  z-index: 5;
-  display: flex;
-  flex-direction: column;
-  min-width: 118px;
-  padding: 5px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-10);
-  background: var(--card);
-  box-shadow: var(--shadow-md);
-}
-.card-menu button {
-  padding: 8px 11px;
-  color: var(--text);
-  font-size: var(--fs-12-5);
-  text-align: left;
-  border: none;
-  border-radius: var(--radius-7);
-  background: transparent;
-  cursor: pointer;
-  transition: background var(--dur-fast) var(--ease-standard);
-}
-.card-menu button:hover { background: var(--bg); }
-.card-menu button.danger { color: var(--danger); }
-.card-menu button.danger:hover { background: color-mix(in srgb, var(--danger) 12%, var(--card)); }
-
-/* 主体：日期牌 / 标题 / 剩余天数 同一横向视觉区 */
-.exam-main {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 14px;
-}
-.date-tile {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  width: 60px;
-  height: 68px;
-  flex: 0 0 60px;
-  border-radius: var(--radius-16);
-  background: var(--primary-soft);
-}
-.date-tile small { color: var(--primary); font-size: var(--fs-11); font-weight: var(--fw-700); line-height: 1.2; }
-.date-tile b { color: var(--primary); font-size: var(--fs-23); font-weight: var(--fw-900); line-height: 1.15; letter-spacing: 0.01em; }
-.exam-info { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-.name {
-  overflow: hidden;
-  font-size: clamp(19px, 1.6vw, 23px);
-  font-weight: var(--fw-750);
-  letter-spacing: -0.01em;
-  line-height: 1.25;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.date { color: var(--ink-soft); font-size: var(--fs-13); font-variant-numeric: tabular-nums; }
-.loc { overflow: hidden; color: var(--ink-faint); font-size: var(--fs-11-5); text-overflow: ellipsis; white-space: nowrap; }
-
-/* 剩余天数：整张卡最显眼的信息 */
-.count {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  min-width: 84px;
-  flex: 0 0 auto;
-  color: var(--primary);
-}
-.count small { color: var(--ink-faint); font-size: var(--fs-11); font-weight: var(--fw-700); }
-.count .num {
-  font-size: clamp(42px, 3.6vw, 50px);
-  font-weight: var(--fw-900);
-  line-height: 1.02;
-  letter-spacing: -0.02em;
-  font-variant-numeric: tabular-nums;
-  transition: opacity var(--dur-base) var(--ease-standard);
-}
-.count .num.tiny { font-size: var(--fs-22); letter-spacing: 0; }
-.count .unit { margin-top: 2px; color: var(--ink-soft); font-size: var(--fs-12); font-weight: var(--fw-700); }
-.countdown-human { display: block; max-width: 120px; color: inherit; font-size: var(--fs-14); font-weight: var(--fw-800); line-height: 1.35; text-align: right; }
-.count.hot { color: var(--danger); }
-.count.hot .unit { color: var(--danger); }
-.count.past { color: var(--ink-faint); }
-.count.past .num { font-size: var(--fs-17); }
-
-/* 底部轻量时间轴：今天 ── ● 目标日 */
-.timeline {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 2px;
-}
-.tl-label { color: var(--ink-faint); font-size: var(--fs-10-5); white-space: nowrap; font-variant-numeric: tabular-nums; }
-.tl-label.strong { color: var(--ink-soft); font-weight: var(--fw-700); margin-right: 10px; }
-.tl-track {
-  position: relative;
-  flex: 1;
-  height: 3px;
-  border-radius: var(--radius-pill);
-  background: var(--bg-tint);
-}
-.tl-track i { position: absolute; inset: 0; border-radius: inherit; background: linear-gradient(90deg, color-mix(in srgb, var(--brand-grad-a) 32%, var(--bg-tint)), color-mix(in srgb, var(--brand-grad-b) 32%, var(--bg-tint))); }
-.exam.finished .tl-track i { background: color-mix(in srgb, var(--ink-faint) 45%, var(--bg-tint)); }
-.tl-dot {
-  width: 7px;
-  height: 7px;
-  flex: 0 0 7px;
-  margin-left: -12px;
-  border-radius: var(--radius-circle);
-  background: var(--primary);
-  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 14%, transparent);
-}
-.tl-dot.on { background: var(--danger); box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger) 15%, transparent); }
-.form {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.form label {
-  font-size: var(--fs-13);
-  color: var(--ink-soft);
-  margin-top: 6px;
-}
-.form-row {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-}
-.form-row > div {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.form input,
-.form select {
-  width: 100%;
-}
-.form .pin-option {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  color: var(--text);
-  cursor: pointer;
-}
-.form .pin-option input {
-  width: auto;
-}
-.error {
-  color: var(--danger);
-  font-size: var(--fs-13);
-}
-.actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-  margin-top: 14px;
-}
-.actions .btn-danger {
-  margin-right: auto;
-}
-.card-menu.up { top: auto; bottom: 26px; }
-
-@media (max-width: 760px) {
-  .page-head {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 12px;
-  }
-
-  .page-actions {
-    width: 100%;
-    justify-content: space-between;
-  }
-
-  .page-actions .btn {
-    flex: 1;
-  }
-
-  .list {
-    grid-template-columns: 1fr;
-    gap: 12px;
-  }
-
-  /* 手机端保持横向三段（日期牌/标题/数字），仅按比例收紧，不做纵向堆叠 */
-  .exam { padding: 16px 16px 14px; gap: 12px; }
-  .exam-main { gap: 12px; }
-  .date-tile { width: 50px; height: 58px; flex-basis: 50px; border-radius: var(--radius-13); }
-  .date-tile small { font-size: var(--fs-10); }
-  .date-tile b { font-size: var(--fs-19); }
-  .name { font-size: var(--fs-18); }
-  .date { font-size: var(--fs-12); }
-  .count { min-width: 72px; }
-  .count .num { font-size: var(--fs-38); }
-
-  .form-row {
-    grid-template-columns: 1fr;
-  }
-}
-</style>
-
-<style scoped>
-.review-message{margin:0;color:var(--success);font-size:var(--fs-12-5);font-weight:var(--fw-700)}.review-action{align-self:flex-start;margin-top:12px;padding:7px 10px;color:var(--primary);font-size:var(--fs-12);font-weight:var(--fw-750);border:1px solid var(--primary);border-radius:var(--radius-8);background:var(--primary-soft)}.review-action:hover{background:var(--primary);color:var(--on-primary,#fff)}
-</style>
+<style scoped src="./exams.css"></style>

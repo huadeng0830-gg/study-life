@@ -1,9 +1,16 @@
 <script setup>
+import { ref } from 'vue'
 import Modal from './Modal.vue'
 import { APP_RELEASE, PREVIOUS_RELEASE_GROUPS, RELEASE_NOTES } from '../composables/releaseNotes.js'
 
 defineProps({ open: Boolean })
 const emit = defineEmits(['close'])
+const expandedVersions = ref(new Set())
+
+function toggleVersion(version, event) {
+  if (event.target?.open) expandedVersions.value.add(version)
+  else expandedVersions.value.delete(version)
+}
 </script>
 
 <template>
@@ -20,19 +27,19 @@ const emit = defineEmits(['close'])
     这里只读、不写已读标记，所以可以随时打开翻历史；
     将来真的更新了版本，UpdateNotes 仍然会正常弹出。
   -->
-  <Modal :open="open" title="更新说明" @close="emit('close')">
+  <Modal :open="open" title="更新说明" medium sheet :sheet-detents="[0.72, 0.94]" @close="emit('close')">
     <div class="release-notes">
       <span class="release-version">版本 {{ APP_RELEASE }}</span>
-      <h4>这次有这些变化</h4>
+      <h3>本次更新</h3>
       <ul><li v-for="(note, index) in RELEASE_NOTES" :key="index">{{ note }}</li></ul>
       <template v-if="PREVIOUS_RELEASE_GROUPS.length">
-        <h4 class="previous-title">之前的更新</h4>
-        <div v-for="group in PREVIOUS_RELEASE_GROUPS" :key="group.version" class="previous-group">
-          <span class="previous-version">{{ group.version }}</span>
-          <ul><li v-for="(note, index) in group.notes" :key="index">{{ note }}</li></ul>
-        </div>
+        <h3 class="previous-title">之前的更新</h3>
+        <details v-for="group in PREVIOUS_RELEASE_GROUPS" :key="group.version" class="previous-group" @toggle="toggleVersion(group.version, $event)">
+          <summary><span class="previous-version">{{ group.version }}</span><small>{{ group.notes.length }} 项更新</small></summary>
+          <ul v-if="expandedVersions.has(group.version)"><li v-for="(note, index) in group.notes" :key="index">{{ note }}</li></ul>
+        </details>
       </template>
-      <button type="button" class="btn btn-primary" autofocus @click="emit('close')">关闭</button>
+      <button type="button" class="btn btn-primary" @click="emit('close')">关闭</button>
     </div>
   </Modal>
 </template>
@@ -40,10 +47,14 @@ const emit = defineEmits(['close'])
 <style scoped>
 .release-notes { display: flex; flex-direction: column; gap: 12px; }
 .release-version { align-self: flex-start; padding: 4px 8px; color: var(--primary); font-size: var(--fs-10); font-weight: var(--fw-800); border-radius: var(--radius-6); background: var(--primary-soft); }
-.release-notes h4 { font-size: var(--fs-16); }
-.release-notes h4.previous-title { margin-top: 6px; font-size: var(--fs-13); color: var(--ink-faint); }
+.release-notes h3 { margin: 0; font-size: var(--fs-16); }
+.release-notes h3.previous-title { margin-top: 6px; font-size: var(--fs-13); color: var(--ink-faint); }
 .release-notes ul { display: flex; flex-direction: column; gap: 8px; margin: 0; padding-left: 20px; color: var(--muted); font-size: var(--fs-12); line-height: 1.55; }
-.previous-group { display: flex; flex-direction: column; gap: 6px; }
-.previous-version { align-self: flex-start; padding: 2px 7px; color: var(--ink-faint); font-size: var(--fs-10); font-weight: var(--fw-700); border-radius: var(--radius-6); background: var(--bg-tint); }
+.previous-group { padding: 0 10px; border: 1px solid var(--border); border-radius: var(--radius-9); background: var(--bg-tint); }
+.previous-group summary { min-height: 44px; padding-block: 12px; color: var(--ink-soft); cursor: pointer; }
+.previous-group summary small { margin-left: 8px; color: var(--muted); font-size: var(--fs-10); white-space: nowrap; }
+.previous-group summary:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; border-radius: var(--radius-6); }
+.previous-group ul { padding-block: 3px 12px; }
+.previous-version { font-size: var(--fs-12); font-weight: var(--fw-700); overflow-wrap: anywhere; }
 .release-notes .btn { align-self: flex-end; min-width: 96px; margin-top: 4px; }
 </style>

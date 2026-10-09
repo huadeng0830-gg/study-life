@@ -9,6 +9,7 @@ import { mySpendCents, normalizeSplit, validateSplit } from '../ledgerSplit.js'
 import { isBillPayment, transactionBillId } from '../ledgerRelations.js'
 import { detachCourseRelations } from './relations.js'
 import { defaultAccount, defaultReminderMinutes, policyDateKey, policyTimeKey } from '../settingsPolicy.js'
+import { eventInputError } from '../events/eventFields.js'
 
 let lastStamp = 0
 function stamp() {
@@ -155,11 +156,11 @@ function restoreItem(list, id, { active = false } = {}) {
   return item
 }
 
-function restoreDeletedItem(list, entity) {
+function restoreDeletedItem(list, entity, { preserveArchive = false } = {}) {
   if (!entity?.id) return null
   const existing = list.value.find((item) => item.id === entity.id)
   if (existing) return existing
-  const restored = { ...entity, archivedAt: null, updatedAt: stamp() }
+  const restored = { ...entity, archivedAt: preserveArchive ? entity.archivedAt ?? null : null, updatedAt: stamp() }
   delete restored.deletedAt
   delete restored.tombstone
   list.value.push(restored)
@@ -180,7 +181,26 @@ export function useDomainCommands() {
   function repeatEndField(repeat, endDate) {
     return repeat === 'none' ? {} : { repeatEndDate: String(endDate || '').trim() }
   }
-  function createTask(value) { const now = stamp(); const repeat = normalizeTaskRepeat(value.repeat); const task = classifyTask({ id: value.id || createId('t'), title: String(value.title || '').trim(), done: false, status: 'pending', createdAt: now, updatedAt: now, course: value.course || '', courseId: value.courseId || '', dueDate: value.dueDate || '', dueTime: value.dueTime || '', priority: value.priority || 'normal', note: value.note || '', sourceText: value.sourceText || '', estimateMinutes: Number(value.estimateMinutes) || 0, reminderMinutes: defaultReminderMinutes('task', value.reminderMinutes), repeat, ...repeatEndField(repeat, value.repeatEndDate), kind: value.kind || 'todo', ...origin(value) }, courses.value); if (!task.title) throw new Error('请填写待办内容'); tasks.value.push(task); commitTasks(); return task }
+  function createTask(value) {
+    const now = stamp()
+    const repeat = normalizeTaskRepeat(value.repeat)
+    const actualMinutes = Number(value.actualMinutes)
+    const task = classifyTask({
+      id: value.id || createId('t'), title: String(value.title || '').trim(), done: false, status: 'pending',
+      createdAt: now, updatedAt: now, course: value.course || '', courseId: value.courseId || '',
+      dueDate: value.dueDate || '', dueTime: value.dueTime || '', priority: value.priority || 'normal',
+      note: value.note || '', sourceText: value.sourceText || '', estimateMinutes: Number(value.estimateMinutes) || 0,
+      ...(value.actualMinutes !== undefined && value.actualMinutes !== null && value.actualMinutes !== '' && Number.isFinite(actualMinutes) && actualMinutes >= 0
+        ? { actualMinutes } : {}),
+      ...(value.workCheckpoint ? { workCheckpoint: value.workCheckpoint } : {}),
+      reminderMinutes: defaultReminderMinutes('task', value.reminderMinutes), repeat,
+      ...repeatEndField(repeat, value.repeatEndDate), kind: value.kind || 'todo', ...origin(value),
+    }, courses.value)
+    if (!task.title) throw new Error('请填写待办内容')
+    tasks.value.push(task)
+    commitTasks()
+    return task
+  }
   /**
    * 生成重复待办的下一期（每天 / 工作日 / 每周 / 每两周 / 每月）。
    *
@@ -309,7 +329,15 @@ export function useDomainCommands() {
     milestoneRestoreRelations.delete(restored.id)
     return restored
   }
-  function createEvent(value) { const now = stamp(); const item = { id: value.id || createId('event'), title: String(value.title || '').trim(), date: value.date || '', time: value.time || '', endTime: value.endTime || '', location: value.location || '', courseId: value.courseId || '', courseName: value.courseName || value.course || '', note: value.note || '', sourceText: value.sourceText || '', normalizedText: value.normalizedText || '', noticeType: value.noticeType || '', reminderMinutes: defaultReminderMinutes('event', value.reminderMinutes), createdAt: now, updatedAt: now, ...origin(value) }; if (!item.title) throw new Error('请填写日程内容'); events.value.push(item); commitEvents(); return item }
+  function createEvent(value) {
+    const now = stamp()
+    const item = { id: value.id || createId('event'), title: String(value.title || '').trim(), date: value.date || '', time: value.time || '', endTime: value.endTime || '', location: value.location || '', courseId: value.courseId || '', courseName: value.courseName || value.course || '', note: value.note || '', sourceText: value.sourceText || '', normalizedText: value.normalizedText || '', noticeType: value.noticeType || '', reminderEnabled: value.reminderEnabled !== false, reminderMinutes: defaultReminderMinutes('event', value.reminderMinutes), createdAt: now, updatedAt: now, ...origin(value) }
+    const issue = eventInputError(item)
+    if (issue) throw new Error(issue.message)
+    events.value.push(item)
+    commitEvents()
+    return item
+  }
   function createTransaction(value = {}) {
     const now = stamp()
     const direction = value.direction === 'income' || value.type === 'income' ? 'income' : 'expense'
@@ -621,7 +649,10 @@ export function useDomainCommands() {
   function updateEvent(id, value) {
     const item = events.value.find((entry) => entry.id === id)
     if (!item) return null
-    Object.assign(item, value, { updatedAt: stamp() })
+    const next = { ...item, ...value, title: String(value.title ?? item.title ?? '').trim() }
+    const issue = eventInputError(next)
+    if (issue) throw new Error(issue.message)
+    Object.assign(item, next, { updatedAt: stamp() })
     commitEvents()
     return item
   }
@@ -632,7 +663,7 @@ export function useDomainCommands() {
     commitEvents()
     return deleted
   }
-  function restoreDeletedEvent(entity) { const item = restoreDeletedItem(events, entity); if (item) commitEvents(); return item }
+  function restoreDeletedEvent(entity) { const item = restoreDeletedItem(events, entity, { preserveArchive: true }); if (item) commitEvents(); return item }
   function archiveTask(id) { const item = archiveItem(tasks, id); if (item) commitTasks(); return item }
   function restoreTask(id) { const item = restoreItem(tasks, id); if (item) commitTasks(); return item }
   function archiveCourse(id) { const item = archiveItem(courses, id); if (item) commitCourses(); return item }
@@ -640,7 +671,14 @@ export function useDomainCommands() {
   function archiveMilestone(id) { const item = archiveItem(milestones, id); if (item) commitMilestones(); return item }
   function restoreMilestone(id) { const item = restoreItem(milestones, id); if (item) commitMilestones(); return item }
   function archiveEvent(id) { const item = archiveItem(events, id); if (item) commitEvents(); return item }
-  function restoreEvent(id) { const item = restoreItem(events, id); if (item) commitEvents(); return item }
+  function restoreEvent(id) {
+    const item = restoreItem(events, id)
+    if (item) {
+      if (item.status === 'archived') delete item.status
+      commitEvents()
+    }
+    return item
+  }
   function archiveBill(id) { const item = archiveItem(bills, id, { inactive: true }); if (item) commitBills(); return item }
   function restoreBill(id) { const item = restoreItem(bills, id, { active: true }); if (item) commitBills(); return item }
   function setBillActive(id, active) {
@@ -692,8 +730,14 @@ export function useDomainCommands() {
   function recordTaskFocusSession(id, session) {
     const task = tasks.value.find((item) => item.id === id)
     if (!task || !session) return null
+    const previousFocusSeconds = Math.max(0, Number(task.focusTotalSeconds) || 0)
+    const addedFocusSeconds = Math.max(0, Number(session.actualFocusSeconds) || 0)
+    const previousActualMinutes = task.actualMinutes !== null && task.actualMinutes !== undefined
+      ? Math.max(0, Number(task.actualMinutes) || 0)
+      : previousFocusSeconds / 60
     task.focusCount = Math.max(0, Number(task.focusCount) || 0) + 1
-    task.focusTotalSeconds = Math.max(0, Number(task.focusTotalSeconds) || 0) + Math.max(0, Number(session.actualFocusSeconds) || 0)
+    task.focusTotalSeconds = previousFocusSeconds + addedFocusSeconds
+    task.actualMinutes = Math.round((previousActualMinutes + addedFocusSeconds / 60) * 10) / 10
     task.lastFocusedAt = session.endedAt || stamp()
     task.updatedAt = stamp()
     commitTasks()

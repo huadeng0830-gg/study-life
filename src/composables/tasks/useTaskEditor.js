@@ -1,5 +1,8 @@
 import { nextTick, ref } from 'vue'
 import { detectTaskEventConflicts, getConflictSummary } from '../conflictDetection.js'
+import { normalizeTaskWorkCheckpoint } from './taskWorkProgress.js'
+import { isValidPlanningDate } from '../planningViews.js'
+import { defaultReminderMinutes } from '../settingsPolicy.js'
 
 function emptyForm() {
   return {
@@ -11,13 +14,19 @@ function emptyForm() {
     priority: 'normal',
     note: '',
     estimateMinutes: '',
+    actualMinutes: '',
+    checkpointLastStep: '',
+    checkpointBlocker: '',
+    checkpointNextStep: '',
+    checkpointResources: '',
     repeat: 'none',
     repeatEndDate: '',
+    reminderMinutes: '',
   }
 }
 
 /** Owns task form state, validation, conflict confirmation, and persistence. */
-export function useTaskEditor({ domain, tasks, courses, events }) {
+export function useTaskEditor({ domain, tasks, courses, events, onSaved = (_message) => {} }) {
   const showForm = ref(false)
   const editingId = ref(null)
   const error = ref('')
@@ -25,6 +34,12 @@ export function useTaskEditor({ domain, tasks, courses, events }) {
   const titleInput = ref(null)
   const dueDateInput = ref(null)
   const repeatEndDateInput = ref(null)
+  /** @type {import('vue').Ref<HTMLInputElement | null>} */
+  const estimateInput = ref(null)
+  /** @type {import('vue').Ref<HTMLInputElement | null>} */
+  const actualInput = ref(null)
+  /** @type {import('vue').Ref<HTMLInputElement | null>} */
+  const reminderInput = ref(null)
   const form = ref(emptyForm())
   const deleteTarget = ref(null)
   const saveConflict = ref(null)
@@ -35,6 +50,9 @@ export function useTaskEditor({ domain, tasks, courses, events }) {
     if (message && field === 'title') nextTick(() => titleInput.value?.focus())
     if (message && field === 'dueDate') nextTick(() => dueDateInput.value?.focus())
     if (message && field === 'repeatEndDate') nextTick(() => repeatEndDateInput.value?.focus())
+    if (message && field === 'estimateMinutes') nextTick(() => estimateInput.value?.focus())
+    if (message && field === 'actualMinutes') nextTick(() => actualInput.value?.focus())
+    if (message && field === 'reminderMinutes') nextTick(() => reminderInput.value?.focus())
   }
 
   function clearFormError(field) {
@@ -60,21 +78,35 @@ export function useTaskEditor({ domain, tasks, courses, events }) {
       priority: task.priority ?? 'normal',
       note: task.note ?? '',
       estimateMinutes: task.estimateMinutes ?? '',
+      actualMinutes: task.actualMinutes ?? '',
+      checkpointLastStep: task.workCheckpoint?.lastStep ?? '',
+      checkpointBlocker: task.workCheckpoint?.blocker ?? '',
+      checkpointNextStep: task.workCheckpoint?.nextStep ?? '',
+      checkpointResources: task.workCheckpoint?.resources?.join('\n') ?? '',
       repeat: task.repeat ?? 'none',
       repeatEndDate: task.repeatEndDate ?? '',
+      reminderMinutes: String(task.reminderMinutes ?? ''),
     }
     showForm.value = true
   }
 
   function commitSave(data, editId) {
-    if (editId) domain.updateTask(editId, data)
-    else domain.createTask({ ...data, createdFrom: 'manual' })
+    if (editId && domain.updateTask(editId, data) === null) {
+      setFormError('这条待办已不存在，请关闭后重新添加。')
+      return
+    }
+    if (!editId) domain.createTask({ ...data, createdFrom: 'manual' })
     showForm.value = false
+    onSaved(editId ? '待办已更新' : '待办已添加')
   }
 
   function save() {
     if (!form.value.title.trim()) {
       setFormError('请填写待办内容', 'title')
+      return
+    }
+    if (form.value.dueDate && !isValidPlanningDate(form.value.dueDate)) {
+      setFormError('请选择有效的截止日期。', 'dueDate')
       return
     }
     if (form.value.repeat !== 'none' && !form.value.dueDate) {
@@ -85,6 +117,38 @@ export function useTaskEditor({ domain, tasks, courses, events }) {
       setFormError('重复结束日期不能早于本期截止日期。', 'repeatEndDate')
       return
     }
+    if (form.value.repeat !== 'none' && form.value.repeatEndDate && !isValidPlanningDate(form.value.repeatEndDate)) {
+      setFormError('请选择有效的重复结束日期。', 'repeatEndDate')
+      return
+    }
+    const rawEstimateMinutes = String(form.value.estimateMinutes ?? '').trim()
+    if (rawEstimateMinutes && (!Number.isFinite(Number(rawEstimateMinutes)) || Number(rawEstimateMinutes) < 0)) {
+      setFormError('预计时长需要是大于或等于 0 的分钟数。', 'estimateMinutes')
+      return
+    }
+    const rawReminderMinutes = String(form.value.reminderMinutes ?? '').trim()
+    if (rawReminderMinutes && (!Number.isFinite(Number(rawReminderMinutes)) || Number(rawReminderMinutes) < 0)) {
+      setFormError('提醒提前量需要是大于或等于 0 的分钟数。', 'reminderMinutes')
+      return
+    }
+    const rawActualMinutes = String(form.value.actualMinutes ?? '').trim()
+    const actualMinutes = Number(rawActualMinutes)
+    if (rawActualMinutes && (!Number.isFinite(actualMinutes) || actualMinutes < 0)) {
+      setFormError('实际用时需要是大于或等于 0 的分钟数。', 'actualMinutes')
+      return
+    }
+    let workCheckpoint
+    try {
+      workCheckpoint = normalizeTaskWorkCheckpoint({
+        lastStep: form.value.checkpointLastStep,
+        blocker: form.value.checkpointBlocker,
+        nextStep: form.value.checkpointNextStep,
+        resources: form.value.checkpointResources,
+      })
+    } catch (cause) {
+      setFormError((cause instanceof Error ? cause.message : '') || '请检查资料链接。')
+      return
+    }
     setFormError('')
     const linkedCourse = courses.value.find((course) => course.id === form.value.courseId)
     const data = {
@@ -92,7 +156,7 @@ export function useTaskEditor({ domain, tasks, courses, events }) {
       course: linkedCourse?.name ?? form.value.course.trim(),
       courseId: linkedCourse?.id ?? '',
       dueDate: form.value.dueDate,
-      dueTime: form.value.dueTime,
+      dueTime: form.value.dueDate ? form.value.dueTime : '',
       priority: form.value.priority,
       note: form.value.note.trim(),
       estimateMinutes: Math.max(0, Number(form.value.estimateMinutes) || 0),
@@ -101,6 +165,12 @@ export function useTaskEditor({ domain, tasks, courses, events }) {
     }
     // Snapshot the edit target before a conflict dialog can remain open.
     const editId = editingId.value
+    const existingTask = tasks.value.find((task) => task.id === editId)
+    if (rawReminderMinutes || existingTask?.reminderMinutes !== undefined) data.reminderMinutes = defaultReminderMinutes('task', rawReminderMinutes)
+    if (rawActualMinutes) data.actualMinutes = Math.round(actualMinutes * 10) / 10
+    else if (existingTask?.actualMinutes !== null && existingTask?.actualMinutes !== undefined) data.actualMinutes = null
+    if (workCheckpoint) data.workCheckpoint = workCheckpoint
+    else if (existingTask?.workCheckpoint) data.workCheckpoint = null
 
     if (data.dueDate) {
       const conflicts = detectTaskEventConflicts(data, [...tasks.value, ...events.value], data.dueDate, 'task')
@@ -134,6 +204,9 @@ export function useTaskEditor({ domain, tasks, courses, events }) {
     titleInput,
     dueDateInput,
     repeatEndDateInput,
+    estimateInput,
+    actualInput,
+    reminderInput,
     form,
     deleteTarget,
     saveConflict,

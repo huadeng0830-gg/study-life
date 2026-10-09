@@ -33,7 +33,7 @@ registerMirrorTeardown()
 const ROUTES = [
   { path: '/', name: '今天', mustInclude: ['本周收支'] },
   { path: '/schedule', name: '课程表', mustInclude: ['高等数学'] },
-  { path: '/course', name: '课程档案', mustInclude: ['课程档案'] },
+  { path: '/course', name: '课程进度', mustInclude: ['课程进度', '高等数学', '完成高数第三章作业'] },
   { path: '/tasks', name: '待办', mustInclude: ['完成高数第三章作业'] },
   { path: '/exams', name: '重要日期', mustInclude: ['四六级考试'] },
   { path: '/events', name: '日程', mustInclude: ['小组会议'] },

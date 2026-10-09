@@ -84,7 +84,7 @@ function confirmImport() {
           <div class="csv-preview-count"><b>{{ preview.total }}</b><span>条可导入</span></div>
           <div class="csv-preview-skips">
             <span>重复 {{ preview.skipped.duplicates }}</span>
-            <span>无有效内容 {{ preview.skipped.invalid }}</span>
+            <span>{{ kind === 'events' ? '内容或时间无效' : '无有效内容' }} {{ preview.skipped.invalid }}</span>
             <span v-if="preview.truncated">文件超过 2000 行，已截取前 2000 行</span>
           </div>
           <ul v-if="previewRows.length">

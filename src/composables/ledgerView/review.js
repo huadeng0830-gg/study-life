@@ -9,24 +9,38 @@
  */
 import { computed, ref } from 'vue'
 import { appToday } from '../timeContext.js'
-import { buildLedgerMonthReview, catInfo, expenses } from '../ledger.js'
+import { buildLedgerMonthReview, catInfo, expenses, ledgerIndex } from '../ledger.js'
 import { mySpendCents, mySpendYuan, personalSpendTotals } from '../ledgerSplit.js'
 import { summarizeLedgerMonthsInBase } from '../ledgerFx.js'
-import { pad2 } from '../../utils/formatters.js'
+import { shiftTrendMonth } from '../monthlyTrendChart.js'
 
 export function useLedgerReview({ personalAmount, ledgerToday, tab, fx }) {
   const reviewMonth = ref(ledgerToday().slice(0, 7)) // YYYY-MM
+  const trendEndMonth = ref(reviewMonth.value)
+  const earliestTrendMonth = computed(() => {
+    let first = ledgerToday().slice(0, 7)
+    for (const month of ledgerIndex.value.monthStats.keys()) {
+      if (month < first) first = month
+    }
+    return first
+  })
+  function setTrendEndMonth(month) {
+    const target = String(month ?? '')
+    if (!shiftTrendMonth(target, 0) || target > ledgerToday().slice(0, 7)) return
+    trendEndMonth.value = target
+  }
 
   function shiftMonth(delta) {
-    const [y, m] = reviewMonth.value.split('-').map(Number)
-    const d = new Date(y, m - 1 + delta, 1)
-    reviewMonth.value = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`
+    const target = shiftTrendMonth(reviewMonth.value, delta)
+    if (!target || target > ledgerToday().slice(0, 7)) return
+    reviewMonth.value = target
+    selectedDay.value = null
     // 换月就收起下钻（函数声明会被提升，这里不依赖定义顺序）。
     resetReviewCategoryView()
   }
   function jumpToMonth(month) {
     const target = String(month ?? '')
-    if (!/^\d{4}-(?:0[1-9]|1[0-2])$/.test(target) || target > ledgerToday().slice(0, 7)) return
+    if (!shiftTrendMonth(target, 0) || target > ledgerToday().slice(0, 7)) return
     reviewMonth.value = target
     selectedDay.value = null
     resetReviewCategoryView()
@@ -132,13 +146,9 @@ export function useLedgerReview({ personalAmount, ledgerToday, tab, fx }) {
     ? `本月有 ${reviewMyShare.value.splitCount} 笔分摊，合计、分类、月历与最大一笔都按「我承担」的份额统计`
     : ''))
 
-  // 12 个月的趋势共用一次流水扫描；逐月调用 sumLedgerMonthInBase 会把整表重复扫 12 次。
+  // 最多显示 12 个月，额外取前一个月供环比使用；所有月份仍共用一次流水扫描。
   const reviewTrendMonths = computed(() => {
-    const [year, month] = ledgerToday().slice(0, 7).split('-').map(Number)
-    const monthKeys = Array.from({ length: 12 }, (_, index) => {
-      const date = new Date(Date.UTC(year, month - 1 + index - 11, 1))
-      return date.toISOString().slice(0, 7)
-    })
+    const monthKeys = Array.from({ length: 13 }, (_, index) => shiftTrendMonth(trendEndMonth.value, index - 12)).filter(Boolean)
     const summaries = summarizeLedgerMonthsInBase(expenses.value, fx.value, monthKeys, { amountOf: mySpendYuan })
     return monthKeys.map((monthKey) => {
       const summary = summaries.get(monthKey)
@@ -209,6 +219,9 @@ export function useLedgerReview({ personalAmount, ledgerToday, tab, fx }) {
     openReviewCategoryFromHome,
     reviewMyShareNote,
     reviewTrendMonths,
+    trendEndMonth,
+    earliestTrendMonth,
+    setTrendEndMonth,
     calendarCells,
     selectedDay,
     selectedDayInfo,

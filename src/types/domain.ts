@@ -14,6 +14,9 @@ export interface Course {
   weekType?: WeekType
   campusId?: string
   travelMinutes?: number
+  archivedAt?: string | null
+  deletedAt?: string | null
+  tombstone?: boolean
 }
 
 export interface PeriodTime {
@@ -44,6 +47,14 @@ export interface TimeConfig {
   updatedAt?: string
 }
 
+export interface TaskWorkCheckpoint {
+  lastStep?: string
+  blocker?: string
+  nextStep?: string
+  resources?: string[]
+  updatedAt?: string
+}
+
 export interface Task {
   id: string
   title: string
@@ -57,6 +68,14 @@ export interface Task {
   createdAt?: string
   updatedAt?: string
   estimateMinutes?: number
+  reminderMinutes?: number
+  archivedAt?: string | null
+  active?: boolean
+  focusCount?: number
+  focusTotalSeconds?: number
+  /** Optional total actual minutes; focus sessions supply a fallback when this is unset. */
+  actualMinutes?: number | null
+  workCheckpoint?: TaskWorkCheckpoint | null
   note?: string
   kind?: 'todo' | 'homework' | 'review' | 'exam-prep'
   status?: 'pending' | 'in_progress' | 'completed' | 'cancelled' | 'archived'
@@ -64,6 +83,7 @@ export interface Task {
   repeat?: 'none' | 'daily' | 'weekdays' | 'weekly' | 'biweekly' | 'monthly'
   /** 重复截止日期（含当天），`YYYY-MM-DD`。缺省 / 空串 = 一直重复。只在 `repeat !== 'none'` 时有意义。 */
   repeatEndDate?: string
+  repeatAnchorDay?: number | null
   createdFrom?: 'manual' | 'quick-record' | 'ocr' | 'clipboard' | 'import'
   sourceType?: string
   sourceId?: string
@@ -75,6 +95,10 @@ export interface QuickEvent {
   title: string
   date?: string
   time?: string
+  endTime?: string
+  location?: string
+  reminderMinutes?: number
+  reminderEnabled?: boolean
   courseId?: string
   courseName?: string
   note?: string
@@ -160,6 +184,15 @@ export interface Milestone {
   kind?: 'exam' | 'countdown' | 'deadline' | 'anniversary'
   courseId?: string
   courseName?: string
+  category?: string
+  location?: string
+  repeat?: 'none' | 'yearly'
+  pinned?: boolean
+  reviewProgress?: number
+  reminderMinutes?: number
+  archivedAt?: string | null
+  status?: string
+  active?: boolean
   createdAt?: string
   updatedAt?: string
 }

@@ -76,12 +76,11 @@ const SwipeActionSelector = defineComponent({
 })
 
 const props = defineProps({ open: Boolean })
-const emit = defineEmits(['close'])
+const emit = defineEmits(['close', 'edit-navigation'])
 
 // 分区状态存在 composables/modalSections.js 的模块级 ref 里：关闭再打开回到上次所在的分区。
 const tab = appearanceTab
-// 五个分区的键盘模型。分组顺序必须与模板里按钮的顺序一致。
-const APPEARANCE_TAB_KEYS = ['theme', 'wallpaper', 'quotes', 'layout', 'swipe']
+const APPEARANCE_TAB_KEYS = ['theme', 'wallpaper', 'quotes', 'layout', 'swipe', 'navigation']
 const { onKeydown: onAppearanceTabKeydown, tabIndexFor: appearanceTabIndex } = useTabKeys({
   keys: APPEARANCE_TAB_KEYS,
   active: () => tab.value,
@@ -389,7 +388,7 @@ const previewStyle = computed(() => ({
 
 <template>
   <Modal :open="open" title="🎨 个性化外观" wide sheet :sheet-detents="[0.55, 0.92]" @close="emit('close')">
-    <div class="appearance-tabs" role="tablist" aria-label="个性化设置分区" @keydown="onAppearanceTabKeydown"><button id="appearance-tab-theme" role="tab" :tabindex="appearanceTabIndex('theme')" :aria-selected="tab === 'theme'" :class="{ on: tab === 'theme' }" @click="tab = 'theme'">主题与课表</button><button id="appearance-tab-wallpaper" role="tab" :tabindex="appearanceTabIndex('wallpaper')" :aria-selected="tab === 'wallpaper'" :class="{ on: tab === 'wallpaper' }" @click="tab = 'wallpaper'">本地壁纸</button><button id="appearance-tab-quotes" role="tab" :tabindex="appearanceTabIndex('quotes')" :aria-selected="tab === 'quotes'" :class="{ on: tab === 'quotes' }" @click="tab = 'quotes'">今天页文字</button><button id="appearance-tab-layout" role="tab" :tabindex="appearanceTabIndex('layout')" :aria-selected="tab === 'layout'" :class="{ on: tab === 'layout' }" @click="tab = 'layout'">首页布局</button><button id="appearance-tab-swipe" role="tab" :tabindex="appearanceTabIndex('swipe')" :aria-selected="tab === 'swipe'" :class="{ on: tab === 'swipe' }" @click="tab = 'swipe'">滑动操作</button></div>
+    <div class="appearance-tabs" role="tablist" aria-label="个性化设置分区" @keydown="onAppearanceTabKeydown"><button id="appearance-tab-theme" role="tab" :tabindex="appearanceTabIndex('theme')" :aria-selected="tab === 'theme'" :class="{ on: tab === 'theme' }" @click="tab = 'theme'">主题与课表</button><button id="appearance-tab-wallpaper" role="tab" :tabindex="appearanceTabIndex('wallpaper')" :aria-selected="tab === 'wallpaper'" :class="{ on: tab === 'wallpaper' }" @click="tab = 'wallpaper'">本地壁纸</button><button id="appearance-tab-quotes" role="tab" :tabindex="appearanceTabIndex('quotes')" :aria-selected="tab === 'quotes'" :class="{ on: tab === 'quotes' }" @click="tab = 'quotes'">今天页文字</button><button id="appearance-tab-layout" role="tab" :tabindex="appearanceTabIndex('layout')" :aria-selected="tab === 'layout'" :class="{ on: tab === 'layout' }" @click="tab = 'layout'">首页布局</button><button id="appearance-tab-swipe" role="tab" :tabindex="appearanceTabIndex('swipe')" :aria-selected="tab === 'swipe'" :class="{ on: tab === 'swipe' }" @click="tab = 'swipe'">滑动操作</button><button id="appearance-tab-navigation" role="tab" :tabindex="appearanceTabIndex('navigation')" :aria-selected="tab === 'navigation'" :class="{ on: tab === 'navigation' }" @click="tab = 'navigation'">导航自定义</button></div>
     <div v-if="tab === 'theme'" class="theme-editor" role="tabpanel" aria-labelledby="appearance-tab-theme">
       <div class="theme-grid" role="group" aria-label="主题色选择">
         <button v-for="(theme, key) in THEMES" :key="key" type="button" class="theme-cell" :class="{ on: themeKey === key }" :aria-pressed="themeKey === key" @click="chooseTheme(key, $event)">
@@ -479,7 +478,7 @@ const previewStyle = computed(() => ({
       </div>
     </section>
 
-    <section v-else class="swipe-editor" role="tabpanel" aria-labelledby="appearance-tab-swipe">
+    <section v-else-if="tab === 'swipe'" class="swipe-editor" role="tabpanel" aria-labelledby="appearance-tab-swipe">
       <div class="swipe-intro"><h4>手机左右滑动</h4><p>滑过约三分之一张卡片才会执行，删除还会再次确认；电脑端原有点击操作不变。</p></div>
 
       <div class="swipe-category">
@@ -531,6 +530,10 @@ const previewStyle = computed(() => ({
       </div>
 
       <p class="privacy-note">默认设置：向左滑完成，向右滑编辑。选择“无操作”可以关闭某个方向。</p>
+    </section>
+    <section v-else class="navigation-settings-panel" role="tabpanel" aria-labelledby="appearance-tab-navigation">
+      <h4>编辑导航</h4><p>整理手机底栏和电脑侧栏，调整页面顺序、分组与常用入口。</p>
+      <button type="button" class="btn btn-primary" @click="emit('edit-navigation')">打开导航编辑器</button>
     </section>
 
     <!-- 成功用 role="status"（礼貌播报），失败才用 role="alert"（立即打断）。
@@ -1022,6 +1025,9 @@ const previewStyle = computed(() => ({
   justify-content:center;
   width:100%}
 }
+.navigation-settings-panel { display: flex; min-width: 0; flex-direction: column; align-items: flex-start; gap: 12px; }
+.navigation-settings-panel h4, .navigation-settings-panel p { margin: 0; }
+.navigation-settings-panel p { color: var(--muted); font-size: var(--fs-13); line-height: 1.7; }
 .module-sort {
   flex-direction:column;
   gap:7px;
@@ -1106,4 +1112,3 @@ const previewStyle = computed(() => ({
   font-size:var(--fs-12)}
 
 </style>
-

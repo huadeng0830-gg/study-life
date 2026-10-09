@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { nextTick } from 'vue'
-import { dismissPersistenceNotice, flushStoredWrites, persistenceState, useStoredRef } from '../src/composables/store/core.js'
+import { dismissPersistenceNotice, flushStoredWrites, persistenceState, restoreStoredValues, useStoredRef } from '../src/composables/store/core.js'
 import { registerMirrorTeardown } from './helpers/mirrorTeardown.js'
 
 // 收尾取消影子副本的待写盘：否则防抖/退避定时器会在环境拆除之后才触发，
@@ -17,6 +17,14 @@ afterEach(() => {
 })
 
 describe('本机持久化状态', () => {
+  it('恢复点中的空配置保留磁盘空值，运行时回到默认配置', async () => {
+    const state = useStoredRef(localKey, { value: 0 })
+    await restoreStoredValues({ [localKey]: { value: 9 } }, { markChanged: false })
+    expect(state.value).toEqual({ value: 9 })
+    await restoreStoredValues({ [localKey]: null }, { markChanged: false })
+    expect(localStorage.getItem(localKey)).toBe('null')
+    expect(state.value).toEqual({ value: 0 })
+  })
   it('localStorage 写入失败时保留内存修改并显示明确提示', async () => {
     localStorage.setItem(localKey, JSON.stringify({ value: 0 }))
     const state = useStoredRef(localKey, { value: 0 })

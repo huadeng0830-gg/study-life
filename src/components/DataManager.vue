@@ -1,27 +1,69 @@
 <script setup>
-import { onBeforeUnmount, ref, watch } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import Modal from './Modal.vue'
 import ConfirmDialog from './ConfirmDialog.vue'
 import TaskProgress from './TaskProgress.vue'
 import BackupSection from './data/BackupSection.vue'
 import RestoreSection from './data/RestoreSection.vue'
 import AccountSyncPanel from './data/AccountSyncPanel.vue'
+import DataOverview from './data/DataOverview.vue'
+import RestorePreview from './data/RestorePreview.vue'
 import { backupReminderTitle, needsBackup } from '../composables/backupReminder.js'
 import { animationsEnabled } from '../composables/motion.js'
-import { backupError, backupMessage, restoreError } from '../composables/dataManagerFeedback.js'
+import { backupError, backupMessage, backupWarning, restoreError } from '../composables/dataManagerFeedback.js'
 import { useDataManagerBackup } from '../composables/dataManagerBackup.js'
+import { readDataInventory } from '../composables/dataManagerInventory.js'
+import { flushStoredWrites } from '../composables/store'
+import { announce } from '../composables/liveRegion.js'
 
 const props = defineProps({ open: Boolean })
 const emit = defineEmits(['close'])
 
 const backup = useDataManagerBackup()
 const {
-  selectedName, backupProgress, exportBackup, retryBackup,
-  continueBackupResult, abortBackup, summary, restoreBackup,
-  restoreBackupTarget, restoreBackupMessage, restoreBackupPreviewModules, applyRestoreBackup,
+  backupProgress, backupBusy, restoring, exportBackup, retryBackup,
+  continueBackupResult, cancelBackup, abortBackup, clearSelectedBackup,
+  restoreBackupTarget, restoreBackupMessage,
+  restoreCheckpoint, restoreCheckpointLoading, restoreCheckpointError, restoreCheckpointModules,
+  restoreCheckpointWallpapers, restoreCheckpointDate, restoreCheckpointMessage,
+  refreshRestoreCheckpoint, applyRestoreBackup, applyRestoreCheckpoint,
 } = backup
+const showCheckpointConfirm = ref(false)
+const inventory = shallowRef(null)
+const inventoryError = ref('')
+const activeSection = ref('backup')
+const operationProgressRef = ref(null)
+let inventoryTimer = 0
+function refreshInventory() {
+  if (!props.open) return
+  try {
+    flushStoredWrites()
+    inventory.value = readDataInventory()
+    inventoryError.value = ''
+  } catch {
+    inventory.value = null
+    inventoryError.value = '本机数据暂时无法读取，请检查浏览器的存储权限后刷新。'
+  }
+}
+function scheduleInventoryRefresh() {
+  if (!props.open) return
+  window.clearTimeout(inventoryTimer)
+  inventoryTimer = window.setTimeout(refreshInventory, 160)
+}
+function closeDataManager() {
+  if (restoring.value) {
+    announce('正在恢复数据，请等待完成后重新载入。')
+    return
+  }
+  clearSelectedBackup()
+  emit('close')
+}
 async function confirmRestoreBackup() {
   await applyRestoreBackup()
+}
+async function confirmRestoreCheckpoint() {
+  showCheckpointConfirm.value = false
+  await applyRestoreCheckpoint()
 }
 
 // 分区导航用组件内滚动代替 `#hash` 锚点。
@@ -37,6 +79,7 @@ const sectionRefs = {
 }
 
 function jumpToSection(name) {
+  activeSection.value = name
   // 分区 <section> 现在是子组件的根节点，模板 ref 拿到的是组件实例；
   // 真正要做滚动的永远是那个根元素（实例上的 scrollIntoView 并不存在）。
   const target = sectionRefs[name]?.value
@@ -48,11 +91,30 @@ function jumpToSection(name) {
 }
 
 watch(() => props.open, (open) => {
-  if (!open && backupProgress.state.status === 'running' && backupProgress.state.canCancel) void backupProgress.cancel()
+  if (open) { refreshInventory(); void refreshRestoreCheckpoint() }
+  if (!open && backupProgress.state.status === 'running' && backupProgress.state.canCancel) void cancelBackup()
 }, { immediate: true })
+
+watch(restoring, async (running) => {
+  if (!running) return
+  await nextTick()
+  operationProgressRef.value?.scrollIntoView({ block: 'start', behavior: animationsEnabled() ? 'smooth' : 'auto' })
+})
+
+onMounted(() => {
+  window.addEventListener('study-life:storage-updated', scheduleInventoryRefresh)
+  window.addEventListener('storage', scheduleInventoryRefresh)
+  window.addEventListener('pageshow', scheduleInventoryRefresh)
+})
 
 onBeforeUnmount(() => {
   abortBackup()
+  clearSelectedBackup()
+  backupProgress.dispose()
+  window.clearTimeout(inventoryTimer)
+  window.removeEventListener('study-life:storage-updated', scheduleInventoryRefresh)
+  window.removeEventListener('storage', scheduleInventoryRefresh)
+  window.removeEventListener('pageshow', scheduleInventoryRefresh)
 })
 
 defineExpose({ exportBackup })
@@ -60,47 +122,60 @@ defineExpose({ exportBackup })
 </script>
 
 <template>
-  <Modal :open="open" title="数据管理" :wide="true" @close="emit('close')">
+  <Modal :open="open" title="数据管理" :wide="true" @close="closeDataManager">
     <div class="data-manager">
-      <p v-if="needsBackup" class="backup-hint">⚠️ 删除苹果桌面应用或清除 Safari 网站数据可能同时删除本地记录。{{ backupReminderTitle }}，建议先导出一份。</p>
+      <DataOverview :inventory="inventory" :error="inventoryError" @refresh="refreshInventory" />
+      <p v-if="needsBackup" class="backup-hint">{{ backupReminderTitle }}。更换设备或清理浏览器数据前，建议先导出一份完整备份。</p>
       <nav class="data-manager-nav" aria-label="数据管理分区">
-        <button type="button" @click="jumpToSection('backup')">备份</button>
-        <button type="button" @click="jumpToSection('restore')">恢复</button>
-        <button type="button" @click="jumpToSection('sync')">账号同步</button>
+        <button type="button" :class="{ active: activeSection === 'backup' }" :aria-current="activeSection === 'backup' ? 'location' : undefined" aria-controls="data-backup" @click="jumpToSection('backup')">备份</button>
+        <button type="button" :class="{ active: activeSection === 'restore' }" :aria-current="activeSection === 'restore' ? 'location' : undefined" aria-controls="data-restore" @click="jumpToSection('restore')">恢复</button>
+        <button type="button" :class="{ active: activeSection === 'sync' }" :aria-current="activeSection === 'sync' ? 'location' : undefined" aria-controls="data-sync" @click="jumpToSection('sync')">账号同步</button>
       </nav>
-      <BackupSection ref="backupSectionRef" />
-
+      <div ref="operationProgressRef" class="operation-progress">
       <TaskProgress
         :task="backupProgress.state"
         :elapsed-seconds="backupProgress.elapsedSeconds.value"
         :activity-age-seconds="backupProgress.activityAgeSeconds.value"
         :stalled="backupProgress.isStalled.value"
         compact
-        @cancel="backupProgress.cancel"
+        dismissible
+        @cancel="cancelBackup"
         @retry="retryBackup"
         @continue="continueBackupResult"
         @wait="backupProgress.continueWaiting"
+        @dismiss="continueBackupResult"
       />
+      </div>
+
+      <BackupSection id="data-backup" ref="backupSectionRef" />
 
       <p v-if="backupMessage" class="success" role="status">{{ backupMessage }}</p>
       <p v-if="backupError" class="error" role="alert">{{ backupError }}</p>
+      <p v-if="backupWarning" class="warning" role="status">{{ backupWarning }}</p>
 
-      <RestoreSection ref="restoreSectionRef" />
+      <RestoreSection id="data-restore" ref="restoreSectionRef" />
 
-      <p v-if="restoreError" class="error" role="alert">{{ restoreError }}</p>
+      <p v-if="restoreError" class="error restore-error" role="alert">{{ restoreError }}</p>
 
-      <div v-if="summary" class="restore-preview">
-        <div class="restore-preview-title">
-          <b>备份已检查</b>
-          <span class="restore-preview-name">{{ selectedName }}</span>
+      <RestorePreview :inventory="inventory" />
+
+      <section class="data-section restore-checkpoint" aria-label="本机恢复点">
+        <div class="restore-checkpoint-heading">
+          <div><h4>本机恢复点</h4><p>保留最近一次恢复前的副本，可撤回所选内容。恢复点只在这台设备上有效。</p></div>
+          <span v-if="restoreCheckpointLoading" class="checkpoint-status">正在读取…</span>
         </div>
-        <div class="restore-preview-scope" role="group" aria-label="将恢复的数据范围">
-          <span v-for="module in restoreBackupPreviewModules" :key="module">{{ module }}</span>
-          <span v-if="summary.wallpapers">{{ summary.wallpapers }} 张壁纸图片</span>
-        </div>
-        <p class="restore-preview-note">只覆盖备份文件中包含的数据；未包含的模块保留在本机。确认恢复后无法撤销。</p>
-        <button class="btn btn-primary" :disabled="restoreBackupPreviewModules.length === 0" @click="restoreBackup">确认恢复</button>
-      </div>
+        <p v-if="restoreCheckpointError" class="error" role="alert">{{ restoreCheckpointError }}</p>
+        <button v-if="restoreCheckpointError" type="button" class="btn btn-ghost" :disabled="backupBusy || restoreCheckpointLoading" @click="refreshRestoreCheckpoint">重新读取恢复点</button>
+        <template v-if="restoreCheckpoint && !restoreCheckpointError && !restoreCheckpointLoading">
+          <p class="checkpoint-time">上次保存：{{ restoreCheckpointDate }}</p>
+          <div class="restore-preview-scope" aria-label="恢复点包含的数据">
+            <span v-for="module in restoreCheckpointModules" :key="module">{{ module }}</span>
+            <span v-if="restoreCheckpoint.selectedModules?.includes('wallpapers')">壁纸图片（{{ restoreCheckpointWallpapers }} 张）</span>
+          </div>
+          <button class="btn btn-ghost" type="button" :disabled="backupBusy" @click="showCheckpointConfirm = true">恢复到这个恢复点</button>
+        </template>
+        <p v-else-if="!restoreCheckpointLoading && !restoreCheckpointError" class="checkpoint-status">尚无恢复点。首次恢复备份时会自动创建，无需手动设置。</p>
+      </section>
 
       <section id="data-sync" ref="syncSectionRef" class="data-section account-sync-wrap">
         <div class="account-sync-icon" aria-hidden="true">↔</div>
@@ -108,7 +183,7 @@ defineExpose({ exportBackup })
       </section>
 
       <p class="local-note">
-        <b class="ios-warning">iPhone 注意：删除桌面应用或清除 Safari 网站数据可能清空本机记录，操作前请先导出备份。</b>
+        清除浏览器网站数据，或删除 iPhone 桌面应用，可能同时清空本机记录与恢复点。请把备份文件保存在应用之外。
       </p>
     </div>
   </Modal>
@@ -121,6 +196,15 @@ defineExpose({ exportBackup })
     confirm-label="确认恢复"
     @close="restoreBackupTarget = null"
     @confirm="confirmRestoreBackup"
+  />
+  <ConfirmDialog
+    v-if="showCheckpointConfirm && restoreCheckpoint"
+    :open="showCheckpointConfirm"
+    title="恢复本机恢复点"
+    :message="restoreCheckpointMessage"
+    confirm-label="恢复并重新载入"
+    @close="showCheckpointConfirm = false"
+    @confirm="confirmRestoreCheckpoint"
   />
 </template>
 
@@ -166,7 +250,8 @@ defineExpose({ exportBackup })
   font-weight:var(--fw-700);
   display:grid}
 .data-manager-nav button:hover,
-.data-manager-nav button:active {
+.data-manager-nav button:active,
+.data-manager-nav button.active {
   color:var(--primary);
   background:var(--primary-soft)}
 .data-manager-nav button:focus-visible {
@@ -195,27 +280,6 @@ defineExpose({ exportBackup })
   font-size:var(--fs-18);
   font-weight:var(--fw-800);
   display:grid}
-.restore-preview {
-  border:1px solid color-mix(in srgb, var(--success) 35%, var(--card));
-  background:color-mix(in srgb, var(--success) 10%, var(--card));
-  border-radius:var(--radius-10);
-  flex-direction:column;
-  align-items:stretch;
-  gap:10px;
-  padding:12px;
-  font-size:var(--fs-12);
-  display:flex}
-.restore-preview-title {
-  min-width:0;
-  display:flex;
-  flex-direction:column;
-  gap:3px}
-.restore-preview-title b { color:var(--success); font-size:var(--fs-13); }
-.restore-preview-name {
-  color:var(--muted);
-  text-overflow:ellipsis;
-  white-space:nowrap;
-  overflow:hidden}
 .restore-preview-scope {
   display:flex;
   flex-wrap:wrap;
@@ -225,8 +289,14 @@ defineExpose({ exportBackup })
   background:color-mix(in srgb, var(--success) 10%, var(--card));
   border-radius:var(--radius-6);
   padding:5px 8px}
-.restore-preview-note { margin:0; color:var(--muted); line-height:1.5; }
-.restore-preview .btn { align-self:flex-start; min-height:44px; }
+.restore-checkpoint { flex-direction:column; align-items:stretch; }
+.restore-checkpoint-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
+.restore-checkpoint-heading h4, .restore-checkpoint-heading p { margin:0; }
+.restore-checkpoint-heading h4 { font-size:var(--fs-14); }
+.restore-checkpoint-heading p, .checkpoint-time, .checkpoint-status { color:var(--muted); font-size:var(--fs-12); line-height:1.5; }
+.restore-checkpoint-heading p { margin-top:3px; }
+.checkpoint-time { margin:0; }
+.restore-checkpoint .btn { align-self:flex-start; min-height:44px; }
 .success {
   margin:0;
   color:var(--success);
@@ -235,16 +305,15 @@ defineExpose({ exportBackup })
   margin:0;
   color:var(--danger);
   font-size:var(--fs-13)}
+.warning { margin:0; color:var(--warning); font-size:var(--fs-12); line-height:1.6; overflow-wrap:anywhere; }
+.operation-progress { scroll-margin-top:64px; }
+.operation-progress:empty { display:none; }
 .local-note {
   margin:0;
   color:var(--muted);
   font-size:var(--fs-12);
   line-height:1.55;
   padding:0 4px}
-.ios-warning {
-  color:var(--warning);
-  margin-top:6px;
-  display:block}
 @media (max-width:520px) {
   .data-manager-nav {
   gap:4px;
@@ -258,6 +327,6 @@ defineExpose({ exportBackup })
   width:32px;
   height:32px;
   font-size:var(--fs-16)}
-  .restore-preview .btn { align-self:stretch; width:100%; }
+  .restore-checkpoint .btn { align-self:stretch; }
 }
 </style>

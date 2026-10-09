@@ -184,7 +184,7 @@ function requestDelete() {
 
       <section v-if="editingId" class="course-links" aria-label="课程关联事项">
         <div class="course-links-head"><div><b>关联事项</b><small>删除课程只会解除关联，待办和重要日期会保留。</small></div><span v-if="linkedReviewProgress !== null" class="link-progress">复习 {{ linkedReviewProgress }}%</span></div>
-        <RouterLink class="course-archive-link" :to="{ path: '/course', query: { courseId: String(editingId) } }" @click="emit('close')">查看课程档案 →</RouterLink>
+        <RouterLink class="course-archive-link" :to="{ path: '/course', query: { courseId: String(editingId) } }" @click="emit('close')">查看课程进度 →</RouterLink>
         <div class="course-link-columns">
           <div><span class="link-label">待办 {{ linkedTasks.length }}</span><p v-if="!linkedTasks.length" class="link-empty">暂无关联待办</p><ul v-else class="link-list"><li v-for="task in linkedTasks.slice(0, 3)" :key="task.id"><span :class="{ done: taskStatus(task) === 'completed' }">{{ task.title }}</span><small>{{ taskStatus(task) === 'completed' ? '已完成' : (task.date || '未安排日期') }}</small></li></ul><div class="link-actions"><RouterLink class="link-action" to="/tasks">管理待办 →</RouterLink><button type="button" class="link-action" @click="emit('add-homework')">添加作业</button></div></div>
           <div><span class="link-label">学习类重要日期 {{ linkedCountdowns.length }}</span><p v-if="!linkedCountdowns.length" class="link-empty">暂无关联学习类重要日期</p><ul v-else class="link-list"><li v-for="item in linkedCountdowns.slice(0, 3)" :key="item.id"><span>{{ item.name }}</span><small>{{ item.date }} · 复习 {{ item.reviewProgress || 0 }}%</small></li></ul><RouterLink class="link-action" to="/exams">管理重要日期 →</RouterLink></div>

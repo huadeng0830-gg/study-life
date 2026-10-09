@@ -1,16 +1,15 @@
 <script setup>
-import { computed, ref } from 'vue'
 import EmptyState from '../../components/EmptyState.vue'
+import MonthlyTrendCard from './MonthlyTrendCard.vue'
 import { catInfo } from '../../composables/ledger.js'
-import { buildMonthlyTrendScale, monthlyTrendBarGeometry } from '../../composables/monthlyTrendChart.js'
-import { moneyHero, moneyRow, moneyWithCurrency } from '../../utils/formatters.js'
-import { formatNumber } from '../../composables/intlFormatters.js'
+import { moneyHero, moneyRow } from '../../utils/formatters.js'
 
 const props = defineProps({
   reviewLabel: { type: String, default: '' },
   reviewMonth: { type: String, default: '' },
   todayMonth: { type: String, default: '' },
-  monthlyTrend: { type: Array, default: () => [] },
+  monthlyTrend: { type: /** @type {import('vue').PropType<import('../../composables/monthlyTrendChart.js').MonthlyTrendRow[]>} */ (Array), default: () => [] },
+  earliestTrendMonth: { type: String, default: '' },
   trendCurrency: { type: String, default: 'CNY' },
   reviewCount: { type: Number, default: 0 },
   reviewTotal: { type: Number, default: 0 },
@@ -40,77 +39,7 @@ const props = defineProps({
   openDetail: { type: Function, required: true },
 })
 
-const emit = defineEmits(['selected-day-change', 'update:showAllReviewCats', 'jump-to-month'])
-
-const trendRange = ref(6)
-const visibleTrendMonths = computed(() => props.monthlyTrend.slice(-trendRange.value))
-const trendScale = computed(() => buildMonthlyTrendScale(visibleTrendMonths.value))
-const hasTrendData = computed(() => visibleTrendMonths.value.some((row) => Number(row.count) > 0))
-const selectedTrendMonth = computed(() => visibleTrendMonths.value.find((row) => row.month === props.reviewMonth) || null)
-const trendMissingRates = computed(() => [...new Set(visibleTrendMonths.value.flatMap((row) => row.missingRates || []))])
-const trendExcludedCount = computed(() => visibleTrendMonths.value.reduce((sum, row) => sum + (Number(row.excludedCount) || 0), 0))
-const trendFxDate = computed(() => visibleTrendMonths.value.find((row) => row.ratesUpdatedAt)?.ratesUpdatedAt || '未记录日期')
-const trendCurrencyNote = computed(() => {
-  const prefix = visibleTrendMonths.value.some((row) => row.hasForeign)
-    ? `按手动汇率折算到 ${props.trendCurrency}（汇率日期 ${trendFxDate.value}）`
-    : `金额单位：${props.trendCurrency}`
-  return trendMissingRates.value.length
-    ? `${prefix}；${trendMissingRates.value.join('、')} 缺少汇率，${trendExcludedCount.value} 笔未计入`
-    : prefix
-})
-
-const trendEmptyMessage = computed(() => (trendExcludedCount.value
-  ? '有外币记录暂缺汇率，补齐汇率后才会计入图表。'
-  : '这段时间还没有收支记录。'))
-
-function trendBarStyle(value) {
-  const amount = Number(value) || 0
-  const geometry = monthlyTrendBarGeometry(amount, trendScale.value)
-  return {
-    bottom: `${geometry.bottom}%`,
-    height: `${geometry.height}%`,
-    minHeight: amount ? '2px' : '0',
-  }
-}
-
-function trendScalePosition(value) {
-  const range = trendScale.value.max - trendScale.value.min
-  return range ? ((value - trendScale.value.min) / range) * 100 : 0
-}
-
-function compactTrendTick(value) {
-  const exact = moneyWithCurrency(value, props.trendCurrency)
-  const numeric = exact.match(/-?[\d,]+(?:\.\d+)?$/)?.[0] || ''
-  const prefix = numeric ? exact.slice(0, -numeric.length) : ''
-  const magnitude = Math.abs(value)
-  const divisor = magnitude >= 100_000_000 ? 100_000_000 : magnitude >= 10_000 ? 10_000 : 1
-  const unit = divisor === 100_000_000 ? '亿' : divisor === 10_000 ? '万' : ''
-  const scaled = value / divisor
-  const digits = Math.abs(scaled) < 10 ? 1 : 0
-  const formatted = formatNumber(scaled, { maximumFractionDigits: digits })
-  return `${prefix}${formatted}${unit}`
-}
-
-function trendMonthLabel(month) {
-  return `${Number(String(month).slice(5))}月`
-}
-
-function trendYearLabel(row, index) {
-  const previous = visibleTrendMonths.value[index - 1]
-  return index === 0 || previous?.month.slice(0, 4) !== row.month.slice(0, 4)
-    ? `${row.month.slice(0, 4)}年`
-    : ''
-}
-
-function trendMonthAriaLabel(row) {
-  const excluded = Number(row.excludedCount) || 0
-  const count = Number(row.count) || 0
-  return `${row.month.slice(0, 4)}年${Number(row.month.slice(5))}月，支出净额 ${moneyWithCurrency(row.expense, props.trendCurrency)}，收入 ${moneyWithCurrency(row.income, props.trendCurrency)}，已计入 ${count} 笔${excluded ? `，另有 ${excluded} 笔缺少汇率未计入` : ''}，点按查看该月账本明细`
-}
-
-function selectTrendMonth(month) {
-  emit('jump-to-month', month)
-}
+const emit = defineEmits(['selected-day-change', 'update:showAllReviewCats', 'jump-to-month', 'trend-end-month-change'])
 
 /* 月历圆点：按当天笔数给粗细（l1/l2/l3），纯展示、与账本口径无关。
    拆分时从 LedgerView 一并搬进来——它只依赖本面板自己的 reviewMonth。 */
@@ -156,42 +85,15 @@ function cellLabel(cell) {
     </span>
   </div>
 
-  <section class="review-month-trend card" aria-labelledby="review-month-trend-title">
-    <div class="trend-head">
-      <div><h2 id="review-month-trend-title" class="block-title">多月收支走势</h2><p>按月对比支出与收入；点任一月份切换到账本明细。</p></div>
-      <div class="trend-range" role="group" aria-label="走势月份范围">
-        <button type="button" :aria-pressed="trendRange === 6" @click="trendRange = 6">近 6 个月</button>
-        <button type="button" :aria-pressed="trendRange === 12" @click="trendRange = 12">近 12 个月</button>
-      </div>
-    </div>
-    <div v-if="selectedTrendMonth" class="trend-glance" aria-live="polite">
-      <b>{{ selectedTrendMonth.month.slice(0, 4) }}年{{ Number(selectedTrendMonth.month.slice(5)) }}月</b>
-      <span><i class="trend-expense-key"></i>支出净额 <strong>{{ moneyWithCurrency(selectedTrendMonth.expense, trendCurrency) }}</strong></span>
-      <span><i class="trend-income-key"></i>收入 <strong>{{ moneyWithCurrency(selectedTrendMonth.income, trendCurrency) }}</strong></span>
-      <small>已计入 {{ selectedTrendMonth.count }} 笔</small>
-    </div>
-    <div class="trend-chart-body" :class="{ 'is-empty': !hasTrendData }">
-      <div v-if="hasTrendData" class="trend-axis" aria-hidden="true">
-        <span v-for="tick in [...trendScale.ticks].reverse()" :key="tick" :style="{ bottom: `${trendScalePosition(tick)}%` }">{{ compactTrendTick(tick) }}</span>
-      </div>
-      <div class="trend-plot">
-        <div v-if="hasTrendData" class="trend-grid" aria-hidden="true">
-          <i v-for="tick in trendScale.ticks" :key="tick" :class="{ zero: tick === 0 }" :style="{ bottom: `${trendScalePosition(tick)}%` }"></i>
-        </div>
-        <p v-if="!hasTrendData" class="trend-empty">{{ trendEmptyMessage }}</p>
-        <div class="monthly-trend-bars" role="group" aria-label="每月支出和收入" :style="{ gridTemplateColumns: `repeat(${trendRange}, minmax(0, 1fr))` }">
-          <button v-for="(row, index) in visibleTrendMonths" :key="row.month" type="button" class="trend-month" :class="{ selected: reviewMonth === row.month }" :aria-pressed="reviewMonth === row.month" :aria-label="trendMonthAriaLabel(row)" :title="trendMonthAriaLabel(row)" @click="selectTrendMonth(row.month)">
-            <span class="trend-month-bars" aria-hidden="true">
-              <i class="trend-bar trend-expense" :class="{ 'trend-expense-negative': Number(row.expense) < 0 }" :style="trendBarStyle(row.expense)"></i>
-              <i class="trend-bar trend-income" :style="trendBarStyle(row.income)"></i>
-            </span>
-            <span class="trend-month-label"><b>{{ trendMonthLabel(row.month) }}</b><small v-if="trendYearLabel(row, index)">{{ trendYearLabel(row, index) }}</small></span>
-          </button>
-        </div>
-      </div>
-    </div>
-    <div class="trend-key"><span><i class="trend-expense-key"></i>支出净额</span><span><i class="trend-income-key"></i>收入</span><small>{{ trendCurrencyNote }}；支出按「我承担」份额统计，退款冲抵支出；低于零线表示退款超过支出。</small></div>
-  </section>
+  <MonthlyTrendCard
+    :months="monthlyTrend"
+    :review-month="reviewMonth"
+    :today-month="todayMonth"
+    :earliest-month="earliestTrendMonth"
+    :currency="trendCurrency"
+    @jump-to-month="emit('jump-to-month', $event)"
+    @range-end-change="emit('trend-end-month-change', $event)"
+  />
 
   <EmptyState
     v-if="reviewCount === 0"
@@ -638,46 +540,6 @@ function cellLabel(cell) {
   font-size:var(--fs-11)}
 .cd-row b {
   font-variant-numeric:tabular-nums}
-.review-month-trend { margin-bottom:12px; padding:16px; }
-.trend-head { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; }
-.trend-head p { margin:4px 0 0; color:var(--ink-faint); font-size:var(--fs-11-5); }
-.trend-range { flex:none; display:flex; gap:4px; padding:3px; border:1px solid var(--border); border-radius:var(--radius-pill); background:var(--card); }
-.trend-range button { min-height:34px; padding:0 11px; color:var(--ink-soft); border:0; border-radius:var(--radius-pill); background:transparent; font-size:var(--fs-11); cursor:pointer; }
-.trend-range button[aria-pressed="true"] { color:var(--on-primary, #fff); background:var(--primary); }
-.trend-range button:focus-visible, .trend-month:focus-visible { outline:2px solid var(--primary); outline-offset:2px; z-index:3; }
-.trend-glance { display:flex; align-items:center; flex-wrap:wrap; gap:10px 18px; min-height:38px; margin-top:9px; padding:7px 10px; color:var(--ink-soft); border:1px solid var(--border); border-radius:var(--radius-9); background:var(--bg-tint); font-size:var(--fs-11); font-variant-numeric:tabular-nums; }
-.trend-glance>b { color:var(--ink); font-weight:var(--fw-750); }
-.trend-glance>span { display:inline-flex; align-items:center; gap:5px; white-space:nowrap; }
-.trend-glance strong { color:var(--ink); font-weight:var(--fw-700); }
-.trend-glance i { width:8px; height:8px; border-radius:2px; }
-.trend-glance small { margin-left:auto; color:var(--ink-faint); font-size:var(--fs-10-5); }
-.trend-expense-key { background:var(--primary); }
-.trend-income-key { background:var(--success); }
-.trend-chart-body { display:grid; grid-template-columns:56px minmax(0,1fr); gap:7px; margin-top:8px; }
-.trend-chart-body.is-empty { grid-template-columns:minmax(0,1fr); }
-.trend-axis { position:relative; height:140px; color:var(--ink-faint); font-size:9px; font-variant-numeric:tabular-nums; }
-.trend-axis span { position:absolute; right:0; max-width:100%; overflow:hidden; transform:translateY(50%); white-space:nowrap; }
-.trend-plot { position:relative; min-width:0; height:170px; }
-.trend-grid { position:absolute; z-index:0; inset:0 0 30px; pointer-events:none; }
-.trend-grid i { position:absolute; right:0; left:0; border-top:1px solid color-mix(in srgb, var(--border) 82%, transparent); }
-.trend-grid i.zero { border-top-color:color-mix(in srgb, var(--ink-faint) 72%, transparent); }
-.monthly-trend-bars { position:relative; z-index:1; height:100%; display:grid; grid-template-columns:repeat(12,minmax(0,1fr)); gap:3px; }
-.trend-month { display:flex; min-width:0; flex-direction:column; padding:0 1px; color:var(--ink-faint); border:0; border-radius:var(--radius-7) var(--radius-7) 0 0; background:transparent; cursor:pointer; }
-.trend-month:hover, .trend-month.selected { color:var(--primary); background:var(--primary-soft); }
-.trend-month[aria-pressed="true"] { box-shadow:inset 0 -3px 0 var(--primary); }
-.trend-month-bars { position:relative; display:block; min-height:0; flex:1; }
-.trend-month-bars .trend-bar { position:absolute; width:clamp(5px,28%,14px); border-radius:3px 3px 0 0; }
-.trend-expense { left:calc(50% - 1px); transform:translateX(-100%); background:var(--primary); }
-.trend-expense-negative { border-radius:0 0 3px 3px!important; background:var(--danger); }
-.trend-income { left:calc(50% + 1px); background:var(--success); }
-.trend-month-label { display:flex; height:30px; flex:none; flex-direction:column; align-items:center; justify-content:center; gap:1px; overflow:hidden; font-variant-numeric:tabular-nums; line-height:1.05; }
-.trend-month-label b { font-size:var(--fs-10-5); font-weight:var(--fw-650); white-space:nowrap; }
-.trend-month-label small { color:var(--ink-faint); font-size:8px; white-space:nowrap; }
-.trend-empty { position:absolute; z-index:2; top:50%; left:50%; width:max-content; max-width:calc(100% - 28px); margin:0; padding:6px 10px; color:var(--ink-soft); border:1px solid var(--border); border-radius:var(--radius-pill); background:var(--card); box-shadow:0 2px 8px #0c1b3412; font-size:var(--fs-10-5); text-align:center; transform:translate(-50%,-50%); pointer-events:none; }
-.trend-key { display:flex; align-items:center; flex-wrap:wrap; gap:8px 14px; margin-top:5px; color:var(--ink-faint); font-size:var(--fs-10-5); }
-.trend-key span { display:inline-flex; align-items:center; gap:5px; color:var(--ink-soft); }
-.trend-key i { width:9px; height:9px; border-radius:2px; }
-.trend-key small { flex-basis:100%; line-height:1.45; }
 @media (max-width:760px) {
 .rs-facts {
   grid-template-columns:1fr}
@@ -688,13 +550,6 @@ function cellLabel(cell) {
 .cat-bar-row.rc-bar {
   grid-template-columns:minmax(0,76px) minmax(0,1fr) auto 10px;
   gap:8px}
-.trend-head { flex-direction:column; }
-.trend-range button { min-height:36px; }
-.trend-glance { gap:8px 12px; }
-.trend-glance small { margin-left:0; }
-.trend-chart-body { grid-template-columns:48px minmax(0,1fr); gap:5px; }
-.monthly-trend-bars { gap:1px; }
-.trend-month-label b { font-size:9px; }
 }
 @media (max-width:520px) {
 .month-nav {
@@ -714,13 +569,5 @@ function cellLabel(cell) {
   padding-inline:6px;
   white-space:nowrap;
 }
-.trend-glance { align-items:flex-start; gap:6px 11px; padding:7px 8px; }
-.trend-glance>b { flex-basis:100%; }
-.trend-glance>span { font-size:var(--fs-10-5); }
-.trend-glance strong { font-size:var(--fs-10-5); }
-.trend-glance small { flex-basis:100%; }
-.trend-chart-body { grid-template-columns:43px minmax(0,1fr); gap:4px; }
-.trend-axis { font-size:8px; }
-.trend-month-label b { font-size:8px; }
 }
 </style>

@@ -1,19 +1,20 @@
 <script setup>
 import { useDataManagerBackup } from '../../composables/dataManagerBackup.js'
 
-const { selectFile } = useDataManagerBackup()
+const { selectFile, fileChecking, selectedName, backupBusy } = useDataManagerBackup()
 </script>
 
 <template>
-  <section id="data-restore" class="data-section">
-    <div class="section-icon restore">↑</div>
+  <section class="data-section">
+    <div class="section-icon restore" aria-hidden="true">↑</div>
     <div class="section-copy">
       <h4>从备份恢复</h4>
       <p>选择此前导出的 JSON 文件，先查看覆盖范围，再确认恢复；选文件时不会修改当前数据。</p>
-      <label class="file-button">
-        选择备份文件
-        <input type="file" accept="application/json,.json" aria-label="选择要恢复的备份文件" @change="selectFile" />
+      <label class="file-button" :class="{ disabled: backupBusy }">
+        {{ fileChecking ? '正在检查备份…' : '选择备份文件' }}
+        <input type="file" accept="application/json,.json" aria-label="选择要恢复的备份文件" :disabled="backupBusy" :aria-busy="fileChecking" @change="selectFile" />
       </label>
+      <p v-if="fileChecking" class="file-checking" role="status">正在读取 {{ selectedName }} 并检查文件完整性…</p>
     </div>
   </section>
 </template>
@@ -34,6 +35,8 @@ const { selectFile } = useDataManagerBackup()
   color:var(--success);
   background:color-mix(in srgb, var(--success) 10%, var(--card))}
 .section-copy {
+  flex:1;
+  min-width:0;
   flex-direction:column;
   align-items:flex-start;
   gap:7px;
@@ -68,6 +71,9 @@ const { selectFile } = useDataManagerBackup()
   outline:var(--focus-width) solid var(--focus-solid);
   outline-offset:var(--focus-offset);
   box-shadow:0 0 0 calc(var(--focus-width) + var(--focus-offset) + 1px) var(--focus-halo)}
+.file-button.disabled { opacity:.6; cursor:default; }
+.file-button.disabled input { cursor:default; }
+.file-checking { overflow-wrap:anywhere; }
 @media (max-width:520px) {
   .section-icon {
   flex-basis:32px;

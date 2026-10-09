@@ -2,7 +2,7 @@
 import { computed, onActivated, onBeforeUnmount, onDeactivated, ref, watch } from 'vue'
 import { accountUser } from '../composables/accountAuth.js'
 import { appNow } from '../composables/timeContext.js'
-import { dateInZone } from '../../supabase/functions/campus-social/availability.js'
+import { dateInZone } from '../composables/zonedTime.js'
 import { socialRequest, subscribeSocialNotifications } from '../services/social.js'
 import { formatDateTime } from '../composables/intlFormatters.js'
 

@@ -1,7 +1,7 @@
 <script setup>
 import { computed, nextTick, ref } from 'vue'
 import { timeConfig, currentTimes, currentCampusId, currentSeasonId, periodLabelById } from '../../composables/store/timeConfig.js'
-import { weekLabel } from '../../composables/store/schedule.js'
+import { weekLabel, isSessionException } from '../../composables/store/schedule.js'
 import { useScheduleGrid } from '../../composables/schedule/useScheduleGrid.js'
 
 const props = defineProps({
@@ -15,7 +15,7 @@ const props = defineProps({
   appearance: { type: Object, required: true },
 })
 
-const emit = defineEmits(['open-add', 'open-edit', 'week-change', 'mobile-day-change'])
+const emit = defineEmits(['open-add', 'open-edit', 'week-change', 'mobile-day-change', 'open-adjustments'])
 const todayIdx = computed(() => props.currentDayIndex)
 const activeCampus = computed(() => timeConfig.value.campuses.find((campus) => campus.id === currentCampusId()))
 const activeSeason = computed(() => timeConfig.value.seasons.find((season) => season.id === currentSeasonId()))
@@ -37,13 +37,39 @@ const {
   computed(() => props.mobileDay),
 )
 
+/**
+ * 当天的例外标记文案。
+ *
+ * 一天可能同时存在整天例外和单节课例外（同一天停两节课就是两条），所以传进来的是
+ * **当日全部例外**；以选中的课程数量概括，不把记录条数误当成节数。
+ */
 function exceptionLabel(item) {
   if (!item) return ''
+  if (Array.isArray(item)) {
+    const dayLevel = item.find((entry) => !isSessionException(entry))
+    const courseIds = (entry) => Array.isArray(entry.courseIds) ? entry.courseIds.map(String) : []
+    const stopped = new Set(item.filter((entry) => entry.type === 'session_off').flatMap(courseIds))
+    const madeUp = new Set(item.filter((entry) => entry.type === 'session_makeup').flatMap(courseIds).filter((id) => !stopped.has(id)))
+    const parts = []
+    if (dayLevel) parts.push(exceptionLabel(dayLevel))
+    if (stopped.size && dayLevel?.type !== 'off') parts.push(`停${stopped.size}门`)
+    if (madeUp.size) parts.push(`补${madeUp.size}门`)
+    return parts.join('·')
+  }
   if (item.type === 'makeup') {
     const day = DAYS[item.sourceDay] ?? '课'
-    return item.sourceWeek ? `补${item.sourceWeek}周${day}` : `补${day}`
+    return item.sourceWeek ? `按第${item.sourceWeek}周${day}` : `按${day}课表`
   }
-  return '放假'
+  if (item.type === 'session_off') return '部分停课'
+  if (item.type === 'session_makeup') return '部分补课'
+  return '放假 / 停课'
+}
+
+/** 标记的配色：整天停课用红、整天补课用蓝，单节课用中性灰（不该跟"整天不上"一样刺眼）。 */
+function exceptionTone(list) {
+  const dayLevel = list.find((entry) => !isSessionException(entry))
+  if (dayLevel) return dayLevel.type
+  return list.every((entry) => entry.type === 'session_makeup') ? 'session_makeup' : 'session_off'
 }
 
 function courseInstanceKey(course) {
@@ -176,7 +202,7 @@ async function onCellKeydown(event, day, periodIndex) {
         <div>
           <strong>{{ mobileDayLabel }}</strong>
           <span v-if="mobileDay === todayIdx && viewWeek === currentWeek" class="mobile-today-mark">今天</span>
-          <small v-if="viewExceptions[mobileDay]">{{ exceptionLabel(viewExceptions[mobileDay]) }}</small>
+          <button v-if="viewExceptions[mobileDay]?.length" type="button" class="exception-tag mobile-exception-tag" :class="exceptionTone(viewExceptions[mobileDay])" :aria-label="`管理 ${mobileDate} 的课程调整：${exceptionLabel(viewExceptions[mobileDay])}`" @click="emit('open-adjustments', mobileDate)">{{ exceptionLabel(viewExceptions[mobileDay]) }}</button>
         </div>
         <button class="day-nav" :disabled="mobileDay === 6" aria-label="后一天" @click="emit('mobile-day-change', 1)">›</button>
       </div>
@@ -218,7 +244,7 @@ async function onCellKeydown(event, day, periodIndex) {
           class="tt-head"
           :class="{ today: i === todayIdx && viewWeek === currentWeek }"
         >
-          {{ d }}<span v-if="i === todayIdx && viewWeek === currentWeek" class="today-tag">今天</span><span v-if="viewExceptions[i]" class="exception-tag" :class="viewExceptions[i].type">{{ exceptionLabel(viewExceptions[i]) }}</span>
+          {{ d }}<span v-if="i === todayIdx && viewWeek === currentWeek" class="today-tag">今天</span><button v-if="viewExceptions[i]?.length" type="button" class="exception-tag" :class="exceptionTone(viewExceptions[i])" :aria-label="`管理 ${viewDates[i]} 的课程调整：${exceptionLabel(viewExceptions[i])}`" @click="emit('open-adjustments', viewDates[i])">{{ exceptionLabel(viewExceptions[i]) }}</button>
         </div>
 
         <template v-for="(row, ri) in timeConfig.periods" :key="row.id">
@@ -355,8 +381,13 @@ async function onCellKeydown(event, day, periodIndex) {
 }
 .tt-head.today { background: var(--primary-soft); color: var(--primary); }
 .today-tag { margin-left: 4px; font-size: var(--fs-11); background: var(--primary); color: var(--on-primary, #fff); padding: 1px 6px; border-radius: var(--radius-pill); vertical-align: 2px; }
-.exception-tag { display: block; width: fit-content; margin: 3px auto 0; padding: 1px 5px; color: var(--danger); font-size: var(--fs-9); font-weight: var(--fw-800); border-radius: var(--radius-5); background: var(--danger-soft); }
+.exception-tag { display: block; width: fit-content; max-width: 100%; margin: 3px auto 0; padding: 3px 6px; color: var(--danger); font-size: var(--fs-10); font-weight: var(--fw-800); border: 1px solid transparent; border-radius: var(--radius-5); background: var(--danger-soft); cursor: pointer; }
+.exception-tag:hover { border-color: currentColor; }
+.mobile-exception-tag { min-height: 36px; }
 .exception-tag.makeup { color: var(--primary); background: var(--primary-soft); }
+/* 单节课只是调换，不是整天放假，配色刻意比"放假"轻一档。 */
+.exception-tag.session_off { color: var(--ink-soft); background: var(--bg-tint); }
+.exception-tag.session_makeup { color: var(--success); background: color-mix(in srgb, var(--success) 10%, var(--card)); }
 .tt-period {
   display: flex;
   flex-direction: column;

@@ -12,6 +12,7 @@ const SILENT_CHECK_INTERVAL = 10 * 60 * 1000
 // 避免“已是最新版本”白白等 3 秒。800ms 已能覆盖 Safari 的异步 updatefound。
 const UPDATE_FOUND_GRACE = 800
 const UPDATE_INSTALL_TIMEOUT = 30 * 1000
+const UPDATE_CHECK_TIMEOUT = 8 * 1000
 const RELEASE_FETCH_TIMEOUT = 8 * 1000
 const CONTROLLER_TAKEOVER_TIMEOUT = 6 * 1000
 export const updateMessage = ref('')
@@ -230,7 +231,11 @@ function waitForWorker(worker, run) {
         // activated 不等于当前页面已经换到新控制器。之前固定等 900ms 就刷新，
         // 在 Safari/慢设备上可能早于 clientsClaim，让首页重新由旧 Worker 提供。
         // 真正的重载只由 controllerchange 触发；超过等待上限则保留旧页面并给出手动入口。
-        if (run.visible && controllerTakeoverMonitor.hasController && !reloadScheduled) {
+        if (run.visible && !run.hadController && !reloadScheduled) {
+          requireManualReload('新版本资源已准备，请重新加载页面以完成更新')
+          appUpdateProgress.setStep('apply', 'warning', '重新加载后即可使用已准备的资源')
+          appUpdateProgress.finish('新版本资源已准备，可以重新加载页面', 'warning')
+        } else if (run.visible && controllerTakeoverMonitor.hasController && !reloadScheduled) {
           setUpdateStage('updating', '新版已启用，正在等待页面切换…')
           appUpdateProgress.setStep('apply', 'running', '等待新版本接管当前页面')
           controllerTakeoverMonitor.waitForTakeover()
@@ -396,28 +401,41 @@ async function performAppUpdateCheck(run, now) {
   let resolveFound = () => {}
   const updateFound = new Promise((resolve) => { resolveFound = resolve })
   let handleUpdateFound = null
+  let checkTimer = 0
+  const checkTimeoutError = new Error('update-check-timeout')
   try {
     if (!navigator.onLine) {
       showUnavailableResult(run, '当前没有网络，暂时无法检查更新')
       return false
     }
 
-    const activeRegistration = await resolveRegistration()
+    // 获取注册信息时就核对版本，两个网络等待不用相加。
+    releaseCheck = startServerReleaseCheck()
+    const checkDeadline = new Promise((_, reject) => {
+      checkTimer = window.setTimeout(() => reject(checkTimeoutError), UPDATE_CHECK_TIMEOUT)
+    })
+    const activeRegistration = await Promise.race([resolveRegistration(), checkDeadline])
     run.registration = activeRegistration
     if (!activeRegistration) {
       showUnavailableResult(run, '更新服务正在准备，请稍后再试')
       return false
     }
 
-    // 页面版本与 Worker 更新请求互不依赖：并行核对服务器版本，避免无更新时
-    // 先等 Worker.update()、再等事件宽限、最后再发 version.txt 请求。
-    // 一旦发现正在安装的 Worker，就取消这条多余请求，不占用更新下载带宽。
-    if (!activeRegistration.installing && !activeRegistration.waiting) {
-      releaseCheck = startServerReleaseCheck()
+    // 首次打开的 Worker 在安装离线缓存，不代表页面版本落后。
+    // 版本号一致时直接结束检查，离线资源继续在后台准备。
+    if (!run.hadController && !activeRegistration.active) {
+      const initialRelease = await Promise.race([releaseCheck.promise, checkDeadline])
+      if (initialRelease === APP_RELEASE) {
+        showLatestReleaseResult(run)
+        return true
+      }
     }
+
     handleUpdateFound = () => {
+      const worker = activeRegistration.installing || activeRegistration.waiting
+      if (!worker || foundWorker) return
       releaseCheck?.cancel()
-      foundWorker = activeRegistration.installing
+      foundWorker = worker
       run.worker = foundWorker
       setUpdateStage('downloading', '发现新版本，正在下载…')
       workerPromise = waitForWorker(foundWorker, run)
@@ -425,13 +443,20 @@ async function performAppUpdateCheck(run, now) {
     }
     activeRegistration.addEventListener('updatefound', handleUpdateFound)
     lastSilentCheckAt = now
-    await activeRegistration.update()
+    if (activeRegistration.installing || activeRegistration.waiting) {
+      // 已有新版在下载或待启用，直接接入进度，不再重复检查。
+      handleUpdateFound()
+    } else {
+      // updatefound 可先于 update() 完成；发现新版就继续安装，避免多等一次请求。
+      await Promise.race([activeRegistration.update(), updateFound, checkDeadline])
+    }
+    window.clearTimeout(checkTimer)
 
     // version.txt 是无缓存的发布版本真值。能读到它时可直接区分「已是最新」与
     // 「Worker 检查漏报」；不必再固定等 Safari 的 updatefound 宽限窗口。
     // 版本请求失败时仍保留完整宽限时间，照顾 Safari 的延迟事件。
     if (!foundWorker && !activeRegistration.installing && !activeRegistration.waiting && releaseCheck) {
-      serverRelease = await releaseCheck.promise
+      serverRelease = await Promise.race([releaseCheck.promise, updateFound.then(() => null)])
       if (!foundWorker && !activeRegistration.installing && !activeRegistration.waiting && serverRelease) {
         serverReleaseChecked = true
         if (serverRelease === APP_RELEASE) {
@@ -483,8 +508,8 @@ async function performAppUpdateCheck(run, now) {
     // 落后，说明 sw.js 检查被缓存或跳过，直接强制同步，绝不误报“已是最新版本”。
     if (!foundWorker && !activeRegistration.installing && !activeRegistration.waiting) {
       if (!serverReleaseChecked) {
-        const fallbackReleaseCheck = releaseCheck || startServerReleaseCheck()
-        serverRelease = await fallbackReleaseCheck.promise
+        releaseCheck ||= startServerReleaseCheck()
+        serverRelease = await releaseCheck.promise
       }
       if (!serverRelease) {
         // version.txt 拉取失败（断网、CDN 抖动等）时不能断言“已是最新版本”。
@@ -502,7 +527,11 @@ async function performAppUpdateCheck(run, now) {
       }
     }
     return true
-  } catch {
+  } catch (error) {
+    if (error === checkTimeoutError) {
+      showUnavailableResult(run, '更新服务响应较慢，请稍后重试')
+      return false
+    }
     if (run.visible) {
       setUpdateStage('error', '检查失败，请确认网络后重试')
       lastCheckOutcome.value = '检查失败'
@@ -510,6 +539,7 @@ async function performAppUpdateCheck(run, now) {
     }
     return false
   } finally {
+    window.clearTimeout(checkTimer)
     releaseCheck?.cancel()
     if (handleUpdateFound && run.registration) run.registration.removeEventListener('updatefound', handleUpdateFound)
     if (updateInFlight === run) updateInFlight = null
@@ -536,7 +566,8 @@ export function checkForAppUpdate(showResult = true) {
     return updateInFlight.promise
   }
 
-  const run = { visible: Boolean(showResult), promise: null, registration: null, worker: null }
+  const run = { visible: Boolean(showResult), promise: null, registration: null, worker: null,
+    hadController: Boolean(navigator.serviceWorker?.controller) }
   updateInFlight = run
   // 仅把用户主动检查显示为按钮忙碌态；静默检查保留按钮，让用户可以点按并提升为可见检查。
   updateChecking.value = run.visible
