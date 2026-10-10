@@ -37,6 +37,7 @@ function startsSoon(item) {
 }
 
 async function load(token = requestGeneration) {
+  if (!active || token !== requestGeneration) return
   const user = accountUser.value
   if (!user?.id || !user.email_confirmed_at) { items.value = []; return }
   loading.value = true
@@ -60,19 +61,23 @@ async function setup(userId) {
   stopRealtime = null
   items.value = []
   error.value = ''
+  loading.value = false
   if (!userId || !accountUser.value?.email_confirmed_at) return
   await load(token)
+  if (!active || token !== requestGeneration) return
   try {
-    stopRealtime = await subscribeSocialNotifications(userId, () => { void load(token) })
+    const unsubscribe = await subscribeSocialNotifications(userId, () => { void load(token) })
+    if (!active || token !== requestGeneration) { unsubscribe?.(); return }
+    stopRealtime = unsubscribe
   } catch (cause) {
     if (token === requestGeneration && !error.value) error.value = cause.message || '实时提醒暂不可用。'
   }
 }
 
-watch(() => accountUser.value?.id || '', (userId) => { if (active) void setup(userId) }, { immediate: true })
+watch(() => [accountUser.value?.id || '', Boolean(accountUser.value?.email_confirmed_at)], ([userId]) => { if (active) void setup(userId) }, { immediate: true })
 onActivated(() => { active = true; void setup(accountUser.value?.id || '') })
 onDeactivated(() => { active = false; requestGeneration++; stopRealtime?.(); stopRealtime = null })
-onBeforeUnmount(() => { requestGeneration++; stopRealtime?.() })
+onBeforeUnmount(() => { active = false; requestGeneration++; stopRealtime?.(); stopRealtime = null })
 </script>
 
 <template>

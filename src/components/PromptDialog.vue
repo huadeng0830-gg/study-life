@@ -26,12 +26,8 @@
  *
  * 【默认按钮文案刻意保持「取消 / 确定」】与原生 prompt 的按钮逐字一致，迁移不顺手改观感。
  */
-import { ref, watch } from 'vue'
+import { ref, useId, watch } from 'vue'
 import Modal from './Modal.vue'
-
-// 与 Modal / ActionSheet / ContextMenu 同一套做法：模块级计数器保证同页多个实例的
-// `for` / `id` 不会撞车。
-let nextPromptId = 0
 
 const props = defineProps({
   open: Boolean,
@@ -51,7 +47,7 @@ const props = defineProps({
 
 const emit = defineEmits(['confirm', 'close', 'input'])
 
-const inputId = `prompt-dialog-input-${++nextPromptId}`
+const inputId = `prompt-dialog-input-${useId()}`
 const errorId = `${inputId}-error`
 const draft = ref('')
 

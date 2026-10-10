@@ -9,6 +9,7 @@ registerMirrorTeardown()
 const previous = { semester: semester.value, exceptions: scheduleExceptions.value, times: timeConfig.value }
 const date = '2026-10-09'
 const value = { title: '示例讨论', date, time: '09:15', endTime: '09:45' }
+const occupiedStage = [{ id: 'occupied', kind: 'scheduled', label: '实际执行', start: { date, time: '09:30' }, end: { date, time: '10:00' }, reminders: [] }]
 const course = { id: 'demo-course', name: '示例课程', day: 4, start: 'p0', end: 'p1', startWeek: 1, endWeek: 20 }
 
 beforeEach(() => {
@@ -52,9 +53,10 @@ describe('日程的实际课程与任务冲突', () => {
     const conflicts = findEventConflicts(value, {
       events: [{ ...value, id: 'editing' }, { ...value, id: 'archived', status: 'archived' }],
       tasks: [
-        { id: 'actionable', title: '示例准备', dueDate: date, dueTime: '09:30', estimateMinutes: 30, status: 'pending' },
-        { id: 'done', title: '已完成准备', dueDate: date, dueTime: '09:30', status: 'completed' },
-        { id: 'legacy-done', title: '旧格式完成记录', dueDate: date, dueTime: '09:30', done: true },
+        { id: 'actionable', title: '示例准备', dueDate: date, dueTime: '09:30', status: 'pending', timeStages: occupiedStage },
+        { id: 'deadline-only', title: '只设截止不占用', dueDate: date, dueTime: '09:30', estimateMinutes: 30, status: 'pending' },
+        { id: 'done', title: '已完成准备', dueDate: date, dueTime: '09:30', status: 'completed', timeStages: occupiedStage },
+        { id: 'legacy-done', title: '旧格式完成记录', dueDate: date, dueTime: '09:30', done: true, timeStages: occupiedStage },
       ],
       courses: [null, { ...course, deletedAt: '2026-10-08T00:00:00Z' }],
     }, 'editing')

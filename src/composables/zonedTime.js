@@ -35,7 +35,10 @@ export function dateText(year, month, day) {
 
 /** 校验 YYYY-MM-DD，并且是真存在的日期（排除 2026-13-45 这类）。 */
 export function validDate(value) {
-  return /^\d{4}-\d{2}-\d{2}$/.test(String(value || '')) && !Number.isNaN(Date.parse(`${value}T00:00:00Z`))
+  const text = String(value || '')
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return false
+  const date = new Date(`${text}T00:00:00Z`)
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === text
 }
 
 /** 把 "HH:MM" 换成当天第几分钟；格式不对或越界返回 null。 */

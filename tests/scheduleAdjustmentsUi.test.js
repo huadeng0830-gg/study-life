@@ -4,6 +4,11 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import ExceptionsModal from '../src/components/schedule/ExceptionsModal.vue'
 import ScheduleGrid from '../src/components/schedule/ScheduleGrid.vue'
 import { coursesForDate, removeScheduleException, scheduleExceptions, semester, upsertScheduleException } from '../src/composables/store/schedule.js'
+import { defaultTimeConfig, timeConfig } from '../src/composables/store/timeConfig.js'
+import { registerMirrorTeardown } from './helpers/mirrorTeardown.js'
+
+registerMirrorTeardown()
+const previousTimes = timeConfig.value
 
 const DATE = '2026-10-14'
 const DAYS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
@@ -21,6 +26,7 @@ beforeEach(() => {
   semester.value = { start: '2026-08-31' }
   scheduleExceptions.value = []
   submissions = []
+  timeConfig.value = defaultTimeConfig()
 })
 afterEach(() => {
   app?.unmount()
@@ -28,13 +34,14 @@ afterEach(() => {
   app = null
   host = null
   document.body.querySelectorAll('.overlay').forEach((element) => element.remove())
+  timeConfig.value = previousTimes
 })
 
-async function mountModal(courses = COURSES) {
+async function mountModal(courses = COURSES, initialExceptionId = '') {
   host = document.createElement('div')
   document.body.appendChild(host)
   app = createApp({ render: () => h(ExceptionsModal, {
-    show: true, exceptions: scheduleExceptions.value, days: DAYS, allCourses: courses, initialDate: DATE,
+    show: true, exceptions: scheduleExceptions.value.slice(), days: DAYS, allCourses: courses, initialDate: DATE, initialExceptionId,
     onSubmit: (value) => { submissions.push(value); upsertScheduleException(value) },
     onRemove: removeScheduleException,
   }) })
@@ -56,6 +63,11 @@ async function input(element, value) {
 }
 async function save() {
   root().querySelector('form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+  await nextTick()
+}
+async function select(element, value) {
+  element.value = value
+  element.dispatchEvent(new Event('change', { bubbles: true }))
   await nextTick()
 }
 
@@ -227,6 +239,104 @@ describe('课程调整的真实表单交互', () => {
   })
 })
 
+describe('部分补课的日期与节次表单', () => {
+  it('改变开始节次带动结束节次，预览、保存及当天课表都使用新时间', async () => {
+    await mountModal()
+    await selectType('session_makeup')
+    checkboxes()[0].click()
+    await nextTick()
+    const [start, end] = root().querySelectorAll('.makeup-slot select')
+    expect([start.value, end.value]).toEqual(['p3', 'p4'])
+    expect(root().querySelector('.arrangement-preview').textContent).toContain('1 组课程节次重叠')
+    await select(start, 'p5')
+    expect(end.value).toBe('p6')
+    expect(root().querySelector('.arrangement-preview').textContent).toContain('第五节课至第六节课（14:00–15:35）')
+    expect(root().querySelector('.arrangement-preview').textContent).not.toContain('节次重叠')
+    await save()
+    expect(submissions[0].courseSlots).toEqual([{ courseId: 'physics', start: 'p5', end: 'p6' }])
+    expect(root().querySelector('.exception-detail').textContent).toContain('第五节课至第六节课（14:00–15:35）')
+    expect(coursesForDate(COURSES, DATE).find((course) => course.id === 'physics')).toMatchObject({ start: 'p5', end: 'p6' })
+    expect(root().querySelector('.slot-picker')).toBeNull()
+  })
+
+  it('多门补课分别设置节次，可以把其中一门设成单节', async () => {
+    await mountModal()
+    await selectType('session_makeup')
+    await input(root().querySelector('input[type="date"]'), '2026-10-17')
+    button('全选').click()
+    await nextTick()
+    const math = root().querySelector('[data-course-id="math"]')
+    const physics = root().querySelector('[data-course-id="physics"]')
+    await select(math.querySelectorAll('select')[0], 'p9')
+    await select(math.querySelectorAll('select')[1], 'p9')
+    await select(physics.querySelectorAll('select')[0], 'p5')
+    await save()
+    const slots = scheduleExceptions.value[0].courseSlots
+    expect(slots).toContainEqual({ courseId: 'math', start: 'p9', end: 'p9' })
+    expect(slots).toContainEqual({ courseId: 'physics', start: 'p5', end: 'p6' })
+    expect(slots).toContainEqual({ courseId: 'english', start: 'p3', end: 'p4' })
+  })
+
+  it('点课表补课后直接进入对应安排，编辑与撤销保留新节次', async () => {
+    const saved = upsertScheduleException({ date: DATE, type: 'session_makeup', courseIds: ['physics'],
+      courseSlots: [{ courseId: 'physics', start: 'p5', end: 'p6' }] })
+    await mountModal(COURSES, saved.id)
+    await nextTick()
+    expect(root().querySelector('#exceptions-tab-session_makeup').getAttribute('aria-selected')).toBe('true')
+    const start = root().querySelector('.makeup-slot select')
+    expect(start.value).toBe('p5')
+    await select(start, 'p7')
+    await save()
+    expect(scheduleExceptions.value[0].courseSlots).toEqual([{ courseId: 'physics', start: 'p7', end: 'p8' }])
+    button('删除').click()
+    await nextTick()
+    button('撤销删除').click()
+    await nextTick()
+    expect(scheduleExceptions.value[0]).toMatchObject({ id: saved.id, courseSlots: [{ courseId: 'physics', start: 'p7', end: 'p8' }] })
+  })
+
+  it('旧安排展示原节次，编辑时带入，保存后变成明确节次', async () => {
+    const saved = upsertScheduleException({ date: DATE, type: 'session_makeup', courseIds: ['physics'] })
+    await mountModal()
+    expect(root().querySelector('.exception-detail').textContent).toContain('第三节课至第四节课')
+    expect(root().querySelector('.exception-detail').textContent).toContain('沿用原节次')
+    button('编辑').click()
+    await nextTick()
+    expect([...root().querySelectorAll('.makeup-slot select')].map((element) => element.value)).toEqual(['p3', 'p4'])
+    await save()
+    expect(scheduleExceptions.value[0]).toMatchObject({ id: saved.id, courseSlots: [{ courseId: 'physics', start: 'p3', end: 'p4' }] })
+  })
+
+  it('缺少有效节次时阻止保存，错误关联并聚焦节次选择区', async () => {
+    await mountModal([COURSES[0], COURSES[1], { ...COURSES[2], start: 'missing', end: 'missing' }])
+    await selectType('session_makeup')
+    checkboxes()[0].click()
+    await nextTick()
+    await save()
+    expect(submissions).toHaveLength(0)
+    expect(root().querySelector('[role="alert"]').textContent).toContain('有效的开始和结束节次')
+    expect(root().querySelector('.slot-picker').getAttribute('aria-describedby')).toBe('exception-form-error')
+    expect(document.activeElement).toBe(root().querySelector('.makeup-slot select'))
+  })
+
+  it('改日期会清空上次节次选择，时间随补课日期切换作息季', async () => {
+    await mountModal()
+    await selectType('session_makeup')
+    await input(root().querySelector('input[type="date"]'), '2026-09-26')
+    const physicsCheckbox = [...root().querySelectorAll('.course-option')].find((element) => element.textContent.includes('示例物理')).querySelector('input')
+    physicsCheckbox.click()
+    await nextTick()
+    await select(root().querySelector('.makeup-slot select'), 'p5')
+    expect(root().querySelector('.slot-summary').textContent).toContain('14:30–16:05')
+    await input(root().querySelector('input[type="date"]'), DATE)
+    expect(root().querySelector('.slot-picker')).toBeNull()
+    checkboxes()[0].click()
+    await nextTick()
+    await select(root().querySelector('.makeup-slot select'), 'p5')
+    expect(root().querySelector('.slot-summary').textContent).toContain('14:00–15:35')
+  })
+})
+
 describe('课表的课程调整标记', () => {
   it('按去重后的课程数标记，点击标记传入准确日期', async () => {
     upsertScheduleException({ date: DATE, type: 'session_off', courseIds: ['math', 'english'] })
@@ -244,5 +354,26 @@ describe('课表的课程调整标记', () => {
     tag.click()
     expect(opened).toEqual([DATE])
     expect(coursesForDate(COURSES, DATE)).toHaveLength(0)
+  })
+
+  it.each(['week', 'day'])('补课块显示新节次，点击打开这条补课而非每周课程（%s）', async (mobileView) => {
+    const saved = upsertScheduleException({ date: DATE, type: 'session_makeup', courseIds: ['physics'],
+      courseSlots: [{ courseId: 'physics', start: 'p5', end: 'p6' }] })
+    const opened = []
+    const edited = []
+    host = document.createElement('div')
+    document.body.appendChild(host)
+    app = createApp(ScheduleGrid, { courses: COURSES, viewWeek: 7, currentWeek: 7,
+      currentDayIndex: 2, mobileView, mobileDay: 2, appearance: { scheduleSkin: 'classic' },
+      onOpenAdjustments: (...args) => opened.push(args), onOpenEdit: (course) => edited.push(course) })
+    app.mount(host)
+    await nextTick()
+    const block = host.querySelector(`[data-focus-id="physics"][data-focus-date="${DATE}"]`)
+    expect(block.textContent).toContain('补课')
+    if (mobileView === 'week') expect(block.style.gridRow).toBe('7 / 9')
+    else expect(block.textContent).toContain('14:00 - 15:35')
+    block.click()
+    expect(opened).toEqual([[DATE, saved.id]])
+    expect(edited).toEqual([])
   })
 })

@@ -638,7 +638,9 @@ export function fontSizeLowerBoundPx(value) {
   if (plain) return Number.parseFloat(plain[1])
   const grow = /^(?:clamp|max)\(\s*([\d.]+)px\s*,/i.exec(text)
   if (grow) return Number.parseFloat(grow[1])
-  const add = /^calc\(\s*([\d.]+)px\s*\+/i.exec(text)
+  // Prove the whole sum is nonnegative. A prefix such as "30px +" can
+  // hide a negative value, subtraction, or a variable in the rest of calc().
+  const add = /^calc\(\s*((?:\d+(?:\.\d+)?|\.\d+))px(?:\s*\+\s*(?:\d+(?:\.\d+)?|\.\d+)(?:px|vw|vh|vmin|vmax|svw|svh|lvw|lvh|dvw|dvh))+\s*\)$/i.exec(text)
   if (add) return Number.parseFloat(add[1])
   return null
 }

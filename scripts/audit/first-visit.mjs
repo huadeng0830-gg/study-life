@@ -20,8 +20,8 @@
 //   seconds 默认 16，windowSize 默认 390,844（手机视口）。可用 CHROME_PATH 指定浏览器。
 //
 // 【退出码 / 结论】
-//   0 = GREEN：主框架导航 ≤ 2 次（全新首访的正常值就是 1 次）。
-//   1 = RED  ：主框架导航 > 2 次，首访已经在循环刷新。
+//   0 = GREEN：应用已打开、导航 1–2 次，且无启动占位、失败界面或错误。
+//   1 = RED  ：刷新循环、空白/未完成启动界面，或控制台、异常、资源错误。
 //   2 = 环境问题：找不到 Chrome、或 DevTools 端口起不来。
 //
 // 【输出】stdout 为稳定 JSON；stderr 为中文进度。浏览器进程、临时 profile 一定会被清理。
@@ -31,6 +31,7 @@ import net from 'node:net'
 import process from 'node:process'
 
 import { findChromePath, killProcessTree, makeTempDir, removeQuietly, sleep } from './shared.mjs'
+import { bootAuditFailures } from './boot-verdict.mjs'
 
 const DEFAULT_URL = 'https://study-life.pages.dev'
 const [rawUrl, rawSeconds, rawSize] = process.argv.slice(2)
@@ -201,6 +202,14 @@ try {
   await session.send('Page.enable')
   await session.send('Runtime.enable')
   await session.send('Log.enable')
+  const [viewportWidth, viewportHeight] = windowSize.split(',').map(Number)
+  if (!Number.isInteger(viewportWidth) || viewportWidth <= 0 || !Number.isInteger(viewportHeight) || viewportHeight <= 0) {
+    throw new Error('windowSize 必须是两个正整数，例如 390,844')
+  }
+  // Headless Chrome 的窗口有最小宽度；必须显式覆盖布局视口才能测到 320/390px。
+  await session.send('Emulation.setDeviceMetricsOverride', {
+    width: viewportWidth, height: viewportHeight, deviceScaleFactor: 1, mobile: viewportWidth <= 900,
+  })
 
   log(`打开 ${targetUrl}（视口 ${windowSize}，观察 ${seconds} 秒）`)
   await session.send('Page.navigate', { url: targetUrl })
@@ -208,8 +217,15 @@ try {
   // 多等一拍，让最后触发的 reload/报错有机会上报。
   await sleep(500)
 
+  const evaluated = await session.send('Runtime.evaluate', {
+    expression: `({appMounted: !!document.querySelector('#app[data-v-app] main'), placeholder: !!document.querySelector('[data-startup-placeholder]'), errorScreen: !!document.querySelector('main.startup-error'), viewport: {width: innerWidth, height: innerHeight}})`,
+    returnByValue: true,
+  })
+  if (evaluated.exceptionDetails) throw new Error('无法读取启动界面')
+  const probe = evaluated.result?.value || {}
   const unique = (list, limit = 8) => [...new Set(list)].slice(0, limit)
   const navCount = mainFrameNavigations.length
+  const reasons = bootAuditFailures({ navigationCount: navCount, probe, consoleErrors, exceptions, networkErrors })
   const report = {
     tool: 'first-visit',
     url: targetUrl,
@@ -224,12 +240,14 @@ try {
     consoleWarnings: unique(consoleWarnings),
     exceptions: unique(exceptions),
     networkErrors: unique(networkErrors),
-    verdict: navCount > 2 ? 'RED' : 'GREEN',
+    probe,
+    reasons,
+    verdict: reasons.length ? 'RED' : 'GREEN',
   }
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`)
   log(`结论：${report.verdict}｜主框架导航 ${navCount} 次（额外重载 ${report.reloads}）｜console error ${unique(consoleErrors, 99).length}｜异常 ${unique(exceptions, 99).length}｜网络错误 ${unique(networkErrors, 99).length}`)
   if (navCount > 2) log('主框架导航超过 2 次：首访正在循环刷新，请检查分包是否 404 与启动恢复预算逻辑。')
-  process.exitCode = navCount > 2 ? 1 : 0
+  process.exitCode = reasons.length ? 1 : 0
 } catch (error) {
   process.stderr.write(`${JSON.stringify({ tool: 'first-visit', url: targetUrl, verdict: 'ERROR', reason: String(error?.message || error) }, null, 2)}\n`)
   process.exitCode = 2

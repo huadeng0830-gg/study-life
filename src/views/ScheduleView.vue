@@ -181,10 +181,12 @@ const sortedExceptions = computed(() =>
   scheduleExceptions.value.filter((item) => item?.date).slice().sort((a, b) => a.date.localeCompare(b.date)),
 )
 const exceptionInitialDate = ref(appToday.value)
+const exceptionInitialId = ref('')
 
-function openExceptionManager(date) {
+function openExceptionManager(date, id = '') {
   repairScheduleExceptionIds()
   exceptionInitialDate.value = typeof date === 'string' ? date : dateForWeekDay(viewWeek.value, mobileDay.value)
+  exceptionInitialId.value = id
   showExceptions.value = true
 }
 
@@ -522,6 +524,7 @@ function confirmDeleteCourse() {
       :days="DAYS"
       :all-courses="visibleCourses"
       :initial-date="exceptionInitialDate"
+      :initial-exception-id="exceptionInitialId"
       @close="showExceptions = false"
       @submit="saveException"
       @remove="removeException"

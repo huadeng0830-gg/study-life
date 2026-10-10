@@ -13,6 +13,9 @@ function notifyLocalChanged(key = '', rawValue = undefined) {
 const queuedMutationNotifications = new Set()
 const installedPersistenceRefs = new WeakSet()
 const suppressedRestoreRefs = new WeakSet()
+// A storage event is already persisted by the other tab. Keep its exact value
+// until the watcher runs, so clearing a key cannot recreate it from defaults.
+const externallyRestoredRaw = new WeakMap()
 
 // Cloud sync must see an in-memory edit before its debounced localStorage write.
 // Coalesce each key within the current microtask so a single operation does not
@@ -274,10 +277,10 @@ function writePendingBatch() {
     } else {
       // Already serialized
       const raw = rawOrProducer
-      if (raw === localStorage.getItem(key)) continue
-      const fingerprint = rawFingerprint(raw)
-      if (fingerprint === writtenFingerprints.get(key)) continue
       try {
+        if (raw === localStorage.getItem(key)) continue
+        const fingerprint = rawFingerprint(raw)
+        if (fingerprint === writtenFingerprints.get(key)) continue
         const localStartedAt = performanceNow()
         localStorage.setItem(key, raw)
         if (typeof window !== 'undefined') window.dispatchEvent(new Event('study-life:storage-updated'))
@@ -348,6 +351,12 @@ function installPersistenceWatcher(key) {
     watch(
       pending.state,
       () => {
+        if (externallyRestoredRaw.has(pending.state)) {
+          const restoredRaw = externallyRestoredRaw.get(pending.state)
+          externallyRestoredRaw.delete(pending.state)
+          // A user edit in the same tick must still be saved.
+          if (JSON.stringify(pending.state.value) === restoredRaw) return
+        }
         if (suppressedRestoreRefs.has(pending.state)) suppressedRestoreRefs.delete(pending.state)
         else notifyLocalMutation(key)
         scheduleWrite(key, () => JSON.stringify(pending.state.value))
@@ -625,27 +634,39 @@ if (typeof window !== 'undefined') {
     // storage 事件对 sessionStorage 也会触发；这里只关心业务数据的 localStorage。
     // 不判断的话，任何写 sessionStorage 的代码都会让本标签页取消待写入并覆盖内存值。
     if (event.storageArea && event.storageArea !== window.localStorage) return
-    if (!event.key) return
-    if (event.newValue === null) {
-      writtenFingerprints.delete(event.key)
-      return
-    }
-    if (!storedRefs.has(event.key)) return
-    writtenFingerprints.set(event.key, rawFingerprint(event.newValue))
-    // 另一个标签页写了同一个键：放弃本次待写入、采用对方的值。
-    // 这是有意的「后写者胜」策略，保证多标签页看到同一份数据；
-    // 真正的多设备合并由同步管线负责，不在这里做。
-      cancelPendingWrite(event.key)
+    const keys = event.key ? [event.key] : [...storedRefs.keys()]
+    for (const key of keys) {
+      const state = storedRefs.get(key)
+      if (!state) continue
       try {
-        storedRefs.get(event.key).value = JSON.parse(event.newValue)
-      } catch {
+        const fallback = storedDefaults.get(key)
+        const saved = event.newValue === null ? null : JSON.parse(event.newValue)
+        // Invalid external values must not discard pending local edits or put a
+        // string/object into a collection that every consumer expects to be an array.
+        if (saved !== null && (Array.isArray(fallback) ? !Array.isArray(saved)
+          : isPlainObject(fallback) ? !isPlainObject(saved)
+            : fallback !== null && typeof saved !== typeof fallback)) {
+          throw new Error('其他页面写入的本机数据格式异常，本页修改已保留。')
+        }
+        const value = saved === null ? JSON.parse(JSON.stringify(fallback)) : normalizeStoredValue(saved, fallback).value
+        const raw = JSON.stringify(value)
+        cancelPendingWrite(key)
+        if (event.newValue === null) writtenFingerprints.delete(key)
+        else writtenFingerprints.set(key, rawFingerprint(event.newValue))
+        const pending = pendingWatcherInstalls.get(key)
+        if (pending) pending.baselineFingerprint = rawFingerprint(raw)
+        else externallyRestoredRaw.set(state, raw)
+        state.value = value
+      } catch (error) {
+        reportPersistenceFailure(error, key, 'read')
+      }
     }
     // 另一个标签页改了农历纪念日时，内存镜像也要跟着走；否则本标签页的首页
     // 会一直读旧镜像（镜像只在首次读取时补水、之后只由设置面板发布）。
-    if (event.key === 'sl_festive_lunar') {
+    if (!event.key || event.key === 'sl_festive_lunar') {
       let nextValue = null
       try {
-        nextValue = JSON.parse(event.newValue)
+        nextValue = event.newValue === null ? [] : JSON.parse(event.newValue)
       } catch {
         return
       }

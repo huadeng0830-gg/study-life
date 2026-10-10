@@ -53,3 +53,10 @@ export function setAccountSyncMode(mode) {
   try { localStorage.setItem(ACCOUNT_SYNC_MODE_KEY, next) } catch { /* 隐私模式下退化为仅本次会话 */ }
   return next
 }
+
+if (typeof window !== 'undefined') window.addEventListener('storage', (event) => {
+  if (event.storageArea && event.storageArea !== window.localStorage) return
+  if (event.key === ACCOUNT_SYNC_MODE_KEY || event.key === null) {
+    accountSyncMode.value = readMode()
+  }
+})

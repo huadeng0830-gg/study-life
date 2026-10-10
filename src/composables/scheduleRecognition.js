@@ -27,7 +27,10 @@ export function issueTypeText(type) {
 function toMinutes(value) {
   const match = /^(\d{1,2}):(\d{2})$/.exec(String(value ?? ''))
   if (!match) return null
-  const minutes = Number(match[1]) * 60 + Number(match[2])
+  const hour = Number(match[1])
+  const minute = Number(match[2])
+  if (hour > 23 || minute > 59) return null
+  const minutes = hour * 60 + minute
   return Number.isFinite(minutes) ? minutes : null
 }
 

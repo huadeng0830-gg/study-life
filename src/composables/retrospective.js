@@ -4,7 +4,9 @@ import { coursesForDate } from './store/schedule.js'
 import { fmtDate } from './store/utils.js'
 import { monthMoodSummary } from './mood.js'
 import { summarizeLedgerTransactions } from './ledger.js'
-import { mySpendCents } from './ledgerSplit.js'
+import { mySpendCents, mySpendYuan } from './ledgerSplit.js'
+import { fxRateNote, summarizeLedgerInBase, useLedgerFx } from './ledgerFx.js'
+import { moneyWithCurrency } from '../utils/formatters.js'
 import { taskRatePercent } from './reviewCharts.js'
 
 const number = (value) => {
@@ -21,6 +23,7 @@ function collect(data) {
     expenses: Array.isArray(data?.expenses) ? data.expenses : [],
     events: Array.isArray(data?.events) ? data.events : [],
     moodLog: data?.moodLog ?? {},
+    fx: data?.fx ?? useLedgerFx().fx.value,
   }
 }
 
@@ -38,6 +41,12 @@ function statBlock(items) {
   return { type: 'stat', items }
 }
 
+function ledgerFor(data, dateFilter) {
+  const records = summarizeLedgerTransactions(data.expenses, { dateFilter, amountOf: mySpendCents })
+  const converted = summarizeLedgerInBase(records.items, data.fx, { amountOf: mySpendYuan })
+  return { ...records, ...converted, count: records.count, note: fxRateNote(converted) }
+}
+
 export function daySnapshot(dateStr, data) {
   const d = collect(data)
   const courses = coursesForDate(d.courses, dateStr)
@@ -47,7 +56,7 @@ export function daySnapshot(dateStr, data) {
   const bills = d.bills.filter((bill) => bill.nextDate === dateStr)
   // 回顾叙事里的「支出」回答的是「**我**花了多少」：与账本页同一口径（分摊取我的份额）。
   // 未分摊的记录逐分不变，所以没有分摊的账本读起来与以前完全一样。
-  const ledger = summarizeLedgerTransactions(d.expenses, { dateFilter: (date) => date === dateStr, amountOf: mySpendCents })
+  const ledger = ledgerFor(d, (date) => date === dateStr)
   const expenses = ledger.items
   const events = d.events.filter((item) => item.date === dateStr)
   const total = tasks.length
@@ -68,6 +77,8 @@ export function daySnapshot(dateStr, data) {
       expensesCount: ledger.count,
       expensesTotal: ledger.expenseTotal,
       incomeTotal: ledger.incomeTotal,
+      base: ledger.base,
+      fxNote: ledger.note,
       events: events.length,
       focusMinutes: tasks.reduce((sum, task) => sum + number(task.estimateMinutes), 0),
     },
@@ -90,15 +101,17 @@ export function dayStory(dateStr, data) {
   blocks.push(statBlock([
     { label: '课程', value: String(s.courses) },
     { label: '待办完成', value: `${s.tasksDone}/${s.tasks}` },
-    { label: '支出', value: s.expensesCount ? `¥${s.expensesTotal.toFixed(2)}` : '—' },
+    { label: '支出', value: s.expensesCount ? moneyWithCurrency(s.expensesTotal, s.base) : '—' },
     { label: '专注', value: s.focusMinutes ? `${s.focusMinutes} 分钟` : '—' },
   ]))
+
+  if (s.fxNote) blocks.push({ type: 'p', text: s.fxNote })
 
   if (snap.courses.length) blocks.push({ type: 'list', title: '当天课程', items: snap.courses.map(courseLine) })
   if (snap.tasks.length) blocks.push({ type: 'list', title: '当天待办', items: snap.tasks.map((task) => `${task.title}${task.done ? '（已完成）' : ''}`) })
   if (snap.exams.length) blocks.push({ type: 'list', title: '重要节点', items: snap.exams.map((item) => item.name) })
-  if (snap.bills.length) blocks.push({ type: 'list', title: '到期账单', items: snap.bills.map((bill) => `${bill.name} · ¥${number(bill.amount).toFixed(2)}`) })
-  if (snap.expenses.length) blocks.push({ type: 'list', title: '当日消费', items: snap.expenses.map((expense) => `${expense.name} ¥${number(expense.amount).toFixed(2)}`) })
+  if (snap.bills.length) blocks.push({ type: 'list', title: '到期账单', items: snap.bills.map((bill) => `${bill.name} · ${moneyWithCurrency(number(bill.amount), bill.currency || s.base)}`) })
+  if (snap.expenses.length) blocks.push({ type: 'list', title: '当日消费', items: snap.expenses.map((expense) => `${expense.name} ${moneyWithCurrency(number(expense.amount), expense.currency || s.base)}`) })
   if (snap.events.length) blocks.push({ type: 'list', title: '当日日程', items: snap.events.map((item) => `${item.title}${item.time ? ` · ${item.time}` : ''}`) })
 
   blocks.push({
@@ -118,9 +131,9 @@ export function monthReport(month, data) {
   const prefix = String(month ?? '').slice(0, 7)
   const tasks = d.tasks.filter((task) => String(task.dueDate ?? '').startsWith(prefix))
   const doneTasks = tasks.filter((task) => task.done)
-  const ledger = summarizeLedgerTransactions(d.expenses, { dateFilter: (date) => date.startsWith(prefix), amountOf: mySpendCents })
+  const ledger = ledgerFor(d, (date) => date.startsWith(prefix))
   const exams = d.exams.filter((item) => (
-    item.repeat === 'yearly' ? String(item.date ?? '').slice(5) === prefix.slice(5) : String(item.date ?? '').startsWith(prefix)
+    item.repeat === 'yearly' ? String(item.date ?? '').slice(5, 7) === prefix.slice(5, 7) : String(item.date ?? '').startsWith(prefix)
   ))
   const bills = d.bills.filter((bill) => String(bill.nextDate ?? '').startsWith(prefix))
   const events = d.events.filter((item) => String(item.date ?? '').startsWith(prefix))
@@ -148,22 +161,24 @@ export function monthReport(month, data) {
   blocks.push({
     type: 'p',
     text: stats.tasks || stats.expensesCount
-      ? `${prefix} 里，你处理了 ${stats.tasks} 件待办，记下 ${stats.expensesCount} 笔收支，支出 ¥${stats.expensesTotal.toFixed(2)}${stats.incomeTotal ? `，收入 ¥${stats.incomeTotal.toFixed(2)}` : ''}。`
+      ? `${prefix} 里，你处理了 ${stats.tasks} 件待办，记下 ${stats.expensesCount} 笔收支，支出 ${moneyWithCurrency(stats.expensesTotal, ledger.base)}${stats.incomeTotal ? `，收入 ${moneyWithCurrency(stats.incomeTotal, ledger.base)}` : ''}。`
       : `${prefix} 还没有留下待办或消费记录，也许是一段轻松的日子。`,
   })
 
   blocks.push(statBlock([
     { label: '待办完成', value: `${stats.tasksDone}/${stats.tasks}` },
-    { label: '支出', value: stats.expensesCount ? `¥${stats.expensesTotal.toFixed(2)}` : '—' },
+    { label: '支出', value: stats.expensesCount ? moneyWithCurrency(stats.expensesTotal, ledger.base) : '—' },
     { label: '专注', value: stats.focusMinutes ? `${stats.focusMinutes} 分钟` : '—' },
     { label: '心情', value: stats.moodDays ? `${stats.moodDays} 天` : '未记录' },
   ]))
+
+  if (ledger.note) blocks.push({ type: 'p', text: ledger.note })
 
   if (mood.dominant) {
     blocks.push({ type: 'p', text: `这个月你记录的心情以「${mood.dominant === 'sunny' ? '晴朗' : mood.dominant === 'cloudy' ? '多云' : '低落'}」为主（晴 ${mood.sunny} / 多云 ${mood.cloudy} / 低落 ${mood.rain}）。` })
   }
   if (exams.length) blocks.push({ type: 'list', title: '月度重要节点', items: exams.slice(0, 12).map((item) => item.name) })
-  if (stats.bills) blocks.push({ type: 'list', title: '月度账单', items: bills.slice(0, 12).map((bill) => `${bill.name} · ¥${number(bill.amount).toFixed(2)}`) })
+  if (stats.bills) blocks.push({ type: 'list', title: '月度账单', items: bills.slice(0, 12).map((bill) => `${bill.name} · ${moneyWithCurrency(number(bill.amount), bill.currency || ledger.base)}`) })
   if (stats.events) blocks.push({ type: 'list', title: '本月日程', items: events.slice(0, 12).map((item) => item.title) })
 
   return { title: `${prefix.slice(0, 4)}年${Number(prefix.slice(5, 7))}月 · 月度回顾`, blocks }
@@ -174,7 +189,7 @@ export function yearReport(year, data) {
   const prefix = String(year ?? '').slice(0, 4)
   const tasks = d.tasks.filter((task) => String(task.dueDate ?? '').startsWith(prefix))
   const doneTasks = tasks.filter((task) => task.done)
-  const ledger = summarizeLedgerTransactions(d.expenses, { dateFilter: (date) => date.startsWith(prefix), amountOf: mySpendCents })
+  const ledger = ledgerFor(d, (date) => date.startsWith(prefix))
   const expenses = ledger.items
   const exams = d.exams.filter((item) => (
     item.repeat === 'yearly' ? Boolean(item.date) : String(item.date ?? '').startsWith(prefix)
@@ -203,15 +218,17 @@ export function yearReport(year, data) {
   const blocks = []
   blocks.push({
     type: 'p',
-    text: `${prefix} 全年，你累计处理了 ${stats.tasks} 件待办、记下 ${stats.expensesCount} 笔收支，共支出 ¥${stats.expensesTotal.toFixed(2)}${stats.incomeTotal ? `，收入 ¥${stats.incomeTotal.toFixed(2)}` : ''}。`,
+    text: `${prefix} 全年，你累计处理了 ${stats.tasks} 件待办、记下 ${stats.expensesCount} 笔收支，共支出 ${moneyWithCurrency(stats.expensesTotal, ledger.base)}${stats.incomeTotal ? `，收入 ${moneyWithCurrency(stats.incomeTotal, ledger.base)}` : ''}。`,
   })
 
   blocks.push(statBlock([
     { label: '待办完成', value: `${stats.tasksDone}/${stats.tasks}` },
-    { label: '全年支出', value: stats.expensesCount ? `¥${stats.expensesTotal.toFixed(2)}` : '—' },
+    { label: '全年支出', value: stats.expensesCount ? moneyWithCurrency(stats.expensesTotal, ledger.base) : '—' },
     { label: '专注', value: stats.focusMinutes ? `${stats.focusMinutes} 分钟` : '—' },
     { label: '活跃天数', value: `${stats.activeDays} 天` },
   ]))
+
+  if (ledger.note) blocks.push({ type: 'p', text: ledger.note })
 
   if (stats.taskRate) blocks.push({ type: 'p', text: `待办完成率 ${stats.taskRate}%，坚持记录本身就是一种了不起。` })
   if (stats.exams) blocks.push({ type: 'list', title: '年度重要节点', items: exams.slice(0, 12).map((item) => item.name) })

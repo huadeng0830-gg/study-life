@@ -1,5 +1,6 @@
 import { clock, touchStoredRef, useStoredRef } from './core.js'
 import { todayStr, MAX_WEEK, dateString } from './utils.js'
+import { periodIndex } from './timeConfig.js'
 
 export const semester = useStoredRef('sl_semester', {
   start: (function defaultSemesterStart() {
@@ -20,7 +21,7 @@ export const scheduleExceptions = useStoredRef('sl_schedule_exceptions', [])
  * - `off`        整天停课（可跨日期区间）
  * - `makeup`     整天按指定周次/星期的课表显示
  * - `session_off`    当天只停选中的课程，其余课程照常
- * - `session_makeup` 当天按原节次补选中的课程
+ * - `session_makeup` 当天按 courseSlots 指定的节次补选中的课程；旧记录沿用原节次
  *
  * 后两种是**按课程 id** 定位到具体节次的，与前两种的「整天」粒度并存。
  */
@@ -75,6 +76,23 @@ export function validateScheduleException(value) {
   }
   if (isSessionException(value) && !normalizeCourseIds(value.courseIds).length) {
     return { field: 'courseIds', message: '请至少选择一门课程' }
+  }
+  if (type === 'session_makeup' && value.courseSlots != null) {
+    const ids = normalizeCourseIds(value.courseIds)
+    if (!Array.isArray(value.courseSlots) || value.courseSlots.length !== ids.length) {
+      return { field: 'courseSlots', message: '请为每门补课课程选择开始和结束节次' }
+    }
+    const seen = new Set()
+    for (const slot of value.courseSlots) {
+      const id = String(slot?.courseId ?? '').trim()
+      const start = periodIndex(slot?.start)
+      const end = periodIndex(slot?.end)
+      if (!ids.includes(id) || seen.has(id) || start < 0 || end < 0) {
+        return { field: 'courseSlots', message: '请为每门补课课程选择有效的开始和结束节次', courseId: id }
+      }
+      if (end < start) return { field: 'courseSlots', message: '补课结束节次不能早于开始节次', courseId: id }
+      seen.add(id)
+    }
   }
   if (type === 'makeup') {
     const day = Number(value.sourceDay ?? 0)
@@ -138,6 +156,9 @@ export function upsertScheduleException(value) {
     endDate,
     // 单节课例外才有 courseIds；其余类型显式写 null，避免导出里留下"曾经有过的"痕迹。
     courseIds: session ? normalizeCourseIds(value.courseIds) : null,
+    courseSlots: type === 'session_makeup' && Array.isArray(value.courseSlots)
+      ? value.courseSlots.map((slot) => ({ courseId: String(slot.courseId).trim(), start: slot.start, end: slot.end }))
+      : null,
     note: String(value.note ?? '').trim(),
     updatedAt: value.updatedAt || new Date().toISOString(),
   }
@@ -289,22 +310,31 @@ function coursesForDateFromIndex(index, date, exceptions) {
     ? mapped.filter((course) => !sessionHidden.has(String(course.id)))
     : mapped
 
-  // 单节课补课：被点名的课在该日已有课表里没出现时，按它原本的星期补进来。
+  // 部分补课在指定节次显示；旧记录没有 courseSlots 时才沿用课程原节次。
   // 已有同 ID 的课不加；同一课程的停课安排优先，避免停课后又被补回来。
   if (!sessionMakeupIds.size) return afterOff
   const present = new Set(afterOff.map((course) => String(course.id)))
   const additions = []
-  for (const courseId of sessionMakeupIds) {
-    if (present.has(courseId) || sessionHidden.has(courseId)) continue
-    const course = index.byId?.get(courseId)
-    if (!course) continue
-    additions.push({
-      ...course,
-      displayDay: actualDay,
-      sourceDay: course.day,
-      sessionMakeup: true,
-      exceptionDate: date,
-    })
+  for (const item of scheduleExceptionsForDate(date, exceptions)) {
+    if (item.type !== 'session_makeup') continue
+    // 损坏或引用已删除节次的记录不能悄悄回落到另一时间。
+    if (item.courseSlots != null && validateScheduleException(item)) continue
+    for (const courseId of normalizeCourseIds(item.courseIds)) {
+      if (present.has(courseId) || sessionHidden.has(courseId)) continue
+      const course = index.byId?.get(courseId)
+      if (!course) continue
+      const slot = item.courseSlots?.find((entry) => String(entry.courseId).trim() === courseId)
+      additions.push({
+        ...course,
+        ...(slot ? { start: slot.start, end: slot.end } : {}),
+        displayDay: actualDay,
+        sourceDay: course.day,
+        sessionMakeup: true,
+        exceptionId: item.id,
+        exceptionDate: date,
+      })
+      present.add(courseId)
+    }
   }
   return [...afterOff, ...additions]
 }

@@ -4,6 +4,7 @@ import { policyDateKey, policyDateTime } from '../settingsPolicy.js'
 import { isActiveEntity } from './state.js'
 import { clock } from '../store/core.js'
 import { mySpendCents } from '../ledgerSplit.js'
+import { remainingTimeStages, taskTimeEntries } from '../tasks/taskTimePlan.ts'
 
 function dateFromKey(key) {
   const [year, month, day] = String(key || '').split('-').map(Number)
@@ -161,7 +162,10 @@ function highlight(type, item, date, time = '') {
 export function selectNextWeekHighlights({ tasks = [], events = [], milestones = [], bills = [] } = {}, now = clock.value, { limit = 8, ...options } = {}) {
   const range = weekRange(now, { ...options, weekOffset: 1 })
   const items = []
-  tasks.filter(isActiveEntity).forEach((task) => { if (inRange(task.dueDate, range)) items.push(highlight('task', task, task.dueDate, task.dueTime)) })
+  tasks.filter((task) => isActiveEntity(task) && !task.done && task.status !== 'completed' && task.status !== 'cancelled').forEach((task) => {
+    const entry = taskTimeEntries({ ...task, timeStages: remainingTimeStages(task, now.getTime()) }).filter((item) => inRange(item.date, range) || (item.anchor === 'occupied' && item.date < range.endDate && item.endDate >= range.startDate)).sort((a, b) => a.date.localeCompare(b.date))[0]
+    if (entry) items.push({ ...highlight('task', task, entry.date < range.startDate ? range.startDate : entry.date, entry.anchor === 'occupied' && entry.date < range.startDate ? '' : entry.time), stageId: entry.stageId, timeLabel: entry.anchor === 'occupied' ? `${entry.label} · ${entry.rangeText}` : `${entry.label}${entry.allDay ? ' · 全天' : !entry.time ? ' · 时刻待定' : ''}` })
+  })
   events.filter(isActiveEntity).forEach((event) => { if (inRange(event.date, range)) items.push(highlight('event', event, event.date, event.time)) })
   milestones.filter(isActiveEntity).forEach((item) => { if (inRange(item.date, range)) items.push(highlight('milestone', item, item.date, item.time)) })
   bills.filter(isActiveEntity).forEach((bill) => { if (inRange(bill.nextDate, range)) items.push(highlight('bill', bill, bill.nextDate)) })

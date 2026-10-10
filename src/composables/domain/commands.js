@@ -1,5 +1,6 @@
 import { touchStoredRef, useStoredRef } from '../store/index.js'
-import { createNextRepeatingTask, nextRepeatDueDate, normalizeTaskRepeat, repeatsTask } from '../taskRecurrence.js'
+import { normalizeTaskRepeat } from '../taskRecurrence.js'
+import { spawnTaskRepeat } from '../tasks/taskRepeatCommand.js'
 import { classifyTask } from '../smartClassify.js'
 import { amountToCents, categoriesForScope, classifyTransaction, isRefundTransaction, normalizeAmount, normalizeLedgerTime } from '../ledger.js'
 // 新增可选字段的来源：币种（多币种记账）与分摊（报销分摊）。
@@ -10,6 +11,7 @@ import { isBillPayment, transactionBillId } from '../ledgerRelations.js'
 import { detachCourseRelations } from './relations.js'
 import { defaultAccount, defaultReminderMinutes, policyDateKey, policyTimeKey } from '../settingsPolicy.js'
 import { eventInputError } from '../events/eventFields.js'
+import { normalizeTimeStages, taskRepeatBase, taskStages } from '../tasks/taskTimePlan.ts'
 
 let lastStamp = 0
 function stamp() {
@@ -193,6 +195,7 @@ export function useDomainCommands() {
       ...(value.actualMinutes !== undefined && value.actualMinutes !== null && value.actualMinutes !== '' && Number.isFinite(actualMinutes) && actualMinutes >= 0
         ? { actualMinutes } : {}),
       ...(value.workCheckpoint ? { workCheckpoint: value.workCheckpoint } : {}),
+      ...(value.timeStages !== undefined ? { timeStages: normalizeTimeStages(value.timeStages) } : {}),
       reminderMinutes: defaultReminderMinutes('task', value.reminderMinutes), repeat,
       ...repeatEndField(repeat, value.repeatEndDate), kind: value.kind || 'todo', ...origin(value),
     }, courses.value)
@@ -201,77 +204,44 @@ export function useDomainCommands() {
     commitTasks()
     return task
   }
-  /**
-   * 生成重复待办的下一期（每天 / 工作日 / 每周 / 每两周 / 每月）。
-   *
-   * 只有真的生成了才写 repeatGeneratedAt —— 原来先写标记再生成，
-   * 一旦 createNextWeeklyTask 返回 null（dueDate 非法等），这个待办
-   * 就带着"已生成"的标记永远不再尝试。
-   *
-   * 判定从 `repeat === 'weekly'` 换成 `repeatsTask(item)`，这样新规则走的是**同一条**
-   * 生成路径而不是各写一份；`repeatsTask` 对未知规则值返回 false，
-   * 于是旧数据/脏数据不会凭空长出新待办。
-   */
-  function spawnNextRepeatTask(item) {
-    const now = stamp()
-    const taskForGeneration = { ...item }
-    if (normalizeTaskRepeat(item.repeat) === 'monthly' && !validAnchorDay(item.repeatAnchorDay)) {
-      // 旧版重复待办没有锚点字段。生成来源链能证明原始月末日时恢复它；
-      // 日期被改过或来源已丢失时，taskRecurrence 会兼容地以当前截止日为锚点。
-      const seen = new Set([item.id])
-      let cursor = item
-      let recoveredAnchor = null
-      while (cursor?.sourceType === 'task-repeat' && cursor.sourceId && !seen.has(cursor.sourceId)) {
-        seen.add(cursor.sourceId)
-        const parent = tasks.value.find((task) => task.id === cursor.sourceId)
-        if (!parent || normalizeTaskRepeat(parent.repeat) !== 'monthly' || !parent.dueDate) break
-        const parentAnchor = validAnchorDay(parent.repeatAnchorDay)
-        const expected = nextRepeatDueDate(parent.dueDate, 'monthly', parentAnchor ? { anchorDay: parentAnchor } : {})
-        if (expected !== cursor.dueDate) break
-        if (parentAnchor) {
-          recoveredAnchor = parentAnchor
-          break
-        }
-        const parentDay = new Date(`${parent.dueDate}T00:00:00`).getDate()
-        const childDay = new Date(`${cursor.dueDate}T00:00:00`).getDate()
-        if (!recoveredAnchor && parentDay > childDay) recoveredAnchor = parentDay
-        cursor = parent
-      }
-      if (recoveredAnchor) taskForGeneration.repeatAnchorDay = recoveredAnchor
-    }
-    const next = createNextRepeatingTask(taskForGeneration)
-    if (!next) return false
-    item.repeatGeneratedAt = now
-    tasks.value.push({ ...next, status: 'pending', updatedAt: now, createdFrom: item.createdFrom || 'manual', sourceType: 'task-repeat', sourceId: item.id })
-    return true
-  }
-  // 两条写路径（updateTask / toggleTask）共用这一句：重复规则或截止日期不合法时一律不生成。
-  function maybeSpawnNextRepeat(item) {
-    if (!repeatsTask(item) || !item.dueDate || item.repeatGeneratedAt) return
-    spawnNextRepeatTask(item)
-  }
   function updateTask(id, value) {
     const item = tasks.value.find((task) => task.id === id)
     if (!item) return null
     const previousRepeat = normalizeTaskRepeat(item.repeat)
-    const previousDueDate = item.dueDate
-    Object.assign(item, value, { updatedAt: stamp() })
+    const previousDueDate = taskRepeatBase(item).date
+    const normalized = 'timeStages' in value ? { ...value, timeStages: normalizeTimeStages(value.timeStages) } : value
+    Object.assign(item, normalized, { updatedAt: stamp() })
     if ('repeat' in value) item.repeat = normalizeTaskRepeat(item.repeat)
     if (item.repeat === 'none') {
       delete item.repeatEndDate
       delete item.repeatAnchorDay
-    } else if (item.repeat === 'monthly' && (item.repeat !== previousRepeat || item.dueDate !== previousDueDate)) {
-      const day = new Date(`${item.dueDate}T00:00:00`).getDate()
+      delete item.repeatGenerationError
+    } else if (item.repeat === 'monthly' && 'repeatAnchorDay' in value) {
+      const anchor = validAnchorDay(value.repeatAnchorDay)
+      if (anchor) item.repeatAnchorDay = anchor
+      else delete item.repeatAnchorDay
+    } else if (item.repeat === 'monthly' && (item.repeat !== previousRepeat || taskRepeatBase(item).date !== previousDueDate)) {
+      const day = new Date(`${taskRepeatBase(item).date}T00:00:00`).getDate()
       if (Number.isInteger(day) && day >= 1 && day <= 31) item.repeatAnchorDay = day
       else delete item.repeatAnchorDay
     } else if (item.repeat !== 'monthly') {
       delete item.repeatAnchorDay
     }
-    if (item.done === true) maybeSpawnNextRepeat(item)
+    if (item.done === true) spawnTaskRepeat(item, tasks.value, stamp())
     commitTasks()
     return item
   }
-  function toggleTask(id) { const item = tasks.value.find((task) => task.id === id); if (!item) return null; const now = stamp(); item.done = !item.done; item.status = item.done ? 'completed' : 'pending'; item.completedAt = item.done ? now : null; item.updatedAt = now; if (item.done) maybeSpawnNextRepeat(item); commitTasks(); return item }
+  function toggleTask(id) { const item = tasks.value.find((task) => task.id === id); if (!item) return null; const now = stamp(); item.done = !item.done; item.status = item.done ? 'completed' : 'pending'; item.completedAt = item.done ? now : null; item.updatedAt = now; if (item.done) spawnTaskRepeat(item, tasks.value, now); commitTasks(); return item }
+  function setTaskStageCompleted(id, stageId, completed = true, finishTask = false) {
+    const item = tasks.value.find((task) => task.id === id)
+    if (!item || item.done || item.status === 'completed' || item.status === 'cancelled' || item.archivedAt) return null
+    const stages = taskStages(item).map((stage) => ({ ...stage }))
+    const stage = stages.find((entry) => entry.id === stageId)
+    if (!stage || stage.completionRequired === false) return null
+    const now = stamp()
+    stage.completedAt = completed ? now : null
+    return updateTask(id, { timeStages: stages, ...(finishTask && completed ? { done: true, status: 'completed', completedAt: now } : {}) })
+  }
   function deleteTask(id) {
     const index = tasks.value.findIndex((item) => item.id === id)
     if (index < 0) return null
@@ -783,5 +753,5 @@ export function useDomainCommands() {
     if (session.todoId) recordTaskFocusSession(session.todoId, session)
     return session
   }
-  return { tasks, courses, milestones, bills, transactions, events, focusSessions, createTask, updateTask, toggleTask, completeTask, deleteTask, restoreDeletedTask, archiveTask, restoreTask, createMilestone, updateMilestone, deleteMilestone, restoreDeletedMilestone, archiveMilestone, restoreMilestone, createEvent, updateEvent, deleteEvent, restoreDeletedEvent, archiveEvent, restoreEvent, createTransaction, updateTransaction, updateTransactionCategories, deleteTransaction, restoreDeletedTransaction, refundTransaction, undoBillPayment, createBill, updateBill, deleteBill, archiveBill, restoreBill, setBillActive, skipBill, deleteCourse, createCourse, replaceCourses, archiveCourse, restoreCourse, recordTaskFocusSession, recordFocusSession, payBill }
+  return { tasks, courses, milestones, bills, transactions, events, focusSessions, createTask, updateTask, toggleTask, completeTask, setTaskStageCompleted, deleteTask, restoreDeletedTask, archiveTask, restoreTask, createMilestone, updateMilestone, deleteMilestone, restoreDeletedMilestone, archiveMilestone, restoreMilestone, createEvent, updateEvent, deleteEvent, restoreDeletedEvent, archiveEvent, restoreEvent, createTransaction, updateTransaction, updateTransactionCategories, deleteTransaction, restoreDeletedTransaction, refundTransaction, undoBillPayment, createBill, updateBill, deleteBill, archiveBill, restoreBill, setBillActive, skipBill, deleteCourse, createCourse, replaceCourses, archiveCourse, restoreCourse, recordTaskFocusSession, recordFocusSession, payBill }
 }

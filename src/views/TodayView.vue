@@ -17,6 +17,9 @@ import { festiveFor } from '../composables/festive.js'
 import { narrativeFor, narrativeLang } from '../composables/narrative.js'
 import MemoryView from '../components/MemoryView.vue'
 import FocusPanel from '../components/FocusPanel.vue'
+// Render the guide with the home route; inserting this small panel after paint
+// pushes every visible home section down on a first visit.
+import HomeProductivityPanel from '../components/HomeProductivityPanel.vue'
 import Modal from '../components/Modal.vue'
 import { useStoredRef } from '../composables/store/index.js'
 import { animationsEnabled } from '../composables/motion.js'
@@ -37,7 +40,6 @@ import { focusLocation } from '../composables/focusNavigation.js'
 import { clearFocusFromRoute, focusElementWhenReady, readFocusQuery } from '../composables/focusNavigation.js'
 import { recordStartupTiming, reportStartupAssetSummary, startupNow } from '../composables/startupDiagnostics.js'
 
-const HomeProductivityPanel = defineAsyncComponent(() => import('../components/HomeProductivityPanel.vue'))
 // Keep campus-social utilities out of the initial home route for guests and until
 // a verified user's calendar section approaches the viewport.
 const SocialCalendarEvents = defineAsyncComponent(() => import('../components/SocialCalendarEvents.vue'))
@@ -282,6 +284,7 @@ function taskDeadline(task) {
 
 /* ---------- 倒计时 / 提醒 ---------- */
 function reminderMeta(item) {
+  if (item.timeSummary) return item.timeSummary
   if (item.kind === 'overdue') return '已逾期'
   if (item.sourceType === 'task') return taskDeadline(item.entity)
   if (item.sourceType === 'bill') return `${dayLabel(item.entity.nextDate)} · ¥${Number(item.entity.amount || 0).toFixed(2)}`
@@ -322,6 +325,7 @@ function nextTitle(item) {
 }
 
 function nextMeta(item) {
+  if (item.timeSummary) return item.timeSummary
   const day = dayLabel(item.date)
   if (item.kind === 'course') return `${day} ${nextUpTimeRange.value}${item.entity.room ? ` · ${item.entity.room}` : ''}`
   if (item.kind === 'bill') return `${day} · ¥${Number(item.entity.amount || 0).toFixed(2)}`

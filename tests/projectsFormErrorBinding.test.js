@@ -37,6 +37,9 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
+import { isRef } from 'vue'
+import ts from 'typescript'
+import { createCollaborationContext } from '../src/composables/collaborationContext.js'
 
 const source = readFileSync(fileURLToPath(new URL('../src/views/ProjectsView.vue', import.meta.url)), 'utf8')
 
@@ -53,25 +56,23 @@ function template() {
 }
 
 function functionBody(name, code = scriptSetup()) {
-  const start = code.indexOf(`function ${name}(`)
-  expect(start, `应能找到 ${name} 函数`).toBeGreaterThan(-1)
-  // 从声明处开始，按花括号配平取出函数体。
-  let depth = 0
-  let seen = false
-  for (let index = start; index < code.length; index += 1) {
-    const char = code[index]
-    if (char === '{') { depth += 1; seen = true }
-    else if (char === '}') {
-      depth -= 1
-      if (seen && depth === 0) return code.slice(start, index + 1)
-    }
-  }
-  throw new Error(`${name} 函数体括号不配平，无法判定`)
+  // 参数解构也包含花括号；用语法树取完整函数，避免把参数误当作函数体。
+  const ast = ts.createSourceFile('ProjectsView.js', code, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS)
+  const declaration = ast.statements.find((node) => ts.isFunctionDeclaration(node) && node.name?.text === name)
+  expect(declaration, `应能找到 ${name} 函数`).toBeDefined()
+  return declaration.getText(ast)
 }
 
 describe('齐行项目表单的错误提示接线', () => {
   it('表单错误位绑独立的 projectFormError，而不是列表级的 pageError', () => {
-    expect(scriptSetup()).toMatch(/const projectFormError = ref\(''\)/)
+    expect(scriptSetup()).toMatch(/const accountContext = createCollaborationContext\(/)
+    expect(scriptSetup()).toMatch(/const projectFormError = accountContext\.state\(''\)/)
+    const context = createCollaborationContext(() => ['fictional-account'])
+    const error = context.state('')
+    expect(isRef(error), '表单错误仍须为独立的响应式 ref').toBe(true)
+    error.value = '虚构的表单校验失败'
+    context.invalidate()
+    expect(error.value, '切换账号时应复位表单错误').toBe('')
 
     const formErrorTag = /<p class="projects-form-error"[^>]*>([\s\S]*?)<\/p>/g
     const bindings = [...template().matchAll(formErrorTag)].map((match) => match[1].trim())
@@ -133,7 +134,11 @@ describe('齐行交付检查说明不会被自动刷新冲掉（接线）', () =
 
   it('切换项目与退出登录时清空草稿', () => {
     expect(functionBody('selectProject')).toMatch(/deliveryEvidenceEdits\.clearAll\(\)/)
-    const signOut = /if \(id\) void refresh\(\)\s*\n\s*else \{[\s\S]*?deliveryEvidenceEdits\.clearAll\(\)/.exec(scriptSetup())
-    expect(signOut, '退出登录时应清空草稿').not.toBeNull()
+    const accountWatch = /watch\(\(\) => accountUser\.value\?\.id, \(id\) => \{([\s\S]*?)\}, \{ immediate: true \}\)/.exec(scriptSetup())
+    expect(accountWatch, '应保留账号切换与退出登录的统一 watcher').not.toBeNull()
+    const clear = accountWatch[1].indexOf('deliveryEvidenceEdits.clearAll()')
+    const refresh = accountWatch[1].indexOf('if (id) void refresh()')
+    expect(clear, '所有账号变化（包括退出）都应清空草稿').toBeGreaterThan(-1)
+    expect(refresh).toBeGreaterThan(clear)
   })
 })

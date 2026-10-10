@@ -2,7 +2,7 @@
 
 本文件记录 `src/style.css` 与 `src/composables/theme.js` 里对外的设计令牌，以及新增令牌时必须遵守的规则。令牌是唯一事实来源，业务样式不应再写硬编码值。
 
-操作反馈使用 `ActionButton.vue` 与 `actionFeedback.js`。常规按钮最小高度 42px；触屏沿用 `--tap-min` 44px；圆角沿用 `--radius-8`。`--action-collapse: 300ms` 同时用于收缩、展开与 SVG 对勾绘制，`--action-fade: 150ms` 用于文案淡出，`--action-ease: ease-in-out` 用于主体变形。`--action-success: #16a34a` 只用于完整成功动画的圆形底色，白色图标按非文本对比度验证；成功文字继续使用 `--success`。失败继续使用 `--danger`，图标统一 22px、2px 描边。JS 时序集中在 `ACTION_TIMING`，业务完成不等待视觉计时器。详见 `docs/INTERACTION_UX_AUDIT.md`。
+操作反馈使用 `ActionButton.vue` 与 `actionFeedback.js`。常规按钮最小高度 42px；触屏沿用 `--tap-min` 44px；圆角沿用 `--radius-8`。`--action-collapse: var(--dur-slow)` 当前为 320ms，用于收缩、展开与 SVG 对勾绘制，`--action-fade: 150ms` 用于文案淡出，`--action-ease: ease-in-out` 用于主体变形。`--action-success: #16a34a` 只用于完整成功动画的圆形底色，白色图标按非文本对比度验证；成功文字继续使用 `--success`。失败继续使用 `--danger`，图标统一 22px、2px 描边。JS 时序集中在 `ACTION_TIMING`，业务完成不等待视觉计时器。详见 `docs/INTERACTION_UX_AUDIT.md`。
 
 ## 1. 颜色令牌
 
@@ -43,7 +43,7 @@
 所有"文字 / 背景"组合必须满足 WCAG 2.x AA：
 
 - 正文（含按钮文字）：**≥ 4.5:1**
-- 大字（≥18.66px 或 ≥14px 粗体）与非文字图形：**≥ 3:1**
+- 大字（≥24 CSS px，或约 ≥18.67 CSS px 粗体）与非文字图形：**≥ 3:1**。大字按 18pt / 14pt 粗体换算，不能把 pt 直接当作 px；参见 [WCAG 1.4.3](https://www.w3.org/WAI/WCAG22/Understanding/contrast-minimum.html)。
 
 校验命令：
 

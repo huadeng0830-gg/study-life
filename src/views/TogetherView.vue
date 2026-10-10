@@ -1,6 +1,7 @@
 <script setup>
 import ActionButton from '../components/ActionButton.vue'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { createCollaborationContext } from '../composables/collaborationContext.js'
 import { accountOpen, accountUser } from '../composables/accountAuth.js'
 import { formatDateTime } from '../composables/intlFormatters.js'
 import { announce as announceLive, announceAlert } from '../composables/liveRegion.js'
@@ -25,53 +26,54 @@ const notificationLabels = {
 const timeZones = ['Asia/Shanghai', 'Asia/Tokyo', 'Asia/Hong_Kong', 'Asia/Singapore', 'UTC', 'Europe/London', 'America/Los_Angeles', 'America/New_York']
 const durationChoices = [90, 120, 180]
 
+const context = createCollaborationContext(() => [accountUser.value?.id || '', Boolean(accountUser.value?.email_confirmed_at)], { onError: (error) => announce('error', error.message) })
 const activeTab = ref('time')
-const pageLoading = ref(false)
-const pageError = ref('')
-const notice = ref(null)
-const profile = ref(null)
+const pageLoading = context.state(false)
+const pageError = context.state('')
+const notice = context.state(null)
+const profile = context.state(null)
 const profileEditorOpen = ref(false)
-const friendRemovalTarget = ref(null)
-const invitationCancellationTarget = ref(null)
-const profileLoading = ref(false)
-const profileSaving = ref(false)
-const profileDraft = ref(blankProfile())
-const friendLoading = ref(false)
-const friendsError = ref('')
-const friends = ref([])
-const incomingRequests = ref([])
-const outgoingRequests = ref([])
-const selectedFriendId = ref('')
-const searchEmail = ref('')
-const searchBusy = ref(false)
-const searched = ref(false)
-const foundProfile = ref(null)
+const friendRemovalTarget = context.state(null)
+const invitationCancellationTarget = context.state(null)
+const profileLoading = context.state(false)
+const profileSaving = context.state(false)
+const profileDraft = context.state(blankProfile)
+const friendLoading = context.state(false)
+const friendsError = context.state('')
+const friends = context.state([])
+const incomingRequests = context.state([])
+const outgoingRequests = context.state([])
+const selectedFriendId = context.state('')
+const searchEmail = context.state('')
+const searchBusy = context.state(false)
+const searched = context.state(false)
+const foundProfile = context.state(null)
 const availabilityDays = ref(7)
-const availability = ref(null)
-const availabilityBusy = ref(false)
-const availabilityError = ref('')
-const selectedSlot = ref(null)
-const composerOpen = ref(false)
-const inviteBusy = ref(false)
+const availability = context.state(null)
+const availabilityBusy = context.state(false)
+const availabilityError = context.state('')
+const selectedSlot = context.state(null)
+const composerOpen = context.state(false)
+const inviteBusy = context.state(false)
 const inviteType = ref('meal')
-const inviteTitle = ref('一起吃饭')
-const inviteLocation = ref('')
-const inviteNote = ref('')
-const inviteStartInput = ref('')
-const inviteEndInput = ref('')
-const invitations = ref([])
-const invitationsBusy = ref(false)
-const invitationsError = ref('')
-const notificationItems = ref([])
-const unreadCount = ref(0)
-const notificationsBusy = ref(false)
-const notificationsError = ref('')
-const proposalInviteId = ref('')
-const proposalOptions = ref([])
+const inviteTitle = context.state('一起吃饭')
+const inviteLocation = context.state('')
+const inviteNote = context.state('')
+const inviteStartInput = context.state('')
+const inviteEndInput = context.state('')
+const invitations = context.state([])
+const invitationsBusy = context.state(false)
+const invitationsError = context.state('')
+const notificationItems = context.state([])
+const unreadCount = context.state(0)
+const notificationsBusy = context.state(false)
+const notificationsError = context.state('')
+const proposalInviteId = context.state('')
+const proposalOptions = context.state([])
 const proposalDays = ref(7)
 const proposalMinMinutes = ref(90)
-const proposalLoading = ref(false)
-const actionBusy = ref('')
+const proposalLoading = context.state(false)
+const actionBusy = context.state('')
 const timezone = computed(() => profile.value?.timezone || profileDraft.value.timezone || 'Asia/Shanghai')
 const hasProfile = computed(() => Boolean(profile.value?.nickname && profile.value?.scheduleCompleteThrough && profile.value?.semesterEnd))
 const selectedFriend = computed(() => friends.value.find((item) => item.profile?.userId === selectedFriendId.value)?.profile || null)
@@ -79,7 +81,7 @@ const intervals = computed(() => availability.value?.intervals || [])
 const canUseSocial = computed(() => Boolean(accountUser.value?.email_confirmed_at))
 const emailDiscoverabilityDisabled = computed(() => !accountUser.value?.email_confirmed_at)
 
-let generation = 0
+let proposalGeneration = 0
 let stopRealtime = null
 let realtimeTimer = 0
 
@@ -156,100 +158,60 @@ const groupedIntervals = computed(() => {
 })
 
 function resetAccountData() {
-  generation++
-  if (stopRealtime) stopRealtime()
+  context.invalidate()
+  proposalGeneration++
+  stopRealtime?.()
   stopRealtime = null
   window.clearTimeout(realtimeTimer)
-  profile.value = null
-  profileDraft.value = blankProfile()
-  friends.value = []
-  incomingRequests.value = []
-  outgoingRequests.value = []
-  selectedFriendId.value = ''
-  availability.value = null
-  invitations.value = []
-  notificationItems.value = []
-  unreadCount.value = 0
-  pageError.value = ''
-  friendsError.value = ''
-  invitationsError.value = ''
-  notificationsError.value = ''
-  // 这些加载标志也必须清掉：generation++ 会让在途请求的 finally 里的
-  // `if (token === generation)` 判定为假，于是它不会替我们复位。少了这一步，
-  // 在账号切换途中退出的那一次加载会把 busy 永久留在 true（页面上就一直显示
-  // 「正在读取好友资料…」或「正在核对双方课表…」）。
-  profileLoading.value = false
-  pageLoading.value = false
-  availabilityBusy.value = false
 }
 
-async function loadProfile(token = generation) {
+async function loadProfile(token) {
   if (!accountUser.value?.id) return
-  profileLoading.value = true
-  try {
+  return context.run(async (isCurrent) => {
     const result = await socialRequest('profile_get')
-    if (token !== generation) return
+    if (!isCurrent()) return
     applyProfile(result.profile)
     pageError.value = ''
-  } catch (error) {
-    if (token === generation) pageError.value = error.message
-  } finally {
-    if (token === generation) profileLoading.value = false
-  }
+  }, { current: token, busy: profileLoading, onError: (error) => { pageError.value = error.message } })
 }
 
-async function loadFriends(token = generation) {
+async function loadFriends(token) {
   if (!canUseSocial.value) return
-  friendLoading.value = true
   friendsError.value = ''
-  try {
+  return context.run(async (isCurrent) => {
     const result = await socialRequest('friends_list')
-    if (token !== generation) return
+    if (!isCurrent()) return
     friends.value = result.friends || []
     incomingRequests.value = result.incoming || []
     outgoingRequests.value = result.outgoing || []
     if (!friends.value.some((item) => item.profile?.userId === selectedFriendId.value)) {
       selectedFriendId.value = friends.value[0]?.profile?.userId || ''
     }
-  } catch (error) {
-    if (token === generation) friendsError.value = error.message
-  } finally {
-    if (token === generation) friendLoading.value = false
-  }
+  }, { current: token, busy: friendLoading, onError: (error) => { friendsError.value = error.message } })
 }
 
-async function loadInvitations(token = generation) {
+async function loadInvitations(token) {
   if (!canUseSocial.value) return
-  invitationsBusy.value = true
   invitationsError.value = ''
-  try {
+  return context.run(async (isCurrent) => {
     const result = await socialRequest('invitations_list')
-    if (token === generation) invitations.value = result.invitations || []
-  } catch (error) {
-    if (token === generation) invitationsError.value = error.message
-  } finally {
-    if (token === generation) invitationsBusy.value = false
-  }
+    if (isCurrent()) invitations.value = result.invitations || []
+  }, { current: token, busy: invitationsBusy, onError: (error) => { invitationsError.value = error.message } })
 }
 
-async function loadNotifications(token = generation) {
+async function loadNotifications(token) {
   if (!canUseSocial.value) return
-  notificationsBusy.value = true
   notificationsError.value = ''
-  try {
+  return context.run(async (isCurrent) => {
     const result = await socialRequest('notifications_list')
-    if (token === generation) {
+    if (isCurrent()) {
       notificationItems.value = result.notifications || []
       unreadCount.value = result.unread || 0
     }
-  } catch (error) {
-    if (token === generation) notificationsError.value = error.message
-  } finally {
-    if (token === generation) notificationsBusy.value = false
-  }
+  }, { current: token, busy: notificationsBusy, onError: (error) => { notificationsError.value = error.message } })
 }
 
-async function refreshAll(token = generation) {
+async function refreshAll(token = context.capture()) {
   if (!canUseSocial.value) return
   await Promise.all([loadFriends(token), loadInvitations(token), loadNotifications(token)])
 }
@@ -257,33 +219,38 @@ async function refreshAll(token = generation) {
 async function onAccountChanged(userId) {
   resetAccountData()
   if (!userId) return
-  const token = generation
+  const token = context.capture()
   pageLoading.value = true
   await loadProfile(token)
-  if (token !== generation) return
+  if (!token()) return
   if (canUseSocial.value) {
     await refreshAll(token)
+    if (!token()) return
     try {
-      stopRealtime = await subscribeSocialNotifications(userId, () => {
+      const unsubscribe = await subscribeSocialNotifications(userId, () => {
+        if (!token()) return
         window.clearTimeout(realtimeTimer)
         realtimeTimer = window.setTimeout(() => {
-          if (token !== generation) return
+          if (!token()) return
           void loadNotifications(token)
           void loadFriends(token)
           void loadInvitations(token)
         }, 250)
       })
+      if (!token()) { unsubscribe?.(); return }
+      stopRealtime = unsubscribe
     } catch (error) {
-      notificationsError.value = error.message || '暂时无法开启实时通知，可手动刷新。'
+      if (token()) notificationsError.value = error.message || '暂时无法开启实时通知，可手动刷新。'
     }
   }
-  pageLoading.value = false
+  if (token()) pageLoading.value = false
 }
 
-watch(() => accountUser.value?.id || '', (userId) => { void onAccountChanged(userId) }, { immediate: true })
+watch(() => [accountUser.value?.id || '', Boolean(accountUser.value?.email_confirmed_at)], ([userId]) => { void onAccountChanged(userId) }, { immediate: true })
 
 async function saveProfile() {
   if (profileSaving.value) return
+  const token = context.capture()
   profileSaving.value = true
   announce('', '')
   try {
@@ -296,55 +263,62 @@ async function saveProfile() {
       semesterEnd: profileDraft.value.semesterEnd,
       availabilityPreferences: profileDraft.value.availabilityPreferences,
     })
+    if (!token()) return
     applyProfile(result.profile)
     announce('success', '资料和可约偏好已保存。')
-    await loadFriends()
+    await loadFriends(token)
   } catch (error) {
-    announce('error', error.message)
-  } finally { profileSaving.value = false }
+    if (token()) announce('error', error.message)
+  } finally { if (token()) profileSaving.value = false }
 }
 
 async function searchByEmail() {
   if (searchBusy.value || !searchEmail.value.trim()) return
+  const token = context.capture()
   searchBusy.value = true
   searched.value = false
   foundProfile.value = null
   announce('', '')
   try {
     const result = await socialRequest('email_search', { email: searchEmail.value.trim() })
+    if (!token()) return
     foundProfile.value = result.profile || null
     searched.value = true
     if (!foundProfile.value) announce('info', '没有找到可添加的用户。对方可能尚未注册、未验证邮箱或关闭了邮箱发现。')
-  } catch (error) { announce('error', error.message) }
-  finally { searchBusy.value = false }
+  } catch (error) { if (token()) announce('error', error.message) }
+  finally { if (token()) searchBusy.value = false }
 }
 
 async function sendFriendRequest() {
   if (!foundProfile.value || actionBusy.value) return
+  const token = context.capture()
   actionBusy.value = `request-${foundProfile.value.userId}`
   announce('', '')
   try {
     const result = await socialRequest('friend_request_send', { targetId: foundProfile.value.userId })
+    if (!token()) return
     announce('success', result.status === 'accepted' || result.status === 'already_friends'
       ? '你们已经成为好友。' : '好友请求已保存并发送，等待对方回应。')
     foundProfile.value = null
     searchEmail.value = ''
-    await loadFriends()
-  } catch (error) { announce('error', error.message) }
-  finally { actionBusy.value = '' }
+    await loadFriends(token)
+  } catch (error) { if (token()) announce('error', error.message) }
+  finally { if (token()) actionBusy.value = '' }
 }
 
 async function respondFriendRequest(request, decision) {
   if (actionBusy.value) return
+  const token = context.capture()
   actionBusy.value = `friend-${request.id}`
   announce('', '')
   try {
     await socialRequest('friend_request_respond', { requestId: request.id, decision })
+    if (!token()) return
     announce('success', decision === 'accept' ? '已添加好友。' : decision === 'reject' ? '已拒绝请求。' : '已撤回请求。')
-    await loadFriends()
-    await loadNotifications()
-  } catch (error) { announce('error', error.message) }
-  finally { actionBusy.value = '' }
+    await loadFriends(token)
+    if (token()) await loadNotifications(token)
+  } catch (error) { if (token()) announce('error', error.message) }
+  finally { if (token()) actionBusy.value = '' }
 }
 
 async function removeFriend(friend) {
@@ -356,14 +330,16 @@ async function confirmRemoveFriend() {
   const friend = friendRemovalTarget.value
   friendRemovalTarget.value = null
   if (actionBusy.value || !friend) return
+  const token = context.capture()
   actionBusy.value = `remove-${friend.userId}`
   announce('', '')
   try {
     await socialRequest('friend_remove', { friendId: friend.userId })
+    if (!token()) return
     announce('success', '好友已移除，共同邀约已取消。')
     await Promise.all([loadFriends(), loadInvitations(), loadNotifications()])
-  } catch (error) { announce('error', error.message) }
-  finally { actionBusy.value = '' }
+  } catch (error) { if (token()) announce('error', error.message) }
+  finally { if (token()) actionBusy.value = '' }
 }
 
 async function queryAvailability(days = availabilityDays.value) {
@@ -374,6 +350,7 @@ async function queryAvailability(days = availabilityDays.value) {
   // 其余加载函数都有这一层守卫（loadFriends 等用 generation、齐行 loadProject 用
   // detailLoadSequence + selectedProjectId），这里补齐。
   const friendId = selectedFriendId.value
+  const token = context.capture()
   availabilityDays.value = days
   availabilityBusy.value = true
   availabilityError.value = ''
@@ -383,14 +360,15 @@ async function queryAvailability(days = availabilityDays.value) {
   announce('', '')
   try {
     await ensureSocialScheduleReady()
+    if (!token() || selectedFriendId.value !== friendId) return
     const result = await socialRequest('availability_query', { friendId, days })
-    if (selectedFriendId.value !== friendId) return
+    if (!token() || selectedFriendId.value !== friendId) return
     availability.value = result
     if (!result.known) availabilityError.value = '暂时无法确认双方在这段日期内的课表是否完整。请检查课表完整日期和同步状态。'
     else if (!result.intervals?.length) availabilityError.value = ''
   } catch (error) {
-    if (selectedFriendId.value === friendId) availabilityError.value = error.message
-  } finally { availabilityBusy.value = false }
+    if (token() && selectedFriendId.value === friendId) availabilityError.value = error.message
+  } finally { if (token()) availabilityBusy.value = false }
 }
 
 function chooseSlot(slot) {
@@ -425,34 +403,36 @@ watch(inviteType, (type) => {
 
 async function createInvitation() {
   if (!canSubmitInvitation.value || inviteBusy.value || !selectedFriendId.value) return
+  const token = context.capture()
+  const payload = {
+    guestId: selectedFriendId.value, activityType: inviteType.value, title: inviteTitle.value.trim(),
+    startsAt: new Date(inviteStartEpoch.value).toISOString(), endsAt: new Date(inviteEndEpoch.value).toISOString(),
+    location: inviteLocation.value, note: inviteNote.value,
+  }
   inviteBusy.value = true
   announce('', '')
   try {
     await ensureSocialScheduleReady()
-    await socialRequest('invitation_create', {
-      guestId: selectedFriendId.value,
-      activityType: inviteType.value,
-      title: inviteTitle.value.trim(),
-      startsAt: new Date(inviteStartEpoch.value).toISOString(),
-      endsAt: new Date(inviteEndEpoch.value).toISOString(),
-      location: inviteLocation.value,
-      note: inviteNote.value,
-    })
+    if (!token() || selectedFriendId.value !== payload.guestId) return
+    await socialRequest('invitation_create', payload)
+    if (!token()) return
     composerOpen.value = false
     selectedSlot.value = null
     activeTab.value = 'invitations'
     announce('success', '邀约已保存并发送给好友。')
     await Promise.all([loadInvitations(), loadNotifications()])
-  } catch (error) { announce('error', error.message) }
-  finally { inviteBusy.value = false }
+  } catch (error) { if (token()) announce('error', error.message) }
+  finally { if (token()) inviteBusy.value = false }
 }
 
 async function runInvitationAction(invite, decision) {
   if (actionBusy.value) return
+  const token = context.capture()
   actionBusy.value = `invite-${invite.id}-${decision}`
   announce('', '')
   try {
     if (['accept', 'accept_change', 'propose_change'].includes(decision)) await ensureSocialScheduleReady()
+    if (!token()) return
     const payload = { invitationId: invite.id, decision }
     if (decision === 'propose_change') {
       const option = proposalOptions.value[0]
@@ -461,14 +441,15 @@ async function runInvitationAction(invite, decision) {
       payload.endsAt = option.endsAt
     }
     await socialRequest('invitation_respond', payload)
+    if (!token()) return
     announce('success', decision === 'accept' ? '邀约已确认，并加入双方日程。'
       : decision === 'decline' ? '已回复不能参加。'
         : decision === 'propose_change' ? '改约时间已发给发起人，等待确认。'
           : decision === 'accept_change' ? '改约已确认，双方日程已更新。' : '已拒绝改约。')
     proposalInviteId.value = ''
     await Promise.all([loadInvitations(), loadNotifications()])
-  } catch (error) { announce('error', error.message) }
-  finally { actionBusy.value = '' }
+  } catch (error) { if (token()) announce('error', error.message) }
+  finally { if (token()) actionBusy.value = '' }
 }
 
 function cancelInvitation(invite) {
@@ -480,19 +461,23 @@ async function confirmCancelInvitation() {
   const invite = invitationCancellationTarget.value
   invitationCancellationTarget.value = null
   if (actionBusy.value || !invite) return
+  const token = context.capture()
   actionBusy.value = `invite-${invite.id}-cancel`
   announce('', '')
   try {
     await socialRequest('invitation_cancel', { invitationId: invite.id })
+    if (!token()) return
     announce('success', '邀约已取消，并从双方日程中移除。')
     await Promise.all([loadInvitations(), loadNotifications()])
-  } catch (error) { announce('error', error.message) }
-  finally { actionBusy.value = '' }
+  } catch (error) { if (token()) announce('error', error.message) }
+  finally { if (token()) actionBusy.value = '' }
 }
 
 async function openProposalPicker(invite) {
   const friendId = invite.peer?.user_id
   if (!friendId) return
+  const token = context.capture()
+  const proposalToken = ++proposalGeneration
   if (proposalInviteId.value === invite.id) { proposalInviteId.value = ''; return }
   proposalInviteId.value = invite.id
   proposalOptions.value = []
@@ -500,52 +485,60 @@ async function openProposalPicker(invite) {
   proposalDays.value = 7
   try {
     await ensureSocialScheduleReady()
+    if (!token() || proposalToken !== proposalGeneration || proposalInviteId.value !== invite.id) return
     const result = await socialRequest('availability_query', { friendId, days: 7 })
+    if (!token() || proposalToken !== proposalGeneration || proposalInviteId.value !== invite.id) return
     if (!result.known) throw new Error('双方课表范围尚不完整，暂时无法提出改约。')
     proposalMinMinutes.value = result.minimumMinutes || 90
     proposalOptions.value = (result.intervals || []).map((item) => ({ startsAt: item.startsAt, endsAt: new Date(Math.min(Date.parse(item.endsAt), Date.parse(item.startsAt) + proposalMinMinutes.value * 60_000)).toISOString() }))
-  } catch (error) { announce('error', error.message) }
-  finally { proposalLoading.value = false }
+  } catch (error) { if (token() && proposalToken === proposalGeneration) announce('error', error.message) }
+  finally { if (token() && proposalToken === proposalGeneration) proposalLoading.value = false }
 }
 
 async function expandProposalDays(days) {
   const invite = invitations.value.find((item) => item.id === proposalInviteId.value)
   if (!invite?.peer?.user_id || proposalLoading.value) return
+  const token = context.capture()
+  const proposalToken = ++proposalGeneration
   proposalDays.value = days
   proposalLoading.value = true
   proposalOptions.value = []
   try {
     await ensureSocialScheduleReady()
+    if (!token() || proposalToken !== proposalGeneration || proposalInviteId.value !== invite.id) return
     const result = await socialRequest('availability_query', { friendId: invite.peer.user_id, days })
+    if (!token() || proposalToken !== proposalGeneration || proposalInviteId.value !== invite.id) return
     if (!result.known) throw new Error('双方课表范围尚不完整，暂时无法提出改约。')
     proposalMinMinutes.value = result.minimumMinutes || 90
     proposalOptions.value = (result.intervals || []).map((item) => ({ startsAt: item.startsAt, endsAt: new Date(Math.min(Date.parse(item.endsAt), Date.parse(item.startsAt) + proposalMinMinutes.value * 60_000)).toISOString() }))
-  } catch (error) { announce('error', error.message) }
-  finally { proposalLoading.value = false }
+  } catch (error) { if (token() && proposalToken === proposalGeneration) announce('error', error.message) }
+  finally { if (token() && proposalToken === proposalGeneration) proposalLoading.value = false }
 }
 
 async function markNotificationsRead() {
   const ids = notificationItems.value.filter((item) => !item.read_at).map((item) => item.id)
   if (!ids.length || notificationsBusy.value) return
+  const token = context.capture()
   notificationsBusy.value = true
   try {
     await socialRequest('notifications_mark_read', { ids })
-    await loadNotifications()
-  } catch (error) { notificationsError.value = error.message }
-  finally { notificationsBusy.value = false }
+    if (token()) await loadNotifications(token)
+  } catch (error) { if (token()) notificationsError.value = error.message }
+  finally { if (token()) notificationsBusy.value = false }
 }
 
 async function refreshCurrentTab() {
+  const token = context.capture()
   announce('', '')
   if (activeTab.value === 'time') {
-    await loadFriends()
-    if (selectedFriendId.value) await queryAvailability(availabilityDays.value)
+    await loadFriends(token)
+    if (token() && selectedFriendId.value) await queryAvailability(availabilityDays.value)
   } else if (activeTab.value === 'invitations') await Promise.all([loadInvitations(), loadNotifications()])
   else await Promise.all([loadFriends(), loadNotifications()])
 }
 
 onBeforeUnmount(() => {
-  generation++
+  context.invalidate()
   stopRealtime?.()
   window.clearTimeout(realtimeTimer)
 })

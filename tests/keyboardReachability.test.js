@@ -370,9 +370,9 @@ describe('可点击元素必须能被键盘触发', () => {
       ({ tag, attrs }) => tag === 'button' && /class="swipe-action"/.test(attrs),
     )
     expect(buttons).toHaveLength(2)
-    for (const { attrs } of buttons) {
-      // 只靠位移藏起来，收起时必须 tabindex=-1，滑开后再放回 0
-      expect(attrs, attrs.replace(/\s+/g, ' ').slice(0, 90)).toMatch(/:tabindex="open \? 0 : -1"/)
-    }
+    // 双向动作仍靠位移隐藏；只能把实际展开的那侧放进 Tab 序。
+    // 运行时的开合与方向切换另由 engineeringFrontendSwipe.test.js 验证。
+    expect(buttons[0].attrs).toContain(':tabindex="open && openDirection === \'left\' ? 0 : -1"')
+    expect(buttons[1].attrs).toContain(':tabindex="open && openDirection === \'right\' ? 0 : -1"')
   })
 })

@@ -1,5 +1,6 @@
 import { policyDateKey, policyDateTime } from '../settingsPolicy.js'
 import { clock } from '../store/core.js'
+import { taskHasTime } from '../tasks/taskTimePlan.ts'
 
 export const TASK_STATUS = Object.freeze({ pending: 'pending', inProgress: 'in_progress', completed: 'completed', cancelled: 'cancelled', archived: 'archived' })
 export const TASK_PLAN_STATE = Object.freeze({ unplanned: 'unplanned', scheduled: 'scheduled', completed: 'completed' })
@@ -33,7 +34,7 @@ export function taskPlanningState(task, now = clock.value) {
   const status = taskStatus(task, now)
   if (status === TASK_STATUS.cancelled || status === TASK_STATUS.archived) return status
   if (status === TASK_STATUS.completed) return TASK_PLAN_STATE.completed
-  if (isTaskActionable(task, now) && task?.dueDate) return TASK_PLAN_STATE.scheduled
+  if (isTaskActionable(task, now) && taskHasTime(task)) return TASK_PLAN_STATE.scheduled
   return TASK_PLAN_STATE.unplanned
 }
 

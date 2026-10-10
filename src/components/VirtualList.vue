@@ -33,7 +33,8 @@ let active = false
 const virtual = computed(() => props.items.length > props.threshold)
 const step = computed(() => Math.max(1, measuredHeight.value + props.gap))
 const windowSize = computed(() => Math.ceil(viewportHeight.value / step.value) + props.overscan * 2)
-const hasItemHeights = computed(() => typeof props.itemHeight === 'function' || Number.isFinite(Number(props.itemHeight)))
+const hasItemHeights = computed(() => typeof props.itemHeight === 'function'
+  || (typeof props.itemHeight === 'number' && Number.isFinite(props.itemHeight) && props.itemHeight > 0))
 
 function resolveItemHeight(item, index) {
   const candidate = typeof props.itemHeight === 'function'

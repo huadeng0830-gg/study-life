@@ -131,7 +131,7 @@ const weekRangeLabel = (week) => `${week.startDate.slice(5)}–${week.lastDate.s
     <section class="card next-week-card">
       <div class="section-head"><div><h2>下周先看</h2><p>来自待办、日程、重要日期和固定账单的去重提醒。</p></div><span>{{ review.nextWeek.length }} 项</span></div>
       <ul v-if="review.nextWeek.length" class="highlight-list">
-        <li v-for="item in review.nextWeek" :key="item.key"><span>{{ item.sourceType === 'task' ? '待办' : item.sourceType === 'event' ? '日程' : item.sourceType === 'milestone' ? '重要日期' : '账单' }}</span><b>{{ item.title }}</b><time>{{ item.date.slice(5) }}<template v-if="item.time"> {{ item.time }}</template></time></li>
+        <li v-for="item in review.nextWeek" :key="item.key"><span>{{ item.sourceType === 'task' ? '待办' : item.sourceType === 'event' ? '日程' : item.sourceType === 'milestone' ? '重要日期' : '账单' }}</span><b>{{ item.title }}<small v-if="item.timeLabel">{{ item.timeLabel }}</small></b><time>{{ item.date.slice(5) }}<template v-if="item.time"> {{ item.time }}</template></time></li>
       </ul>
       <p v-else class="empty-hint">下周还没有需要提前看的事项。</p>
     </section>
@@ -204,6 +204,7 @@ const weekRangeLabel = (week) => `${week.startDate.slice(5)}–${week.lastDate.s
 .highlight-list li { display: grid; grid-template-columns: 42px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 9px 10px; border-radius: var(--radius-9); background: var(--bg-tint); }
 .highlight-list li > span { color: var(--primary); font-size: var(--fs-11); font-weight: var(--fw-750); }
 .highlight-list b { overflow: hidden; font-size: var(--fs-13); text-overflow: ellipsis; white-space: nowrap; }
+.highlight-list b small { display: block; margin-top: 4px; color: var(--ink-faint); font-size: var(--fs-11); font-weight: var(--fw-400); white-space: normal; overflow-wrap: anywhere; }
 .highlight-list time { color: var(--ink-faint); font-size: var(--fs-11); font-variant-numeric: tabular-nums; }
 .empty-hint { margin-top: 16px; color: var(--ink-faint); font-size: var(--fs-13); }
 .review-insights { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }

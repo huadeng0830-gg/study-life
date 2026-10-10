@@ -124,12 +124,12 @@ function onPointerMove(event) {
     horizontal = true
   }
   event.preventDefault?.()
-  const direction = dx < 0 || originOffset < 0 ? 'left' : 'right'
+  const direction = originOffset < 0 ? 'left' : originOffset > 0 ? 'right' : dx < 0 ? 'left' : 'right'
   const hasActions = direction === 'left' ? leftActions.value.length : rightActions.value.length
   const raw = originOffset + dx
   const distance = distanceFor(direction)
   const next = hasActions
-    ? Math.max(-distance, Math.min(0, raw))
+    ? direction === 'right' ? Math.max(0, Math.min(distance, raw)) : Math.max(-distance, Math.min(0, raw))
     : raw * 0.16
   setOffset(next, false, direction)
   suppressClick = Math.abs(dx) > GESTURE_THRESHOLD
@@ -141,7 +141,7 @@ function onPointerEnd(event) {
   const direction = offset < 0 ? 'left' : 'right'
   const distance = distanceFor(direction)
   const hasActions = direction === 'left' ? leftActions.value.length : rightActions.value.length
-  const opening = !wasOpen && direction === 'left'
+  const opening = !wasOpen
   const shouldOpen = hasActions && horizontal && (
     opening
       ? Math.abs(offset) >= distance * SNAP_RATIO
@@ -198,7 +198,7 @@ onBeforeUnmount(() => {
         type="button"
         class="swipe-action"
         :class="action.tone || 'primary'"
-        :tabindex="open ? 0 : -1"
+        :tabindex="open && openDirection === 'left' ? 0 : -1"
         :aria-label="action.ariaLabel || action.label"
         @click.stop="onAction(action)"
       >{{ action.label }}</button>
@@ -210,7 +210,7 @@ onBeforeUnmount(() => {
         type="button"
         class="swipe-action"
         :class="action.tone || 'primary'"
-        :tabindex="open ? 0 : -1"
+        :tabindex="open && openDirection === 'right' ? 0 : -1"
         :aria-label="action.ariaLabel || action.label"
         @click.stop="onAction(action)"
       >{{ action.label }}</button>

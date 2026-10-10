@@ -481,6 +481,8 @@ async function chooseDefaultEventStartTime(formModal, settle) {
   const wheelOverlay = [...document.querySelectorAll('.overlay')].find((overlay) => overlay.querySelector('.time-wheel'))
   buttonByText(wheelOverlay, '确定').click()
   await settle()
+  buttonByText(formModal(), '60 分钟').click()
+  await settle()
 }
 
 /**
@@ -498,7 +500,7 @@ function overlayIndex(predicate) {
 
 function expectConfirmAbove(label, lowerSelector) {
   const lower = overlayIndex((overlay) => overlay.querySelector(lowerSelector))
-  const confirm = overlayIndex((overlay) => overlay.querySelector('.modal-foot'))
+  const confirm = overlayIndex((overlay) => overlay.querySelector('.message') && overlay.querySelector('.modal-foot'))
   expect(lower, `${label}：底层浮层应当存在`).toBeGreaterThanOrEqual(0)
   expect(confirm, `${label}：确认框浮层应当存在`).toBeGreaterThanOrEqual(0)
   expect(confirm, `${label}：确认框必须排在底层浮层之后，否则会被它盖住`).toBeGreaterThan(lower)
@@ -506,6 +508,7 @@ function expectConfirmAbove(label, lowerSelector) {
 
 /** 未来 30 天，保证落在"已安排 / 即将到来"筛选里且与运行日期无关。 */
 const FUTURE = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+const occupiedStage = (start, end) => [{ id: 'example-occupied', label: '实际执行', kind: 'scheduled', start: { date: FUTURE, time: start }, end: { date: FUTURE, time: end }, reminders: [] }]
 
 describe('行为层：确认与取消都要真的分叉', () => {
   it('旧笔记路由回到首页并清除退役笔记数据', async () => {
@@ -603,7 +606,7 @@ describe('行为层：确认与取消都要真的分叉', () => {
   it('冲突继续保存：取消不写数据，确认才写入（且确认键是 primary 不是危险键）', async () => {
     // 只有显式安排了时间的事项才参与冲突检测；这里用重叠时段验证确认流程。
     localStorage.setItem('sl_tasks', JSON.stringify([
-      { id: 't1', title: '写高数作业', status: 'pending', done: false, dueDate: FUTURE, dueTime: '09:00', createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z' },
+      { id: 't1', title: '写高数作业', status: 'pending', done: false, dueDate: FUTURE, dueTime: '09:00', timeStages: occupiedStage('09:00', '10:00'), createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z' },
     ]))
     localStorage.setItem('sl_events', JSON.stringify([]))
     const { main, settle } = await boot('/events')
@@ -656,8 +659,8 @@ describe('行为层：确认与取消都要真的分叉', () => {
   it('待办冲突继续保存：取消不改数据，确认才落盘（同样叠在表单之上）', async () => {
     // 两条同一天、明确安排在重叠时段的待办 → 编辑保存时应要求确认。
     localStorage.setItem('sl_tasks', JSON.stringify([
-      { id: 't1', title: '交作业', status: 'pending', done: false, dueDate: FUTURE, dueTime: '10:00', createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z' },
-      { id: 't2', title: '写报告', status: 'pending', done: false, dueDate: FUTURE, dueTime: '10:30', createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z' },
+      { id: 't1', title: '交作业', status: 'pending', done: false, dueDate: FUTURE, dueTime: '10:00', timeStages: occupiedStage('10:00', '11:00'), createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z' },
+      { id: 't2', title: '写报告', status: 'pending', done: false, dueDate: FUTURE, dueTime: '10:30', timeStages: occupiedStage('10:30', '11:30'), createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z' },
     ]))
     const { main, settle } = await boot('/tasks')
 
@@ -699,7 +702,7 @@ describe('行为层：确认与取消都要真的分叉', () => {
 
   it('冲突确认框上按 Escape：只关最上层，表单不关、数据不动、页面锁不解除', async () => {
     localStorage.setItem('sl_tasks', JSON.stringify([
-      { id: 't1', title: '写高数作业', status: 'pending', done: false, dueDate: FUTURE, dueTime: '09:00', createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z' },
+      { id: 't1', title: '写高数作业', status: 'pending', done: false, dueDate: FUTURE, dueTime: '09:00', timeStages: occupiedStage('09:00', '10:00'), createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z' },
     ]))
     localStorage.setItem('sl_events', JSON.stringify([]))
     const { main, settle } = await boot('/events')

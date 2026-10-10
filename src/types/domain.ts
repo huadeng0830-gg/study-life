@@ -55,6 +55,33 @@ export interface TaskWorkCheckpoint {
   updatedAt?: string
 }
 
+export interface TaskStageBoundary {
+  date: string
+  /** 缺省表示时刻待定，不能作为午夜的精确安排。 */
+  time?: string
+}
+
+export interface TaskStageReminder {
+  id: string
+  anchor: 'start' | 'end'
+  minutesBefore: number
+  enabled: boolean
+  /** 只有日期的端点使用用户可见的提醒时刻。 */
+  dateOnlyTime?: string
+}
+
+export interface TaskTimeStage {
+  id: string
+  label: string
+  kind: 'window' | 'scheduled'
+  start?: TaskStageBoundary
+  end?: TaskStageBoundary
+  allDay?: boolean
+  completionRequired?: boolean
+  completedAt?: string | null
+  reminders?: TaskStageReminder[]
+}
+
 export interface Task {
   id: string
   title: string
@@ -63,6 +90,7 @@ export interface Task {
   courseId?: string
   dueDate?: string
   dueTime?: string
+  timeStages?: TaskTimeStage[]
   priority?: 'high' | 'normal' | 'low'
   completedAt?: string | null
   createdAt?: string
@@ -84,6 +112,8 @@ export interface Task {
   /** 重复截止日期（含当天），`YYYY-MM-DD`。缺省 / 空串 = 一直重复。只在 `repeat !== 'none'` 时有意义。 */
   repeatEndDate?: string
   repeatAnchorDay?: number | null
+  /** 下一期时刻无效时保留当前完成事实，并显示重新安排入口。 */
+  repeatGenerationError?: string
   createdFrom?: 'manual' | 'quick-record' | 'ocr' | 'clipboard' | 'import'
   sourceType?: string
   sourceId?: string

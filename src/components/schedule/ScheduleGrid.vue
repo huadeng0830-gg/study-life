@@ -113,6 +113,10 @@ function openAdd(day, period) {
 }
 
 function openEdit(course) {
+  if (course.sessionMakeup) {
+    emit('open-adjustments', course.exceptionDate, course.exceptionId)
+    return
+  }
   emit('open-edit', course)
 }
 
@@ -225,7 +229,7 @@ async function onCellKeydown(event, day, periodIndex) {
           @click="openEdit(course)"
         >
           <span class="mobile-course-time">{{ courseTimeRange(course) || coursePeriodText(course) }}</span>
-          <span class="mobile-course-main"><b>{{ course.name }}</b><small>{{ course.room || '未设置地点' }}<template v-if="course.teacher"> · {{ course.teacher }}</template></small><span v-if="courseProgress[course.id]?.pending" class="course-study-badge" :class="{ urgent: courseProgress[course.id]?.overdue }">{{ courseProgress[course.id].overdue ? `${courseProgress[course.id].overdue} 项逾期` : `${courseProgress[course.id].pending} 项待办` }}</span></span>
+          <span class="mobile-course-main"><b>{{ course.name }}<span v-if="course.sessionMakeup" class="makeup-badge">补课</span></b><small>{{ course.room || '未设置地点' }}<template v-if="course.teacher"> · {{ course.teacher }}</template></small><span v-if="courseProgress[course.id]?.pending" class="course-study-badge" :class="{ urgent: courseProgress[course.id]?.overdue }">{{ courseProgress[course.id].overdue ? `${courseProgress[course.id].overdue} 项逾期` : `${courseProgress[course.id].pending} 项待办` }}</span></span>
           <span class="mobile-course-arrow">›</span>
         </button>
       </div>
@@ -298,8 +302,9 @@ async function onCellKeydown(event, day, periodIndex) {
           @click="openEdit(c)"
         >
           <span class="c-name">{{ c.name }}</span>
+          <span v-if="c.sessionMakeup" class="makeup-badge">补课 · {{ coursePeriodText(c) }}</span>
           <span v-if="courseProgress[c.id]?.pending" class="course-study-badge" :class="{ urgent: courseProgress[c.id]?.overdue }">{{ courseProgress[c.id].overdue ? `${courseProgress[c.id].overdue} 项逾期` : `${courseProgress[c.id].pending} 项待办` }}</span>
-          <span class="c-week">{{ weekLabel(c) }}</span>
+          <span class="c-week">{{ c.sessionMakeup ? '仅此日期' : weekLabel(c) }}</span>
           <span v-if="c.room" class="c-sub">@{{ c.room }}</span>
         </div>
       </div>
@@ -365,6 +370,8 @@ async function onCellKeydown(event, day, periodIndex) {
 .mobile-course-main { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .mobile-course-main b { overflow: hidden; font-size: var(--fs-14); line-height: 1.35; }
 .mobile-course-main small { overflow: hidden; color: var(--ink-soft); font-size: var(--fs-11); text-overflow: ellipsis; white-space: nowrap; }
+.makeup-badge { display: inline-block; margin-left: 5px; color: var(--success); font-size: var(--fs-10); font-weight: var(--fw-600); line-height: 1.5; }
+.course > .makeup-badge { margin-left: 0; }
 .mobile-course-arrow { color: var(--ink-faint); font-size: var(--fs-24); text-align: center; }
 .mobile-day-empty { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 24px 4px 6px; color: var(--ink-soft); font-size: var(--fs-13); }
 

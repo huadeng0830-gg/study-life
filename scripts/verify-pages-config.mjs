@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
@@ -21,14 +21,24 @@ const scriptSource = /(?:^|;)\s*script-src\b([^;]*)/i.exec(headers)?.[1] || ''
 if (/(?:^|\s)'unsafe-(?:inline|eval)'(?:\s|$)/i.test(scriptSource)) {
   throw new Error('Content-Security-Policy 的 script-src 不得放行 unsafe-inline 或 unsafe-eval。')
 }
-const declaredHashes = new Set([...headers.matchAll(/'sha256-([^']+)'/g)].map((match) => match[1]))
-const html = readFileSync(htmlPath, 'utf8')
-const inlineScripts = [...html.matchAll(/<script\b((?:(?!\bsrc\s*=)[^>])*)>([\s\S]*?)<\/script\s*>/gi)]
-for (const [, attributes, source] of inlineScripts) {
-  if (/\btype\s*=\s*["']?module\b/i.test(attributes)) continue
-  // HTML input preprocessing normalizes CRLF and CR to LF before the browser
-  // evaluates an inline script. Match that behavior across Windows checkouts.
-  const hash = createHash('sha256').update(source.replace(/\r\n?/g, '\n')).digest('base64')
-  if (!declaredHashes.has(hash)) throw new Error('index.html 的内联启动脚本 SHA-256 与 CSP 不匹配。')
+const declaredHashes = new Set([...scriptSource.matchAll(/'sha256-([^']+)'/g)].map((match) => match[1]))
+function publicHtmlFiles(directory) {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const file = path.join(directory, entry.name)
+    return entry.isDirectory() ? publicHtmlFiles(file) : entry.isFile() && /\.html$/i.test(entry.name) ? [file] : []
+  })
 }
-console.log('✓ Cloudflare Pages 输出目录与安全头配置已核验')
+const htmlFiles = [htmlPath, ...publicHtmlFiles(path.join(ROOT, 'public'))]
+for (const file of htmlFiles) {
+  const html = readFileSync(file, 'utf8')
+  const scripts = [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script\s*>/gi)]
+  for (const [, attributes, source] of scripts) {
+    if (/(?:^|\s)src\s*=/i.test(attributes)) continue
+    // HTML input preprocessing normalizes CRLF and CR to LF before the browser
+    // evaluates any inline classic or module script, including static pages.
+    const hash = createHash('sha256').update(source.replace(/\r\n?/g, '\n')).digest('base64')
+    const relativeFile = path.relative(ROOT, file).split(path.sep).join('/')
+    if (!declaredHashes.has(hash)) throw new Error(`${relativeFile} 的内联脚本 SHA-256 与 CSP script-src 不匹配。`)
+  }
+}
+console.log(`✓ Cloudflare Pages 输出目录与安全头配置已核验（${htmlFiles.length} 个自有 HTML 文件）`)

@@ -1,7 +1,8 @@
-import { ref } from 'vue'
+import { getCurrentScope, onScopeDispose, ref, watch } from 'vue'
 import { MAX_WEEK } from './store'
 import { timeConfig } from './store/timeConfig.js'
 import { useTaskProgress } from './taskProgress.js'
+import { accountDataOwner } from './accountSyncIdentity.js'
 
 // OCR 引擎、版面解析和本地纠错词典只在用户真正选择图片后才下载。
 // 普通查看/编辑课程表不再为这些重模块付出初始化成本。
@@ -102,6 +103,7 @@ export function useScheduleOcrImport({
   let batchOcrController = null
   let lastBatchFiles = []
   let retryableImport = null
+  let importGeneration = 0
 
   async function applyTimetableVocabulary(table) {
     const { applyOcrVocabulary } = await import('./ocrVocabulary.js')
@@ -146,6 +148,9 @@ export function useScheduleOcrImport({
   async function runExcelImport(file) {
     if (batchOcrProgress.state.status === 'running') return
     let cancelled = false
+    const generation = ++importGeneration
+    const owner = accountDataOwner.value
+    const isCurrent = () => !cancelled && generation === importGeneration && owner === accountDataOwner.value
     retryableImport = { type: 'excel', file }
     batchError.value = ''
     batchOcrProgress.start({
@@ -156,7 +161,7 @@ export function useScheduleOcrImport({
     try {
       batchOcrProgress.setStep('read', 'running', `正在读取 ${file.name}`)
       const extracted = await extractExcelTimetable(file)
-      if (cancelled) return
+      if (!isCurrent()) return
       batchOcrProgress.setStep('read', 'completed', '文件已在本机读取，未上传服务器')
       batchOcrProgress.setStep('sheets', 'running', '正在识别课程清单或星期表格')
       if (!extracted.count) throw new Error('没有找到可识别的课程清单或星期表头，请确认文件包含课程名称、星期和节次')
@@ -166,6 +171,7 @@ export function useScheduleOcrImport({
       let table = null
       if (extracted.columns?.length) {
         const structured = await extractTimetable({ columns: extracted.columns, layout: null })
+        if (!isCurrent()) return
         table = structured.table
         importText = table.batchText
         const lineOffset = batchText.value.split(/\r?\n/).filter((line) => line.trim()).length
@@ -173,6 +179,7 @@ export function useScheduleOcrImport({
       }
       if (!importText.trim()) throw new Error('已读到课表，但未能还原课程的周次或节次；请检查单元格是否包含“1-16周”和“1-2节”')
       await loadBatchParser()
+      if (!isCurrent()) return
       const parsed = importText.split(/\r?\n/)
         .map((line, index) => getBatchParserApi().parseBatchLine(line, index + 1, timeConfig, MAX_WEEK))
       const validCount = parsed.filter((row) => row.data).length
@@ -187,7 +194,7 @@ export function useScheduleOcrImport({
       batchOcrProgress.setStep('preview', 'completed', '导入预览已生成，尚未写入课表')
       batchOcrProgress.finish('Excel 课程表已解析，请确认预览', reviewCount ? 'warning' : 'completed')
     } catch (error) {
-      if (cancelled) return
+      if (!isCurrent()) return
       const message = error?.message || 'Excel 课程表读取失败，请检查文件格式后重试'
       batchError.value = message
       batchOcrProgress.fail('structure', message, { retry: true })
@@ -209,6 +216,9 @@ export function useScheduleOcrImport({
     lastBatchFiles = files
     retryableImport = { type: 'image', files }
     const controller = new AbortController()
+    const generation = ++importGeneration
+    const owner = accountDataOwner.value
+    const isCurrent = () => !controller.signal.aborted && generation === importGeneration && owner === accountDataOwner.value
     batchOcrController = controller
     batchOcrProgress.start({
       title: files.length > 1 ? `正在识别 ${files.length} 张课程表` : '正在识别课程表',
@@ -221,7 +231,7 @@ export function useScheduleOcrImport({
     const failures = []
     try {
       for (const [index, file] of files.entries()) {
-        if (controller.signal.aborted) break
+        if (!isCurrent()) return
         try {
         ocrSummary.value = files.length > 1 ? `正在识别第 ${index + 1}/${files.length} 张：${file.name}` : ''
         batchOcrProgress.setStep('read', 'completed', `图片队列已读取，共 ${files.length} 张`)
@@ -230,24 +240,28 @@ export function useScheduleOcrImport({
         try {
           result = await performAccurateOCR(
             file,
-            (event) => handleOcrActivity(batchOcrProgress, event, 'recognize'),
+            (event) => { if (isCurrent()) handleOcrActivity(batchOcrProgress, event, 'recognize') },
             { kind: 'timetable', mode: 'accurate', signal: controller.signal },
           )
         } catch (accurateError) {
+          if (!isCurrent()) return
           if (accurateError?.name === 'AbortError') throw accurateError
           if (import.meta.env.DEV) console.warn('[OCR] 精准课表识别降级为兼容模式', accurateError)
           batchOcrProgress.activity('精准识别不可用，正在切换兼容引擎')
           result = await performLegacyOCR(
             file,
-            (event) => handleOcrActivity(batchOcrProgress, event, 'recognize'),
+            (event) => { if (isCurrent()) handleOcrActivity(batchOcrProgress, event, 'recognize') },
             { signal: controller.signal },
           )
         }
+        if (!isCurrent()) return
         batchOcrProgress.setStep('engine', 'completed', '识别引擎已就绪')
         batchOcrProgress.setStep('recognize', 'completed', `第 ${index + 1}/${files.length} 张文字识别完成`)
         batchOcrProgress.setStep('structure', 'running', '正在分析文字区域、表头与单元格关系')
         const { table, toBatchLine } = await extractTimetable(result)
+        if (!isCurrent()) return
         const vocabularyChanges = await applyTimetableVocabulary(table)
+        if (!isCurrent()) return
         if (vocabularyChanges.length) table.batchText = table.courses.map(toBatchLine).join('\n')
         const lineOffset = batchText.value.split(/\r?\n/).filter((line) => line.trim()).length
         rememberCourseReviews(table.courses, lineOffset)
@@ -266,11 +280,13 @@ export function useScheduleOcrImport({
         const currentReviews = summaries.reduce((sum, item) => sum + item.table.diagnostics.reviewCount, 0)
         batchOcrProgress.setPartial({ 图片: `${summaries.length}/${files.length}`, 课程: currentCourses, 建议确认: currentReviews }, `第 ${index + 1}/${files.length} 张处理完成`)
         } catch (e) {
+          if (!isCurrent()) return
           if (e?.name === 'AbortError') return
           failures.push(`${file.name}：${e.message}`)
           batchOcrProgress.activity(`第 ${index + 1}/${files.length} 张失败，已保留此前结果`)
         }
       }
+      if (!isCurrent()) return
       if (!summaries.length && failures.length) {
         batchError.value = `图片识别失败：${failures.join('；')}`
         const engineFailed = isOcrEngineFailure(batchOcrProgress, failures.join('；'))
@@ -308,9 +324,13 @@ export function useScheduleOcrImport({
 
   // KeepAlive 离开页面不会卸载组件；此时主动取消 OCR，避免它继续占用新页面的 CPU。
   function stopOcr() {
+    importGeneration += 1
     if (batchOcrProgress.state.status === 'running') void batchOcrProgress.cancel()
     else batchOcrController?.abort()
   }
+
+  watch(accountDataOwner, stopOcr, { flush: 'sync' })
+  if (getCurrentScope()) onScopeDispose(stopOcr)
 
   return {
     showImageCropper,

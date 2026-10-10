@@ -16,6 +16,8 @@ const RETIRED_DATA_KEY_SET = new Set(RETIRED_DATA_KEYS)
 // 应用生命周期内复用同一个连接，避免高频保存时反复开关数据库。
 let vaultPromise = null
 const pendingMirrorWrites = new Map()
+const mirrorVersions = new Map()
+let mirrorSequence = 0
 let mirrorTimer = null
 let flushingMirrors = false
 let mirrorErrorHandler = null
@@ -174,7 +176,9 @@ function deferStartupMirror(keys) {
       const latest = localStorage.getItem(key)
       if (latest !== null) {
         const pending = pendingMirrorWrites.get(key)
-        pendingMirrorWrites.set(key, { raw: latest, allowEmpty: pending?.allowEmpty === true })
+        const version = ++mirrorSequence
+        mirrorVersions.set(key, version)
+        pendingMirrorWrites.set(key, { raw: latest, allowEmpty: pending?.allowEmpty === true, version })
       }
     }
     void flushMirrorWrites()
@@ -322,6 +326,9 @@ async function flushMirrorWrites() {
     if (generation !== mirrorGeneration) return
     const safeEntries = entries
       .filter(([key, value]) => {
+        // A bulk restore or a newer edit may have committed while this batch
+        // awaited IndexedDB. An older snapshot must never overwrite it.
+        if (mirrorVersions.get(key) !== value.version) return false
         if (value.allowEmpty) return true
         const backup = previous.get(key)
         return backup?.value !== value.raw && shouldMirrorValue(value.raw, backup?.value, value)
@@ -357,6 +364,7 @@ async function flushMirrorWrites() {
 export async function clearDataVault() {
   mirrorGeneration += 1
   pendingMirrorWrites.clear()
+  mirrorVersions.clear()
   if (mirrorTimer) window.clearTimeout(mirrorTimer)
   mirrorTimer = null
   const db = await openVault()
@@ -381,7 +389,7 @@ function mirrorDelayFor(failureCount) {
 // 又改了这个键，新值必须优先。
 function requeueMirrorEntries(entries) {
   for (const [key, value] of entries) {
-    if (!pendingMirrorWrites.has(key)) pendingMirrorWrites.set(key, value)
+    if (mirrorVersions.get(key) === value.version && !pendingMirrorWrites.has(key)) pendingMirrorWrites.set(key, value)
   }
 }
 
@@ -476,7 +484,9 @@ export function mirrorLocalValue(key, rawValue, { allowEmpty = false } = {}) {
   if (!managedKey(key) || rawValue === null || rawValue === undefined) return Promise.resolve()
   // 宿主环境已经消失或换人：这次写盘没有可写的地方，连定时器都不要安排。
   if (!mirrorHostAlive()) return Promise.resolve()
-  pendingMirrorWrites.set(key, { raw: rawValue, allowEmpty })
+  const version = ++mirrorSequence
+  mirrorVersions.set(key, version)
+  pendingMirrorWrites.set(key, { raw: rawValue, allowEmpty, version })
   scheduleMirrorFlush()
   return Promise.resolve()
 }
@@ -487,6 +497,10 @@ export async function mirrorLocalValues(records) {
     managedKey(key) && typeof value === 'string'
   )
   if (!entries.length) return
+  for (const [key] of entries) {
+    pendingMirrorWrites.delete(key)
+    mirrorVersions.set(key, ++mirrorSequence)
+  }
   try {
     const db = await openVault()
     if (!db) {

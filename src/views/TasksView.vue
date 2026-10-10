@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, useId, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import EmptyState from '../components/EmptyState.vue'
 import Modal from '../components/Modal.vue'
@@ -11,6 +11,10 @@ import VirtualList from '../components/VirtualList.vue'
 import Toast from '../components/Toast.vue'
 import TaskWorkCheckpointFields from '../components/tasks/TaskWorkCheckpointFields.vue'
 import TaskWorkSession from '../components/tasks/TaskWorkSession.vue'
+import TaskTimeEditor from '../components/tasks/TaskTimeEditor.vue'
+import TaskTimeShift from '../components/tasks/TaskTimeShift.vue'
+import TaskStageAction from '../components/tasks/TaskStageAction.vue'
+import TaskRescheduleDialog from '../components/tasks/TaskRescheduleDialog.vue'
 import LearningNavigation from '../components/learning/LearningNavigation.vue'
 import TaskFocusLink from '../components/learning/TaskFocusLink.vue'
 import { appearance } from '../composables/appearance.js'
@@ -28,7 +32,10 @@ import TaskBoard from '../components/task-views/TaskBoard.vue'
 import TaskCalendar from '../components/task-views/TaskCalendar.vue'
 import { buildTaskBoard, buildTaskMonthGrid, shiftTaskMonth, taskMonthFromQuery, taskMonthLabel, taskViewModeFromQuery } from '../composables/taskViews.js'
 import { TASK_REPEATS, taskRepeatLabel } from '../composables/taskRecurrence.js'
-import { filterTaskWorkspace, isValidPlanningDate, taskWorkspaceSummary } from '../composables/planningViews.js'
+import { filterTaskWorkspace, taskWorkspaceSummary } from '../composables/planningViews.js'
+import { taskHasTime, taskRepeatBase, taskStages, taskTimeSummary } from '../composables/tasks/taskTimePlan.ts'
+import { useTaskStageActions } from '../composables/tasks/useTaskStageActions.ts'
+import { undoTaskTimeShift } from '../composables/tasks/taskTimeShift.ts'
 import { useDebouncedRef } from '../composables/useDebouncedRef.js'
 import { defaultReminderMinutes } from '../composables/settingsPolicy.js'
 
@@ -54,9 +61,6 @@ const priorityFilter = ref('all')
 const periodFilter = ref('all')
 /** @type {import('vue').Ref<import('../types/domain').Task | null>} */
 const rescheduleTarget = ref(null)
-const rescheduleDate = ref('')
-const rescheduleTime = ref('')
-const rescheduleError = ref('')
 /** @type {import('vue').Ref<{ open: boolean, message: string, type: string, actionLabel: string, undoFn?: () => unknown, viewFn?: () => unknown, duration: number }>} */
 const toast = ref({ open: false, message: '', type: 'info', actionLabel: '', duration: 3200 })
 const openSwipeItemId = ref('')
@@ -91,6 +95,7 @@ const {
   errorField,
   titleInput,
   dueDateInput,
+  dueTimeInput,
   repeatEndDateInput,
   estimateInput,
   actualInput,
@@ -104,7 +109,16 @@ const {
   save,
   confirmConflictSave,
   remove,
-} = useTaskEditor({ domain, tasks, courses, events: domain.events, onSaved: (message) => showToast(message, { type: 'success' }) })
+} = useTaskEditor({ domain, tasks, courses, events: domain.events, onSaved: (message, options = {}) => showToast(message, { type: 'success', ...options }) })
+const { completionTarget, completionMessage, toggle: toggleWithStageGuard, confirmWhole, completeStage } = useTaskStageActions({ domain, now: appNow, notify: showToast })
+const repeatBase = computed(() => taskRepeatBase(form.value))
+const editingStageId = ref('')
+const editorFormId = useId()
+
+function applyTimeShift(plan) {
+  Object.assign(form.value, { dueDate: plan.dueDate || '', dueTime: plan.dueTime || '', timeStages: plan.timeStages || [] })
+  clearFormError(errorField.value)
+}
 
 watch(() => [route.path, route.query.new, route.query.courseId], ([path, value, courseId]) => {
   if (path !== '/tasks' || value !== '1') return
@@ -174,7 +188,7 @@ const PRIORITIES = {
 }
 
 const SORTS = [
-  { key: 'due', label: '按截止时间' },
+  { key: 'due', label: '按下一步时间' },
   { key: 'priority', label: '按优先级' },
   { key: 'created', label: '按创建时间' },
 ]
@@ -187,7 +201,7 @@ function toggleDone(event, id) {
 
 function toggleTask(task) {
   if (!task) return
-  domain.toggleTask(task.id)
+  toggleWithStageGuard(task)
 }
 
 function openProjectTask(task) {
@@ -195,9 +209,9 @@ function openProjectTask(task) {
   void router.push({ path: '/projects', query: { project: task.relationId, ...(task.sourceId ? { task: task.sourceId } : {}) } })
 }
 
-function openEditTask(task) {
+function openEditTask(task, stageId = '') {
   if (task?.sourceType === 'project-task') openProjectTask(task)
-  else openPersonalTaskEditor(task)
+  else { editingStageId.value = stageId; openPersonalTaskEditor(task) }
 }
 
 function setTaskStatus(task, status) {
@@ -209,24 +223,22 @@ function setTaskStatus(task, status) {
 function openReschedule(task) {
   if (task?.sourceType === 'project-task') { openProjectTask(task); return }
   rescheduleTarget.value = task
-  rescheduleDate.value = addAppDays(appToday.value, 1)
-  rescheduleTime.value = task.dueTime || ''
-  rescheduleError.value = ''
 }
 
-function saveReschedule() {
+function saveReschedule(plan) {
   if (!rescheduleTarget.value) return
-  if (!isValidPlanningDate(rescheduleDate.value)) {
-    rescheduleError.value = '请选择有效的截止日期'
-    return
-  }
   if (rescheduleTarget.value.sourceType === 'project-task') { openProjectTask(rescheduleTarget.value); rescheduleTarget.value = null; return }
   const target = tasks.value.find((task) => task.id === rescheduleTarget.value.id)
-  if (!target) { rescheduleError.value = '这条待办已不存在，请关闭后刷新列表。'; return }
-  const before = { dueDate: target.dueDate, dueTime: target.dueTime, repeatAnchorDay: target.repeatAnchorDay }
-  domain.updateTask(target.id, { dueDate: rescheduleDate.value, dueTime: rescheduleTime.value })
+  if (!target) return
+  const before = JSON.parse(JSON.stringify({ dueDate: target.dueDate || '', dueTime: target.dueTime || '', timeStages: target.timeStages || [], repeat: target.repeat, repeatAnchorDay: target.repeatAnchorDay || null }))
+  domain.updateTask(target.id, plan)
+  const after = JSON.parse(JSON.stringify({ dueDate: target.dueDate || '', dueTime: target.dueTime || '', timeStages: target.timeStages || [], repeat: target.repeat, repeatAnchorDay: target.repeatAnchorDay || null }))
   rescheduleTarget.value = null
-  showToast('截止日期已重新安排', { type: 'success', actionLabel: '撤销', undoFn: () => domain.updateTask(target.id, before), duration: 6000 })
+  showToast('时间安排已更新', { type: 'success', actionLabel: '撤销', undoFn: () => {
+    const current = tasks.value.find((task) => task.id === target.id)
+    if (!current) return
+    return domain.updateTask(current.id, undoTaskTimeShift(current, before, after))
+  }, duration: 6000 })
 }
 
 function swipeLabel(task, direction) {
@@ -304,6 +316,7 @@ function dueTimestamp(task) {
 
 function dueInfo(task) {
   if (taskStatus(task) === 'completed') return { text: task.completedAt ? `完成于 ${formatAppDate(task.completedAt, { withWeekday: false })}` : '已完成', cls: 'completed' }
+  if (taskStages(task).length) { const plan = taskTimeSummary(task, appNow.value.getTime()); return { text: plan.text, cls: plan.risk ? 'overdue' : '' } }
   if (!task.dueDate) return { text: '无截止日期', cls: '' }
   const today = appToday.value
   const days = appCalendarDaysBetween(today, task.dueDate)
@@ -589,7 +602,7 @@ function updateTaskCheckpointField(field, value) {
     <header class="page-head">
       <div class="page-head-main">
         <h1 class="page-title">待办</h1>
-        <p class="page-desc">把要做的事情放这里，按截止时间轻松管理。</p>
+        <p class="page-desc">记下要做的事，按下一步时间管理截止与阶段安排。</p>
       </div>
       <div class="page-actions">
         <button class="btn btn-ghost" :aria-expanded="showHistory" @click="setHistory">{{ showHistory ? '返回当前' : `历史 ${counts.archived || ''}` }}</button>
@@ -614,8 +627,8 @@ function updateTaskCheckpointField(field, value) {
     <LearningNavigation current="tasks" />
 
     <div v-if="tasks.length && !showHistory" class="task-overview" role="group" aria-label="待办概览">
-      <button type="button" class="card overview-item" :class="{ selected: periodFilter === 'today' }" :aria-pressed="periodFilter === 'today'" @click="selectOverview('today')"><span>今天到期</span><b>{{ workspaceSummary.today }}</b><small>待完成事项</small></button>
-      <button type="button" class="card overview-item overdue-overview" :class="{ selected: periodFilter === 'overdue' }" :aria-pressed="periodFilter === 'overdue'" @click="selectOverview('overdue')"><span>已逾期</span><b>{{ workspaceSummary.overdue }}</b><small>完成或重新安排</small></button>
+      <button type="button" class="card overview-item" :class="{ selected: periodFilter === 'today' }" :aria-pressed="periodFilter === 'today'" @click="selectOverview('today')"><span>今天的安排</span><b>{{ workspaceSummary.today }}</b><small>阶段或截止时间</small></button>
+      <button type="button" class="card overview-item overdue-overview" :class="{ selected: periodFilter === 'overdue' }" :aria-pressed="periodFilter === 'overdue'" @click="selectOverview('overdue')"><span>需要确认</span><b>{{ workspaceSummary.overdue }}</b><small>逾期或阶段已结束</small></button>
       <button type="button" class="card overview-item" :class="{ selected: periodFilter === 'week' }" :aria-pressed="periodFilter === 'week'" @click="selectOverview('week')"><span>未来 7 天</span><b>{{ workspaceSummary.week }}</b><small>含今天</small></button>
       <button type="button" class="card overview-item" :class="{ selected: periodFilter === 'unplanned' }" :aria-pressed="periodFilter === 'unplanned'" @click="selectOverview('unplanned')"><span>待安排日期</span><b>{{ workspaceSummary.unplanned }}</b><small>给想法安排时间</small></button>
     </div>
@@ -644,7 +657,7 @@ function updateTaskCheckpointField(field, value) {
     <section class="card workspace-filters" aria-label="搜索和筛选待办">
       <div class="workspace-search"><label class="sr-only" for="tasks-search">搜索待办</label><input id="tasks-search" v-model="query" type="search" placeholder="搜索待办、课程、备注或下一步" /><button v-if="query" type="button" class="link-btn" aria-label="清除待办搜索" @click="query = ''; searchQuery.flush('')">×</button></div>
       <label class="workspace-select"><span>优先级</span><select v-model="priorityFilter"><option value="all">全部优先级</option><option value="high">高优先级</option><option value="normal">普通</option><option value="low">低优先级</option></select></label>
-      <label v-if="!showHistory" class="workspace-select"><span>范围</span><select :value="periodFilter" @change="changePeriod"><option value="all">全部日期</option><option value="today">今天到期</option><option value="overdue">已逾期</option><option value="week">未来 7 天</option><option value="unplanned">待安排日期</option></select></label>
+      <label v-if="!showHistory" class="workspace-select"><span>范围</span><select :value="periodFilter" @change="changePeriod"><option value="all">全部日期</option><option value="today">今天的安排</option><option value="overdue">逾期或待确认</option><option value="week">未来 7 天</option><option value="unplanned">待安排日期</option></select></label>
       <div class="workspace-result"><span role="status">{{ viewMode === 'list' ? visibleTasks.length : allCurrentTasks.length }} 项待办</span><button v-if="hasWorkspaceFilters" type="button" class="link-btn" @click="resetWorkspaceFilters">清除筛选</button></div>
     </section>
 
@@ -736,16 +749,20 @@ function updateTaskCheckpointField(field, value) {
             </div>
             <p v-if="task.note" :title="task.note">{{ task.note }}</p>
             <p v-if="taskCheckpointCue(task)" class="checkpoint-cue" :title="taskCheckpointCue(task)">{{ taskCheckpointCue(task) }}</p>
+            <p v-if="task.timeStages?.length" class="stage-time-summary" :class="dueInfo(task).cls">{{ dueInfo(task).text }}</p>
+            <!-- sl_tasks 显式提交后父视图重绘；传入快照使子组件也能观察就地状态变更。 -->
+            <TaskStageAction v-if="task.timeStages?.length" :task="{ ...task }" :now-ms="appNow.getTime()" @complete="completeStage(task, $event)" @open="openEditTask(task)" />
+            <p v-if="task.repeatGenerationError" class="stage-time-summary overdue" role="status">{{ task.repeatGenerationError }}</p>
             <button v-if="task.sourceType === 'milestone-review' && task.sourceId" type="button" class="milestone-link" @click.stop="openRelatedMilestone(task)">查看关联重要日期 →</button>
           </div>
 
-          <span class="due" :class="dueInfo(task).cls">{{ dueInfo(task).text }}</span>
+          <span v-if="!task.timeStages?.length" class="due" :class="dueInfo(task).cls">{{ dueInfo(task).text }}</span>
 
           <div class="more" @click.stop>
             <TaskFocusLink v-if="task.sourceType !== 'project-task' && !isArchived(task) && !task.done && task.status !== 'completed' && task.status !== 'cancelled'" :task="task" />
             <button v-if="task.sourceType === 'project-task'" class="link-btn" :aria-label="task.workCheckpoint?.nextStep ? `继续齐行任务：${task.title}` : `打开齐行工作台：${task.title}`" :title="task.workCheckpoint?.nextStep ? '查看齐行上次进度并继续' : '打开齐行工作台'" @click.stop="openProjectTask(task)">{{ task.workCheckpoint?.nextStep ? '继续' : '查看项目' }}</button>
             <button v-if="task.sourceType !== 'project-task' && !isArchived(task) && taskStatus(task) !== 'completed'" class="link-btn continue-link" :aria-label="task.workCheckpoint?.nextStep ? `继续待办：${task.title}` : `开始待办：${task.title}`" :title="task.workCheckpoint?.nextStep ? '查看上次进度并继续' : '开始并记录任务进度'" @click.stop="openTaskWorkSession(task)">{{ task.workCheckpoint?.nextStep ? '继续' : task.status === 'in_progress' ? '工作台' : '开始' }}</button>
-            <button v-if="task.sourceType !== 'project-task' && !isArchived(task) && taskStatus(task) === 'overdue'" class="link-btn reschedule-link" title="重新安排日期" @click.stop="openReschedule(task)">重新安排</button>
+            <button v-if="task.sourceType !== 'project-task' && !isArchived(task) && taskStatus(task) !== 'completed' && taskHasTime(task)" class="link-btn reschedule-link" title="重新安排时间" @click.stop="openReschedule(task)">改期</button>
             <button v-if="task.sourceType !== 'project-task' && isArchived(task)" class="link-btn" aria-label="恢复待办" title="恢复待办" @click="domain.restoreTask(task.id)">↶</button>
             <button v-if="task.sourceType !== 'project-task'" class="link-btn" aria-label="编辑待办" title="编辑待办" @click="openEditTask(task)">✎</button>
             <button v-if="task.sourceType !== 'project-task' && !isArchived(task) && taskStatus(task) === 'completed'" class="link-btn" aria-label="归档待办" title="归档待办" @click="archiveTask(task)">▱</button>
@@ -756,7 +773,7 @@ function updateTaskCheckpointField(field, value) {
     </VirtualList>
 
     <Modal v-if="showForm" :open="showForm" :title="editingId ? '编辑待办' : '添加待办'" @close="showForm = false">
-      <form class="form" novalidate @submit.prevent="save">
+      <form :id="editorFormId" class="form" novalidate @submit.prevent="save">
         <label for="tasks-title">待办内容 *</label>
         <input id="tasks-title" ref="titleInput" v-model="form.title" maxlength="200" placeholder="例如：完成高数第三章作业" :aria-invalid="errorField === 'title' || undefined" :aria-describedby="errorField === 'title' ? 'tasks-form-error' : undefined" @input="clearFormError('title')" />
 
@@ -769,16 +786,18 @@ function updateTaskCheckpointField(field, value) {
         <div class="form-row">
           <div>
             <label for="tasks-due-date">截止日期</label>
-            <input id="tasks-due-date" ref="dueDateInput" v-model="form.dueDate" type="date" :aria-invalid="errorField === 'dueDate' || undefined" :aria-describedby="errorField === 'dueDate' ? 'tasks-form-error' : undefined" @input="clearFormError('dueDate')" />
+            <input id="tasks-due-date" ref="dueDateInput" v-model="form.dueDate" type="date" :aria-invalid="errorField === 'dueDate' || undefined" :aria-describedby="errorField === 'dueDate' ? 'tasks-form-error' : undefined" @input="clearFormError('dueDate'); if (!form.dueDate) form.dueTime = ''" />
           </div>
           <div>
             <label for="tasks-due-time">截止时间</label>
-            <input id="tasks-due-time" v-model="form.dueTime" type="time" :disabled="!form.dueDate" />
+            <input id="tasks-due-time" ref="dueTimeInput" v-model="form.dueTime" type="time" :disabled="!form.dueDate" :aria-invalid="errorField === 'dueTime' || undefined" :aria-describedby="errorField === 'dueTime' ? 'tasks-form-error' : undefined" @input="clearFormError('dueTime')" />
           </div>
         </div>
 
         <div class="date-shortcuts" role="group" aria-label="快速选择截止日期"><button type="button" :aria-pressed="form.dueDate === appToday" @click="setFormDueDate(0)">今天</button><button type="button" :aria-pressed="form.dueDate === addAppDays(appToday, 1)" @click="setFormDueDate(1)">明天</button><button type="button" :aria-pressed="form.dueDate === addAppDays(appToday, 7)" @click="setFormDueDate(7)">一周后</button><button type="button" :aria-pressed="!form.dueDate" @click="setFormDueDate(null)">暂不安排</button></div>
-        <small v-if="!form.dueDate" class="repeat-hint">未设置日期的事项会留在“待安排日期”，随时可以补上。</small>
+        <small v-if="!taskHasTime(form)" class="repeat-hint">未设置日期的事项会留在“待安排日期”，随时可以补上。</small>
+        <TaskTimeEditor v-model="form.timeStages" :error-field="errorField" :focus-stage-id="editingStageId" :now-ms="appNow.getTime()" @change="clearFormError(errorField)" />
+        <TaskTimeShift v-if="taskHasTime(form)" :task="form" :now-ms="appNow.getTime()" @apply="applyTimeShift" @undo="applyTimeShift" />
 
         <label for="tasks-priority">优先级</label>
         <select id="tasks-priority" v-model="form.priority">
@@ -799,8 +818,8 @@ function updateTaskCheckpointField(field, value) {
         <label for="tasks-repeat">重复</label>
         <select id="tasks-repeat" v-model="form.repeat"><option v-for="rule in TASK_REPEATS" :key="rule.value" :value="rule.value">{{ rule.value === 'none' ? rule.label : `${rule.label}（完成后生成下一期）` }}</option></select>
         <label v-if="form.repeat !== 'none'" for="tasks-repeat-end">重复结束日期</label>
-        <input v-if="form.repeat !== 'none'" id="tasks-repeat-end" ref="repeatEndDateInput" v-model="form.repeatEndDate" type="date" :min="form.dueDate || undefined" :disabled="!form.dueDate" :aria-invalid="errorField === 'repeatEndDate' || undefined" :aria-describedby="errorField === 'repeatEndDate' ? 'tasks-form-error' : undefined" @input="clearFormError('repeatEndDate')" />
-        <small v-if="form.repeat !== 'none'" class="repeat-hint">完成后按重复规则生成下一期；需要设置截止日期，结束日期含当天，留空则持续重复。</small>
+        <input v-if="form.repeat !== 'none'" id="tasks-repeat-end" ref="repeatEndDateInput" v-model="form.repeatEndDate" type="date" :min="repeatBase.date || undefined" :disabled="!repeatBase.date" :aria-invalid="errorField === 'repeatEndDate' || undefined" :aria-describedby="errorField === 'repeatEndDate' ? 'tasks-form-error' : undefined" @input="clearFormError('repeatEndDate')" />
+        <small v-if="form.repeat !== 'none'" class="repeat-hint">完成事项后，所有阶段一起进入下一期。基准：{{ repeatBase.label }}{{ repeatBase.date ? `（${repeatBase.date}）` : '，请填写阶段或截止日期' }}；结束日期含当天，留空持续重复。</small>
 
         <label for="tasks-reminder">提前提醒（分钟）</label>
         <input id="tasks-reminder" ref="reminderInput" v-model="form.reminderMinutes" type="number" min="0" step="1" :disabled="!form.dueDate" :placeholder="`默认提前 ${defaultTaskReminder} 分钟`" :aria-invalid="errorField === 'reminderMinutes' || undefined" aria-describedby="tasks-reminder-hint" @input="clearFormError('reminderMinutes')" />
@@ -810,12 +829,14 @@ function updateTaskCheckpointField(field, value) {
         <TaskWorkCheckpointFields :form="form" :task="tasks.find((task) => task.id === editingId)" :editing="Boolean(editingId)" @update:field="updateTaskCheckpointField" />
 
         <p v-if="error" id="tasks-form-error" class="error" role="alert">{{ error }}</p>
+      </form>
+      <template #foot>
         <div class="actions">
           <button v-if="editingId" type="button" class="btn btn-danger" @click="remove">删除</button>
           <button type="button" class="btn" @click="showForm = false">取消</button>
-          <button type="submit" class="btn btn-primary">保存</button>
+          <button type="submit" :form="editorFormId" class="btn btn-primary">保存</button>
         </div>
-      </form>
+      </template>
     </Modal>
 
     <TaskWorkSession :open="Boolean(workSessionTask)" :task="workSessionTask" :checkpoint="workSessionTask?.workCheckpoint" :form="workSessionDraft"
@@ -841,16 +862,8 @@ function updateTaskCheckpointField(field, value) {
       @close="saveConflict = null"
       @confirm="confirmConflictSave"
     />
-    <Modal v-if="rescheduleTarget" :open="Boolean(rescheduleTarget)" title="重新安排日期" @close="rescheduleTarget = null">
-      <form class="reschedule-form" novalidate @submit.prevent="saveReschedule">
-        <p>为“{{ rescheduleTarget.title }}”选择一个新的截止日期。</p>
-        <label>新的截止日期<input v-model="rescheduleDate" type="date" :aria-invalid="Boolean(rescheduleError) || undefined" @input="rescheduleError = ''" /></label>
-        <div class="date-shortcuts" role="group" aria-label="快速重新安排日期"><button type="button" @click="rescheduleDate = appToday; rescheduleError = ''">今天</button><button type="button" @click="rescheduleDate = addAppDays(appToday, 1); rescheduleError = ''">明天</button><button type="button" @click="rescheduleDate = addAppDays(appToday, 7); rescheduleError = ''">一周后</button></div>
-        <label>截止时间（选填）<input v-model="rescheduleTime" type="time" /></label>
-        <p v-if="rescheduleError" class="error" role="alert">{{ rescheduleError }}</p>
-        <div class="actions"><button type="button" class="btn" @click="rescheduleTarget = null">取消</button><button type="submit" class="btn btn-primary">保存日期</button></div>
-      </form>
-    </Modal>
+    <TaskRescheduleDialog v-if="rescheduleTarget" :task="rescheduleTarget" :today="appToday" :now-ms="appNow.getTime()" :existing-items="[...tasks, ...domain.events.value]" @close="rescheduleTarget = null" @save="saveReschedule" />
+    <ConfirmDialog v-if="completionTarget" :open="Boolean(completionTarget)" title="完成整个事项" :message="completionMessage" confirm-label="直接完成事项" cancel-label="继续处理阶段" tone="primary" @close="completionTarget = null" @confirm="confirmWhole" />
     <Toast v-model:open="toast.open" :message="toast.message" :type="toast.type" :action-label="toast.actionLabel" :undo-fn="toast.undoFn" :view-fn="toast.viewFn" :duration="toast.duration" @action="() => {}" @close="toast.open = false" />
   </div>
 </template>

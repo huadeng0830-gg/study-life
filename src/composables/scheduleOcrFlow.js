@@ -10,10 +10,11 @@
  * 实例。放在一个模块里，三处共用一份缓存，也不必再为了拿 api 互相 import。
  */
 
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import { useTaskProgress } from './taskProgress.js'
 import { timeConfig } from './store/timeConfig.js'
 import { importError } from './timeSettingsShared.js'
+import { accountDataOwner } from './accountSyncIdentity.js'
 import {
   countTargetModes,
   modesText,
@@ -36,6 +37,7 @@ async function performLegacyOCR(...args) {
 
 export const scheduleOcrProgress = useTaskProgress()
 let scheduleOcrController = null
+let scheduleOcrGeneration = 0
 let lastScheduleMode = 'auto'
 
 // 识别解析器和识别 API 只在需要时加载
@@ -111,6 +113,9 @@ export async function runParseImage(file, mode = 'auto') {
   lastScheduleImage.value = file
   lastScheduleMode = mode
   const controller = new AbortController()
+  const generation = ++scheduleOcrGeneration
+  const owner = accountDataOwner.value
+  const isCurrent = () => !controller.signal.aborted && generation === scheduleOcrGeneration && owner === accountDataOwner.value
   scheduleOcrController = controller
   scheduleOcrProgress.start({
     title: mode === 'accurate' ? '正在精准识别作息表' : '正在识别作息表',
@@ -119,7 +124,7 @@ export async function runParseImage(file, mode = 'auto') {
   })
   scheduleOcrProgress.setStep('read', 'running', `正在读取 ${file.name}`)
   try {
-    const onProgress = (event) => handleOcrActivity(scheduleOcrProgress, event, 'structure')
+    const onProgress = (event) => { if (isCurrent()) handleOcrActivity(scheduleOcrProgress, event, 'structure') }
     // 布局感知引擎能处理普通表格图片；只在质量信号需要时才比较增强效果，
     // 兼容引擎保留为回退方案。
     let result
@@ -130,15 +135,18 @@ export async function runParseImage(file, mode = 'auto') {
         signal: controller.signal,
       })
     } catch (accurateError) {
+      if (!isCurrent()) return
       if (accurateError?.name === 'AbortError') throw accurateError
       scheduleOcrProgress.activity('布局识别暂不可用，正在切换兼容识别')
       result = await performLegacyOCR(file, onProgress, { signal: controller.signal })
     }
+    if (!isCurrent()) return
     scheduleOcrProgress.setStep('read', 'completed', '图片读取完成')
     scheduleOcrProgress.setStep('engine', 'completed', '识别引擎已就绪')
     scheduleOcrProgress.setStep('structure', 'completed', result.structure?.valid ? '表格网格与行结构已恢复' : '已提取文字位置与结构')
     scheduleOcrProgress.setStep('extract', 'running', '正在解析节次与作息组')
     const parser = await loadScheduleParser()
+    if (!isCurrent()) return
     const analysis = parser.parseScheduleOCR(result, {
       campuses: timeConfig.value.campuses,
       seasons: timeConfig.value.seasons,
@@ -154,7 +162,8 @@ export async function runParseImage(file, mode = 'auto') {
     const schemeTotal = analysis.schemes?.length || 1
     scheduleOcrProgress.setStep('extract', 'completed', `发现 ${schemeTotal} 组作息`)
     scheduleOcrProgress.setStep('match', 'running', '正在匹配校区与作息方案')
-    const draftValue = await startRecognition(analysis, file.name)
+    const draftValue = await startRecognition(analysis, file.name, { isCurrent })
+    if (!isCurrent() || !draftValue) return
     scheduleOcrProgress.setStep('match', 'completed', modesText(countTargetModes(draftValue)))
     scheduleOcrProgress.setStep('validate', 'running', '正在检查时间冲突与缺失')
     const reviewSchemes = draftValue.schemes.filter((scheme) => schemeStatus(scheme, timeConfig.value) !== 'ready').length
@@ -166,6 +175,7 @@ export async function runParseImage(file, mode = 'auto') {
     )
     if (result.quality?.warnings?.length) importError.value = `图片质量提示：${result.quality.warnings.join('、')}。精准模式已比较原图、增强图和表格行。`
   } catch (e) {
+    if (!isCurrent()) return
     if (e?.name === 'AbortError') return
     importError.value = e.message ?? '图片识别失败'
     const engineFailed = isOcrEngineFailure(scheduleOcrProgress, importError.value)
@@ -201,7 +211,10 @@ export function continueScheduleResults() {
 
 /** KeepAlive 离开页面不会卸载组件；主动取消 OCR 避免占用 CPU。 */
 export function stopScheduleOcr() {
+  scheduleOcrGeneration += 1
   if (scheduleOcrProgress.state.status === 'running') void scheduleOcrProgress.cancel()
   else scheduleOcrController?.abort()
   lastScheduleImage.value = null
 }
+
+watch(accountDataOwner, stopScheduleOcr, { flush: 'sync' })

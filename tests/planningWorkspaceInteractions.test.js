@@ -77,10 +77,10 @@ describe('重要日期与待办交互', () => {
   })
 
   it('概览筛选逾期，重新安排日期保留工作状态，并可撤销', async () => {
-    buttonWithin(host.querySelector('.task-overview'), '已逾期').click()
+    buttonWithin(host.querySelector('.task-overview'), '需要确认').click()
     await nextTick()
     expect(visibleIds()).toEqual(['overdue'])
-    buttonWithin(host.querySelector('[data-focus-id="overdue"]'), '重新安排').click()
+    buttonWithin(host.querySelector('[data-focus-id="overdue"]'), '改期').click()
     await nextTick()
     const form = document.querySelector('.reschedule-form')
     buttonWithin(form, '一周后').click()

@@ -30,6 +30,7 @@ function createUpdaterController({
   }
 
   let checking = false
+  let checkInFlight = false
   let downloading = false
 
   function setState(patch) {
@@ -110,7 +111,9 @@ function createUpdaterController({
 
   async function check() {
     if (!enabled) return false
-    if (checking || downloading || state.stage === 'ready') return true
+    if (checking || checkInFlight || downloading || state.stage === 'ready') return true
+    checkInFlight = true
+    checking = true
     setState({ stage: 'checking', lastCheckedAt: Date.now(), message: '正在连接桌面更新服务…' })
     try {
       await autoUpdater.checkForUpdates()
@@ -118,6 +121,9 @@ function createUpdaterController({
     } catch {
       handlers.error()
       return false
+    } finally {
+      checkInFlight = false
+      checking = false
     }
   }
 

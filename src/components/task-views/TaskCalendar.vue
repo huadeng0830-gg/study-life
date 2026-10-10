@@ -17,6 +17,7 @@
  */
 import { computed } from 'vue'
 import { taskCalendarCellLabel, taskCalendarRowLabel, taskCalendarDotClass } from '../../composables/taskViews.js'
+import { taskTimeOnDate } from '../../composables/tasks/taskTimePlan.ts'
 
 const props = defineProps({
   /** `YYYY-MM`。 */
@@ -100,13 +101,13 @@ function toggleLabel(task) {
 
     <div v-if="selectedDate" class="cal-detail">
       <b>{{ selectedLabel }}</b>
-      <small>{{ selectedTasks.length }} 条待办到期</small>
-      <p v-if="!selectedTasks.length" class="cal-detail-empty">这一天没有到期的待办。</p>
+      <small>{{ selectedTasks.length }} 条待办安排</small>
+      <p v-if="!selectedTasks.length" class="cal-detail-empty">这一天没有待办安排。</p>
       <div v-for="task in selectedTasks" :key="task.id" class="cd-row" :data-focus-id="task.id">
-        <button type="button" class="cd-main" :aria-label="rowLabel(task)" @click="emit('open', task)">
-          <span class="cd-name">{{ task.title }}</span>
-          <small>{{ dueInfoOf(task).text }}</small>
-        </button>
+        <div class="cd-content">
+          <button type="button" class="cd-main" :aria-label="rowLabel(task)" @click="emit('open', task)"><span class="cd-name">{{ task.title }}</span></button>
+          <button v-for="entry in taskTimeOnDate(task, selectedDate)" :key="entry.key" type="button" class="cd-phase" @click="emit('open', task, entry.stageId)">{{ entry.label }} · {{ entry.anchor === 'occupied' ? entry.rangeText : entry.time || (entry.allDay ? '全天' : '时刻待定') }}{{ entry.completed ? ' · 已完成' : '' }}</button>
+        </div>
         <button
           type="button"
           class="check"
@@ -116,7 +117,7 @@ function toggleLabel(task) {
         >{{ statusOf(task) === 'completed' ? '✓' : '' }}</button>
       </div>
     </div>
-    <p v-else class="cal-hint">点一天，看这天有哪几件事到期。</p>
+    <p v-else class="cal-hint">点一天，查看阶段起止、跨日安排和截止时间。</p>
   </section>
 </template>
 
@@ -271,8 +272,15 @@ function toggleLabel(task) {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.cd-main small {
-  flex: 0 0 auto;
+.cd-content { display: grid; flex: 1; min-width: 0; }
+.cd-phase {
+  display: block;
+  border: 0;
+  background: transparent;
+  padding: 6px 4px;
+  min-height: 32px;
+  text-align: left;
+  overflow-wrap: anywhere;
   color: var(--ink-faint);
   font-size: var(--fs-11);
   font-variant-numeric: tabular-nums;

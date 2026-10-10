@@ -1,5 +1,5 @@
 <script setup>
-import { nextTick, onActivated, onBeforeUnmount, onDeactivated, ref, watch } from 'vue'
+import { nextTick, onActivated, onBeforeUnmount, onDeactivated, ref, useId, watch } from 'vue'
 import {
   createScrollLock,
   initialFocusTarget,
@@ -23,8 +23,6 @@ import { animationsEnabled } from '../composables/motion.js'
  * 与 Modal 共用遮罩栈，所以「弹窗里再开操作菜单」时 Escape 只关最上面一层。
  */
 
-let nextSheetId = 0
-
 const props = defineProps({
   open: Boolean,
   title: String,
@@ -37,7 +35,7 @@ const emit = defineEmits(['select', 'close'])
 
 const panelEl = ref(null)
 const overlayEl = ref(null)
-const titleId = `action-sheet-title-${++nextSheetId}`
+const titleId = `action-sheet-title-${useId()}`
 const entry = { modalEl: panelEl, previousFocus: null, active: false, onBack: () => emit('close') }
 const scrollLock = createScrollLock()
 

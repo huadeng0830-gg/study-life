@@ -136,8 +136,11 @@ async function loadBlurVariant() {
   const target = sourceTarget.value
   const sequence = ++blurVariantSequence
   window.clearTimeout(blurVariantTimer)
+  // A variant belongs to one wallpaper revision. Retire it as soon as that
+  // request changes, including disabled effects and missing/failed replacements.
+  if (blurVariantUrl.value) URL.revokeObjectURL(blurVariantUrl.value)
+  blurVariantUrl.value = ''
   if (!blurEligible.value || !target) {
-    blurVariantUrl.value = ''
     return
   }
   blurVariantTimer = window.setTimeout(async () => {

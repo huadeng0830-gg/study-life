@@ -115,8 +115,11 @@ export function currencySymbol(currency = 'CNY') {
 
 // 相对日期标签：今天 / 昨天 / M月D日。
 export function dayLabel(dateStr) {
-  if (dateStr === dateText()) return '今天'
-  if (dateStr === dateText(new Date(Date.now() - 86400000))) return '昨天'
+  const today = new Date()
+  if (dateStr === dateText(today)) return '今天'
+  const yesterday = new Date(today)
+  yesterday.setDate(yesterday.getDate() - 1)
+  if (dateStr === dateText(yesterday)) return '昨天'
   const d = new Date(dateStr + 'T00:00:00')
   return `${d.getMonth() + 1}月${d.getDate()}日`
 }

@@ -13,9 +13,9 @@
 
 ## 当前基线看哪里
 
-- **当前状态、硬约束、怎么验证** → [`../../HANDOVER.md`](../../HANDOVER.md) 的 §0 与 §1
+- **本次审计范围、问题与未验证边界** → [`../PROJECT_AUDIT.md`](../PROJECT_AUDIT.md)；实际命令与结果见 [`../TEST_REPORT.md`](../TEST_REPORT.md)
 - **对外承诺的能力清单** → [`../../README.md`](../../README.md)（这份是**经过逐条核实的**，没有虚报）
-- **设计令牌的权威值** → [`../../DESIGN_TOKENS.md`](../../DESIGN_TOKENS.md)（43 个令牌与 `src/style.css` 零漂移）
+- **设计令牌的约定** → [`../../DESIGN_TOKENS.md`](../../DESIGN_TOKENS.md)，实际值由 `src/style.css` 和设计令牌测试核对
 
 ## 但请不要删掉这些报告
 

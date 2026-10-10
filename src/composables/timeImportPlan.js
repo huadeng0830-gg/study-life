@@ -11,13 +11,14 @@
  * 否则导入到一半失败时没有可回滚的原数据，"已恢复原数据"会变成空话。
  */
 
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import { timeConfig } from './store/timeConfig.js'
 import { useTaskProgress } from './taskProgress.js'
 import { importError, pasteText, showToast } from './timeSettingsShared.js'
 import { loadPlanDraft, planCampusId, planSeasonId } from './timePlanDraft.js'
 import { clearRecognition, openSchemeDetail, recognitionDraft } from './recognitionSchemes.js'
 import { currentRecognitionApi } from './scheduleOcrFlow.js'
+import { accountDataOwner } from './accountSyncIdentity.js'
 
 export const importPlanOpen = ref(false)
 export const importPlan = ref(null)
@@ -39,6 +40,17 @@ export const importFailed = ref(false)
 export const importProgress = useTaskProgress()
 export const lastImportResult = ref(null)
 export const importPlanScope = ref(null)
+let importPlanContext = null
+let accountGeneration = 0
+const configFingerprint = (cfg = timeConfig.value) => JSON.stringify(cfg)
+const contextIsCurrent = (context) => !context || (context.owner === accountDataOwner.value
+  && context.generation === accountGeneration
+  && context.config === timeConfig.value && context.fingerprint === configFingerprint())
+
+function rejectChangedPlan() {
+  importError.value = '作息已变化，请重新生成导入计划。'
+  importFailed.value = true
+}
 
 export function openImportPlan(scopeSchemeId = null) {
   if (!recognitionDraft.value?.schemes.length) return
@@ -47,11 +59,13 @@ export function openImportPlan(scopeSchemeId = null) {
   importPlanOverrides.value = {}
   planDiffExpanded.value = {}
   importPlan.value = currentRecognitionApi()?.buildImportPlan(recognitionDraft.value, timeConfig.value, {}, scopeSchemeId) ?? null
+  importPlanContext = { owner: accountDataOwner.value, generation: accountGeneration, config: timeConfig.value, fingerprint: configFingerprint() }
   importPlanOpen.value = true
 }
 
 function rebuildPlan() {
   if (!recognitionDraft.value || !importPlan.value) return
+  if (!contextIsCurrent(importPlanContext)) { rejectChangedPlan(); return }
   importPlan.value = currentRecognitionApi()?.buildImportPlan(recognitionDraft.value, timeConfig.value, importPlanOverrides.value, importPlanScope.value) ?? null
 }
 
@@ -103,11 +117,21 @@ const sleep = (ms) => new Promise((resolve) => window.setTimeout(resolve, ms))
 export async function confirmImportPlan() {
   const plan = importPlan.value
   if (!plan?.executable || importRunning.value) return
+  if (!contextIsCurrent(importPlanContext)) { rejectChangedPlan(); return }
   // 新一轮尝试：清掉上一轮的失败态与错误文案。"重试导入"这个出口每点一次都会走到这里，
   // 不清 importError 的话，即使重试成功，下层弹窗仍会挂着上一次的「导入失败，已恢复原数据」。
   importFailed.value = false
   importError.value = ''
   const cfg = timeConfig.value
+  const owner = accountDataOwner.value
+  const generation = accountGeneration
+  let expectedFingerprint = configFingerprint(cfg)
+  const assertCurrent = () => {
+    if (owner === accountDataOwner.value && generation === accountGeneration && cfg === timeConfig.value && expectedFingerprint === configFingerprint(cfg)) return
+    const error = new Error('作息已变化，为保护最新配置已停止导入，请重新生成计划。')
+    error.name = 'TimeImportChangedError'
+    throw error
+  }
   const applied = plan.items.filter((item) => item.action !== 'skip')
   // 守卫必须在置 importRunning 之前。
   // 原来先置 true 再取快照、取不到就 `return` —— 于是 importRunning 永远停在 true：
@@ -138,24 +162,30 @@ export async function confirmImportPlan() {
   try {
     importProgress.setStep('snapshot', 'running')
     await sleep(160)
+    assertCurrent()
     importProgress.setStep('snapshot', 'completed')
     importProgress.setStep('plan', 'running')
     await sleep(120)
+    assertCurrent()
     importProgress.setStep('plan', 'completed')
     for (let index = 0; index < applied.length; index++) {
       importProgress.setStep(`apply-${index}`, 'running')
       await sleep(140)
+      assertCurrent()
       api.applyImportItem(applied[index], cfg)
+      expectedFingerprint = configFingerprint(cfg)
       importProgress.setStep(`apply-${index}`, 'completed')
     }
     cfg.updatedAt = new Date().toISOString()
+    expectedFingerprint = configFingerprint(cfg)
     importProgress.setStep('save', 'running')
     await sleep(120)
+    assertCurrent()
     importProgress.setStep('save', 'completed')
     importProgress.finish(`已成功导入 ${applied.length} 组作息`)
     const replace = applied.filter((item) => item.action === 'replace').length
     const create = applied.length - replace
-    lastImportResult.value = { snapshot, count: applied.length, replace, create, at: Date.now() }
+    lastImportResult.value = { owner, fingerprint: expectedFingerprint, snapshot, count: applied.length, replace, create, at: Date.now() }
     importRunning.value = false
     importPlanOpen.value = false
     clearRecognition()
@@ -163,8 +193,11 @@ export async function confirmImportPlan() {
     refreshDraftIfAffected(applied)
     showToast(`✓ 已成功导入 ${applied.length} 组作息（${replace} 替换 / ${create} 新建），如识别有误可撤销`)
   } catch (e) {
-    currentRecognitionApi()?.restoreTimeConfig(cfg, snapshot)
-    const messageText = `导入失败，已恢复原数据：${e?.message ?? '未知错误'}`
+    if (owner !== accountDataOwner.value || generation !== accountGeneration) return
+    const changed = e?.name === 'TimeImportChangedError'
+    const canRestore = !changed && cfg === timeConfig.value
+    if (canRestore) currentRecognitionApi()?.restoreTimeConfig(cfg, snapshot)
+    const messageText = changed ? e.message : `导入失败，${canRestore ? '已恢复原数据' : '已保留最新配置'}：${e?.message ?? '未知错误'}`
     importProgress.fail('save', messageText)
     importRunning.value = false
     importError.value = messageText
@@ -173,14 +206,32 @@ export async function confirmImportPlan() {
     // 用户看到的是"点确认 → 闪一下 → 又回到列表"，无从判断成没成。
     // 置失败态后计划弹窗原地渲染原因与出口（重试 / 返回计划列表）。
     importFailed.value = true
+  } finally {
+    importRunning.value = false
   }
 }
 
 export function undoLastImport() {
   const result = lastImportResult.value
   if (!result) return
+  if (result.owner !== accountDataOwner.value || result.fingerprint !== configFingerprint()) {
+    lastImportResult.value = null
+    importError.value = '作息已有新的编辑，为保护这些改动，本次导入不能整体撤销。'
+    showToast(importError.value)
+    return
+  }
   currentRecognitionApi()?.restoreTimeConfig(timeConfig.value, result.snapshot)
   lastImportResult.value = null
   if (planSeasonId.value && planCampusId.value) loadPlanDraft(planSeasonId.value, planCampusId.value)
   showToast('已撤销本次导入，恢复到导入前状态')
 }
+
+watch(accountDataOwner, () => {
+  accountGeneration += 1
+  importPlanContext = null
+  lastImportResult.value = null
+  clearRecognition()
+  importError.value = ''
+  importFailed.value = false
+  importProgress.reset()
+}, { flush: 'sync' })

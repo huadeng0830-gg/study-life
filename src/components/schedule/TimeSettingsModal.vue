@@ -68,6 +68,7 @@ import {
 import {
   activeSchemeForQuick,
   activeSchemeId,
+  beginRecognitionSession,
   countTargetModes,
   discardRecognition,
   modesText,
@@ -198,15 +199,17 @@ function toggleImport() {
 
 // ---------- 识别暂存层 / 总览与详情 / 导入计划：已拆到 composables/recognitionSchemes.js、composables/timeImportPlan.js ----------
 
-
 async function runParsePaste() {
+  const session = beginRecognitionSession()
   importError.value = ''
   const analysis = await parseScheduleText(pasteText.value)
+  if (!session()) return
   if (!analysis.rows.length) {
     importError.value = '没有解析到「节次名称 + 时间段」行，示例：第一节 8:00-8:45'
     return
   }
-  const draftValue = await startRecognition(analysis, '粘贴文本')
+  const draftValue = await startRecognition(analysis, '粘贴文本', { session })
+  if (!draftValue || !session()) return
   showToast(`识别完成 · 共 ${draftValue.schemes.length} 组作息（${modesText(countTargetModes(draftValue))}）`)
 }
 

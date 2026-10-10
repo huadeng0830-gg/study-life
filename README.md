@@ -9,16 +9,12 @@
 [🌐 在线体验](https://study-life.pages.dev/) · [📦 GitHub](https://github.com/huadeng0830-gg/study-life)
 
 <!-- RELEASE_STATUS:START -->
-> **当前源码版本**：网页 / PWA `2026年10月09日-版本2` · Windows 桌面版 `1.0.12`
+> **当前源码版本**：网页 / PWA `2026年10月10日-版本2` · Windows 桌面版 `1.0.15`
 > **最近更新**：
-> - 学习入口以课表为中心，课程卡片显示待办与逾期，课程详情可直接记录作业、考试或准备专注
-> - 学习安排利用课表空档联动待办与复习，支持今日、明日和自选日期、冲突复核、加入日程及撤销
-> - 专注带入原任务与下一步，结束后回写实际时长并续记进度，重复复习复用当前待办
-> - 修复账本回顾柱形与月份对齐，触屏点按一次即可切换，滑动不会误选，支持直接选择月份
-> - 统一账本汇率、分摊与退款统计，完善收入回顾、筛选导出、录入校验及固定账单撤销
-> - 清单支持购物、出行等常用模板、多行添加、分类搜索排序与批量管理，复制或重置后可重复使用
-> - 完善清单数量、单价与预算统计，修复新增事项即时刷新、跨清单撤销和全局搜索定位，适配手机与键盘操作
-> - 统一操作反馈：重要保存使用真实结果动画，普通保存快速反馈，长任务保留处理阶段，完善防重、错误重试和移动端焦点
+> - 齐行支持任务筛选和子任务上下文，完善成果自动保存、草稿冲突恢复、提交版本校验及排期时区
+> - 修复切换账号或项目后的旧请求、重复操作与加载状态，完善好友刷新和协作安排校验
+> - 加强本机数据恢复、导入撤销与取消保护，统一周年提醒、回顾币种与跨日安排
+> - 改善长列表、长图裁切、右滑和键盘操作，修正启动文字可读性、账单反馈与邮箱验证返回页
 > [下载已发布的 Windows 安装包与版本说明](https://github.com/huadeng0830-gg/study-life/releases/latest)
 <!-- RELEASE_STATUS:END -->
 
@@ -274,7 +270,7 @@ npx wrangler pages deploy dist --project-name=study-life --branch=main
 
 ## 🗄 Supabase 服务端
 
-邮箱账号、自动同步、好友课表与齐行项目协作运行在独立的 Supabase 项目中。数据库结构按时间顺序保存在 `supabase/migrations/`；本次部署已应用账号同步、好友协作、项目协作、项目外键索引和任务续接工作台迁移。Edge Function `campus-social` 当前为 v3，JWT 验证保持开启，同时处理好友和项目操作。
+邮箱账号、自动同步、好友课表与齐行项目协作运行在独立的 Supabase 项目中。数据库结构按时间顺序保存在 `supabase/migrations/`；2026-10-10 生产数据库已应用全部 13 条迁移，包括协作日历与任务依赖约束、成果提交草稿版本校验。Edge Function `campus-social` 当前为 v4，JWT 验证保持开启，同时处理好友和项目操作。
 
 项目协作的 15 张表均开启 RLS，并撤销 `anon` 与 `authenticated` 的表权限；浏览器只能携带登录 JWT 调用 Edge Function，由服务端检查成员角色后使用 `service_role` 访问数据库。成果文件放在私有 `qixing-deliverables` Storage bucket，最大 20 MiB。不要把 `service_role` 密钥写入网页变量、客户端代码或仓库。
 
@@ -294,10 +290,10 @@ npx supabase functions deploy campus-social --project-ref xyuwjmswqmxfwtyzakan
 四个脚本只依赖 Node 内置模块和本机 Chrome，用来守住 PWA 最容易出问题的一环：**启动资源不完整**。
 历史上出现过一次线上故障——某个懒加载分包 404，Service Worker 拿着旧入口、CDN 只剩新资源，
 应用「清缓存 → 注销 SW → 重载」一路循环，手机端表现为打不开、一直在刷新首页。
-下面三个自检分别从资源、行为、回归三个角度盯住这件事。
+下面四个自检覆盖资源完整性、实际启动、故障恢复与缺失 API。
 
 还有一类故障只有手机浏览器会踩：**iOS Safari 缺失的 Web API**。2026-09-20 的线上故障就是
-`src/main.js` 在启动路径里裸调 `requestIdleCallback`（iOS 17.4 以前完全没有这个 API），
+`src/main.js` 在启动路径里裸调 `requestIdleCallback`，而目标 Safari 环境没有这个 API，
 `ReferenceError` 被当成启动失败，最终弹出「页面没有完整加载」，而电脑端一切正常——
 `audit:iphone-boot` 专门守这一类。
 
@@ -311,7 +307,7 @@ npm run audit:iphone-boot   # 4. iPhone Safari（没有 requestIdleCallback）�
 | 脚本 | 回答什么问题 | 什么时候用 |
 | --- | --- | --- |
 | `scripts/audit/release-integrity.mjs <baseUrl>` | 已部署站点的 `index.html` 引用、**所有 JS 内部出现的 `assets/xxx-hash.js\|css`（懒加载分包名只写在 JS 里，最容易漏）**、以及 `sw.js` 的 workbox 预缓存清单条目，是否都能返回 200 | 每次发布后对着线上地址跑一次；发布前也可以指向本地预览地址 |
-| `scripts/audit/first-visit.mjs [url] [seconds] [windowSize]` | 一个全新 profile（无缓存、无 SW）打开线上地址，**主框架导航了几次**、有没有 console error / 未捕获异常 / 网络错误 | 改动启动流程或 SW 之后，在真机之前先量一次 |
+| `scripts/audit/first-visit.mjs [url] [seconds] [windowSize]` | 一个全新 profile（无缓存、无 SW）按实际布局视口打开地址，检查主框架导航、应用界面挂载、启动占位与错误页、console error / 未捕获异常 / 网络错误 | 改动启动流程或 SW 之后，在真机之前先量一次 |
 | `scripts/audit/reload-loop.mjs <distDir> [brokenChunkPattern]` | 故意让 `dist` 里某个分包（默认 `TodayView`）404，用户会经历几次页面加载、最终看到的是失败界面还是白屏/永久骨架屏 | 每次改动启动恢复、更新流程或 SW 策略时跑一次，防回归 |
 | `scripts/audit/iphone-boot.mjs [url] [seconds]` | 在 iPhone 视口里**删掉 `requestIdleCallback`**（模拟 iOS Safari）**并把钟点钉在晚上 20 点**，首屏还能不能挂上来、会不会出现「页面没有完整加载」；`--hour=N` 可换时段、`--keep-idle-callback` 作为对照 | 改动 `src/main.js` 的启动路径、预热或更新检查时跑一次 |
 
@@ -320,11 +316,11 @@ npm run audit:iphone-boot   # 4. iPhone Safari（没有 requestIdleCallback）�
 - `audit:release` RED：有资源返回非 200（输出 JSON 里的 `missing` 会给出路径、状态码和「被谁引用」），
   或者 `sw.js` 的预缓存清单解析出 0 条——后者说明这项检查本身失效了，一样按 RED 处理。
   此时不要发布：分包 404 就是上面那个无限刷新故障的直接触发条件。
-- `audit:first-visit` RED：全新用户首访的主框架导航 > 2 次（正常应为 1 次），说明页面已经在自己刷新。
+- `audit:first-visit` RED：主框架导航不在 1–2 次范围，应用界面未打开，启动占位或错误页仍存在，或有控制台、运行时、网络错误。
 - `audit:reload-loop` RED：分包 404 时页面加载次数 > 4（正常约 2 次：首访一次 + 一次受控恢复重载），
   或者刷不出来了却看不到「页面没有完整加载 / 重新加载」这类可操作提示（白屏或永久骨架屏，同样算没修好）。
 - `audit:iphone-boot` RED：缺 `requestIdleCallback` 的浏览器里首屏没挂上来，
-  或出现了 `main.startup-error`（致命错误页）。先查启动路径里有没有未守卫的 Web API 调用——
+  出现了 `main.startup-error`（致命错误页），发生异常或进入重载循环。先查启动路径里有没有未守卫的 Web API 调用——
   这类缺陷在桌面 Chrome 上永远不会复现，必须靠这个装置兜住。
 
 退出码统一为：`0` = GREEN，`1` = RED，`2` = 环境/装置问题（例如找不到 Chrome、`dist` 不存在、分包名匹配不到）。

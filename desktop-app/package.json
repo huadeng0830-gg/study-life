@@ -1,6 +1,6 @@
 {
   "name": "study-life-desktop",
-  "version": "1.0.12",
+  "version": "1.0.15",
   "private": true,
   "main": "main.cjs",
   "dependencies": {

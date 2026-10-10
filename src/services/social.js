@@ -37,7 +37,10 @@ export async function ensureSocialScheduleReady() {
   return user
 }
 
-function messageFor(code, fallback) {
+function messageFor(code, fallback, action = '') {
+  if (action.startsWith('project_') && ['conflict', 'state_changed'].includes(code)) {
+    return fallback || '项目刚刚发生变化，请刷新后重新提交。'
+  }
   const messages = {
     unauthorized: '登录已失效，请重新登录。',
     email_verification_required: '请先完成邮箱验证，再使用好友协作。',
@@ -69,14 +72,19 @@ export async function socialRequest(action, payload = {}) {
   if (!navigator.onLine) throw new SocialError('offline', '当前离线，操作尚未保存；联网后请重试。', 0)
   const client = await getSupabaseClient()
   const { data: authData, error: authError } = await client.auth.getSession()
-  if (authError || !currentSessionMatches(user.id, authData?.session)) {
+  const session = authData?.session
+  if (authError || !session?.access_token || !currentSessionMatches(user.id, session)) {
     throw new SocialError('unauthorized', '登录已失效，请重新登录。', 401)
   }
-  const { data, error } = await client.functions.invoke('campus-social', { body: { action, payload } })
+  // The SDK may resolve its default token after an account switch. Bind this
+  // mutation to the session that authorized the user's original action.
+  const { data, error } = await client.functions.invoke('campus-social', {
+    body: { action, payload }, headers: { Authorization: `Bearer ${session.access_token}` },
+  })
   if (accountUser.value?.id !== user.id) throw new SocialError('account_changed', '登录账号已切换，本次操作已取消。', 401)
   if (error) {
     const detail = await parseFunctionError(error)
-    throw new SocialError(detail.code, messageFor(detail.code, detail.message), detail.status)
+    throw new SocialError(detail.code, messageFor(detail.code, detail.message, action), detail.status)
   }
   if (!data || typeof data !== 'object' || !('data' in data)) {
     throw new SocialError('service_unavailable', '服务没有返回有效结果，请稍后重试。', 503)

@@ -38,6 +38,8 @@
 .workspace-select select { min-height: 38px; font-size: var(--fs-12-5); }
 .workspace-result { display: flex; align-items: center; gap: 8px; color: var(--ink-faint); font-size: var(--fs-12); }
 .task-meta { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; margin-top: 5px; }
+.stage-time-summary { color: var(--ink-soft); font-size: var(--fs-12); overflow-wrap: anywhere; }
+.stage-time-summary.overdue { color: var(--danger); }
 .task-title-button { display: block; width: 100%; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; overflow-wrap: anywhere; }
 .milestone-link { padding: 4px 0; border: 0; color: var(--primary); background: transparent; font-size: var(--fs-11-5); text-align: left; }
 .date-shortcuts { display: flex; flex-wrap: wrap; gap: 7px; }
@@ -260,7 +262,7 @@
   display: flex;
   justify-content: flex-end;
   gap: 10px;
-  margin-top: 14px;
+  margin-top: 0;
 }
 .actions .btn-danger {
   margin-right: auto;

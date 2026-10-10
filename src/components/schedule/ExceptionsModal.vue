@@ -5,7 +5,7 @@ import { appToday } from '../../composables/timeContext.js'
 import { useTabKeys } from '../../composables/tabKeys.js'
 import { animationsEnabled } from '../../composables/motion.js'
 import { MAX_WEEK } from '../../composables/store/utils.js'
-import { periodIndex, periodLabelById } from '../../composables/store/timeConfig.js'
+import { autoSeasonIdFor, currentCampusId, currentSeasonId, periodIndex, periodLabelById, timeConfig } from '../../composables/store/timeConfig.js'
 import {
   courseInWeek, coursesForDate, exceptionAppliesOn, isScheduleDate, isSessionException,
   scheduleExceptionForDate, scheduleExceptionReplacementIndex, sessionExceptionCourseIds,
@@ -18,14 +18,17 @@ const props = defineProps({
   days: { type: Array, required: true },
   allCourses: { type: Array, default: () => [] },
   initialDate: { type: String, default: '' },
+  initialExceptionId: { type: [String, Number], default: '' },
 })
 const emit = defineEmits(['close', 'submit', 'remove'])
 
-/** @type {{ type: string, date: string, endDate: string, sourceWeek: number, sourceDay: number, note: string, courseIds: string[] }} */
-const form = reactive({ type: 'off', date: '', endDate: '', sourceWeek: 0, sourceDay: 0, note: '', courseIds: [] })
+/** @typedef {{ courseId: string, start: string, end: string }} CourseSlot */
+/** @type {{ type: string, date: string, endDate: string, sourceWeek: number, sourceDay: number, note: string, courseIds: string[], courseSlots: CourseSlot[] }} */
+const form = reactive({ type: 'off', date: '', endDate: '', sourceWeek: 0, sourceDay: 0, note: '', courseIds: [], courseSlots: [] })
 const editingId = ref(null)
 const error = ref('')
 const errorField = ref('')
+const errorCourseId = ref('')
 const savedMessage = ref('')
 const search = ref('')
 const listFilter = ref('all')
@@ -34,6 +37,7 @@ const endDateInput = ref(null)
 const sourceWeekInput = ref(null)
 const sourceDayInput = ref(null)
 const coursePicker = ref(null)
+const slotPicker = ref(null)
 const editor = ref(null)
 const removedItem = ref(null)
 const removeError = ref('')
@@ -42,7 +46,7 @@ const TYPE_TABS = Object.freeze([
   { id: 'off', label: '放假 / 停课', hint: '暂停一天或连续几天的常规课程，开始与结束日期都包含在内。' },
   { id: 'makeup', label: '整天调课', hint: '当天整张课表改用指定周次、星期的课程，适合周末补上某天的课。' },
   { id: 'session_off', label: '部分停课', hint: '选择当天要停的课程，可选多门；当天其他课程照常。' },
-  { id: 'session_makeup', label: '部分补课', hint: '选择要补的课程，可选多门；按各课程原节次上课，当天其他课程照常。' },
+  { id: 'session_makeup', label: '部分补课', hint: '先选补课日期和课程，再为每门课设置开始、结束节次；当天其他课程照常。' },
 ])
 const typeLabel = (type) => TYPE_TABS.find((tab) => tab.id === type)?.label || '放假 / 停课'
 const typeHint = computed(() => TYPE_TABS.find((tab) => tab.id === form.type)?.hint || '')
@@ -55,14 +59,24 @@ const endDateErrorId = computed(() => errorField.value === 'endDate' ? 'exceptio
 const weekErrorId = computed(() => errorField.value === 'sourceWeek' ? 'exception-form-error' : undefined)
 const dayErrorId = computed(() => errorField.value === 'sourceDay' ? 'exception-form-error' : undefined)
 const courseErrorId = computed(() => errorField.value === 'courseIds' ? 'exception-form-error' : undefined)
+const slotErrorId = computed(() => errorField.value === 'courseSlots' ? 'exception-form-error' : undefined)
+const periods = computed(() => timeConfig.value.periods)
 
-function setError(message = '', field = '') {
+function setError(message = '', field = '', courseId = '') {
   error.value = message
   errorField.value = message ? field : ''
+  errorCourseId.value = message ? courseId : ''
   if (!message || !field) return
   nextTick(() => {
     if (field === 'courseIds') {
       const target = coursePicker.value?.querySelector('input[type="checkbox"]') || coursePicker.value
+      target?.focus()
+      return
+    }
+    if (field === 'courseSlots') {
+      const rows = Array.from(slotPicker.value?.querySelectorAll('[data-course-id]') || [])
+      const row = rows.find((element) => element.dataset.courseId === courseId) || rows[0]
+      const target = row?.querySelector('select[aria-invalid="true"]') || row?.querySelector('select') || slotPicker.value
       target?.focus()
       return
     }
@@ -80,6 +94,7 @@ function selectType(type) {
   if (form.type === type) return
   form.type = type
   form.courseIds = []
+  form.courseSlots = []
   search.value = ''
   if (type === 'off' && (!form.endDate || form.endDate < form.date)) form.endDate = form.date
   clearFeedback()
@@ -102,7 +117,7 @@ const dateHint = computed(() => isScheduleDate(form.date) ? `${props.days[dayInd
 function resetForm() {
   const date = isScheduleDate(props.initialDate) ? props.initialDate : appToday.value
   editingId.value = null
-  Object.assign(form, { type: 'off', date, endDate: date, sourceWeek: 0, sourceDay: dayIndexOf(date), note: '', courseIds: [] })
+  Object.assign(form, { type: 'off', date, endDate: date, sourceWeek: 0, sourceDay: dayIndexOf(date), note: '', courseIds: [], courseSlots: [] })
   search.value = ''
   clearFeedback()
 }
@@ -111,13 +126,17 @@ watch(() => props.show, (open) => {
     resetForm()
     removedItem.value = null
     removeError.value = ''
+    nextTick(() => {
+      const item = props.exceptions.find((entry) => entry.id === props.initialExceptionId)
+      if (props.show && item) startEdit(item)
+    })
   }
 }, { immediate: true })
 watch(() => form.date, (date, previous) => {
   if (form.type === 'off' && (form.endDate === previous || form.endDate < date)) form.endDate = date
 })
 function onDateInput() {
-  if (isSessionType.value) form.courseIds = []
+  if (isSessionType.value) { form.courseIds = []; form.courseSlots = [] }
   clearFeedback()
 }
 
@@ -146,19 +165,66 @@ function courseLabel(course) {
   const periods = start === end ? start : [start, end].filter(Boolean).join('至')
   return [props.days[course.day], periods, weekLabel(course), course.room].filter(Boolean).join(' · ')
 }
+function defaultSlot(id) {
+  const course = allCourseList.value.find((item) => String(item.id) === id)
+  return { courseId: id, start: course?.start || '', end: course?.end || '' }
+}
+function timesForDate(date) {
+  const cfg = timeConfig.value
+  const campus = currentCampusId()
+  const season = cfg.autoSeason && isScheduleDate(date)
+    ? autoSeasonIdFor(campus, cfg, new Date(`${date}T12:00:00`)) || currentSeasonId() : currentSeasonId()
+  return cfg.times?.[season]?.[campus] || []
+}
+const selectedDateTimes = computed(() => timesForDate(form.date))
+function periodOption(period) {
+  const time = selectedDateTimes.value[periodIndex(period.id)]
+  return time?.start && time?.end ? `${period.label}（${time.start}–${time.end}）` : `${period.label}（时间未设置）`
+}
+function slotLabel(slot, date = form.date) {
+  if (!slot || periodIndex(slot.start) < 0 || periodIndex(slot.end) < 0) return '请设置补课节次'
+  const start = periodLabelById(slot.start)
+  const end = periodLabelById(slot.end)
+  const label = slot.start === slot.end ? start : `${start}至${end}`
+  const times = date === form.date ? selectedDateTimes.value : timesForDate(date)
+  const startTime = times[periodIndex(slot.start)]?.start
+  const endTime = times[periodIndex(slot.end)]?.end
+  return startTime && endTime ? `${label}（${startTime}–${endTime}）` : `${label}（时间未设置）`
+}
+function setSlotStart(slot, start) {
+  const duration = Math.max(0, periodIndex(slot.end) - periodIndex(slot.start))
+  slot.start = start
+  slot.end = periods.value[Math.min(periods.value.length - 1, periodIndex(start) + duration)]?.id || ''
+  clearFeedback()
+}
+function slotInvalid(slot) {
+  return errorField.value === 'courseSlots' && (!errorCourseId.value || errorCourseId.value === slot.courseId)
+}
 function toggleCourse(id) {
   const key = String(id)
   const index = form.courseIds.indexOf(key)
-  if (index >= 0) form.courseIds.splice(index, 1)
-  else form.courseIds.push(key)
+  if (index >= 0) {
+    form.courseIds.splice(index, 1)
+    form.courseSlots = form.courseSlots.filter((slot) => slot.courseId !== key)
+  } else {
+    form.courseIds.push(key)
+    if (form.type === 'session_makeup') form.courseSlots.push(defaultSlot(key))
+  }
   clearFeedback()
 }
 function selectVisibleCourses() {
+  if (form.type === 'session_makeup') {
+    for (const course of filteredCourses.value) {
+      const key = String(course.id)
+      if (!form.courseIds.includes(key)) form.courseSlots.push(defaultSlot(key))
+    }
+  }
   form.courseIds = [...new Set([...form.courseIds, ...filteredCourses.value.map((course) => String(course.id))])]
   clearFeedback()
 }
 function clearSelection() {
   form.courseIds = []
+  form.courseSlots = []
   clearFeedback()
 }
 
@@ -167,6 +233,10 @@ const payload = computed(() => ({
   ...(form.type === 'off' ? { endDate: form.endDate === form.date ? null : form.endDate } : {}),
   ...(form.type === 'makeup' ? { sourceWeek: form.sourceWeek || null, sourceDay: form.sourceDay } : {}),
   ...(isSessionType.value ? { courseIds: [...form.courseIds] } : {}),
+  ...(form.type === 'session_makeup' ? { courseSlots: form.courseIds.map((id) => {
+    const slot = form.courseSlots.find((entry) => entry.courseId === id)
+    return { courseId: id, start: slot?.start || '', end: slot?.end || '' }
+  }) } : {}),
 }))
 const replacementIndex = computed(() => scheduleExceptionReplacementIndex({ ...payload.value, id: undefined }, otherExceptions.value))
 const previewCourses = computed(() => {
@@ -185,15 +255,18 @@ const previewText = computed(() => {
     return `${form.date || '所选日期'} 按${week}${props.days[form.sourceDay] || ''}课表上课，保存后当天共 ${previewCourses.value.length} 门课。`
   }
   if (!form.courseIds.length) return '选择课程后，可在这里查看实际生效的安排。'
-  const action = form.type === 'session_off' ? '停课' : '补课'
-  return `${action}：${form.courseIds.map(courseNameOf).join('、')}。保存后当天共 ${previewCourses.value.length} 门课。`
+  if (form.type === 'session_makeup') {
+    const details = form.courseSlots.map((slot) => `${courseNameOf(slot.courseId)} · ${slotLabel(slot)}`).join('；')
+    return `${form.date} 补课：${details}。保存后当天共 ${previewCourses.value.length} 门课。`
+  }
+  return `停课：${form.courseIds.map(courseNameOf).join('、')}。保存后当天共 ${previewCourses.value.length} 门课。`
 })
 const previewWarnings = computed(() => {
   const warnings = []
   if (!editingId.value && replacementIndex.value >= 0) warnings.push(`已有同日的“${typeLabel(otherExceptions.value[replacementIndex.value].type)}”安排，保存将替换它。`)
   const dayException = scheduleExceptionForDate(form.date, otherExceptions.value)
   if (form.type === 'makeup' && dayException?.type === 'off' && dayException.endDate > dayException.date) warnings.push('这一天位于放假范围内，整天调课将优先执行，其余假期日期保留。')
-  if (form.type === 'session_makeup' && dayException?.type === 'off') warnings.push('当天已设置放假 / 停课，选中的课程仍按原节次补上。')
+  if (form.type === 'session_makeup' && dayException?.type === 'off') warnings.push('当天已设置放假 / 停课，选中的课程仍按指定节次补上。')
   if (form.type === 'off' && offDays.value) {
     const overrides = otherExceptions.value.filter((item) => (item.type === 'makeup' || item.type === 'session_makeup')
       && item.date >= form.date && item.date <= form.endDate && item !== otherExceptions.value[replacementIndex.value])
@@ -225,6 +298,11 @@ function startEdit(item) {
   Object.assign(form, { type: TYPE_TABS.some((tab) => tab.id === item.type) ? item.type : 'off', date, endDate: item.endDate || date,
     sourceWeek: Number(item.sourceWeek) || 0, sourceDay: item.sourceDay == null ? dayIndexOf(date) : Number(item.sourceDay),
     note: item.note || '', courseIds: Array.isArray(item.courseIds) ? item.courseIds.map(String) : [] })
+  form.courseSlots = form.type === 'session_makeup' ? form.courseIds.map((id) => {
+    if (item.courseSlots == null) return defaultSlot(id)
+    const slot = Array.isArray(item.courseSlots) ? item.courseSlots.find((entry) => String(entry?.courseId) === id) : null
+    return { courseId: id, start: slot?.start || '', end: slot?.end || '' }
+  }) : []
   search.value = ''
   clearFeedback()
   nextTick(() => {
@@ -234,7 +312,8 @@ function startEdit(item) {
 }
 function removeItem(item) {
   if (editingId.value === item.id) resetForm()
-  removedItem.value = { ...item, courseIds: item.courseIds ? [...item.courseIds] : null }
+  removedItem.value = { ...item, courseIds: item.courseIds ? [...item.courseIds] : null,
+    courseSlots: Array.isArray(item.courseSlots) ? item.courseSlots.map((slot) => ({ ...slot })) : item.courseSlots }
   removeError.value = ''
   emit('remove', item.id)
 }
@@ -253,7 +332,7 @@ function submit() {
   clearFeedback()
   if (form.type === 'off' && !form.endDate) { setError('请选择结束日期', 'endDate'); return }
   const problem = validateScheduleException(payload.value)
-  if (problem) { setError(problem.message, problem.field); return }
+  if (problem) { setError(problem.message, problem.field, problem.courseId); return }
   if (form.type === 'makeup' && !form.sourceWeek && (weekOf(form.date) < 1 || weekOf(form.date) > MAX_WEEK)) {
     setError('该日期在学期范围外，请指定要采用的课表周次', 'sourceWeek'); return
   }
@@ -271,6 +350,7 @@ function submit() {
   editingId.value = null
   form.note = ''
   form.courseIds = []
+  form.courseSlots = []
   search.value = ''
   savedMessage.value = wasEditing ? '已保存修改，课程表已更新。' : '已添加课程调整，课程表已更新。'
 }
@@ -285,7 +365,13 @@ function dateText(item) {
 function exceptionDetail(item) {
   if (isSessionException(item)) {
     const names = (Array.isArray(item.courseIds) ? item.courseIds : []).map(courseNameOf).join('、') || '未选择课程'
-    return item.type === 'session_off' ? `停课：${names}，其他课程照常` : `补课：${names}，按原节次上课`
+    if (item.type === 'session_off') return `停课：${names}，其他课程照常`
+    const details = (Array.isArray(item.courseIds) ? item.courseIds : []).map((id) => {
+      const slot = item.courseSlots == null ? defaultSlot(String(id))
+        : Array.isArray(item.courseSlots) ? item.courseSlots.find((entry) => String(entry?.courseId) === String(id)) : null
+      return `${courseNameOf(id)} · ${slotLabel(slot, item.date)}`
+    }).join('；') || '未选择课程'
+    return `补课：${details}${item.courseSlots == null ? ' · 沿用原节次' : ''}`
   }
   if (item.type === 'makeup') return `按${item.sourceWeek ? `第 ${item.sourceWeek} 周` : weekTextFor(item.date)}${props.days[item.sourceDay] || ''}课表上课`
   return '暂停常规课程；已设置的单日调课与部分补课仍生效'
@@ -349,6 +435,30 @@ function exceptionDetail(item) {
               </div>
               <p v-if="!filteredCourses.length" class="picker-empty">没有匹配的课程，试试其他关键词。</p>
             </template>
+          </fieldset>
+          <fieldset v-if="form.type === 'session_makeup' && form.courseSlots.length" ref="slotPicker" class="course-picker slot-picker" tabindex="-1"
+            :aria-invalid="errorField === 'courseSlots' || undefined" :aria-describedby="slotErrorId">
+            <legend>设置补课节次</legend>
+            <p class="muted-tip">默认带入原节次，可按通知修改；每门课分别安排。时间按补课日期对应的作息显示。</p>
+            <div v-for="slot in form.courseSlots" :key="slot.courseId" class="makeup-slot" :data-course-id="slot.courseId">
+              <b>{{ courseNameOf(slot.courseId) }}</b>
+              <div class="date-fields slot-fields">
+                <label>开始节次
+                  <select :value="slot.start" :aria-label="`${courseNameOf(slot.courseId)}补课开始节次`" :aria-invalid="slotInvalid(slot) || undefined" :aria-describedby="slotInvalid(slot) ? slotErrorId : undefined"
+                    @change="setSlotStart(slot, $event.target.value)">
+                    <option value="" disabled>请选择开始节次</option>
+                    <option v-for="period in periods" :key="period.id" :value="period.id">{{ periodOption(period) }}</option>
+                  </select>
+                </label>
+                <label>结束节次
+                  <select v-model="slot.end" :aria-label="`${courseNameOf(slot.courseId)}补课结束节次`" :aria-invalid="slotInvalid(slot) || undefined" :aria-describedby="slotInvalid(slot) ? slotErrorId : undefined" @change="clearFeedback">
+                    <option value="" disabled>请选择结束节次</option>
+                    <option v-for="period in periods" :key="period.id" :value="period.id" :disabled="periodIndex(period.id) < periodIndex(slot.start)">{{ periodOption(period) }}</option>
+                  </select>
+                </label>
+              </div>
+              <small class="slot-summary">{{ form.date }} · {{ slotLabel(slot) }}</small>
+            </div>
           </fieldset>
           <div class="arrangement-preview">
             <b>生效预览</b><p>{{ previewText }}</p>
@@ -420,6 +530,9 @@ function exceptionDetail(item) {
 .course-option > span { display: grid; gap: 4px; min-width: 0; overflow-wrap: anywhere; }
 .course-option b { color: var(--text); font-size: var(--fs-12); }
 .course-option small { color: var(--muted); font-size: var(--fs-11); line-height: 1.5; }
+.makeup-slot { display: grid; gap: 8px; min-width: 0; padding: 12px; background: var(--bg-tint); border-radius: var(--radius-8); }
+.makeup-slot > b { color: var(--text); font-size: var(--fs-12); overflow-wrap: anywhere; }
+.slot-summary { color: var(--muted); font-size: var(--fs-11); line-height: 1.6; overflow-wrap: anywhere; }
 .arrangement-preview { padding: 12px 14px; border-radius: var(--radius-10); background: var(--primary-soft); color: var(--text); font-size: var(--fs-12); line-height: 1.65; overflow-wrap: anywhere; }
 .arrangement-preview b { color: var(--primary); }
 .arrangement-preview p { margin: 5px 0 0; }

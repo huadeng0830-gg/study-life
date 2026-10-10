@@ -19,6 +19,7 @@ import { clock, useStoredRef } from './store/core.js'
 import { policyDateKey, policyDateTime, settings } from './settingsPolicy.js'
 import { countdownTarget } from './store/countdown.js'
 import { isArchived, isTaskActionable } from './domain/state.js'
+import { stageBoundaryAt, stageLabel, stageTimeState, taskStages } from './tasks/taskTimePlan.ts'
 
 // 直接注册存储 ref，而不是从某个 barrel import —— 后者会把本模块拉进
 // store → domain → … 的依赖链，而这个调度器只需要读三份集合。
@@ -120,7 +121,7 @@ export function collectDueReminders(nowMs = Date.now()) {
   const firedEntries = new Map(logEntries.map((item) => [item.key, item]))
   const queuedKeys = new Set()
 
-  const push = (kind, item, date, time, rawMinutes) => {
+  const push = (kind, item, date, time, rawMinutes, options = {}) => {
     // reminderMinutes 为 0 的语义是"到点才提醒"，不是"不提醒"。
     const minutes = Number.isFinite(Number(rawMinutes)) && Number(rawMinutes) > 0
       ? Number(rawMinutes)
@@ -132,9 +133,9 @@ export function collectDueReminders(nowMs = Date.now()) {
     if (!Number.isFinite(dueAt)) return
     const fireAt = dueAt - minutes * 60_000
     if (fireAt > horizon || fireAt < windowStart) return
-    const key = reminderKey(kind, item.id)
+    const key = options.key || reminderKey(kind, item.id)
     // An event's time/reminder change schedules a new notification; title-only edits do not.
-    const signature = kind === 'event' ? `${dueAt}:${minutes}` : ''
+    const signature = kind === 'event' || kind === 'task' ? `${dueAt}:${minutes}` : ''
     const fired = firedEntries.get(key)
     if ((fired && (!signature || !fired.signature || fired.signature === signature)) || queuedKeys.has(key)) return
     queuedKeys.add(key)
@@ -142,7 +143,8 @@ export function collectDueReminders(nowMs = Date.now()) {
       key,
       kind,
       title: String(item.title || item.name || '').trim(),
-      body: `${minutes > 0 ? `${minutes} 分钟后` : '就是现在'}：${String(item.title || item.name || '').trim()}`,
+      sourceId: item.id,
+      body: options.body || `${minutes > 0 ? `${minutes} 分钟后` : '就是现在'}：${String(item.title || item.name || '').trim()}`,
       fireAt,
       minutes,
       ...(signature ? { signature } : {}),
@@ -153,6 +155,24 @@ export function collectDueReminders(nowMs = Date.now()) {
   for (const task of tasks.value || []) {
     if (!isTaskActionable(task, new Date(nowMs)) || task?.status === 'done' || task?.active === false) continue
     push('task', task, task?.dueDate, task?.dueTime, task?.reminderMinutes ?? policy.task)
+    taskStages(task).forEach((stage, index) => {
+      if (stageTimeState(stage, nowMs) === 'completed') return
+      const endAt = stageBoundaryAt(stage.end, 'end')
+      for (const reminder of stage.reminders || []) {
+        if (!reminder.enabled) continue
+        // 分钟轮询通常落在端点后几秒。结束提醒保留一次轮询的容差，
+        // 之后关闭的窗口不补发过时通知，开始提醒在窗口关闭后立即失效。
+        const justEnded = reminder.anchor === 'end' && nowMs - endAt <= 60_000
+        if (Number.isFinite(endAt) && ((endAt < nowMs && !justEnded) || (reminder.anchor === 'start' && endAt <= nowMs))) continue
+        const boundary = stage[reminder.anchor]
+        if (!boundary?.date || (!boundary.time && !reminder.dateOnlyTime)) continue
+        const time = boundary.time || reminder.dateOnlyTime
+        push('task', task, boundary.date, time, reminder.minutesBefore, {
+          key: `task:${task.id}:stage:${stage.id}:reminder:${reminder.id}`,
+          body: `${task.title} · ${stageLabel(stage, index)}${reminder.anchor === 'start' ? '开始' : '结束'}提醒（${boundary.date} ${time}，提前 ${reminder.minutesBefore} 分钟）`,
+        })
+      }
+    })
   }
   for (const item of events.value || []) {
     if (item?.archivedAt || item?.status === 'archived' || item?.active === false || item?.deletedAt || item?.tombstone || item?.reminderEnabled === false) continue
@@ -170,25 +190,39 @@ export function collectDueReminders(nowMs = Date.now()) {
   return due.sort((left, right) => left.fireAt - right.fireAt)
 }
 
-function fire(entry) {
+function fire(entries) {
   // Re-read the shared value at firing time so a reminder log received from
   // another tab/device can suppress a duplicate before the next scheduler tick.
   logEntries = readLog()
   pruneLog(Date.now())
-  if (logEntries.some((item) => item.key === entry.key && (!entry.signature || !item.signature || item.signature === entry.signature))) return false
+  const pending = entries.filter((entry) => !logEntries.some((item) => item.key === entry.key && (!entry.signature || !item.signature || item.signature === entry.signature)))
+  if (!pending.length) return false
+  const entry = pending[0]
   if (notifyPermission() !== 'granted') return false
   try {
     const notification = new Notification(`三两事 · ${entry.kind === 'task' ? '待办' : entry.kind === 'event' ? '日程' : '重要节点'}提醒`, {
-      body: entry.body,
+      body: pending.map((item) => item.body).join('\n'),
       tag: entry.key,
     })
     // Only consume the catch-up window after the browser accepted the notification.
-    markFired(entry.key, Date.now(), entry.signature)
+    pending.forEach((item) => markFired(item.key, Date.now(), item.signature))
     try { notification.onclick = () => { try { window.focus() } catch {}; notification.close() } } catch {}
     return true
   } catch {
     return false
   }
+}
+
+function fireDueReminders(nowMs) {
+  const groups = new Map()
+  for (const entry of collectDueReminders(nowMs)) {
+    if (entry.fireAt > nowMs) continue
+    const key = `${entry.kind}:${entry.sourceId}:${entry.fireAt}`
+    const group = groups.get(key) || []
+    group.push(entry)
+    groups.set(key, group)
+  }
+  for (const entries of groups.values()) fire(entries)
 }
 
 function notifyState() {
@@ -221,10 +255,7 @@ export function startReminderScheduler() {
     const nowMs = clock.value?.getTime?.() || Date.now()
     logEntries = readLog()
     pruneLog(nowMs)
-    for (const entry of collectDueReminders(nowMs)) {
-      // 已过去的（含刚打开页面时的补响）立即触发。
-      if (entry.fireAt <= nowMs) fire(entry)
-    }
+    fireDueReminders(nowMs)
   }
   tick()
   timer = setInterval(tick, 60_000)
@@ -255,9 +286,7 @@ export function notifyReminderDataChanged() {
   lastSeenSignature = signature
   if (!timer) return
   const nowMs = Date.now()
-  for (const entry of collectDueReminders(nowMs)) {
-    if (entry.fireAt <= nowMs) fire(entry)
-  }
+  fireDueReminders(nowMs)
 }
 
 /** 仅供测试：清空去重记录。 */

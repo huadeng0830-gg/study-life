@@ -14,6 +14,8 @@
  *     宁可少生成一条，也不要在用户没设置过的规则下凭空塞进新待办。
  */
 
+import { moveTimeDate, taskRepeatBase, taskStages, timePlanId } from './tasks/taskTimeFields.ts'
+
 function dateText(date) {
   const pad = (value) => String(value).padStart(2, '0')
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
@@ -141,17 +143,20 @@ export function nextRepeatDueDate(dueDate, repeat, { until = '', anchorDay } = {
  * 生成重复待办的下一条。规则不认识、缺截止日期、超过重复截止日期时都返回 null。
  */
 export function createNextRepeatingTask(task, now = new Date()) {
-  if (!repeatsTask(task) || !task?.dueDate) return null
+  const base = taskRepeatBase(task || {})
+  if (!repeatsTask(task) || !base.date) return null
   const rule = normalizeTaskRepeat(task.repeat)
-  const parsedDate = parseDueDate(task.dueDate)
+  const parsedDate = parseDueDate(base.date)
   const repeatAnchorDay = rule === 'monthly'
     ? validAnchorDay(task.repeatAnchorDay) ?? parsedDate?.getDate()
     : null
-  const dueDate = nextRepeatDueDate(task.dueDate, rule, {
+  const nextBase = nextRepeatDueDate(base.date, rule, {
     until: task.repeatEndDate,
     anchorDay: repeatAnchorDay,
   })
-  if (!dueDate) return null
+  if (!nextBase) return null
+  const days = Math.round((Date.parse(`${nextBase}T12:00:00Z`) - Date.parse(`${base.date}T12:00:00Z`)) / 86400000)
+  const dueDate = task.dueDate ? (taskStages(task).length ? moveTimeDate(task.dueDate, days) : nextBase) : ''
   const next = {
     ...task,
     // 只用毫秒时间戳当 id 时，同一毫秒内完成的两个重复任务会拿到同一个 id，
@@ -163,6 +168,14 @@ export function createNextRepeatingTask(task, now = new Date()) {
     dueDate,
     createdAt: now.toISOString(),
   }
+  delete next.repeatGenerationError
+  if (taskStages(task).length) next.status = 'pending'
+  if (taskStages(task).length) next.timeStages = taskStages(task).map((stage) => ({
+    ...stage, id: timePlanId(), completedAt: null,
+    ...(stage.start?.date ? { start: { ...stage.start, date: moveTimeDate(stage.start.date, days) } } : {}),
+    ...(stage.end?.date ? { end: { ...stage.end, date: moveTimeDate(stage.end.date, days) } } : {}),
+    reminders: (stage.reminders || []).map((reminder) => ({ ...reminder, id: timePlanId('reminder') })),
+  }))
   if (repeatAnchorDay) next.repeatAnchorDay = repeatAnchorDay
   else delete next.repeatAnchorDay
   return next

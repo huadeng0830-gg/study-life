@@ -351,7 +351,9 @@ onMounted(() => {
   backupNudgeTimer = window.setTimeout(() => {
     const NUDGE_DAYS = 7
     const NUDGE_MS = NUDGE_DAYS * 86400000
-    const lastRaw = typeof localStorage !== 'undefined' ? localStorage.getItem('sl_backup_nudge_at') : null
+    let lastRaw = null
+    try { lastRaw = typeof localStorage !== 'undefined' ? localStorage.getItem('sl_backup_nudge_at') : null }
+    catch { /* Keep the backup entry available when local storage reads are blocked. */ }
     const last = lastRaw ? new Date(lastRaw).getTime() : 0
     if (Number.isFinite(last) && Date.now() - last < NUDGE_MS) return
     if (!needsBackup.value) return

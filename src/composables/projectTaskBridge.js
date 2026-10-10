@@ -93,18 +93,24 @@ async function flushQueue(userId = accountUser.value?.id) {
   updateQueueStatus(userId, projectTaskSyncState.value.message)
   try {
     const queue = readQueue(userId)
-    const remaining = []
+    const acknowledged = new Set()
     for (const entry of queue) {
       if (accountUser.value?.id !== userId) return
       try {
         await projectRequest('task_personal_sync', entry)
+        acknowledged.add(JSON.stringify(entry))
       } catch (error) {
-        if (isFinalTaskSyncError(error)) await reconcileProjectTaskTodos(userId, entry.projectId)
-        else remaining.push(entry)
+        if (isFinalTaskSyncError(error)) {
+          await reconcileProjectTaskTodos(userId, entry.projectId)
+          acknowledged.add(JSON.stringify(entry))
+        }
       }
     }
+    // A request can be awaiting its response while another task (or tab) queues
+    // a new status. Remove only the acknowledged versions from the live queue.
+    const remaining = readQueue(userId).filter((entry) => !acknowledged.has(JSON.stringify(entry)))
     writeQueue(userId, remaining)
-    projectTaskSyncState.value = {
+    if (accountUser.value?.id === userId) projectTaskSyncState.value = {
       pending: remaining.length,
       message: remaining.length ? '项目待办状态暂未同步，联网后会自动重试。' : '',
       syncing: false,

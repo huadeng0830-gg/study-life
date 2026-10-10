@@ -15,12 +15,14 @@ import { timeConfig, seasonAppliesTo, seasonsForCampus } from './store/timeConfi
 import { pasteText, showToast } from './timeSettingsShared.js'
 import { currentRecognitionApi, loadRecognition, schemeDisplayName, schemeStatus } from './scheduleOcrFlow.js'
 import { importPlan, importPlanOpen, importPlanOverrides, planDiffExpanded } from './timeImportPlan.js'
+import { accountDataOwner } from './accountSyncIdentity.js'
 
 // ---- 识别暂存层（recognitionDraft）：确认前绝不写入正式作息 ----
 export const recognitionDraft = ref(null)
 export const activeSchemeId = ref(null)
 export const schemeDetailOpen = ref(false)
 export const detailFilter = ref('all') // all | issues
+let recognitionGeneration = 0
 
 export const schemeCount = computed(() => recognitionDraft.value?.schemes.length ?? 0)
 
@@ -49,6 +51,7 @@ export const activeSchemeRows = computed(() => {
 export const activeSchemeIssueCount = computed(() => activeSchemeValidation.value?.issueRowCount ?? 0)
 
 export function clearRecognition() {
+  recognitionGeneration += 1
   recognitionDraft.value = null
   activeSchemeId.value = null
   schemeDetailOpen.value = false
@@ -65,9 +68,19 @@ export function discardRecognition() {
   showToast('已放弃本次识别结果，正式作息未受影响')
 }
 
+// 从解析开始就拥有一次识别会话；取消、换号或新请求都会使其失效。
+export function beginRecognitionSession() {
+  const generation = ++recognitionGeneration
+  const owner = accountDataOwner.value
+  return () => generation === recognitionGeneration && owner === accountDataOwner.value
+}
+
 // 识别结果进入暂存层：此处绝不写入正式作息
-export async function startRecognition(analysis, sourceName) {
+export async function startRecognition(analysis, sourceName, { isCurrent = () => true, session } = {}) {
+  if (!isCurrent() || (session && !session())) return null
+  const activeSession = session ?? beginRecognitionSession()
   const api = await loadRecognition()
+  if (!activeSession() || !isCurrent()) return null
   const value = api.buildRecognitionDraft(analysis, timeConfig.value, sourceName)
   recognitionDraft.value = value
   activeSchemeId.value = value.schemes[0]?.id ?? null

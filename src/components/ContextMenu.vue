@@ -1,5 +1,5 @@
 <script setup>
-import { nextTick, onActivated, onBeforeUnmount, onDeactivated, ref, watch } from 'vue'
+import { nextTick, onActivated, onBeforeUnmount, onDeactivated, ref, useId, watch } from 'vue'
 import { isTopOverlay, pushOverlay, removeOverlay, topOverlay, trapTabKey } from '../composables/overlayStack.js'
 import { pointMenuPlacement } from '../composables/menuPlacement.js'
 
@@ -24,8 +24,7 @@ const emit = defineEmits(['select', 'close'])
 // role="menu" 需要可访问名称，否则读屏只念出「菜单」，不知道是哪个菜单。
 // 与 Modal / ActionSheet 同一套做法：有可见标题就让 aria-labelledby 指过去；
 // title 是可选的（目前只有考试页传），没传时退化成一句通用名称，不留空名。
-let nextMenuId = 0
-const titleId = `context-menu-title-${++nextMenuId}`
+const titleId = `context-menu-title-${useId()}`
 
 const panelEl = ref(null)
 const entry = { modalEl: panelEl, previousFocus: null, active: false, onBack: () => emit('close') }

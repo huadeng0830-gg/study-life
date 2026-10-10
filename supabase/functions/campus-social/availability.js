@@ -71,11 +71,23 @@ function weekOf(semesterStart, date) {
   return Math.floor((current - start) / (7 * DAY_MS)) + 1
 }
 
-function dateException(exceptions, date) {
-  return exceptions.find((item) => item?.date && (
-    (item.type === 'off' && item.endDate && item.date <= date && date <= item.endDate)
+function dateExceptions(exceptions, date) {
+  const isSession = (item) => item.type === 'session_off' || item.type === 'session_makeup'
+  const isRange = (item) => item.type === 'off' && validDate(item.endDate) && item.endDate > item.date
+  return exceptions.filter((item) => validDate(item?.date) && (
+    (isRange(item) && item.date <= date && date <= item.endDate)
     || item.date === date
-  )) || null
+  )).sort((left, right) => Number(isSession(left)) - Number(isSession(right))
+    || Number(isRange(left)) - Number(isRange(right))
+    || String(right.updatedAt ?? '').localeCompare(String(left.updatedAt ?? ''))
+    || right.date.localeCompare(left.date)
+    || String(left.id ?? '').localeCompare(String(right.id ?? '')))
+}
+
+function exceptionCourseIds(item) {
+  return [...new Set((Array.isArray(item?.courseIds) ? item.courseIds : [])
+    .filter((id) => typeof id === 'string' || typeof id === 'number')
+    .map((id) => String(id).trim()).filter(Boolean))]
 }
 
 function sourceWeekFor(exception, date, semesterStart) {
@@ -115,14 +127,15 @@ function timeRangeForCourse(course, date, timeConfig) {
   const start = validClock(slots?.[startIndex]?.start)
   const end = validClock(slots?.[endIndex]?.end)
   if (start === null || end === null || end <= start) return null
-  return { start, end, travel: Math.min(180, Math.max(0, Number(course.travelMinutes) || 0)) }
+  return { start, end, travel: Math.ceil(Math.min(180, Math.max(0, Number(course.travelMinutes) || 0))) }
 }
 
 function addWallInterval(target, date, startMinute, endMinute, timeZone) {
   const startDate = addDate(date, Math.floor(startMinute / 1440))
   const endDate = addDate(date, Math.floor(endMinute / 1440))
-  const startClock = `${pad(Math.floor((startMinute % 1440) / 60))}:${pad(startMinute % 60)}`
-  const endValue = endMinute % 1440
+  const startValue = ((startMinute % 1440) + 1440) % 1440
+  const startClock = `${pad(Math.floor(startValue / 60))}:${pad(startValue % 60)}`
+  const endValue = ((endMinute % 1440) + 1440) % 1440
   const endClock = `${pad(Math.floor(endValue / 60))}:${pad(endValue % 60)}`
   const start = wallTimeToEpoch(startDate, startClock, timeZone, 'start')
   const end = wallTimeToEpoch(endDate, endClock, timeZone, 'end')
@@ -132,18 +145,18 @@ function addWallInterval(target, date, startMinute, endMinute, timeZone) {
 function courseBlocksForDate(values, profile, preferences, date) {
   const courses = values.sl_courses || []
   if (!courses.length) return { ok: true, blocks: [] }
-  if (profile.semester_end && date > profile.semester_end) return { ok: true, blocks: [] }
   const semesterStart = values.sl_semester?.start
   const config = values.sl_timecfg
-  if (!validDate(semesterStart) || !config || !Array.isArray(config.periods) || !Array.isArray(config.seasons)) return { ok: false, blocks: [] }
-  const exception = dateException(values.sl_schedule_exceptions || [], date)
-  if (exception?.type === 'off') return { ok: true, blocks: [] }
+  if (!validDate(semesterStart) || !config || !Array.isArray(config.periods) || !Array.isArray(config.seasons)
+      || config.periods.some((item) => !item?.id) || config.seasons.some((item) => !item?.id)) return { ok: false, blocks: [] }
+  const exceptions = dateExceptions(values.sl_schedule_exceptions || [], date)
+  const exception = exceptions.find((item) => item.type === 'off' || item.type === 'makeup') || null
+  const hidden = new Set(exceptions.filter((item) => item.type === 'session_off').flatMap(exceptionCourseIds))
   const week = sourceWeekFor(exception, date, semesterStart)
-  if (week < 1) return { ok: true, blocks: [] }
   const target = new Date(`${date}T00:00:00Z`).getUTCDay()
   const weekday = target === 0 ? 6 : target - 1
   const day = exception?.type === 'makeup' ? Math.max(0, Math.min(6, Number(exception.sourceDay) || 0)) : weekday
-  const blocks = []
+  const selected = []
   for (const course of courses) {
     const courseDay = Number(course?.day)
     const startWeek = Number(course?.startWeek ?? 1)
@@ -152,7 +165,36 @@ function courseBlocksForDate(values, profile, preferences, date) {
         || !Number.isInteger(startWeek) || !Number.isInteger(endWeek) || startWeek < 1 || endWeek < startWeek || endWeek > 25
         || !['all', 'odd', 'even', undefined, null, ''].includes(course.weekType)
         || typeof course.start !== 'string' || typeof course.end !== 'string') return { ok: false, blocks: [] }
-    if (courseDay !== day || !courseIsOn(course, week)) continue
+    if (exception?.type !== 'off' && date <= profile.semester_end && week >= 1
+        && courseDay === day && courseIsOn(course, week) && !hidden.has(String(course.id))) selected.push(course)
+  }
+  const present = new Set(selected.map((course) => String(course.id)))
+  for (const item of exceptions) {
+    if (item.type !== 'session_makeup') continue
+    const ids = exceptionCourseIds(item)
+    if (!ids.length) return { ok: false, blocks: [] }
+    if (item.courseSlots != null) {
+      if (!Array.isArray(item.courseSlots) || item.courseSlots.length !== ids.length) return { ok: false, blocks: [] }
+      const seen = new Set()
+      for (const slot of item.courseSlots) {
+        const id = String(slot?.courseId ?? '').trim()
+        const start = config.periods.findIndex((period) => period.id === slot?.start)
+        const end = config.periods.findIndex((period) => period.id === slot?.end)
+        if (!ids.includes(id) || seen.has(id) || start < 0 || end < start) return { ok: false, blocks: [] }
+        seen.add(id)
+      }
+    }
+    for (const id of ids) {
+      if (present.has(id) || hidden.has(id)) continue
+      const course = courses.find((candidate) => String(candidate.id) === id)
+      if (!course) continue
+      const slot = item.courseSlots?.find((entry) => String(entry.courseId).trim() === id)
+      selected.push(slot ? { ...course, start: slot.start, end: slot.end } : course)
+      present.add(id)
+    }
+  }
+  const blocks = []
+  for (const course of selected) {
     const range = timeRangeForCourse(course, date, config)
     if (!range) return { ok: false, blocks: [] }
     const before = Math.max(preferences.classBufferMinutes, range.travel)
@@ -211,6 +253,9 @@ export function userFreeIntervals({ snapshot, profile, confirmedInvitations = []
   if (!Array.isArray(values.sl_courses) || !Array.isArray(values.sl_events) || !Array.isArray(values.sl_exams)) {
     return { known: false, intervals: [], revision: snapshot.revision }
   }
+  if (values.sl_schedule_exceptions != null && !Array.isArray(values.sl_schedule_exceptions)) {
+    return { known: false, intervals: [], revision: snapshot.revision }
+  }
   const preferences = normalizedPreferences(profile)
   if (!preferences) return { known: false, intervals: [], revision: snapshot.revision }
   const lastDate = dateInZone(end - 1, zone)
@@ -220,17 +265,17 @@ export function userFreeIntervals({ snapshot, profile, confirmedInvitations = []
   const firstDate = addDate(dateInZone(start, zone), -1)
   const afterLastDate = addDate(lastDate, 1)
   const busy = []
-  for (let date = firstDate; date < afterLastDate; date = addDate(date, 1)) {
-    const weekday = new Date(`${date}T00:00:00Z`).getUTCDay()
-    if (!preferences.includeWeekends && (weekday === 0 || weekday === 6)) continue
+  // Adjacent days can occupy the requested day through overnight events or
+  // class buffers; weekend preferences affect bookable windows only.
+  for (let date = firstDate; date <= afterLastDate; date = addDate(date, 1)) {
     const courseResult = courseBlocksForDate(values, profile, preferences, date)
     if (!courseResult.ok) return { known: false, intervals: [], revision: snapshot.revision }
     busy.push(...courseResult.blocks, ...eventBlocksForDate(values, profile, date))
-    for (const invitation of confirmedInvitations) {
-      const inviteStart = Date.parse(invitation.starts_at)
-      const inviteEnd = Date.parse(invitation.ends_at)
-      if (Number.isFinite(inviteStart) && Number.isFinite(inviteEnd)) busy.push({ start: inviteStart, end: inviteEnd })
-    }
+  }
+  for (const invitation of confirmedInvitations) {
+    const inviteStart = Date.parse(invitation.starts_at)
+    const inviteEnd = Date.parse(invitation.ends_at)
+    if (Number.isFinite(inviteStart) && Number.isFinite(inviteEnd)) busy.push({ start: inviteStart, end: inviteEnd })
   }
   const daily = []
   for (let date = firstDate; date < afterLastDate; date = addDate(date, 1)) {

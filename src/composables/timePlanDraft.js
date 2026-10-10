@@ -36,8 +36,11 @@ import { resetPlanTools } from './timePlanTools.js'
 import { restoreStoredValues } from './store/core.js'
 
 export function toMinutes(hhmm) {
-  const [h = 0, m = 0] = String(hhmm ?? '').split(':').map(Number)
-  return h * 60 + m
+  const match = /^(\d{1,2}):(\d{2})$/.exec(String(hhmm ?? ''))
+  if (!match) return Number.NaN
+  const hour = Number(match[1])
+  const minute = Number(match[2])
+  return hour <= 23 && minute <= 59 ? hour * 60 + minute : Number.NaN
 }
 
 export function toHHMM(minutes) {
@@ -228,6 +231,7 @@ export function rowError(index) {
   const row = draft.value[index]
   if (!row) return ''
   if (!row.start || !row.end) return '时间尚未设置'
+  if (!Number.isFinite(toMinutes(row.start)) || !Number.isFinite(toMinutes(row.end))) return '时间必须在 00:00 至 23:59 之间'
   if (toMinutes(row.end) <= toMinutes(row.start)) return '结束时间需要晚于开始时间'
   const prev = draft.value[index - 1]
   if (index > 0 && prev?.end && toMinutes(row.start) < toMinutes(prev.end)) {

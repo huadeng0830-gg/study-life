@@ -22,7 +22,7 @@ if (env.NODE_ENV === 'production' && RELEASE_SOURCE_SIGNATURE !== sourceSignatur
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
   const desktopBuild = mode === 'desktop'
-  const accountEnv = loadEnv(mode, '.', 'VITE_SUPABASE_')
+  const accountEnv = loadEnv(mode, '.', ['VITE_SUPABASE_', 'VITE_APP_RELEASE'])
   if ((accountEnv.VITE_SUPABASE_URL || accountEnv.VITE_SUPABASE_PUBLISHABLE_KEY) && !getSupabaseConfig(accountEnv)) {
     throw new Error('Supabase 账号配置不完整或密钥不安全：请使用有效项目 URL 与 publishable / anon key，禁止使用 secret / service_role key。')
   }

@@ -269,13 +269,11 @@ async function projectAvailability(userId: string, projectId: string, requestedD
   if (people.length > 30) return { known: false, intervals: [], people, range: null, reason: 'team_too_large' }
   await dispatch(userId, 'availability_rate_limit')
   const userIds = people.map((item: any) => String(item.userId))
-  const [profileResult, snapshotResult, socialParticipantResult, meetingParticipantResult] = await Promise.all([
+  const [profileResult, snapshotResult] = await Promise.all([
     admin.from('social_profiles').select('user_id,timezone,schedule_complete_through,semester_end,availability_preferences,updated_at').in('user_id', userIds),
     admin.from('account_sync_snapshots').select('user_id,revision,payload').in('user_id', userIds),
-    admin.from('social_invitation_participants').select('user_id,invitation_id').in('user_id', userIds),
-    admin.from('team_project_meeting_participants').select('user_id,meeting_id').in('user_id', userIds).eq('status', 'accepted'),
   ])
-  for (const result of [profileResult, snapshotResult, socialParticipantResult, meetingParticipantResult]) if (result.error) dbError(result.error)
+  for (const result of [profileResult, snapshotResult]) if (result.error) dbError(result.error)
   const profiles = profileResult.data || []
   const snapshots = snapshotResult.data || []
   if (profiles.length !== userIds.length || snapshots.length !== userIds.length) {
@@ -287,35 +285,14 @@ async function projectAvailability(userId: string, projectId: string, requestedD
   catch { return { known: false, intervals: [], people, range: null, reason: 'schedule_incomplete' } }
   const snapshotById = new Map(snapshots.map((snapshot: any) => [snapshot.user_id, snapshot]))
   const profileById = new Map(profiles.map((profile: any) => [profile.user_id, profile]))
-  const socialInviteIds = [...new Set((socialParticipantResult.data || []).map((row: any) => row.invitation_id))]
-  const teamMeetingIds = [...new Set((meetingParticipantResult.data || []).map((row: any) => row.meeting_id))]
-  const [socialInviteResult, teamMeetingResult] = await Promise.all([
-    socialInviteIds.length ? admin.from('social_invitations').select('id,starts_at,ends_at').in('id', socialInviteIds).eq('status', 'confirmed').gte('ends_at', new Date().toISOString()) : Promise.resolve({ data: [], error: null }),
-    teamMeetingIds.length ? admin.from('team_project_meetings').select('id,starts_at,ends_at').in('id', teamMeetingIds).eq('status', 'confirmed').gte('ends_at', new Date().toISOString()) : Promise.resolve({ data: [], error: null }),
-  ])
-  if (socialInviteResult.error) dbError(socialInviteResult.error)
-  if (teamMeetingResult.error) dbError(teamMeetingResult.error)
-  const socialInviteRows = socialInviteResult.data || []
-  const meetingById = new Map((teamMeetingResult.data || []).map((item: any) => [item.id, item]))
-  const meetingsByUser = new Map<string, any[]>()
-  for (const participant of meetingParticipantResult.data || []) {
-    const meeting = meetingById.get(participant.meeting_id)
-    if (!meeting) continue
-    const rows = meetingsByUser.get(participant.user_id) || []
-    rows.push({ starts_at: meeting.starts_at, ends_at: meeting.ends_at })
-    meetingsByUser.set(participant.user_id, rows)
-  }
+  const calendarByUser = await getConfirmedCalendar(userIds, range)
   let combined: Array<{ start: number; end: number }> | null = null
   let minimumMinutes = 30
   const revisions: Record<string, unknown> = {}
   for (const id of userIds) {
     const profile = profileById.get(id)
     const snapshot = snapshotById.get(id)
-    const personInvites = (socialParticipantResult.data || [])
-      .filter((row: any) => row.user_id === id)
-      .map((row: any) => socialInviteRows.find((invite: any) => invite.id === row.invitation_id))
-      .filter(Boolean)
-    const free = userFreeIntervals({ snapshot, profile, confirmedInvitations: [...personInvites, ...(meetingsByUser.get(id) || [])] }, range)
+    const free = userFreeIntervals({ snapshot, profile, confirmedInvitations: calendarByUser.get(id) || [] }, range)
     if (!free.known) return { known: false, intervals: [], people, range: { startDate: range.startDate, endDateExclusive: range.endDateExclusive }, reason: 'schedule_incomplete' }
     combined = combined === null ? free.intervals : intersectIntervals(combined, free.intervals)
     minimumMinutes = Math.max(minimumMinutes, free.minimumMinutes || 90)
@@ -404,32 +381,50 @@ async function listFriends(userId: string) {
   }
 }
 
-async function getActiveInvitations(userId: string) {
-  const { data: participants, error: participantError } = await admin.from('social_invitation_participants')
-    .select('invitation_id').eq('user_id', userId)
-  if (participantError) dbError(participantError)
-  const ids = [...new Set((participants || []).map((row: any) => row.invitation_id))]
-  if (!ids.length) return []
-  const { data, error } = await admin.from('social_invitations').select('starts_at,ends_at')
-    .in('id', ids).eq('status', 'confirmed').gte('ends_at', new Date().toISOString())
-  if (error) dbError(error)
-  return data || []
+async function getConfirmedCalendar(userIds: string[], range: { start: number; end: number }) {
+  // Filter the joined calendar before the Data API row limit. Reading a user's
+  // complete participant history first can silently hide their newer meetings.
+  const [invitations, meetings] = await Promise.all([
+    admin.from('social_invitation_participants')
+      .select('user_id,slot:social_invitations!inner(starts_at,ends_at)', { count: 'exact' })
+      .in('user_id', userIds).eq('slot.status', 'confirmed')
+      .gte('slot.ends_at', new Date(range.start).toISOString()).lt('slot.starts_at', new Date(range.end).toISOString()).limit(1000),
+    admin.from('team_project_meeting_participants')
+      .select('user_id,slot:team_project_meetings!inner(starts_at,ends_at)', { count: 'exact' })
+      .in('user_id', userIds).eq('status', 'accepted').eq('slot.status', 'confirmed')
+      .gte('slot.ends_at', new Date(range.start).toISOString()).lt('slot.starts_at', new Date(range.end).toISOString()).limit(1000),
+  ])
+  const byUser = new Map<string, any[]>()
+  for (const result of [invitations, meetings]) {
+    if (result.error) dbError(result.error)
+    const rows = result.data || []
+    if ((result.count != null && result.count > rows.length) || (result.count == null && rows.length >= 1000)) {
+      throw new ApiError('schedule_unknown', '相关安排过多，暂时无法完整确认共同时间。', 409)
+    }
+    for (const row of rows) {
+      const slot = row.slot
+      if (!slot?.starts_at || !slot?.ends_at) throw new ApiError('schedule_unknown', '暂时无法完整确认共同时间。', 409)
+      const slots = byUser.get(row.user_id) || []
+      slots.push(slot)
+      byUser.set(row.user_id, slots)
+    }
+  }
+  return byUser
 }
 
 async function loadPair(userIds: string[], range: { start: number; end: number }) {
-  const [profiles, snapshots, firstInvites, secondInvites] = await Promise.all([
+  const [profiles, snapshots, calendarByUser] = await Promise.all([
     requireProfiles(userIds),
     admin.from('account_sync_snapshots').select('user_id,revision,payload').in('user_id', userIds),
-    getActiveInvitations(userIds[0]), getActiveInvitations(userIds[1]),
+    getConfirmedCalendar(userIds, range),
   ])
   if (snapshots.error) dbError(snapshots.error)
   const byId = new Map((snapshots.data || []).map((snapshot: any) => [snapshot.user_id, snapshot]))
   if (userIds.some((id) => !byId.has(id))) throw new ApiError('schedule_unknown', '双方账号的课表同步还没有完成。请先同步课表再试。', 409)
-  const inviteLists = [firstInvites, secondInvites]
   const pair = profiles.map((profile: any, index: number) => ({
     profile,
     snapshot: byId.get(userIds[index]),
-    confirmedInvitations: inviteLists[index],
+    confirmedInvitations: calendarByUser.get(userIds[index]) || [],
   }))
   return { pair, profiles }
 }
@@ -685,13 +680,13 @@ async function handle(user: any, action: string, payload: any) {
     case 'project_create': return projectDispatch(user.id, 'create', {
       id: assertUUID(payload.id, '项目'), name: cleanText(payload.name, 120, '项目名称', true),
       description: cleanText(payload.description, 2000, '项目说明'), type: cleanText(payload.type, 24, '项目类型'),
-      startsOn: cleanText(payload.startsOn, 10, '开始日期'), targetEndOn: cleanText(payload.targetEndOn, 10, '预计结束日期'),
+      startsOn: assertDate(payload.startsOn, '开始日期'), targetEndOn: assertDate(payload.targetEndOn, '预计结束日期'),
     })
     case 'project_update': return projectDispatch(user.id, 'update', {
       projectId: assertUUID(payload.projectId, '项目'), expectedRevision: assertRevision(payload.expectedRevision, '项目'),
       name: cleanText(payload.name, 120, '项目名称', true), description: cleanText(payload.description, 2000, '项目说明'),
-      type: cleanText(payload.type, 24, '项目类型'), startsOn: cleanText(payload.startsOn, 10, '开始日期'),
-      targetEndOn: cleanText(payload.targetEndOn, 10, '预计结束日期'),
+      type: cleanText(payload.type, 24, '项目类型'), startsOn: assertDate(payload.startsOn, '开始日期'),
+      targetEndOn: assertDate(payload.targetEndOn, '预计结束日期'),
     })
     case 'project_archive': return projectDispatch(user.id, 'archive', {
       projectId: assertUUID(payload.projectId, '项目'), archived: payload.archived === true,
@@ -744,12 +739,12 @@ async function handle(user: any, action: string, payload: any) {
       dependsOnTaskId: payload.dependsOnTaskId ? assertUUID(payload.dependsOnTaskId, '前置任务') : '',
       assigneeId: payload.assigneeId ? assertUUID(payload.assigneeId, '负责人') : '',
       title: cleanText(payload.title, 160, '任务标题', true), description: cleanText(payload.description, 3000, '任务说明'),
-      dueOn: cleanText(payload.dueOn, 10, '截止日期'), priority: cleanText(payload.priority, 12, '优先级'),
+      dueOn: assertDate(payload.dueOn, '截止日期'), priority: cleanText(payload.priority, 12, '优先级'),
     })
     case 'project_task_update': return projectDispatch(user.id, 'task_update', {
       projectId: assertUUID(payload.projectId, '项目'), taskId: assertUUID(payload.taskId, '任务'),
       expectedRevision: assertRevision(payload.expectedRevision, '任务'), title: cleanText(payload.title, 160, '任务标题', true),
-      description: cleanText(payload.description, 3000, '任务说明'), dueOn: cleanText(payload.dueOn, 10, '截止日期'),
+      description: cleanText(payload.description, 3000, '任务说明'), dueOn: assertDate(payload.dueOn, '截止日期'),
       priority: cleanText(payload.priority, 12, '优先级'),
       ...(Object.hasOwn(payload, 'milestoneId') ? { milestoneId: payload.milestoneId ? assertUUID(payload.milestoneId, '里程碑') : '' } : {}),
       ...(Object.hasOwn(payload, 'dependsOnTaskId') ? { dependsOnTaskId: payload.dependsOnTaskId ? assertUUID(payload.dependsOnTaskId, '前置任务') : '' } : {}),
@@ -840,6 +835,7 @@ async function handle(user: any, action: string, payload: any) {
     case 'project_deliverable_submit': return projectDispatch(user.id, 'deliverable_submit', {
       projectId: assertUUID(payload.projectId, '项目'), deliverableId: assertUUID(payload.deliverableId, '交付项'),
       versionId: assertUUID(payload.versionId, '版本'), submissionKey: assertUUID(payload.submissionKey, '提交编号'),
+      ...(payload.expectedRevision === undefined ? {} : { expectedRevision: assertDraftRevision(payload.expectedRevision) }),
       changeNote: cleanText(payload.changeNote, 1500, '修改说明'),
     })
     case 'project_deliverable_review': {
@@ -859,6 +855,28 @@ async function handle(user: any, action: string, payload: any) {
   }
 }
 
+async function readRequestText(request: Request, maximumBytes: number) {
+  if (!request.body) return ''
+  const reader = request.body.getReader()
+  const decoder = new TextDecoder()
+  let bytes = 0
+  let text = ''
+  try {
+    while (true) {
+      const { value, done } = await reader.read()
+      if (done) return text + decoder.decode()
+      bytes += value.byteLength
+      if (bytes > maximumBytes) {
+        await reader.cancel().catch(() => {})
+        throw new ApiError('invalid_input', '请求内容过大。', 413)
+      }
+      text += decoder.decode(value, { stream: true })
+    }
+  } finally {
+    reader.releaseLock()
+  }
+}
+
 Deno.serve(async (request: Request) => {
   if (request.method === 'OPTIONS') return withCors(request, new Response('ok', { headers: corsHeaders }))
   if (request.method !== 'POST') return withCors(request, response({ error: '仅支持 POST。', code: 'method_not_allowed' }, 405))
@@ -866,8 +884,7 @@ Deno.serve(async (request: Request) => {
   try {
     const length = Number(request.headers.get('content-length') || 0)
     if (length > 32_768) throw new ApiError('invalid_input', '请求内容过大。', 413)
-    const raw = await request.text()
-    if (new TextEncoder().encode(raw).byteLength > 32_768) throw new ApiError('invalid_input', '请求内容过大。', 413)
+    const raw = await readRequestText(request, 32_768)
     let body
     try { body = JSON.parse(raw) } catch { throw new ApiError('invalid_input', '请求内容无效。') }
     if (!body || typeof body.action !== 'string') throw new ApiError('invalid_input', '请求内容无效。')

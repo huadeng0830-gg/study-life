@@ -1,6 +1,7 @@
 import { socialRequest } from './social.js'
 import { accountUser } from '../composables/accountAuth.js'
 import { getSupabaseClient } from './supabase.js'
+import { validDate } from '../composables/zonedTime.js'
 
 const PROJECT_FILE_BUCKET = 'qixing-deliverables'
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -50,9 +51,19 @@ export function validateProjectForm(value = {}) {
   if (!form.name) return { ok: false, field: 'name', message: '请填写项目名称。' }
   if (form.name.length > 120) return { ok: false, field: 'name', message: '项目名称不能超过 120 个字。' }
   if (form.description.length > 2000) return { ok: false, field: 'description', message: '项目说明不能超过 2000 个字。' }
-  if (form.startsOn && !/^\d{4}-\d{2}-\d{2}$/.test(form.startsOn)) return { ok: false, field: 'startsOn', message: '开始日期格式不正确。' }
-  if (form.targetEndOn && !/^\d{4}-\d{2}-\d{2}$/.test(form.targetEndOn)) return { ok: false, field: 'targetEndOn', message: '预计结束日期格式不正确。' }
+  if (form.startsOn && !validDate(form.startsOn)) return { ok: false, field: 'startsOn', message: '开始日期格式不正确。' }
+  if (form.targetEndOn && !validDate(form.targetEndOn)) return { ok: false, field: 'targetEndOn', message: '预计结束日期格式不正确。' }
   if (form.startsOn && form.targetEndOn && form.targetEndOn < form.startsOn) return { ok: false, field: 'targetEndOn', message: '预计结束日期不能早于开始日期。' }
+  return { ok: true, value: form }
+}
+
+export function validateProjectTaskForm(value = {}) {
+  const form = { ...value, title: String(value.title || '').trim(), description: String(value.description || '').trim(), dueOn: String(value.dueOn || '').trim() }
+  if (!form.title) return { ok: false, field: 'title', message: '请填写任务标题。' }
+  if (form.title.length > 160) return { ok: false, field: 'title', message: '任务标题不能超过 160 个字。' }
+  if (form.description.length > 3000) return { ok: false, field: 'description', message: '任务说明不能超过 3000 个字。' }
+  if (form.dueOn && !validDate(form.dueOn)) return { ok: false, field: 'dueOn', message: '请填写有效的截止日期。' }
+  if (form.dependsOnTaskId && form.dependsOnTaskId === form.id) return { ok: false, field: 'dependsOnTaskId', message: '任务不能以自己作为前置任务。' }
   return { ok: true, value: form }
 }
 
@@ -73,10 +84,11 @@ export async function uploadProjectDeliverableFile(projectId, deliverableId, fil
   if (!UUID_PATTERN.test(String(projectId || '')) || !UUID_PATTERN.test(String(deliverableId || '')) || !file?.name || !Number.isSafeInteger(file.size)) {
     throw new Error('文件或交付项信息无效。')
   }
-  if (file.size < 1 || file.size > 20 * 1024 * 1024) throw new Error('单个成果文件不能超过 20 MB。')
+  if (file.size < 1) throw new Error('成果文件不能为空。')
+  if (file.size > 20 * 1024 * 1024) throw new Error('单个成果文件不能超过 20 MB。')
   const { client, userId } = await verifiedProjectFileClient()
-  const safeName = String(file.name).normalize('NFKC').replace(/[^\p{L}\p{N}._-]+/gu, '_').slice(0, 120) || 'file'
-  const objectId = globalThis.crypto?.randomUUID?.()
+  const safeName = String(file.name).normalize('NFKC').replace(/[^\p{L}\p{N}._-]+/gu, '_').replace(/\.{2,}/g, '_').slice(0, 120) || 'file'
+  const objectId = newProjectId()
   if (!objectId) throw new Error('当前环境无法生成安全文件编号。')
   const path = `${projectId}/${deliverableId}/${userId}/${objectId}-${safeName}`
   const { error } = await client.storage.from(PROJECT_FILE_BUCKET).upload(path, file, {
@@ -89,7 +101,9 @@ export async function uploadProjectDeliverableFile(projectId, deliverableId, fil
 
 export async function getProjectDeliverableFileUrl(path) {
   const objectPath = String(path || '')
-  if (!/^[0-9a-f-]{36}\/[0-9a-f-]{36}\/[0-9a-f-]{36}\/.{1,200}$/i.test(objectPath) || objectPath.includes('..')) {
+  const segments = objectPath.split('/')
+  if (segments.length !== 4 || !segments.slice(0, 3).every((segment) => UUID_PATTERN.test(segment))
+    || !/^[^/\\\u0000-\u001f]{1,200}$/.test(segments[3]) || ['.', '..'].includes(segments[3])) {
     throw new Error('成果文件路径无效。')
   }
   const { client, userId } = await verifiedProjectFileClient()

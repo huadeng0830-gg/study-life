@@ -3,6 +3,9 @@ import { courseTimeRange, currentTimes, periodIndex } from '../store/timeConfig.
 import { isArchived, isBillDueSoon, isTaskActionable } from '../domain/state.js'
 import { addAppDays, appDateTime } from '../timeContext.js'
 import { courseTiming } from '../courseTime.js'
+import { taskStages, taskTimeSummary } from '../tasks/taskTimePlan.ts'
+import { countdownState } from '../store/countdown.js'
+import { policyDateKey } from '../settingsPolicy.js'
 
 function minutesOf(value) {
   if (!value) return null
@@ -62,9 +65,18 @@ export function selectHomeNextUp({
   }
 
   events.filter((item) => !isArchived(item)).forEach((item) => add('event', item, item.date, item.time))
-  tasks.filter((item) => isTaskActionable(item, now)).forEach((item) => add('task', item, item.dueDate, item.dueTime))
+  tasks.filter((item) => isTaskActionable(item, now)).forEach((item) => {
+    if (!taskStages(item).length) { add('task', item, item.dueDate, item.dueTime); return }
+    const plan = taskTimeSummary(item, nowTs)
+    // 已结束待确认在风险区显示；这里仍可展示同一事项的后续安排。
+    const entry = plan.next?.risk ? plan.following : plan.next
+    if (entry?.date && entry.at <= nowTs + 7 * 86400000) candidates.push({ kind: 'task', entity: item, date: entry.date, time: entry.time, dueAt: Math.max(nowTs, entry.at), state: 'upcoming', timeSummary: entry.label, stageId: entry.stage?.id })
+  })
   bills.filter((item) => isBillDueSoon(item, now)).forEach((item) => add('bill', item, item.nextDate))
-  milestones.filter((item) => !isArchived(item) && !item.countdown?.isPast).forEach((item) => add('milestone', item, item.date, item.time))
+  milestones.filter((item) => !isArchived(item)).forEach((item) => {
+    const countdown = countdownState(item, now)
+    if (countdown.target && !countdown.isPast) add('milestone', item, policyDateKey(countdown.target), item.time)
+  })
 
   const nextUp = candidates.sort((a, b) => a.dueAt - b.dueAt)[0] || { kind: 'none' }
   const course = nextUp.kind === 'course' ? nextUp.entity : null

@@ -1,12 +1,16 @@
 <script setup>
 import ActionButton from '../components/ActionButton.vue'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { createCollaborationContext } from '../composables/collaborationContext.js'
 import { useRoute, useRouter } from 'vue-router'
 import { socialRequest } from '../services/social.js'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import VirtualList from '../components/VirtualList.vue'
 import Modal from '../components/Modal.vue'
 import ProjectTaskWorkProgress from '../components/projects/ProjectTaskWorkProgress.vue'
+import ProjectTaskOverview from '../components/projects/ProjectTaskOverview.vue'
+import ProjectDraftRecovery from '../components/projects/ProjectDraftRecovery.vue'
+import { useProjectMeetings } from '../composables/projects/useProjectMeetings.js'
 import TaskWorkSession from '../components/tasks/TaskWorkSession.vue'
 import { accountOpen, accountUser } from '../composables/accountAuth.js'
 import { announce as announceLive, announceAlert } from '../composables/liveRegion.js'
@@ -14,15 +18,19 @@ import { detachProjectTaskTodos, ensureProjectTaskTodo, setProjectTaskTodoStatus
 import { usePendingFieldEdits } from '../composables/pendingFieldEdits.js'
 import { loadProjectTaskCheckpoints, attachProjectTaskCheckpoints } from '../composables/projects/projectTaskCheckpoints.js'
 import { taskEventLabel } from '../composables/projects/taskEventLabel.js'
-import { groupProjectSubtasks, projectDeliveryCenter, projectTaskRisks } from '../composables/projects/projectTaskSelectors.js'
+import { isProjectTaskBlocked, selectProjectTasks, projectTaskOverview, projectDeliveryCenter, projectTaskRisks } from '../composables/projects/projectTaskSelectors.js'
 import { useProjectTaskWorkbench } from '../composables/projects/useProjectTaskWorkbench.js'
+import { useProjectDeliverableEditor } from '../composables/projects/useProjectDeliverableEditor.js'
+import { createProjectRequestScope } from '../composables/projects/projectRequestScope.js'
+import { createProjectEditorScope } from '../composables/projects/projectEditorScope.js'
+import { useProjectTaskActions } from '../composables/projects/useProjectTaskActions.js'
 import { useDomainCommands } from '../composables/domain/commands.js'
 import { syncProjectMeetingEvents, detachProjectMeetingEvents } from '../composables/projectMeetingBridge.js'
 import {
   newProjectId, PROJECT_TASK_PRIORITY, PROJECT_TASK_STATUS, PROJECT_TYPE_LABELS, PROJECT_TYPES,
-  getProjectDeliverableFileUrl, projectRequest, uploadProjectDeliverableFile, validateProjectForm,
+  getProjectDeliverableFileUrl, projectRequest as requestProject, validateProjectForm, validateProjectTaskForm,
 } from '../services/projects.js'
-import { dateInZone, wallTimeToEpoch, zonedParts } from '../composables/zonedTime.js'
+import { dateInZone } from '../composables/zonedTime.js'
 import { formatDateTime } from '../composables/intlFormatters.js'
 
 const route = useRoute()
@@ -30,89 +38,106 @@ const router = useRouter()
 const domain = useDomainCommands()
 const taskSync = useProjectTaskSyncState()
 
-const projects = ref([])
-const selectedProjectId = ref('')
-const project = ref(null)
-const members = ref([])
+const accountContext = createCollaborationContext(() => [accountUser.value?.id || ''])
+const projectContext = createCollaborationContext(() => [accountUser.value?.id || '', selectedProjectId.value], { onError: (error) => notify('error', errorMessage(error)) })
+const projects = accountContext.state([])
+const selectedProjectId = accountContext.state('')
+const project = accountContext.state(null)
+const members = accountContext.state([])
 /** @type {import('vue').Ref<Array<Record<string, any>>>} */
-const tasks = ref([])
-const milestones = ref([])
+const tasks = accountContext.state([])
+const milestones = accountContext.state([])
 /** @type {import('vue').Ref<Array<{ id: string, title: string, required: boolean, checked: boolean, checkedByName?: string, evidence: string, revision: number }>>} */
-const deliveryChecks = ref([])
-const activities = ref([])
-const adjustments = ref([])
-const deliverables = ref([])
-const meetings = ref([])
-const inbox = ref({ invitations: [], assignments: [], adjustments: [], reviews: [], meetings: [] })
-const friends = ref([])
-const inviteLinks = ref([])
+const deliveryChecks = accountContext.state([])
+const activities = accountContext.state([])
+const adjustments = accountContext.state([])
+const deliverables = accountContext.state([])
+const meetings = accountContext.state([])
+const inbox = accountContext.state(() => ({ invitations: [], assignments: [], adjustments: [], reviews: [], meetings: [] }))
+const friends = accountContext.state([])
+const inviteLinks = accountContext.state([])
 const activeSection = ref('tasks')
 const showArchived = ref(false)
-const pageLoading = ref(false)
-const detailLoading = ref(false)
-const pageError = ref('')
-const notice = ref(null)
-const actionBusy = ref('')
-const showProjectForm = ref(false)
-const editingProject = ref(false)
-const projectDraft = ref(blankProject())
-const projectRequestId = ref('')
-const showTaskForm = ref(false)
-const taskDraft = ref(blankTask())
-const editingTask = ref(false)
-const showAdjustmentForm = ref(false)
-const adjustmentTask = ref(null)
-const adjustmentDraft = ref(blankAdjustment())
-const showDeliverableForm = ref(false)
-const deliverableDraft = ref(blankDeliverable())
-const showDeliverableEditor = ref(false)
-const activeDeliverable = ref(null)
-const draftContent = ref(blankDeliverableContent())
-const draftRevision = ref(0)
-const changeNote = ref('')
-const fileUploadBusy = ref(false)
-const reviewTarget = ref(null)
-const reviewFeedback = ref('')
-const reviewChecklist = ref([{ item: '符合交付要求', passed: false }])
-const showInviteForm = ref(false)
-const selectedFriendId = ref('')
-const friendsLoading = ref(false)
-const linkBusy = ref(false)
-const linkToShare = ref('')
-const taskEvents = ref([])
-const taskEventsTitle = ref('')
-const projectCheckpointError = ref('')
-const confirmAction = ref(null)
-const lastDeletedProjectId = ref('')
-const transferTargetId = ref('')
-const joiningToken = ref('')
-const showMilestoneForm = ref(false)
-const milestoneDraft = ref(blankMilestone())
-const editingMilestone = ref(false)
-const showDeliveryCheckForm = ref(false)
-const deliveryCheckDraft = ref(blankDeliveryCheck())
-const showMeetingForm = ref(false)
-const meetingDraft = ref(blankMeeting())
-const meetingProposalTarget = ref(null)
-const scheduleAvailability = ref(null)
-const scheduleDays = ref(7)
-const scheduleBusy = ref(false)
-const scheduleError = ref('')
-const scheduleTimezone = ref('Asia/Shanghai')
-const projectSaveBusy = ref(false)
+const pageLoading = accountContext.state(false)
+const detailLoading = accountContext.state(false)
+const pageError = accountContext.state('')
+const notice = accountContext.state(null)
+const actionBusy = projectContext.state('')
+const { pending: pendingTaskActions, run: runTaskAction } = useProjectTaskActions(projectContext, actionBusy, currentProjectRequest)
+const showProjectForm = accountContext.state(false)
+const editingProject = accountContext.state(false)
+const projectDraft = accountContext.state(blankProject)
+const projectRequestId = accountContext.state('')
+const showTaskForm = accountContext.state(false)
+const taskDraft = accountContext.state(blankTask)
+const editingTask = accountContext.state(false)
+const showAdjustmentForm = accountContext.state(false)
+const adjustmentTask = accountContext.state(null)
+const adjustmentDraft = accountContext.state(blankAdjustment)
+const showDeliverableForm = accountContext.state(false)
+const deliverableDraft = accountContext.state(blankDeliverable)
+const reviewTarget = accountContext.state(null)
+const reviewFeedback = accountContext.state('')
+const reviewChecklist = accountContext.state(() => [{ item: '符合交付要求', passed: false }])
+const showInviteForm = accountContext.state(false)
+const selectedFriendId = accountContext.state('')
+const friendsLoading = projectContext.state(false)
+const linkBusy = accountContext.state(false)
+const linkToShare = accountContext.state('')
+const taskEvents = accountContext.state([])
+const taskEventsTitle = accountContext.state('')
+const projectCheckpointError = accountContext.state('')
+const confirmAction = accountContext.state(null)
+const lastDeletedProjectId = accountContext.state('')
+const transferTargetId = accountContext.state('')
+const joiningToken = accountContext.state('')
+const showMilestoneForm = accountContext.state(false)
+const milestoneDraft = accountContext.state(blankMilestone)
+const editingMilestone = accountContext.state(false)
+const showDeliveryCheckForm = accountContext.state(false)
+const deliveryCheckDraft = accountContext.state(blankDeliveryCheck)
+const scheduleTimezone = accountContext.state('')
+const projectSaveBusy = accountContext.state(false)
 // 表单自己的错误位。原先这里绑的是 pageError——那**只**记录列表/详情加载失败，而表单校验
 // 失败走 notify() → 顶部 notice，于是校验提示在这个 aria-live 区永不出现、而旧列表报错会串进
 // 表单。完整推理见 tests/projectsFormErrorBinding.test.js。
-const projectFormError = ref('')
+const projectFormError = accountContext.state('')
 const deliveryEvidenceEdits = usePendingFieldEdits() // 「凭证与说明」绑在服务端对象上，每 120 秒自动刷新会整体替换 deliveryChecks，未保存的输入会被静默清空；换项目时清空（id 属旧项目）
-const taskSaveBusy = ref(false)
-const adjustmentSaveBusy = ref(false)
-const deliverableSaveBusy = ref(false)
-const reviewSaveBusy = ref(false)
-const planningSaveBusy = ref(false)
+const taskSaveBusy = accountContext.state(false)
+const adjustmentSaveBusy = accountContext.state(false)
+const deliverableSaveBusy = accountContext.state(false)
+const reviewSaveBusy = accountContext.state(false)
+const planningSaveBusy = accountContext.state(false)
 const statusFilter = ref('open')
-let detailLoadSequence = 0
-let availabilitySequence = 0
+const projectSearch = ref('')
+const taskSearch = ref('')
+const assigneeFilter = ref('all')
+const milestoneFilter = ref('')
+const taskSort = ref('default')
+const clockNow = ref(Date.now())
+const inboxError = ref('')
+const taskFormError = ref('')
+let selectionVisit = 0
+const editorScopes = {
+  project: createProjectEditorScope(projectContext, showProjectForm, projectSaveBusy),
+  task: createProjectEditorScope(projectContext, showTaskForm, taskSaveBusy),
+  adjustment: createProjectEditorScope(projectContext, showAdjustmentForm, adjustmentSaveBusy),
+  deliverable: createProjectEditorScope(projectContext, showDeliverableForm, deliverableSaveBusy),
+  review: createProjectEditorScope(projectContext, reviewTarget, reviewSaveBusy),
+  milestone: createProjectEditorScope(projectContext, showMilestoneForm, planningSaveBusy),
+  check: createProjectEditorScope(projectContext, showDeliveryCheckForm, planningSaveBusy),
+}
+
+function currentProjectRequest(channel) {
+  const isCurrent = projectContext.capture(channel)
+  const projectId = project.value?.id
+  return () => isCurrent() && projectId === selectedProjectId.value && projectId === project.value?.id
+}
+
+const requestScope = createProjectRequestScope(requestProject, {
+  captureProject: () => projectContext.capture(), captureAccount: () => accountContext.capture(), readProjectId: () => selectedProjectId.value,
+})
+const projectRequest = requestScope.request
 
 const isSignedIn = computed(() => Boolean(accountUser.value?.id))
 const isManager = computed(() => ['owner', 'admin'].includes(project.value?.role))
@@ -121,28 +146,50 @@ const { open: openProjectTaskWorkbench, close: closeProjectTaskWorkbench, dialog
   projectRequest, loadProject, changeTaskStatus, notify, describeError: errorMessage,
 })
 const isOwner = computed(() => project.value?.role === 'owner')
-const visibleProjects = computed(() => projects.value.filter((item) => showArchived.value ? item.status === 'archived' : item.status === 'active'))
-const filteredTasks = computed(() => {
-  const list = tasks.value.filter((task) => !task.parentTaskId)
-  return statusFilter.value === 'all' ? list : list.filter((task) => statusFilter.value === 'done' ? task.status === 'completed' : task.status !== 'completed')
-})
-// VirtualList limits DOM work when a project has many tasks.
+const visibleProjects = computed(() => projects.value.filter((item) => (showArchived.value ? item.status === 'archived' : item.status === 'active')
+  && (!projectSearch.value.trim() || [item.name, item.description, PROJECT_TYPE_LABELS[item.type]].join(' ').toLocaleLowerCase().includes(projectSearch.value.trim().toLocaleLowerCase()))))
+const todayKey = computed(() => dateInZone(clockNow.value, scheduleTimezone.value || 'Asia/Shanghai'))
+const taskSelection = computed(() => selectProjectTasks(tasks.value, {
+  status: statusFilter.value, assignee: assigneeFilter.value, milestone: milestoneFilter.value,
+  search: taskSearch.value, sort: taskSort.value, userId: accountUser.value?.id, today: todayKey.value,
+}))
+const filteredTasks = computed(() => taskSelection.value.parents)
 const visibleTasks = computed(() => filteredTasks.value)
+const taskOverview = computed(() => projectTaskOverview(tasks.value, { userId: accountUser.value?.id, today: todayKey.value }))
+const hasTaskFilters = computed(() => statusFilter.value !== 'open' || assigneeFilter.value !== 'all' || milestoneFilter.value || taskSearch.value.trim() || taskSort.value !== 'default')
+function resetTaskFilters() { statusFilter.value = 'open'; assigneeFilter.value = 'all'; milestoneFilter.value = ''; taskSearch.value = ''; taskSort.value = 'default' }
 const dependencyTaskOptions = computed(() => tasks.value.filter((task) => task.id !== taskDraft.value.id))
 const deliverableTaskOptions = computed(() => {
   const assignedTaskIds = new Set(deliverables.value.map((item) => item.taskId).filter(Boolean))
   return tasks.value.filter((task) => !task.parentTaskId && !assignedTaskIds.has(task.id))
 })
-const subtasksByParent = computed(() => groupProjectSubtasks(tasks.value))
+const subtasksByParent = computed(() => taskSelection.value.children)
 const assignedSubtasks = (taskId) => subtasksByParent.value.get(taskId) || []
-function isTaskDependencyBlocked(task) { return Boolean(task?.dependsOnTaskId && task.dependencyStatus !== 'completed') }
+const isTaskDependencyBlocked = isProjectTaskBlocked
 const activeMembers = computed(() => members.value.filter((member) => member.status === 'active'))
 const pendingMemberInvites = computed(() => members.value.filter((member) => member.status === 'invited'))
 const pendingInboxCount = computed(() => inbox.value.invitations.length + inbox.value.assignments.length + inbox.value.adjustments.length + inbox.value.reviews.length + inbox.value.meetings.length)
 const projectFormTitle = computed(() => editingProject.value ? '编辑项目' : '新建项目')
 const projectRisks = computed(() => projectTaskRisks({ project: project.value, tasks: tasks.value, deliverables: deliverables.value,
-  deliveryChecks: deliveryChecks.value, inbox: inbox.value, isDependencyBlocked: isTaskDependencyBlocked }))
+  deliveryChecks: deliveryChecks.value, inbox: inbox.value, isDependencyBlocked: isTaskDependencyBlocked, now: clockNow.value, timeZone: scheduleTimezone.value || 'Asia/Shanghai' }))
 const deliveryCenter = computed(() => projectDeliveryCenter(tasks.value, deliverables.value))
+
+const deliverableEditor = useProjectDeliverableEditor({
+  project, accountUser, projectRequest, loadProject, loadInbox, captureRequest: currentProjectRequest, notify, describeError: errorMessage,
+})
+const { showDeliverableEditor, activeDeliverable, draftContent, draftRevision, changeNote, fileUploadBusy,
+  busy: deliverableEditorBusy, error: deliverableEditorError, dirty: deliverableDirty,
+  conflict: deliverableConflict, latestDraft: latestDeliverableDraft,
+  open: openDeliverableEditor, close: closeDeliverableEditor, addLink: addContentLink,
+  upload: uploadDeliverableFiles, save: saveDeliverableDraft, submit: submitDeliverable } = deliverableEditor
+
+const { showMeetingForm, meetingDraft, meetingProposalTarget, scheduleAvailability, scheduleDays, scheduleBusy, scheduleError,
+  formatProjectTime, queryGroupAvailability, openMeetingForm, openMeetingProposal, saveMeetingForm, respondMeeting,
+  meetingCanConfirm, meetingStatusLabel, meetingParticipantStatus } = useProjectMeetings({
+  project, activeMembers, accountUser, isManager, scheduleTimezone, projectContext, actionBusy, projectRequest, loadProject, loadInbox, notify, describeError: errorMessage,
+})
+
+function applyTaskSummaryFilter(filters) { resetTaskFilters(); statusFilter.value = filters.status; assigneeFilter.value = filters.assignee; activeSection.value = 'tasks' }
 
 function blankProject() {
   return { name: '', description: '', type: 'blank', startsOn: '', targetEndOn: '' }
@@ -154,55 +201,56 @@ function blankTask(parentTaskId = '') {
 
 function blankAdjustment() { return { type: 'deadline_extension', reason: '', dueOn: '', targetId: '', description: '', subtasks: '' } }
 function blankDeliverable() { return { id: '', taskId: '', title: '', instructions: '', reviewerId: '', required: true, reviewRequired: true } }
-function blankDeliverableContent() { return { summary: '', links: [], files: [] } }
 function blankMilestone() { return { id: '', title: '', description: '', dueOn: '', revision: 0 } }
 function blankDeliveryCheck() { return { id: '', title: '', required: true } }
-function blankMeeting() { return { id: '', title: '', note: '', startsLocal: '', endsLocal: '' } }
 
 function notify(kind, text) {
-  notice.value = text ? { kind, text } : null
   if (!text) return
+  notice.value = { kind, text }
   if (kind === 'error') announceAlert(text, { clearAfter: 7000 })
   else announceLive(text, { clearAfter: 5000 })
 }
 
 function errorMessage(error, fallback = '操作没有完成，请稍后重试。') {
+  if (error?.code === 'project_context_changed') return ''
   return error?.message || fallback
 }
 
 async function loadInbox() {
   if (!isSignedIn.value) return
-  inbox.value = await projectRequest('inbox')
+  const isCurrent = accountContext.capture('inbox')
+  try {
+    const result = await projectRequest('inbox')
+    if (isCurrent()) { inbox.value = result; inboxError.value = '' }
+  } catch (error) {
+    if (isCurrent() && errorMessage(error)) inboxError.value = '暂时无法更新待处理事项，可刷新重试。'
+  }
 }
 
 async function loadProjects({ keepSelected = true } = {}) {
   if (!isSignedIn.value) {
-    projects.value = []
-    selectedProjectId.value = ''
-    project.value = null
-    members.value = []
-    tasks.value = []
-    milestones.value = []
-    deliveryChecks.value = []
-    adjustments.value = []
-    deliverables.value = []
-    meetings.value = []
+    accountContext.invalidate()
+    projectContext.invalidate()
     closeProjectTaskWorkbench()
-    projectCheckpointError.value = ''
     return
   }
   pageLoading.value = true
   pageError.value = ''
+  const isCurrent = accountContext.capture('list')
   try {
     const [result] = await Promise.all([projectRequest('list'), loadInbox()])
+    if (!isCurrent()) return
     projects.value = result.projects || []
     const queryId = String(route.query.project || '')
     const currentId = keepSelected && projects.value.some((item) => item.id === selectedProjectId.value) ? selectedProjectId.value : ''
-    const nextId = [queryId, currentId, projects.value[0]?.id].find((id) => id && projects.value.some((item) => item.id === id)) || ''
-    selectedProjectId.value = nextId
+    const nextId = [queryId, currentId, projects.value.find((item) => item.status === (showArchived.value ? 'archived' : 'active'))?.id, projects.value[0]?.id].find((id) => id && projects.value.some((item) => item.id === id)) || ''
     if (queryId !== nextId && queryId) await syncProjectQuery(nextId)
-    if (nextId) await loadProject(nextId)
+    if (!isCurrent()) return
+    if (nextId && nextId !== selectedProjectId.value) await selectProject(nextId, { automatic: true })
+    else if (nextId) await loadProject(nextId)
     else {
+      if (selectedProjectId.value) resetProjectDialogs()
+      selectedProjectId.value = ''
       project.value = null
       members.value = []
       tasks.value = []
@@ -215,15 +263,15 @@ async function loadProjects({ keepSelected = true } = {}) {
       await syncProjectQuery('')
     }
   } catch (error) {
-    pageError.value = errorMessage(error, '暂时无法读取项目，请检查网络后重试。')
+    if (isCurrent()) pageError.value = errorMessage(error, '暂时无法读取项目，请检查网络后重试。')
   } finally {
-    pageLoading.value = false
+    if (isCurrent()) pageLoading.value = false
   }
 }
 
 async function loadProject(id = selectedProjectId.value) {
   if (!isSignedIn.value || !id) return
-  const requestSequence = ++detailLoadSequence
+  const isCurrent = projectContext.capture('detail')
   detailLoading.value = true
   try {
     const checkpointLoad = loadProjectTaskCheckpoints(id, projectRequest, (error) => errorMessage(error))
@@ -235,7 +283,9 @@ async function loadProject(id = selectedProjectId.value) {
       socialRequest('profile_get').catch(() => null),
       checkpointLoad,
     ])
-    if (requestSequence !== detailLoadSequence || selectedProjectId.value !== id) return
+    if (!isCurrent()) return
+    pageError.value = ''
+    clockNow.value = Date.now()
     projectCheckpointError.value = checkpointResult.error
     project.value = result.project
     members.value = result.members || []
@@ -247,18 +297,18 @@ async function loadProject(id = selectedProjectId.value) {
     adjustments.value = adjustmentResult.requests || []
     deliverables.value = deliverableResult.deliverables || []
     meetings.value = meetingResult.meetings || []
-    scheduleTimezone.value = profileResult?.profile?.timezone || scheduleTimezone.value || 'Asia/Shanghai'
-    syncProjectMeetingEvents(id, meetings.value, project.value, domain, accountUser.value?.id, scheduleTimezone.value)
+    scheduleTimezone.value = profileResult?.profile?.timezone || scheduleTimezone.value
+    if (scheduleTimezone.value) syncProjectMeetingEvents(id, meetings.value, project.value, domain, accountUser.value?.id, scheduleTimezone.value)
     const acceptedMine = tasks.value.filter((task) => task.assigneeId === accountUser.value?.id && task.assignmentStatus === 'accepted')
     for (const task of acceptedMine) ensureProjectTaskTodo(task, project.value, domain)
     detachProjectTaskTodos(id, acceptedMine.map((task) => task.id), domain)
-    if (route.query.task && String(route.query.project || '') === id) {
-      const task = tasks.value.find((item) => String(item.id) === String(route.query.task))
-      if (task) openProjectTaskWorkbench(task)
-      const query = { ...route.query }; delete query.task; void router.replace({ path: '/projects', query })
-    }
+    openRouteTask()
   } catch (error) {
-    if (requestSequence !== detailLoadSequence || selectedProjectId.value !== id) return
+    if (!isCurrent()) return
+    if (![403, 404].includes(error?.status) && project.value?.id === id) {
+      pageError.value = errorMessage(error, '暂时无法刷新项目。')
+      return
+    }
     if ([403, 404].includes(error?.status)) detachProjectTaskTodos(id, [], domain)
     if ([403, 404].includes(error?.status)) detachProjectMeetingEvents(id, domain, accountUser.value?.id, scheduleTimezone.value)
     project.value = null
@@ -272,40 +322,71 @@ async function loadProject(id = selectedProjectId.value) {
     projectCheckpointError.value = ''
     pageError.value = errorMessage(error, '暂时无法读取项目内容，请刷新后重试。')
   } finally {
-    if (requestSequence === detailLoadSequence) detailLoading.value = false
+    if (isCurrent()) detailLoading.value = false
   }
 }
 
 let refreshPromise = null
 async function refresh() {
   if (refreshPromise) return refreshPromise
-  refreshPromise = loadProjects()
+  const pending = loadProjects()
+  refreshPromise = pending
   try {
-    return await refreshPromise
+    return await pending
   } finally {
-    refreshPromise = null
+    if (refreshPromise === pending) refreshPromise = null
   }
 }
 
 async function syncProjectQuery(id) {
   const query = { ...route.query }
   delete query.join
+  if (String(route.query.project || '') !== id) delete query.task
   if (id) query.project = id
   else delete query.project
   if (JSON.stringify(query) !== JSON.stringify(route.query)) await router.replace({ path: '/projects', query })
 }
 
-async function selectProject(id) {
-  closeProjectTaskWorkbench()
-  availabilitySequence++
-  scheduleAvailability.value = null
-  scheduleError.value = ''
-  scheduleBusy.value = false
+function openRouteTask() {
+  if (!route.query.task || String(route.query.project || '') !== project.value?.id) return
+  const task = tasks.value.find((item) => String(item.id) === String(route.query.task))
+  if (task) openProjectTaskWorkbench(task)
+  else notify('info', '这个任务已被移除或暂时无法查看。')
+  const query = { ...route.query }; delete query.task
+  void router.replace({ path: '/projects', query })
+}
+
+function resetProjectDialogs() {
+  projectContext.invalidate()
+  closeProjectTaskWorkbench(); deliverableEditor.reset()
+  scheduleAvailability.value = null; scheduleError.value = ''; scheduleBusy.value = false
+  showProjectForm.value = false; showTaskForm.value = false; showAdjustmentForm.value = false
+  showDeliverableForm.value = false; showInviteForm.value = false; showMilestoneForm.value = false
+  showDeliveryCheckForm.value = false; showMeetingForm.value = false
+  activeDeliverable.value = null; adjustmentTask.value = null; reviewTarget.value = null; meetingProposalTarget.value = null
+  confirmAction.value = null; transferTargetId.value = ''; taskEventsTitle.value = ''; taskEvents.value = []
+  actionBusy.value = ''; projectSaveBusy.value = false; taskSaveBusy.value = false; adjustmentSaveBusy.value = false
+  deliverableSaveBusy.value = false; reviewSaveBusy.value = false; planningSaveBusy.value = false
+  friendsLoading.value = false; linkBusy.value = false; friends.value = []; inviteLinks.value = []; linkToShare.value = ''; selectedFriendId.value = ''
+}
+
+function currentNavigationRequest() {
+  const visit = selectionVisit, isCurrentAccount = accountContext.capture()
+  return () => visit === selectionVisit && isCurrentAccount()
+}
+
+async function selectProject(id, { automatic = false } = {}) {
+  if (!automatic) selectionVisit++
+  if (id === selectedProjectId.value && project.value?.id === id) { activeSection.value = 'tasks'; return }
+  resetProjectDialogs()
   deliveryEvidenceEdits.clearAll()
-  selectedProjectId.value = id
-  activeSection.value = 'tasks'
-  await syncProjectQuery(id)
-  await loadProject(id)
+  selectedProjectId.value = id; project.value = null; pageError.value = ''; detailLoading.value = true
+  tasks.value = []; members.value = []; milestones.value = []; deliveryChecks.value = []
+  activities.value = []; adjustments.value = []; deliverables.value = []; meetings.value = []
+  activeSection.value = 'tasks'; resetTaskFilters()
+  showArchived.value = projects.value.find((item) => item.id === id)?.status === 'archived'
+  projectSearch.value = ''
+  await Promise.all([syncProjectQuery(id), loadProject(id)])
 }
 
 function openCreateProject() {
@@ -328,6 +409,8 @@ function openEditProject() {
 }
 
 async function saveProject() {
+  const isCurrent = editorScopes.project.capture()
+  const isCurrentNavigation = currentNavigationRequest()
   const validated = validateProjectForm(projectDraft.value)
   if (!validated.ok) { projectFormError.value = validated.message || '请检查项目名称与日期。'; notify('error', projectFormError.value); return }
   if (projectSaveBusy.value) return
@@ -342,22 +425,24 @@ async function saveProject() {
   try {
     if (editingProject.value) {
       await projectRequest('update', { projectId: project.value.id, expectedRevision: project.value.revision, ...validated.value })
+      if (!isCurrent()) return
       notify('success', '项目已保存。')
       showProjectForm.value = false
       await refresh()
     } else {
       const result = await projectRequest('create', { id: projectRequestId.value, ...validated.value })
+      if (!isCurrent()) return
       showProjectForm.value = false
       notify('success', '项目已创建。')
       await loadProjects({ keepSelected: false })
-      if (result.projectId) await selectProject(result.projectId)
+      if (isCurrentNavigation() && result.projectId) await selectProject(result.projectId, { automatic: true })
     }
-  } catch (error) {
+  } catch (error) { if (!isCurrent()) return;
     // 服务端拒绝也要就地显示：用户此刻正盯着表单，只在顶部横幅提示很容易被忽略。
     const message = errorMessage(error)
     projectFormError.value = message
     notify('error', message)
-  } finally { projectSaveBusy.value = false }
+  } finally { if (isCurrent()) projectSaveBusy.value = false }
 }
 
 function askConfirm(action) { confirmAction.value = action }
@@ -365,69 +450,56 @@ function askConfirm(action) { confirmAction.value = action }
 async function runConfirmedAction() {
   const action = confirmAction.value
   if (!action || actionBusy.value) return
-  actionBusy.value = action.kind
-  try {
-    if (action.kind === 'archive') {
-      await projectRequest('archive', { projectId: project.value.id, archived: true })
-      showArchived.value = true
-      notify('success', '项目已归档。')
-    } else if (action.kind === 'restore') {
-      await projectRequest('archive', { projectId: action.projectId || project.value?.id, archived: false })
-      showArchived.value = false
-      notify('success', '项目已恢复。')
-    } else if (action.kind === 'delete') {
-      await projectRequest('delete', { projectId: project.value.id })
-      lastDeletedProjectId.value = project.value.id
-      notify('success', '项目已移入回收站。你可以立即撤销。')
+  const projectId = action.projectId || project.value?.id
+  const commands = {
+    archive: ['archive', { archived: true }, '项目已归档。'],
+    restore: ['archive', { archived: false }, '项目已恢复。'],
+    delete: ['delete', {}, '项目已移入回收站。你可以立即撤销。'],
+    leave: ['member_leave', {}, '你已退出项目。'],
+    remove: ['member_remove', { targetId: action.targetId }, '成员已移出项目。'],
+    'decline-invite': ['invite_respond', { decision: 'decline' }, '已拒绝项目邀请。'],
+    'delete-milestone': ['milestone_delete', { milestoneId: action.milestoneId }, '里程碑已删除，关联任务仍会保留。'],
+    'meeting-cancel': ['meeting_cancel', { meetingId: action.meetingId }, '讨论邀约已取消。'],
+    'meeting-confirm': ['meeting_confirm', { meetingId: action.meetingId }, '讨论已确认，并加入已接受成员的个人日程。'],
+    'meeting-apply-proposal': ['meeting_apply_proposal', { meetingId: action.meetingId, participantId: action.participantId }, '已采用建议时间，成员需要重新确认。'],
+    'delivery-check-delete': ['delivery_check_delete', { checkId: action.checkId }, '交付检查项已删除。'],
+  }
+  const [command, payload, message] = commands[action.kind] || []
+  if (!command) return
+  return projectContext.run(() => projectRequest(command, { projectId, ...payload }), {
+    busy: actionBusy, busyValue: action.kind,
+    current: action.kind === 'decline-invite' ? accountContext.capture() : currentProjectRequest(),
+    commit: async () => {
+      if (action.kind === 'archive' || action.kind === 'restore') showArchived.value = action.kind === 'archive'
+      if (action.kind === 'leave') detachProjectTaskTodos(projectId, [], domain)
+      if (action.kind === 'delete') lastDeletedProjectId.value = projectId
+      notify('success', message)
       confirmAction.value = null
-      await loadProjects({ keepSelected: false })
-      return
-    } else if (action.kind === 'leave') {
-      await projectRequest('member_leave', { projectId: project.value.id })
-      detachProjectTaskTodos(project.value.id, [], domain)
-      notify('success', '你已退出项目。')
-    } else if (action.kind === 'remove') {
-      await projectRequest('member_remove', { projectId: project.value.id, targetId: action.targetId })
-      notify('success', '成员已移出项目。')
-    } else if (action.kind === 'decline-invite') {
-      await projectRequest('invite_respond', { projectId: action.projectId, decision: 'decline' })
-      notify('success', '已拒绝项目邀请。')
-    } else if (action.kind === 'delete-milestone') {
-      await projectRequest('milestone_delete', { projectId: project.value.id, milestoneId: action.milestoneId })
-      notify('success', '里程碑已删除，关联任务仍会保留。')
-    } else if (action.kind === 'meeting-cancel') {
-      await projectRequest('meeting_cancel', { projectId: project.value.id, meetingId: action.meetingId })
-      notify('success', '讨论邀约已取消。')
-    } else if (action.kind === 'meeting-confirm') {
-      await projectRequest('meeting_confirm', { projectId: project.value.id, meetingId: action.meetingId })
-      notify('success', '讨论已确认，并加入已接受成员的个人日程。')
-    } else if (action.kind === 'meeting-apply-proposal') {
-      await projectRequest('meeting_apply_proposal', { projectId: project.value.id, meetingId: action.meetingId, participantId: action.participantId })
-      notify('success', '已采用建议时间，成员需要重新确认。')
-    } else if (action.kind === 'delivery-check-delete') {
-      await projectRequest('delivery_check_delete', { projectId: project.value.id, checkId: action.checkId })
-      notify('success', '交付检查项已删除。')
-    }
-    confirmAction.value = null
-    await refresh()
-  } catch (error) { notify('error', errorMessage(error)) }
-  finally { actionBusy.value = '' }
+      if (action.kind === 'delete') await loadProjects({ keepSelected: false })
+      else await refresh()
+    },
+  })
 }
 
 async function acceptProjectInvite(projectId) {
+  if (actionBusy.value) return
+  const isCurrent = projectContext.capture()
+  const isCurrentNavigation = currentNavigationRequest()
   actionBusy.value = `invite:${projectId}`
   try {
     await projectRequest('invite_respond', { projectId, decision: 'accept' })
+    if (!isCurrent()) return
     notify('success', '已加入项目。')
     await loadProjects({ keepSelected: false })
-    await selectProject(projectId)
-  } catch (error) { notify('error', errorMessage(error)) }
-  finally { actionBusy.value = '' }
+    if (isCurrentNavigation()) await selectProject(projectId, { automatic: true })
+  } catch (error) { if (!isCurrent()) return; notify('error', errorMessage(error)) }
+  finally { if (isCurrent()) actionBusy.value = '' }
 }
 
 function openTaskCreate(parentTaskId = '') {
   if (project.value?.status !== 'active') return
   editingTask.value = false
+  taskFormError.value = ''
   taskDraft.value = blankTask(parentTaskId)
   taskDraft.value.id = newProjectId()
   showTaskForm.value = true
@@ -436,6 +508,7 @@ function openTaskCreate(parentTaskId = '') {
 function openTaskEdit(task) {
   if (!task || !isManager.value || project.value?.status !== 'active') return
   editingTask.value = true
+  taskFormError.value = ''
   taskDraft.value = {
     id: task.id, parentTaskId: task.parentTaskId || '', title: task.title || '',
     description: task.description || '', dueOn: task.dueOn || '', priority: task.priority || 'normal',
@@ -445,9 +518,11 @@ function openTaskEdit(task) {
 }
 
 async function saveTask() {
-  const title = taskDraft.value.title.trim()
-  if (!title) { notify('error', '请填写任务标题。'); return }
-  if (title.length > 160 || taskDraft.value.description.length > 3000) { notify('error', '任务标题或说明超出长度限制。'); return }
+  const isCurrent = editorScopes.task.capture()
+  const validated = validateProjectTaskForm(taskDraft.value)
+  if (!validated.ok) { taskFormError.value = validated.message; return }
+  const { title } = validated.value
+  taskFormError.value = ''
   if (taskSaveBusy.value || !taskDraft.value.id) return
   taskSaveBusy.value = true
   try {
@@ -461,13 +536,14 @@ async function saveTask() {
     } else {
       await projectRequest('task_create', { ...taskDraft.value, projectId: project.value.id, title, description: taskDraft.value.description.trim() })
     }
+    if (!isCurrent()) return
     showTaskForm.value = false
     notify('success', editingTask.value ? '任务已更新。' : '任务已添加。')
     editingTask.value = false
     await loadProject(project.value.id)
     await loadInbox()
-  } catch (error) { notify('error', errorMessage(error)) }
-  finally { taskSaveBusy.value = false }
+  } catch (error) { if (!isCurrent()) return; taskFormError.value = errorMessage(error); notify('error', taskFormError.value) }
+  finally { if (isCurrent()) taskSaveBusy.value = false }
 }
 
 function canRequestAdjustment(task) {
@@ -493,6 +569,7 @@ function adjustmentRequestData() {
 }
 
 async function saveAdjustment() {
+  const isCurrent = editorScopes.adjustment.capture()
   if (adjustmentSaveBusy.value || !adjustmentTask.value) return
   const id = newProjectId()
   const data = adjustmentRequestData()
@@ -506,12 +583,13 @@ async function saveAdjustment() {
       id, projectId: project.value.id, taskId: adjustmentTask.value.id,
       type: adjustmentDraft.value.type, reason: adjustmentDraft.value.reason.trim(), data,
     })
+    if (!isCurrent()) return
     showAdjustmentForm.value = false
     notify('success', '调整申请已提交，原任务约定暂时保持不变。')
     await loadProject(project.value.id)
     await loadInbox()
-  } catch (error) { notify('error', errorMessage(error)) }
-  finally { adjustmentSaveBusy.value = false }
+  } catch (error) { if (!isCurrent()) return; notify('error', errorMessage(error)) }
+  finally { if (isCurrent()) adjustmentSaveBusy.value = false }
 }
 
 function canRespondAdjustment(request) {
@@ -536,25 +614,29 @@ function adjustmentDataSummary(request) {
 }
 
 async function decideAdjustment(request, decision) {
+  if (actionBusy.value) return
+  const isCurrent = projectContext.capture()
   actionBusy.value = `adjustment:${request.id}`
   try {
     await projectRequest('adjustment_decide', { projectId: project.value.id, requestId: request.id, decision, decisionNote: '' })
     notify('success', decision === 'approve' ? '申请已通过，任务调整已生效。' : '申请已退回，原任务约定保持不变。')
     await loadProject(project.value.id)
     await loadInbox()
-  } catch (error) { notify('error', errorMessage(error)) }
-  finally { actionBusy.value = '' }
+  } catch (error) { if (!isCurrent()) return; notify('error', errorMessage(error)) }
+  finally { if (isCurrent()) actionBusy.value = '' }
 }
 
 async function cancelAdjustment(request) {
+  if (actionBusy.value) return
+  const isCurrent = projectContext.capture()
   actionBusy.value = `adjustment:${request.id}`
   try {
     await projectRequest('adjustment_cancel', { projectId: project.value.id, requestId: request.id })
     notify('success', '申请已撤回。')
     await loadProject(project.value.id)
     await loadInbox()
-  } catch (error) { notify('error', errorMessage(error)) }
-  finally { actionBusy.value = '' }
+  } catch (error) { if (!isCurrent()) return; notify('error', errorMessage(error)) }
+  finally { if (isCurrent()) actionBusy.value = '' }
 }
 
 function openDeliverableCreate() {
@@ -565,92 +647,19 @@ function openDeliverableCreate() {
 }
 
 async function saveDeliverable() {
+  const isCurrent = editorScopes.deliverable.capture()
   const draft = deliverableDraft.value
   if (!draft.title.trim()) { notify('error', '请填写交付项名称。'); return }
   if (deliverableSaveBusy.value || !draft.id) return
   deliverableSaveBusy.value = true
   try {
     await projectRequest('deliverable_create', { ...draft, projectId: project.value.id, title: draft.title.trim(), instructions: draft.instructions.trim() })
+    if (!isCurrent()) return
     showDeliverableForm.value = false
     notify('success', '交付项已添加。')
     await loadProject(project.value.id)
-  } catch (error) { notify('error', errorMessage(error)) }
-  finally { deliverableSaveBusy.value = false }
-}
-
-function openDeliverableEditor(item) {
-  activeDeliverable.value = item
-  const content = item.draft?.content || blankDeliverableContent()
-  draftContent.value = { summary: content.summary || '', links: [...(content.links || [])], files: [...(content.files || [])] }
-  draftRevision.value = item.draft?.revision || 0
-  changeNote.value = ''
-  showDeliverableEditor.value = true
-}
-
-function addContentLink() { draftContent.value.links.push({ type: 'document', title: '', url: '' }) }
-
-async function uploadDeliverableFiles(event) {
-  const files = [...(event.target.files || [])]
-  event.target.value = ''
-  if (!files.length || fileUploadBusy.value || !activeDeliverable.value) return
-  fileUploadBusy.value = true
-  try {
-    for (const file of files) {
-      const uploaded = await uploadProjectDeliverableFile(project.value.id, activeDeliverable.value.id, file)
-      draftContent.value.files.push(uploaded)
-    }
-    notify('success', `已添加 ${files.length} 个成果文件，请保存草稿后再正式提交。`)
-  } catch (error) { notify('error', errorMessage(error, '文件上传失败。')) }
-  finally { fileUploadBusy.value = false }
-}
-
-async function saveDeliverableDraft() {
-  if (!activeDeliverable.value || deliverableSaveBusy.value) return
-  const deliverableId = activeDeliverable.value.id
-  deliverableSaveBusy.value = true
-  try {
-    const result = await projectRequest('deliverable_draft_save', {
-      projectId: project.value.id, deliverableId,
-      expectedRevision: draftRevision.value, content: draftContent.value,
-    })
-    draftRevision.value = result.revision
-    notify('success', '草稿已保存。')
-    await loadProject(project.value.id)
-    activeDeliverable.value = deliverables.value.find((item) => item.id === deliverableId) || activeDeliverable.value
-  } catch (error) { notify('error', errorMessage(error)) }
-  finally { deliverableSaveBusy.value = false }
-}
-
-function submissionKey(deliverableId) {
-  const key = `study-life-project-submit:${accountUser.value?.id}:${deliverableId}:${draftRevision.value}`
-  try {
-    const stored = localStorage.getItem(key)
-    if (stored) return stored
-    const created = newProjectId()
-    if (created) localStorage.setItem(key, created)
-    return created
-  } catch { return newProjectId() }
-}
-
-async function submitDeliverable() {
-  if (!activeDeliverable.value || !draftRevision.value || deliverableSaveBusy.value) return
-  const key = submissionKey(activeDeliverable.value.id)
-  const versionId = newProjectId()
-  if (!key || !versionId) { notify('error', '当前环境无法生成安全版本编号。'); return }
-  deliverableSaveBusy.value = true
-  try {
-    const result = await projectRequest('deliverable_submit', {
-      projectId: project.value.id, deliverableId: activeDeliverable.value.id,
-      versionId, submissionKey: key, changeNote: changeNote.value.trim(),
-    })
-    try { localStorage.removeItem(`study-life-project-submit:${accountUser.value?.id}:${activeDeliverable.value.id}:${draftRevision.value}`) } catch { /* 不影响已经提交的版本。 */ }
-    showDeliverableEditor.value = false
-    activeDeliverable.value = null
-    notify('success', `成果 V${result.version} 已正式提交。`)
-    await loadProject(project.value.id)
-    await loadInbox()
-  } catch (error) { notify('error', errorMessage(error)) }
-  finally { deliverableSaveBusy.value = false }
+  } catch (error) { if (!isCurrent()) return; notify('error', errorMessage(error)) }
+  finally { if (isCurrent()) deliverableSaveBusy.value = false }
 }
 
 function openReview(item, version) {
@@ -683,13 +692,15 @@ function adjustmentStatus(status) {
   return ({ pending: '处理中', approved: '已通过', rejected: '已拒绝', cancelled: '已撤回', stale: '任务已变化' })[status] || '已更新'
 }
 
-function openInboxAdjustment(item) {
-  void selectProject(item.projectId).then(() => { activeSection.value = 'adjustments' })
+async function openProjectSection(item, section, taskId = '') {
+  await selectProject(item.projectId)
+  if (selectedProjectId.value !== item.projectId || project.value?.id !== item.projectId) return
+  activeSection.value = section
+  if (taskId) { const task = tasks.value.find((entry) => entry.id === taskId); if (task) openProjectTaskWorkbench(task) }
 }
+function openInboxAdjustment(item) { void openProjectSection(item, 'adjustments') }
 
-function openInboxReview(item) {
-  void selectProject(item.projectId).then(() => { activeSection.value = 'deliverables' })
-}
+function openInboxReview(item) { void openProjectSection(item, 'deliverables') }
 
 function canAddAdjustment(task) {
   return canRequestAdjustment(task) && !adjustments.value.some((request) => request.taskId === task.id && request.requesterId === accountUser.value?.id && request.status === 'pending')
@@ -709,26 +720,30 @@ function openMilestoneForm(item = null) {
 }
 
 async function saveMilestone() {
+  const isCurrent = editorScopes.milestone.capture()
   const draft = milestoneDraft.value
   if (!draft.title.trim() || planningSaveBusy.value) return
   planningSaveBusy.value = true
   try {
     if (editingMilestone.value) await projectRequest('milestone_update', { projectId: project.value.id, milestoneId: draft.id, expectedRevision: draft.revision, title: draft.title.trim(), description: draft.description.trim(), dueOn: draft.dueOn })
     else await projectRequest('milestone_create', { ...draft, projectId: project.value.id, title: draft.title.trim(), description: draft.description.trim() })
+    if (!isCurrent()) return
     showMilestoneForm.value = false
     notify('success', editingMilestone.value ? '里程碑已更新。' : '里程碑已添加。')
     await loadProject(project.value.id)
-  } catch (error) { notify('error', errorMessage(error)) }
-  finally { planningSaveBusy.value = false }
+  } catch (error) { if (!isCurrent()) return; notify('error', errorMessage(error)) }
+  finally { if (isCurrent()) planningSaveBusy.value = false }
 }
 
 async function toggleMilestone(item, completed) {
+  if (actionBusy.value) return
+  const isCurrent = projectContext.capture()
   actionBusy.value = `milestone:${item.id}`
   try {
     await projectRequest('milestone_toggle', { projectId: project.value.id, milestoneId: item.id, completed })
     await loadProject(project.value.id)
-  } catch (error) { notify('error', errorMessage(error)) }
-  finally { actionBusy.value = '' }
+  } catch (error) { if (!isCurrent()) return; notify('error', errorMessage(error)) }
+  finally { if (isCurrent()) actionBusy.value = '' }
 }
 
 function openDeliveryCheckForm() {
@@ -738,138 +753,39 @@ function openDeliveryCheckForm() {
 }
 
 async function saveDeliveryCheckItem() {
+  const isCurrent = editorScopes.check.capture()
   const draft = deliveryCheckDraft.value
   if (!draft.title.trim() || planningSaveBusy.value) return
   planningSaveBusy.value = true
   try {
     await projectRequest('delivery_check_create', { ...draft, projectId: project.value.id, title: draft.title.trim() })
+    if (!isCurrent()) return
     showDeliveryCheckForm.value = false
     notify('success', '交付检查项已添加。')
     await loadProject(project.value.id)
-  } catch (error) { notify('error', errorMessage(error)) }
-  finally { planningSaveBusy.value = false }
+  } catch (error) { if (!isCurrent()) return; notify('error', errorMessage(error)) }
+  finally { if (isCurrent()) planningSaveBusy.value = false }
 }
 
 async function saveDeliveryCheck(item, checked = item.checked) {
+  const isCurrent = projectContext.capture()
   if (actionBusy.value) return
+  const evidence = item.evidence || ''
   actionBusy.value = `delivery-check:${item.id}`
   try {
-    await projectRequest('delivery_check_update', { projectId: project.value.id, checkId: item.id, expectedRevision: item.revision, checked, evidence: item.evidence || '' })
-    deliveryEvidenceEdits.clear(item.id) // 已写入服务端，不再需要草稿保护
+    await projectRequest('delivery_check_update', { projectId: project.value.id, checkId: item.id, expectedRevision: item.revision, checked, evidence })
+    if (!isCurrent()) return
+    if (deliveryEvidenceEdits.pending.value.get(item.id) === evidence) deliveryEvidenceEdits.clear(item.id)
     notify('success', checked ? '交付检查已记录。' : '交付检查已重新打开。')
     await loadProject(project.value.id)
-  } catch (error) { notify('error', errorMessage(error)) }
-  finally { actionBusy.value = '' }
+  } catch (error) { if (!isCurrent()) return; notify('error', errorMessage(error)) }
+  finally { if (isCurrent()) actionBusy.value = '' }
 }
 
-function localInputForEpoch(epoch) {
-  const zone = scheduleTimezone.value || 'Asia/Shanghai'
-  const parts = zonedParts(epoch, zone)
-  return `${dateInZone(epoch, zone)}T${String(parts.hour).padStart(2, '0')}:${String(parts.minute).padStart(2, '0')}`
-}
-
-function epochForLocalInput(value, edge = 'start') {
-  const match = /^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})$/.exec(value || '')
-  return match ? wallTimeToEpoch(match[1], match[2], scheduleTimezone.value || 'Asia/Shanghai', edge) : null
-}
-
-function formatProjectTime(value) {
-  return formatDateTime(value, { timeZone: scheduleTimezone.value || 'Asia/Shanghai', month: 'long', day: 'numeric', weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
-}
-
-async function queryGroupAvailability(days = scheduleDays.value) {
-  if (!project.value || activeMembers.value.length < 2 || scheduleBusy.value) return
-  const projectId = project.value.id
-  const requestSequence = ++availabilitySequence
-  scheduleDays.value = days
-  scheduleBusy.value = true
-  scheduleError.value = ''
-  scheduleAvailability.value = null
-  try {
-    const [result, profileResult] = await Promise.all([
-      projectRequest('time_availability', { projectId, days }),
-      socialRequest('profile_get'),
-    ])
-    if (requestSequence !== availabilitySequence || selectedProjectId.value !== projectId) return
-    scheduleTimezone.value = profileResult.profile?.timezone || 'Asia/Shanghai'
-    scheduleAvailability.value = result
-  } catch (error) {
-    if (requestSequence === availabilitySequence && selectedProjectId.value === projectId) scheduleError.value = errorMessage(error, '暂时无法计算共同时间，请检查课表同步后重试。')
-  } finally {
-    if (requestSequence === availabilitySequence) scheduleBusy.value = false
-  }
-}
-
-function openMeetingForm(slot = null) {
-  if (project.value?.status !== 'active' || activeMembers.value.length < 2) return
-  meetingProposalTarget.value = null
-  meetingDraft.value = { ...blankMeeting(), id: newProjectId() }
-  if (slot) {
-    const start = Date.parse(slot.startsAt)
-    const end = Math.min(Date.parse(slot.endsAt), start + (scheduleAvailability.value?.minimumMinutes || 90) * 60_000)
-    meetingDraft.value.startsLocal = localInputForEpoch(start)
-    meetingDraft.value.endsLocal = localInputForEpoch(end)
-  }
-  showMeetingForm.value = true
-}
-
-function openMeetingProposal(meeting) {
-  meetingProposalTarget.value = meeting
-  meetingDraft.value = {
-    ...blankMeeting(), title: meeting.title, note: meeting.note || '',
-    startsLocal: localInputForEpoch(Date.parse(meeting.startsAt)), endsLocal: localInputForEpoch(Date.parse(meeting.endsAt)),
-  }
-  showMeetingForm.value = true
-}
-
-async function saveMeetingForm() {
-  const draft = meetingDraft.value
-  const start = epochForLocalInput(draft.startsLocal, 'start')
-  const end = epochForLocalInput(draft.endsLocal, 'end')
-  if (start === null || end === null || start <= Date.now() || end <= start || end - start > 8 * 60 * 60_000) { notify('error', '请选择有效的未来时间，讨论时长不能超过 8 小时；时区切换附近不存在的本地时间不能使用。'); return }
-  if (meetingProposalTarget.value) {
-    await respondMeeting(meetingProposalTarget.value, 'propose', new Date(start).toISOString(), new Date(end).toISOString())
-    return
-  }
-  if (!draft.title.trim()) { notify('error', '请填写讨论主题。'); return }
-  const id = draft.id || newProjectId()
-  actionBusy.value = 'meeting-create'
-  try {
-    await projectRequest('meeting_create', { id, projectId: project.value.id, title: draft.title.trim(), note: draft.note.trim(), startsAt: new Date(start).toISOString(), endsAt: new Date(end).toISOString() })
-    showMeetingForm.value = false
-    notify('success', '讨论邀请已发送，成员确认后可以加入个人日程。')
-    await loadProject(project.value.id)
-    await loadInbox()
-  } catch (error) { notify('error', errorMessage(error)) }
-  finally { actionBusy.value = '' }
-}
-
-async function respondMeeting(meeting, response, proposedStartsAt = '', proposedEndsAt = '') {
-  actionBusy.value = `meeting:${meeting.id}`
-  try {
-    await projectRequest('meeting_respond', { projectId: project.value.id, meetingId: meeting.id, response, proposedStartsAt, proposedEndsAt })
-    showMeetingForm.value = false
-    meetingProposalTarget.value = null
-    notify('success', response === 'accept' ? '已接受讨论时间。' : response === 'decline' ? '已拒绝讨论邀请。' : '改期建议已发送，等待组织者回应。')
-    await loadProject(project.value.id)
-    await loadInbox()
-  } catch (error) { notify('error', errorMessage(error)) }
-  finally { actionBusy.value = '' }
-}
-
-function meetingCanConfirm(meeting) {
-  return (meeting.createdBy === accountUser.value?.id || isManager.value) && meeting.status === 'open'
-    && meeting.participants?.length > 0 && meeting.participants.every((item) => item.status === 'accepted')
-}
-
-function meetingStatusLabel(status) { return ({ open: '等待回应', confirmed: '已确认', cancelled: '已取消' })[status] || '等待回应' }
-function meetingParticipantStatus(status) { return ({ invited: '待回应', accepted: '已接受', declined: '已拒绝', proposed: '建议改期' })[status] || '待回应' }
-
-function openInboxMeeting(item) {
-  void selectProject(item.projectId).then(() => { activeSection.value = 'schedule' })
-}
+function openInboxMeeting(item) { void openProjectSection(item, 'schedule') }
 
 async function decideReview(result) {
+  const isCurrent = editorScopes.review.capture()
   if (!reviewTarget.value || reviewSaveBusy.value) return
   if (!reviewFeedback.value.trim()) { notify('error', '请填写具体验收意见。'); return }
   if (result === 'approved' && reviewChecklist.value.some((item) => !item.passed)) { notify('error', '请先通过所有检查项，或将成果退回修改。'); return }
@@ -879,12 +795,13 @@ async function decideReview(result) {
       projectId: project.value.id, deliverableId: reviewTarget.value.deliverableId,
       versionId: reviewTarget.value.versionId, result, feedback: reviewFeedback.value.trim(), checklist: reviewChecklist.value,
     })
+    if (!isCurrent()) return
     reviewTarget.value = null
     notify('success', result === 'approved' ? '成果已通过验收。' : '成果已退回修改。')
     await loadProject(project.value.id)
     await loadInbox()
-  } catch (error) { notify('error', errorMessage(error)) }
-  finally { reviewSaveBusy.value = false }
+  } catch (error) { if (!isCurrent()) return; notify('error', errorMessage(error)) }
+  finally { if (isCurrent()) reviewSaveBusy.value = false }
 }
 
 async function openDeliverableFile(file) {
@@ -899,40 +816,42 @@ async function openDeliverableFile(file) {
 }
 
 async function respondTask(task, decision) {
-  actionBusy.value = `task:${task.id}`
-  try {
-    const result = await projectRequest('task_respond', { projectId: project.value.id, taskId: task.id, decision })
+  const projectId = project.value.id
+  return runTaskAction(task.id, async (isCurrent) => {
+    const result = await projectRequest('task_respond', { projectId, taskId: task.id, decision })
+    if (!isCurrent()) return
     if (result.assignmentStatus === 'accepted') ensureProjectTaskTodo({ ...task, ...result }, project.value, domain)
     notify('success', decision === 'accept' ? '已接受分工，任务已加入你的个人待办。' : '已拒绝分工，负责人会看到需要重新安排。')
-    await loadProject(project.value.id)
-    await loadInbox()
-  } catch (error) { notify('error', errorMessage(error)) }
-  finally { actionBusy.value = '' }
+    await loadProject(projectId)
+    if (isCurrent()) await loadInbox()
+  })
 }
 
 async function changeTaskStatus(task, status) {
-  actionBusy.value = `task:${task.id}`
-  try {
-    await projectRequest('task_status', { projectId: project.value.id, taskId: task.id, status })
+  const projectId = project.value.id
+  return runTaskAction(task.id, async (isCurrent) => {
+    await projectRequest('task_status', { projectId, taskId: task.id, status })
+    if (!isCurrent()) return false
     setProjectTaskTodoStatus(task, project.value, status, domain)
     notify('success', status === 'completed' ? '任务已完成。' : `任务状态已更新为「${PROJECT_TASK_STATUS[status]}」。`)
-    await loadProject(project.value.id)
+    await loadProject(projectId)
+    if (!isCurrent()) return false
     await loadInbox()
-    return true
-  } catch (error) { notify('error', errorMessage(error)); return false }
-  finally { actionBusy.value = '' }
+    return isCurrent()
+  })
 }
 
 async function loadFriends() {
-  friendsLoading.value = true
-  try {
+  return projectContext.run(async (isCurrent) => {
     const result = await socialRequest('friends_list')
+    if (!isCurrent()) return
     friends.value = (result.friends || []).filter((item) => item.profile?.userId && !members.value.some((member) => member.userId === item.profile.userId && member.status !== 'left'))
-  } catch (error) { notify('error', errorMessage(error)) }
-  finally { friendsLoading.value = false }
+  }, { busy: friendsLoading, current: currentProjectRequest('friends') })
 }
 
 async function inviteFriend() {
+  if (actionBusy.value) return
+  const isCurrent = projectContext.capture()
   if (!selectedFriendId.value) { notify('error', '请选择一位好友。'); return }
   actionBusy.value = 'invite-friend'
   try {
@@ -940,15 +859,17 @@ async function inviteFriend() {
     notify('success', '邀请已发送，对方可在齐行中接受或拒绝。')
     selectedFriendId.value = ''
     await loadProject(project.value.id)
-  } catch (error) { notify('error', errorMessage(error)) }
-  finally { actionBusy.value = '' }
+  } catch (error) { if (!isCurrent()) return; notify('error', errorMessage(error)) }
+  finally { if (isCurrent()) actionBusy.value = '' }
 }
 
 async function loadInviteLinks() {
+  const isCurrent = currentProjectRequest()
   try {
     const result = await projectRequest('invites', { projectId: project.value.id })
+    if (!isCurrent()) return
     inviteLinks.value = result.links || []
-  } catch (error) { notify('error', errorMessage(error)) }
+  } catch (error) { if (isCurrent()) notify('error', errorMessage(error)) }
 }
 
 function makeInviteToken() {
@@ -964,6 +885,7 @@ function inviteUrl(token) {
 }
 
 async function createInviteLink() {
+  const isCurrent = projectContext.capture()
   if (linkBusy.value) return
   const token = makeInviteToken()
   const id = newProjectId()
@@ -976,8 +898,8 @@ async function createInviteLink() {
     await loadInviteLinks()
     try { await navigator.clipboard.writeText(linkToShare.value); notify('success', '邀请链接已创建并复制，可加入 5 人，7 天后过期。') }
     catch { notify('success', '邀请链接已创建，请复制下方链接分享。') }
-  } catch (error) { notify('error', errorMessage(error)) }
-  finally { linkBusy.value = false }
+  } catch (error) { if (!isCurrent()) return; notify('error', errorMessage(error)) }
+  finally { if (isCurrent()) linkBusy.value = false }
 }
 
 async function copyInviteLink(url) {
@@ -986,24 +908,29 @@ async function copyInviteLink(url) {
 }
 
 async function revokeInviteLink(linkId) {
+  if (actionBusy.value) return
+  const isCurrent = projectContext.capture()
   actionBusy.value = `link:${linkId}`
   try {
     await projectRequest('invite_link_revoke', { projectId: project.value.id, linkId })
     notify('success', '邀请链接已停用。')
     await loadInviteLinks()
-  } catch (error) { notify('error', errorMessage(error)) }
-  finally { actionBusy.value = '' }
+  } catch (error) { if (!isCurrent()) return; notify('error', errorMessage(error)) }
+  finally { if (isCurrent()) actionBusy.value = '' }
 }
 
 async function loadTaskEvents(task) {
+  const isCurrent = currentProjectRequest('task-events')
   taskEventsTitle.value = task.title
   try {
     const result = await projectRequest('task_events', { projectId: project.value.id, taskId: task.id })
+    if (!isCurrent()) return
     taskEvents.value = result.events || []
-  } catch (error) { notify('error', errorMessage(error)) }
+  } catch (error) { if (isCurrent()) notify('error', errorMessage(error)) }
 }
 
 async function transferOwner() {
+  const isCurrent = projectContext.capture()
   if (!transferTargetId.value || actionBusy.value) return
   actionBusy.value = 'transfer-owner'
   try {
@@ -1011,11 +938,12 @@ async function transferOwner() {
     transferTargetId.value = ''
     notify('success', '项目负责人已转交。')
     await refresh()
-  } catch (error) { notify('error', errorMessage(error)) }
-  finally { actionBusy.value = '' }
+  } catch (error) { if (!isCurrent()) return; notify('error', errorMessage(error)) }
+  finally { if (isCurrent()) actionBusy.value = '' }
 }
 
 async function changeMemberRole(member) {
+  const isCurrent = projectContext.capture()
   if (!isOwner.value || project.value?.status !== 'active' || actionBusy.value || !member?.userId || member.role === 'owner') return
   const role = member.role === 'admin' ? 'member' : 'admin'
   actionBusy.value = `role:${member.userId}`
@@ -1023,8 +951,8 @@ async function changeMemberRole(member) {
     await projectRequest('member_role_update', { projectId: project.value.id, targetId: member.userId, role })
     notify('success', role === 'admin' ? '已设为管理员。' : '已调整为普通成员。')
     await loadProject(project.value.id)
-  } catch (error) { notify('error', errorMessage(error)) }
-  finally { actionBusy.value = '' }
+  } catch (error) { if (!isCurrent()) return; notify('error', errorMessage(error)) }
+  finally { if (isCurrent()) actionBusy.value = '' }
 }
 
 async function processJoinLink() {
@@ -1036,29 +964,35 @@ async function processJoinLink() {
     return
   }
   joiningToken.value = token
+  const isCurrent = accountContext.capture('join')
+  const isCurrentNavigation = currentNavigationRequest()
   try {
     const result = await projectRequest('invite_join', { token })
+    if (!isCurrent() || !isCurrentNavigation()) return
     notify('success', '已加入项目。')
     await loadProjects({ keepSelected: false })
-    await selectProject(result.projectId)
-  } catch (error) { notify('error', errorMessage(error, '邀请链接无效或已过期。')) }
+    if (isCurrent() && isCurrentNavigation()) await selectProject(result.projectId, { automatic: true })
+  } catch (error) { if (!isCurrent()) return; notify('error', errorMessage(error, '邀请链接无效或已过期。')) }
   finally {
-    joiningToken.value = ''
+    if (isCurrent()) joiningToken.value = ''
   }
 }
 
 async function undoDeleteProject() {
+  const isCurrent = projectContext.capture()
+  const isCurrentNavigation = currentNavigationRequest()
   if (!lastDeletedProjectId.value || actionBusy.value) return
   const id = lastDeletedProjectId.value
   actionBusy.value = 'restore-deleted'
   try {
     await projectRequest('restore', { projectId: id })
+    if (!isCurrent()) return
     lastDeletedProjectId.value = ''
     notify('success', '项目已恢复。')
     await loadProjects({ keepSelected: false })
-    await selectProject(id)
-  } catch (error) { notify('error', errorMessage(error)) }
-  finally { actionBusy.value = '' }
+    if (isCurrentNavigation()) await selectProject(id, { automatic: true })
+  } catch (error) { if (!isCurrent()) return; notify('error', errorMessage(error)) }
+  finally { if (isCurrent()) actionBusy.value = '' }
 }
 
 function formatDate(value) {
@@ -1097,17 +1031,19 @@ function activityLabel(item) {
 }
 
 watch(() => accountUser.value?.id, (id) => {
+  accountContext.invalidate()
+  projectContext.invalidate()
+  deliverableEditor.reset()
+  inboxError.value = ''; taskFormError.value = ''; resetTaskFilters(); projectSearch.value = ''
+  refreshPromise = null
+  deliveryEvidenceEdits.clearAll()
+  closeProjectTaskWorkbench()
   if (id) void refresh()
-  else {
-    deliveryEvidenceEdits.clearAll()
-    projects.value = []; project.value = null; members.value = []; tasks.value = []; milestones.value = []; deliveryChecks.value = []; adjustments.value = []; deliverables.value = []; meetings.value = []; inbox.value = { invitations: [], assignments: [], adjustments: [], reviews: [], meetings: [] }
-    closeProjectTaskWorkbench()
-    projectCheckpointError.value = ''
-  }
 }, { immediate: true })
 watch(() => route.query.project, (id) => {
   if (id && id !== selectedProjectId.value && projects.value.some((item) => item.id === id)) void selectProject(String(id))
 })
+watch(() => route.query.task, () => { if (!detailLoading.value) openRouteTask() })
 watch(() => route.query.join, () => { void processJoinLink() })
 watch(() => accountUser.value?.id, () => { void processJoinLink() })
 
@@ -1115,7 +1051,8 @@ let refreshTimer = 0
 let lastAutomaticRefreshAt = 0
 const AUTO_REFRESH_INTERVAL = 120_000
 function refreshAutomatically() {
-  if (document.visibilityState !== 'visible' || route.path !== '/projects' || !isSignedIn.value) return
+  clockNow.value = Date.now()
+  if (document.visibilityState !== 'visible' || route.path !== '/projects' || !isSignedIn.value || actionBusy.value || pendingTaskActions.value.size || taskSaveBusy.value || projectSaveBusy.value || deliverableEditorBusy.value || fileUploadBusy.value) return
   const now = Date.now()
   // focus 和 visibilitychange 经常在同一轮恢复时连续触发；合并它们，避免重复请求。
   if (now - lastAutomaticRefreshAt < 30_000) return
@@ -1131,6 +1068,9 @@ onMounted(() => {
   document.addEventListener('visibilitychange', onWindowFocus)
 })
 onBeforeUnmount(() => {
+  accountContext.invalidate()
+  projectContext.invalidate()
+  deliverableEditor.reset()
   window.clearInterval(refreshTimer)
   window.removeEventListener('focus', onWindowFocus)
   document.removeEventListener('visibilitychange', onWindowFocus)
@@ -1158,6 +1098,7 @@ onBeforeUnmount(() => {
       <span>{{ taskSync.message }} 尚有 {{ taskSync.pending }} 项。</span>
     </div>
     <p v-if="pageError" class="projects-error" role="alert">{{ pageError }}</p>
+    <p v-if="inboxError" class="projects-form-hint" role="status">{{ inboxError }}</p>
 
     <section v-if="!isSignedIn" class="projects-signin panel">
       <div class="projects-signin-icon" aria-hidden="true">🧩</div>
@@ -1183,7 +1124,7 @@ onBeforeUnmount(() => {
         </div>
         <div v-for="assignment in inbox.assignments" :key="`assignment-${assignment.taskId}`" class="projects-inbox-row">
           <div><strong>{{ assignment.title }}</strong><span>{{ assignment.projectName }} · 等待你确认分工</span></div>
-          <button class="btn btn-ghost" type="button" @click="selectProject(assignment.projectId)">查看任务</button>
+          <button class="btn btn-ghost" type="button" @click="openProjectSection(assignment, 'tasks', assignment.taskId)">查看任务</button>
         </div>
         <div v-for="request in inbox.adjustments" :key="`adjustment-${request.requestId}`" class="projects-inbox-row">
           <div><strong>{{ request.taskTitle }} · {{ adjustmentTypeLabel(request.type) }}</strong><span>{{ request.projectName }} · {{ request.requesterName }}：{{ request.reason }}</span></div>
@@ -1205,12 +1146,13 @@ onBeforeUnmount(() => {
             <h2>我的项目</h2>
             <button class="icon-btn" type="button" :aria-expanded="showArchived" aria-controls="project-list" :aria-label="showArchived ? '显示进行中项目' : '显示已归档项目'" :title="showArchived ? '显示进行中项目' : '显示已归档项目'" @click="showArchived = !showArchived">{{ showArchived ? '↶' : '▱' }}</button>
           </div>
+          <input v-model="projectSearch" class="projects-search" type="search" maxlength="200" aria-label="搜索项目" placeholder="搜索项目" />
           <p v-if="showArchived" class="projects-rail-hint">已归档项目</p>
-          <button v-for="item in visibleProjects" :key="item.id" class="project-list-item" :class="{ active: item.id === selectedProjectId }" type="button" @click="selectProject(item.id)">
+          <button v-for="item in visibleProjects" :key="item.id" class="project-list-item" :class="{ active: item.id === selectedProjectId }" :aria-current="item.id === selectedProjectId ? 'true' : undefined" type="button" @click="selectProject(item.id)">
             <span class="project-list-icon" aria-hidden="true">{{ ({ course: '📚', competition: '🏁', research: '🔬', software: '💻', event: '🎪', blank: '🧩' })[item.type] || '🧩' }}</span>
             <span class="project-list-copy"><strong>{{ item.name }}</strong><small>{{ PROJECT_TYPE_LABELS[item.type] || '项目' }}<template v-if="item.targetEndOn"> · {{ formatDate(item.targetEndOn) }}</template></small></span>
           </button>
-          <p v-if="!visibleProjects.length && !pageLoading" class="projects-rail-empty">{{ showArchived ? '还没有归档项目。' : '还没有项目，先创建一个吧。' }}</p>
+          <p v-if="!visibleProjects.length && !pageLoading" class="projects-rail-empty">{{ projectSearch.trim() ? '没有匹配的项目，试试其他关键词。' : showArchived ? '还没有归档项目。' : '还没有项目，先创建一个吧。' }}</p>
           <div class="projects-rail-footer"><button class="btn btn-secondary" type="button" @click="openCreateProject">＋ 新建项目</button></div>
         </aside>
 
@@ -1232,25 +1174,34 @@ onBeforeUnmount(() => {
               <span>{{ members.filter((item) => item.status === 'active').length }} 位成员</span>
               <span>{{ roleLabel(project.role) }}</span>
             </div>
+            <ProjectTaskOverview :summary="taskOverview" @filter="applyTaskSummaryFilter" />
           </header>
           <section v-if="projectRisks.length" class="project-risk-panel" aria-label="项目提醒">
             <strong>需要留意</strong><span v-for="risk in projectRisks" :key="risk">{{ risk }}</span>
           </section>
 
           <nav class="project-tabs" aria-label="项目分区">
-            <button type="button" :class="{ active: activeSection === 'tasks' }" @click="activeSection = 'tasks'">任务</button>
-            <button type="button" :class="{ active: activeSection === 'adjustments' }" @click="activeSection = 'adjustments'">协商 <span v-if="adjustments.some((item) => item.status === 'pending')">{{ adjustments.filter((item) => item.status === 'pending').length }}</span></button>
-            <button type="button" :class="{ active: activeSection === 'deliverables' }" @click="activeSection = 'deliverables'">成果 <span>{{ deliverables.length }}</span></button>
-            <button type="button" :class="{ active: activeSection === 'schedule' }" @click="activeSection = 'schedule'">团队时间</button>
-            <button type="button" :class="{ active: activeSection === 'members' }" @click="activeSection = 'members'">成员 <span>{{ activeMembers.length }}</span></button>
-            <button type="button" :class="{ active: activeSection === 'activity' }" @click="activeSection = 'activity'">动态</button>
+            <button type="button" :aria-pressed="activeSection === 'tasks'" :class="{ active: activeSection === 'tasks' }" @click="activeSection = 'tasks'">任务</button>
+            <button type="button" :aria-pressed="activeSection === 'adjustments'" :class="{ active: activeSection === 'adjustments' }" @click="activeSection = 'adjustments'">协商 <span v-if="adjustments.some((item) => item.status === 'pending')">{{ adjustments.filter((item) => item.status === 'pending').length }}</span></button>
+            <button type="button" :aria-pressed="activeSection === 'deliverables'" :class="{ active: activeSection === 'deliverables' }" @click="activeSection = 'deliverables'">成果 <span>{{ deliverables.length }}</span></button>
+            <button type="button" :aria-pressed="activeSection === 'schedule'" :class="{ active: activeSection === 'schedule' }" @click="activeSection = 'schedule'">团队时间</button>
+            <button type="button" :aria-pressed="activeSection === 'members'" :class="{ active: activeSection === 'members' }" @click="activeSection = 'members'">成员 <span>{{ activeMembers.length }}</span></button>
+            <button type="button" :aria-pressed="activeSection === 'activity'" :class="{ active: activeSection === 'activity' }" @click="activeSection = 'activity'">动态</button>
           </nav>
 
           <section v-if="activeSection === 'tasks'" class="project-panel panel" aria-labelledby="project-tasks-title">
             <div class="projects-section-head project-tasks-head">
               <div><h3 id="project-tasks-title">任务</h3><p>负责人发出的分工需要成员明确接受。</p></div>
-              <div class="project-tasks-actions"><select v-model="statusFilter" aria-label="任务筛选"><option value="open">未完成</option><option value="done">已完成</option><option value="all">全部</option></select><button v-if="project.status === 'active'" class="btn btn-primary" type="button" @click="openTaskCreate()">＋ 添加任务</button></div>
+              <div class="project-tasks-actions"><button v-if="project.status === 'active'" class="btn btn-primary" type="button" @click="openTaskCreate()">＋ 添加任务</button></div>
             </div>
+            <div class="project-task-filters" aria-label="任务查找与筛选">
+              <input v-model="taskSearch" class="projects-search" type="search" maxlength="200" aria-label="搜索任务" placeholder="搜索任务、成员或进度" />
+              <select v-model="statusFilter" aria-label="任务筛选"><option value="open">未完成</option><option value="todo">待开始</option><option value="in_progress">进行中</option><option value="review">待验收</option><option value="done">已完成</option><option value="overdue">已逾期</option><option value="blocked">等待前置</option><option value="all">全部状态</option></select>
+              <select v-model="assigneeFilter" aria-label="按负责人筛选"><option value="all">全部成员</option><option value="mine">我的任务</option><option value="unassigned">未分配</option><option v-for="member in activeMembers.filter((item) => item.userId !== accountUser.id)" :key="member.userId" :value="member.userId">{{ member.nickname }}</option></select>
+              <select v-if="milestones.length" v-model="milestoneFilter" aria-label="按阶段筛选"><option value="">全部阶段</option><option v-for="item in milestones" :key="item.id" :value="item.id">{{ item.title }}</option></select>
+              <select v-model="taskSort" aria-label="任务排序"><option value="default">默认排序</option><option value="due">截止日期优先</option><option value="priority">优先级优先</option><option value="updated">最近更新优先</option></select>
+            </div>
+            <div v-if="tasks.length" class="project-task-filter-status"><span role="status" aria-live="polite">匹配 {{ taskSelection.count }} 项任务（含子任务）</span><button v-if="hasTaskFilters" class="btn btn-ghost" type="button" @click="resetTaskFilters">重置筛选</button></div>
             <p v-if="projectCheckpointError" class="projects-form-hint" role="status">暂时无法读取齐行任务进度，进度保存也会暂停；任务、分工和其它项目功能仍可使用。联网后重新打开项目即可重试。</p>
             <section v-if="milestones.length || isManager" class="project-milestones" aria-label="项目里程碑">
               <div class="projects-section-head"><div><h4>里程碑</h4><p>记录项目关键阶段；任务可以关联到对应阶段。</p></div><button v-if="isManager && project.status === 'active'" class="btn btn-ghost" type="button" @click="openMilestoneForm()">＋ 添加里程碑</button></div>
@@ -1263,10 +1214,11 @@ onBeforeUnmount(() => {
             </section>
             <div v-if="detailLoading" class="projects-loading" role="status">正在加载项目内容…</div>
             <div v-else-if="!filteredTasks.length" class="projects-empty">
-              <span aria-hidden="true">✓</span><strong>{{ statusFilter === 'done' ? '还没有完成的任务' : '现在没有待处理任务' }}</strong><small>{{ project.status === 'active' ? '添加一个简单任务，或邀请队友一起分工。' : '归档项目只保留历史查看。' }}</small>
-              <button v-if="project.status === 'active'" class="btn btn-secondary" type="button" @click="openTaskCreate()">添加第一个任务</button>
+              <span aria-hidden="true">✓</span><strong>{{ tasks.length ? '没有符合筛选条件的任务' : '项目还没有任务' }}</strong><small>{{ tasks.length ? '试试其他关键词，或查看全部任务。' : project.status === 'active' ? '添加一个简单任务，或邀请队友一起分工。' : '归档项目只保留历史查看。' }}</small>
+              <button v-if="tasks.length" class="btn btn-secondary" type="button" @click="resetTaskFilters(); statusFilter = 'all'">查看全部任务</button>
+              <button v-else-if="project.status === 'active'" class="btn btn-secondary" type="button" @click="openTaskCreate()">添加第一个任务</button>
             </div>
-            <VirtualList v-if="visibleTasks.length" :items="visibleTasks" class="project-task-list" :estimated-height="118" :gap="8" :threshold="25" :overscan="4">
+            <VirtualList v-if="visibleTasks.length" :items="visibleTasks" item-key="id" class="project-task-list" :estimated-height="118" :gap="8" :threshold="25" :overscan="4">
               <template #default="{ item: task }">
             <article class="project-task">
               <div class="project-task-main">
@@ -1275,19 +1227,19 @@ onBeforeUnmount(() => {
                   <div class="project-task-title"><strong :class="{ 'task-is-done': task.status === 'completed' }">{{ task.title }}</strong><span class="project-task-status" :class="`state-${task.status}`">{{ PROJECT_TASK_STATUS[task.status] || '待开始' }}</span></div>
                   <p v-if="task.description" class="project-task-description">{{ task.description }}</p>
                   <ProjectTaskWorkProgress :task="task" />
-                  <div class="project-task-meta"><span>{{ taskAssignmentLabel(task) }}</span><span v-if="task.dueOn">截止 {{ formatDate(task.dueOn) }}</span><span v-if="milestoneTaskLabel(task.milestoneId)">阶段：{{ milestoneTaskLabel(task.milestoneId) }}</span><span v-if="isTaskDependencyBlocked(task)">等待前置：{{ task.dependencyTaskTitle }}</span><span>{{ PROJECT_TASK_PRIORITY[task.priority] || '普通' }}优先级</span></div>
+                  <div class="project-task-meta"><span>{{ taskAssignmentLabel(task) }}</span><span v-if="task.dueOn" :class="{ 'task-date-overdue': task.status !== 'completed' && task.dueOn < todayKey }">{{ task.status !== 'completed' && task.dueOn < todayKey ? '已逾期 · ' : '' }}{{ task.dueOn === todayKey ? '今天截止' : '截止 ' + formatDate(task.dueOn) }}</span><span v-if="milestoneTaskLabel(task.milestoneId)">阶段：{{ milestoneTaskLabel(task.milestoneId) }}</span><span v-if="isTaskDependencyBlocked(task)">等待前置：{{ task.dependencyTaskTitle }}</span><span>{{ PROJECT_TASK_PRIORITY[task.priority] || '普通' }}优先级</span></div>
                 </div>
               </div>
               <div class="project-task-actions">
                 <template v-if="project.status === 'active' && task.assigneeId === accountUser.id && task.assignmentStatus === 'pending'">
-                  <ActionButton tone="ghost" class="btn btn-ghost" type="button" :disabled="actionBusy === `task:${task.id}`" kind="important" feedback="external" :show-error="false" :action="() => respondTask(task, 'decline')">拒绝分工</ActionButton>
-                  <ActionButton tone="primary" class="btn btn-primary" type="button" :disabled="actionBusy === `task:${task.id}`" kind="important" feedback="external" :show-error="false" :action="() => respondTask(task, 'accept')">接受分工</ActionButton>
+                  <ActionButton tone="ghost" class="btn btn-ghost" type="button" :disabled="pendingTaskActions.has(task.id)" kind="important" feedback="external" :show-error="false" :action="() => respondTask(task, 'decline')">拒绝分工</ActionButton>
+                  <ActionButton tone="primary" class="btn btn-primary" type="button" :disabled="pendingTaskActions.has(task.id)" kind="important" feedback="external" :show-error="false" :action="() => respondTask(task, 'accept')">接受分工</ActionButton>
                 </template>
                 <template v-else-if="project.status === 'active' && task.status !== 'completed' && (isManager || (task.assigneeId === accountUser.id && task.assignmentStatus === 'accepted'))">
-                  <button v-if="task.status === 'todo'" class="btn btn-secondary" type="button" :disabled="actionBusy === `task:${task.id}` || isTaskDependencyBlocked(task)" @click="openProjectTaskWorkbench(task)">工作台</button>
-                  <button v-else class="btn btn-secondary" type="button" :disabled="actionBusy === `task:${task.id}`" @click="openProjectTaskWorkbench(task)">继续</button>
-                  <ActionButton tone="neutral" v-if="task.status === 'in_progress'" class="btn btn-secondary" type="button" :disabled="actionBusy === `task:${task.id}` || isTaskDependencyBlocked(task)" kind="important" feedback="external" :show-error="false" :action="() => changeTaskStatus(task, 'review')">提交验收</ActionButton>
-                  <ActionButton tone="primary" class="btn btn-primary" type="button" :disabled="actionBusy === `task:${task.id}` || isTaskDependencyBlocked(task)" kind="important" feedback="external" :show-error="false" :action="() => changeTaskStatus(task, 'completed')">完成</ActionButton>
+                  <button v-if="task.status === 'todo'" class="btn btn-secondary" type="button" :disabled="Boolean(actionBusy)" @click="openProjectTaskWorkbench(task)">工作台</button>
+                  <button v-else class="btn btn-secondary" type="button" :disabled="Boolean(actionBusy)" @click="openProjectTaskWorkbench(task)">继续</button>
+                  <ActionButton tone="neutral" v-if="task.status === 'in_progress'" class="btn btn-secondary" type="button" :disabled="pendingTaskActions.has(task.id) || isTaskDependencyBlocked(task)" kind="important" feedback="external" :show-error="false" :action="() => changeTaskStatus(task, 'review')">提交验收</ActionButton>
+                  <ActionButton tone="primary" class="btn btn-primary" type="button" :disabled="pendingTaskActions.has(task.id) || isTaskDependencyBlocked(task)" kind="important" feedback="external" :show-error="false" :action="() => changeTaskStatus(task, 'completed')">完成</ActionButton>
                 </template>
                 <button v-if="canAddAdjustment(task)" class="btn btn-ghost" type="button" @click="openAdjustment(task)">协商调整</button>
                 <button v-if="isManager && project.status === 'active'" class="btn btn-ghost" type="button" @click="openTaskEdit(task)">编辑</button>
@@ -1295,7 +1247,22 @@ onBeforeUnmount(() => {
                 <button class="icon-btn" type="button" :aria-label="`查看“${task.title}”的进展记录`" title="进展记录" @click="loadTaskEvents(task)">⋯</button>
               </div>
               <div v-if="assignedSubtasks(task.id).length" class="project-subtasks">
-                <div v-for="child in assignedSubtasks(task.id)" :key="child.id" class="project-subtask-row"><span aria-hidden="true">↳</span><strong :class="{ 'task-is-done': child.status === 'completed' }">{{ child.title }}</strong><small>{{ taskAssignmentLabel(child) }}<template v-if="child.dueOn"> · {{ formatDate(child.dueOn) }}</template><template v-if="isTaskDependencyBlocked(child)"> · 等待前置：{{ child.dependencyTaskTitle }}</template></small><template v-if="project.status === 'active' && child.assigneeId === accountUser.id && child.assignmentStatus === 'pending'"><ActionButton tone="ghost" class="btn btn-ghost" type="button" kind="important" feedback="external" :show-error="false" :action="() => respondTask(child, 'decline')">拒绝</ActionButton><ActionButton tone="ghost" class="btn btn-ghost" type="button" kind="important" feedback="external" :show-error="false" :action="() => respondTask(child, 'accept')">接受</ActionButton></template><ActionButton tone="ghost" v-else-if="project.status === 'active' && child.assigneeId === accountUser.id && child.assignmentStatus === 'accepted' && child.status !== 'completed'" class="btn btn-ghost" type="button" :disabled="isTaskDependencyBlocked(child)" kind="important" feedback="external" :show-error="false" :action="() => changeTaskStatus(child, 'completed')">完成</ActionButton><button v-if="isManager && project.status === 'active'" class="icon-btn" type="button" :aria-label="`编辑子任务 ${child.title}`" @click="openTaskEdit(child)">✎</button></div>
+                <div v-for="child in assignedSubtasks(task.id)" :key="child.id" class="project-subtask-row">
+                  <span aria-hidden="true">↳</span><strong :class="{ 'task-is-done': child.status === 'completed' }">{{ child.title }}</strong>
+                  <span class="project-task-status" :class="`state-${child.status}`">{{ PROJECT_TASK_STATUS[child.status] || '待开始' }}</span>
+                  <small>{{ taskAssignmentLabel(child) }}<template v-if="child.dueOn"> · {{ formatDate(child.dueOn) }}</template><template v-if="isTaskDependencyBlocked(child)"> · 等待前置：{{ child.dependencyTaskTitle }}</template></small>
+                  <div class="project-subtask-actions">
+                    <template v-if="project.status === 'active' && child.assigneeId === accountUser.id && child.assignmentStatus === 'pending'">
+                      <ActionButton tone="ghost" class="btn btn-ghost" type="button" :disabled="pendingTaskActions.has(child.id)" kind="important" feedback="external" :show-error="false" :action="() => respondTask(child, 'decline')">拒绝</ActionButton>
+                      <ActionButton tone="ghost" class="btn btn-ghost" type="button" :disabled="pendingTaskActions.has(child.id)" kind="important" feedback="external" :show-error="false" :action="() => respondTask(child, 'accept')">接受</ActionButton>
+                    </template>
+                    <template v-else-if="project.status === 'active' && child.status !== 'completed' && (isManager || (child.assigneeId === accountUser.id && child.assignmentStatus === 'accepted'))">
+                      <button class="btn btn-ghost" type="button" :disabled="Boolean(actionBusy)" @click="openProjectTaskWorkbench(child)">工作台</button>
+                      <ActionButton tone="ghost" class="btn btn-ghost" type="button" :disabled="pendingTaskActions.has(child.id) || isTaskDependencyBlocked(child)" kind="important" feedback="external" :show-error="false" :action="() => changeTaskStatus(child, 'completed')">完成</ActionButton>
+                    </template>
+                    <button v-if="isManager && project.status === 'active'" class="icon-btn" type="button" :aria-label="`编辑子任务 ${child.title}`" @click="openTaskEdit(child)">✎</button>
+                  </div>
+                </div>
               </div>
             </article>
               </template>
@@ -1418,17 +1385,20 @@ onBeforeUnmount(() => {
 
     <Modal v-if="showProjectForm" :open="showProjectForm" :title="projectFormTitle" :medium="true" @close="showProjectForm = false">
       <form class="projects-form" @submit.prevent="saveProject">
+        <fieldset class="project-editor-fields" :disabled="projectSaveBusy">
         <label>项目名称 <span aria-hidden="true">*</span><input v-model="projectDraft.name" maxlength="120" required autofocus placeholder="例如：数学建模竞赛" /></label>
         <label>项目类型<select v-model="projectDraft.type"><option v-for="item in PROJECT_TYPES" :key="item.value" :value="item.value">{{ item.label }}</option></select></label>
         <label>项目说明 <textarea v-model="projectDraft.description" maxlength="2000" rows="3" placeholder="选填，写下目标或背景" /></label>
         <div class="projects-form-grid"><label>开始日期<input v-model="projectDraft.startsOn" type="date" /></label><label>预计结束<input v-model="projectDraft.targetEndOn" type="date" :min="projectDraft.startsOn || undefined" /></label></div>
         <p class="projects-form-error" aria-live="polite">{{ projectFormError }}</p>
+        </fieldset>
         <div class="projects-form-actions"><button class="btn btn-ghost" type="button" @click="showProjectForm = false">取消</button><ActionButton tone="primary" kind="important" feedback="external" :show-error="false" class="btn btn-primary" type="submit" :disabled="projectSaveBusy" :busy="projectSaveBusy">{{ projectSaveBusy ? '保存中…' : editingProject ? '保存修改' : '创建项目' }}</ActionButton></div>
       </form>
     </Modal>
 
     <Modal v-if="showTaskForm" :open="showTaskForm" :title="editingTask ? '编辑任务' : taskDraft.parentTaskId ? '添加子任务' : '添加任务'" :medium="true" @close="showTaskForm = false; editingTask = false">
       <form class="projects-form" @submit.prevent="saveTask">
+        <fieldset class="project-editor-fields" :disabled="taskSaveBusy">
         <label>任务标题 <span aria-hidden="true">*</span><input v-model="taskDraft.title" maxlength="160" required autofocus placeholder="例如：完成需求分析" /></label>
         <label>任务说明 <textarea v-model="taskDraft.description" maxlength="3000" rows="3" placeholder="选填" /></label>
         <div class="projects-form-grid"><label>负责人<select v-model="taskDraft.assigneeId"><option value="">暂不分配</option><option v-for="member in activeMembers" :key="member.userId" :value="member.userId">{{ member.userId === accountUser.id ? '我' : member.nickname }}</option></select></label><label>截止日期<input v-model="taskDraft.dueOn" type="date" /></label></div>
@@ -1437,6 +1407,8 @@ onBeforeUnmount(() => {
         <p v-if="taskDraft.dependsOnTaskId" class="projects-form-hint">前置任务完成前，成员不能开始或完成此任务；系统会阻止循环依赖。</p>
         <label>优先级<select v-model="taskDraft.priority"><option v-for="(label, value) in PROJECT_TASK_PRIORITY" :key="value" :value="value">{{ label }}</option></select></label>
         <p v-if="taskDraft.assigneeId" class="projects-form-hint">{{ editingTask ? '更换负责人后，新负责人需要明确接受；原负责人待办会转为个人记录。' : '分配后会等待负责人明确接受；接受后才加入对方的个人待办。' }}</p>
+        <p v-if="taskFormError" class="projects-form-error" role="alert">{{ taskFormError }}</p>
+        </fieldset>
         <div class="projects-form-actions"><button class="btn btn-ghost" type="button" @click="showTaskForm = false; editingTask = false">取消</button><ActionButton tone="primary" kind="important" feedback="external" :show-error="false" class="btn btn-primary" type="submit" :disabled="taskSaveBusy" :busy="taskSaveBusy">{{ taskSaveBusy ? '保存中…' : editingTask ? '保存修改' : '添加任务' }}</ActionButton></div>
       </form>
     </Modal>
@@ -1445,34 +1417,41 @@ onBeforeUnmount(() => {
 
     <Modal v-if="showMilestoneForm" :open="showMilestoneForm" :title="editingMilestone ? '编辑里程碑' : '添加里程碑'" :medium="true" :sheet="true" @close="showMilestoneForm = false">
       <form class="projects-form" @submit.prevent="saveMilestone">
+        <fieldset class="project-editor-fields" :disabled="planningSaveBusy">
         <label>阶段名称 <span aria-hidden="true">*</span><input v-model="milestoneDraft.title" maxlength="160" required autofocus placeholder="例如：方案评审" /></label>
         <label>阶段说明<textarea v-model="milestoneDraft.description" maxlength="2000" rows="3" placeholder="选填" /></label>
         <label>关键日期<input v-model="milestoneDraft.dueOn" type="date" :min="project?.startsOn || undefined" /></label>
+        </fieldset>
         <div class="projects-form-actions"><button class="btn btn-ghost" type="button" @click="showMilestoneForm = false">取消</button><ActionButton tone="primary" kind="important" feedback="external" :show-error="false" class="btn btn-primary" type="submit" :disabled="planningSaveBusy" :busy="planningSaveBusy">{{ planningSaveBusy ? '保存中…' : editingMilestone ? '保存修改' : '添加里程碑' }}</ActionButton></div>
       </form>
     </Modal>
 
     <Modal v-if="showDeliveryCheckForm" :open="showDeliveryCheckForm" title="添加交付检查项" :medium="true" :sheet="true" @close="showDeliveryCheckForm = false">
       <form class="projects-form" @submit.prevent="saveDeliveryCheckItem">
+        <fieldset class="project-editor-fields" :disabled="planningSaveBusy">
         <label>检查内容 <span aria-hidden="true">*</span><input v-model="deliveryCheckDraft.title" maxlength="200" required autofocus placeholder="例如：确认最终报告包含实验数据" /></label>
         <label class="project-check-row"><input v-model="deliveryCheckDraft.required" type="checkbox" />项目交付必需</label>
+        </fieldset>
         <div class="projects-form-actions"><button class="btn btn-ghost" type="button" @click="showDeliveryCheckForm = false">取消</button><ActionButton tone="primary" kind="important" feedback="external" :show-error="false" class="btn btn-primary" type="submit" :disabled="planningSaveBusy" :busy="planningSaveBusy">{{ planningSaveBusy ? '保存中…' : '添加检查项' }}</ActionButton></div>
       </form>
     </Modal>
 
     <Modal v-if="showMeetingForm" :open="showMeetingForm" :title="meetingProposalTarget ? '提出改期建议' : '发起小组讨论'" :medium="true" :sheet="true" @close="showMeetingForm = false; meetingProposalTarget = null">
       <form class="projects-form" @submit.prevent="saveMeetingForm">
+        <fieldset class="project-editor-fields" :disabled="Boolean(actionBusy)">
         <p class="projects-form-hint">时间按你的账号时区（{{ scheduleTimezone }}）填写。其他成员会看到本地时区下的时间。</p>
         <label v-if="!meetingProposalTarget">讨论主题 <span aria-hidden="true">*</span><input v-model="meetingDraft.title" maxlength="160" required autofocus placeholder="例如：确定演示方案" /></label>
         <label v-if="!meetingProposalTarget">讨论说明<textarea v-model="meetingDraft.note" maxlength="1500" rows="2" placeholder="选填，写下议题或会议链接" /></label>
         <label>{{ meetingProposalTarget ? '建议开始时间' : '开始时间' }}<input v-model="meetingDraft.startsLocal" type="datetime-local" required /></label>
         <label>{{ meetingProposalTarget ? '建议结束时间' : '结束时间' }}<input v-model="meetingDraft.endsLocal" type="datetime-local" required /></label>
+        </fieldset>
         <div class="projects-form-actions"><button class="btn btn-ghost" type="button" @click="showMeetingForm = false; meetingProposalTarget = null">取消</button><ActionButton tone="primary" kind="important" feedback="external" :show-error="false" class="btn btn-primary" type="submit" :disabled="Boolean(actionBusy)" :busy="actionBusy">{{ actionBusy ? '提交中…' : meetingProposalTarget ? '发送改期建议' : '发送讨论邀请' }}</ActionButton></div>
       </form>
     </Modal>
 
     <Modal v-if="showAdjustmentForm" :open="showAdjustmentForm" title="协商任务调整" :medium="true" :sheet="true" @close="showAdjustmentForm = false">
       <form class="projects-form" @submit.prevent="saveAdjustment">
+        <fieldset class="project-editor-fields" :disabled="adjustmentSaveBusy">
         <p class="projects-form-hint">{{ adjustmentTask?.title }} · 申请提交后先由相关成员确认，确认前不会改动现有安排。</p>
         <label>申请类型<select v-model="adjustmentDraft.type"><option value="deadline_extension">延长截止时间</option><option value="help">寻求其他成员协助</option><option value="scope_change">调整任务范围</option><option value="split">拆分任务</option><option value="handover">交接任务负责人</option><option value="unable_to_continue">无法继续承担</option></select></label>
         <label v-if="adjustmentDraft.type === 'deadline_extension'">申请的新截止日期<input v-model="adjustmentDraft.dueOn" type="date" :min="nextDay(adjustmentTask?.dueOn)" required /></label>
@@ -1480,25 +1459,29 @@ onBeforeUnmount(() => {
         <label v-if="adjustmentDraft.type === 'scope_change'">调整后的任务说明<textarea v-model="adjustmentDraft.description" maxlength="3000" rows="3" placeholder="写下希望采用的新范围" /></label>
         <label v-if="adjustmentDraft.type === 'split'">拆分后的子任务<textarea v-model="adjustmentDraft.subtasks" rows="4" placeholder="每行一个子任务，最多 8 项" /></label>
         <label>申请原因 <span aria-hidden="true">*</span><textarea v-model="adjustmentDraft.reason" maxlength="1500" rows="3" required placeholder="说明当前遇到的问题和需要怎样的调整" /></label>
+        </fieldset>
         <div class="projects-form-actions"><button class="btn btn-ghost" type="button" @click="showAdjustmentForm = false">取消</button><ActionButton tone="primary" kind="important" feedback="external" :show-error="false" class="btn btn-primary" type="submit" :disabled="adjustmentSaveBusy" :busy="adjustmentSaveBusy">{{ adjustmentSaveBusy ? '提交中…' : '提交申请' }}</ActionButton></div>
       </form>
     </Modal>
 
     <Modal v-if="showDeliverableForm" :open="showDeliverableForm" title="添加项目交付项" :medium="true" :sheet="true" @close="showDeliverableForm = false">
       <form class="projects-form" @submit.prevent="saveDeliverable">
+        <fieldset class="project-editor-fields" :disabled="deliverableSaveBusy">
         <label>交付项名称 <span aria-hidden="true">*</span><input v-model="deliverableDraft.title" maxlength="160" required autofocus placeholder="例如：最终报告" /></label>
         <label>交付要求<textarea v-model="deliverableDraft.instructions" maxlength="3000" rows="3" placeholder="选填，写下格式、内容或检查要求" /></label>
         <label>关联任务<select v-model="deliverableDraft.taskId"><option value="">不关联具体任务</option><option v-for="task in deliverableTaskOptions" :key="task.id" :value="task.id">{{ task.title }}</option></select></label>
         <label>验收人<select v-model="deliverableDraft.reviewerId"><option value="">项目负责人或管理员</option><option v-for="member in activeMembers.filter((item) => item.userId !== accountUser.id)" :key="member.userId" :value="member.userId">{{ member.nickname }}</option></select></label>
         <label class="project-check-row"><input v-model="deliverableDraft.required" type="checkbox" />项目交付必需</label>
         <label class="project-check-row"><input v-model="deliverableDraft.reviewRequired" type="checkbox" />正式提交后需要验收</label>
+        </fieldset>
         <div class="projects-form-actions"><button class="btn btn-ghost" type="button" @click="showDeliverableForm = false">取消</button><ActionButton tone="primary" kind="important" feedback="external" :show-error="false" class="btn btn-primary" type="submit" :disabled="deliverableSaveBusy" :busy="deliverableSaveBusy">{{ deliverableSaveBusy ? '保存中…' : '添加交付项' }}</ActionButton></div>
       </form>
     </Modal>
 
-    <Modal v-if="showDeliverableEditor" :open="showDeliverableEditor" :title="`提交成果 · ${activeDeliverable?.title || ''}`" :wide="true" :sheet="true" @close="showDeliverableEditor = false; activeDeliverable = null">
+    <Modal v-if="showDeliverableEditor" :open="showDeliverableEditor" :title="`提交成果 · ${activeDeliverable?.title || ''}`" :wide="true" :sheet="true" @close="closeDeliverableEditor">
       <form class="projects-form deliverable-editor" @submit.prevent="submitDeliverable">
         <p v-if="activeDeliverable?.instructions" class="projects-form-hint">交付要求：{{ activeDeliverable.instructions }}</p>
+        <fieldset class="project-editor-fields" :disabled="deliverableEditorBusy">
         <label>成果说明<textarea v-model="draftContent.summary" maxlength="5000" rows="4" placeholder="简要说明完成内容、查看方式或注意事项" /></label>
         <div class="deliverable-editor-section"><div class="projects-section-head"><strong>在线链接</strong><button class="btn btn-ghost" type="button" :disabled="draftContent.links.length >= 10" @click="addContentLink">＋ 添加链接</button></div>
           <div v-for="(link, index) in draftContent.links" :key="index" class="deliverable-link-editor"><select v-model="link.type" aria-label="链接类型"><option value="document">在线文档</option><option value="repository">代码仓库</option><option value="commit">指定提交</option><option value="other">其他链接</option></select><input v-model="link.title" maxlength="160" aria-label="链接名称" placeholder="链接名称" /><input v-model="link.url" type="url" aria-label="HTTPS 链接" placeholder="https://…" /><button class="icon-btn" type="button" :aria-label="`删除链接 ${index + 1}`" @click="draftContent.links.splice(index, 1)">×</button></div>
@@ -1507,16 +1490,22 @@ onBeforeUnmount(() => {
           <div v-for="(file, index) in draftContent.files" :key="file.path" class="deliverable-file-row"><span>{{ file.name }} · {{ Math.max(1, Math.round(file.size / 1024)) }} KB</span><button class="btn btn-ghost danger-text" type="button" @click="draftContent.files.splice(index, 1)">移除</button></div>
         </div>
         <label>本次修改说明<input v-model="changeNote" maxlength="1500" placeholder="选填，例如：根据验收意见补充了实验结果" /></label>
-        <p v-if="draftRevision" class="projects-form-hint">当前草稿版本 {{ draftRevision }}。正式提交后会固定为一个不可覆盖的成果版本。</p>
-        <div class="projects-form-actions deliverable-editor-actions"><button class="btn btn-ghost" type="button" @click="showDeliverableEditor = false; activeDeliverable = null">关闭</button><ActionButton tone="neutral" class="btn btn-secondary" type="button" :disabled="deliverableSaveBusy || fileUploadBusy" kind="frequent" feedback="external" :show-error="false" :action="() => saveDeliverableDraft()">{{ deliverableSaveBusy ? '保存中…' : '保存草稿' }}</ActionButton><ActionButton tone="primary" kind="important" feedback="external" :show-error="false" class="btn btn-primary" type="submit" :disabled="deliverableSaveBusy || fileUploadBusy || draftRevision < 1" :busy="deliverableSaveBusy || fileUploadBusy">{{ deliverableSaveBusy ? '提交中…' : '正式提交新版本' }}</ActionButton></div>
+        </fieldset>
+        <p class="projects-form-hint" role="status">{{ deliverableDirty ? '有未保存的改动，正式提交时会一并保存。' : draftRevision ? '草稿已保存，可以正式提交。' : '添加成果后可以直接提交，也可以先保存草稿。' }}</p>
+        <p class="projects-form-hint">关闭后再次打开，可继续本项目尚未保存的草稿。</p>
+        <p v-if="deliverableEditorError" class="projects-form-error" role="alert">{{ deliverableEditorError }}</p>
+        <ProjectDraftRecovery :conflict="deliverableConflict" :latest="latestDeliverableDraft" :busy="deliverableEditorBusy || fileUploadBusy" @load="deliverableEditor.loadLatestDraft" @resolve="deliverableEditor.resolveConflict" />
+        <div class="projects-form-actions deliverable-editor-actions"><button class="btn btn-ghost" type="button" @click="closeDeliverableEditor">关闭</button><ActionButton tone="neutral" class="btn btn-secondary" type="button" :disabled="deliverableEditorBusy || fileUploadBusy" kind="frequent" feedback="external" :show-error="false" :action="() => saveDeliverableDraft()">{{ deliverableEditorBusy ? '保存中…' : '保存草稿' }}</ActionButton><ActionButton tone="primary" kind="important" feedback="external" :show-error="false" class="btn btn-primary" type="submit" :disabled="deliverableEditorBusy || fileUploadBusy" :busy="deliverableEditorBusy || fileUploadBusy">{{ deliverableEditorBusy ? '提交中…' : '正式提交新版本' }}</ActionButton></div>
       </form>
     </Modal>
 
     <Modal v-if="reviewTarget" :open="Boolean(reviewTarget)" title="验收成果" :medium="true" :sheet="true" @close="reviewTarget = null">
       <form class="projects-form" @submit.prevent="decideReview('approved')">
+        <fieldset class="project-editor-fields" :disabled="reviewSaveBusy">
         <p class="projects-form-hint">通过前请逐项确认检查结果；有未通过项时请选择退回修改。</p>
         <div class="review-checklist"><div v-for="(item, index) in reviewChecklist" :key="index" class="review-check-row"><input v-model="item.passed" type="checkbox" :aria-label="`检查项 ${index + 1} 通过`" /><input v-model="item.item" maxlength="200" :aria-label="`检查项 ${index + 1} 名称`" placeholder="检查项" /><button class="icon-btn" type="button" :aria-label="`删除检查项 ${index + 1}`" :disabled="reviewChecklist.length <= 1" @click="reviewChecklist.splice(index, 1)">×</button></div><button class="btn btn-ghost" type="button" :disabled="reviewChecklist.length >= 20" @click="addReviewChecklistItem">＋ 添加检查项</button></div>
         <label>验收意见 <span aria-hidden="true">*</span><textarea v-model="reviewFeedback" maxlength="3000" rows="4" required placeholder="说明检查结果，退回时请写清楚修改建议" /></label>
+        </fieldset>
         <div class="projects-form-actions"><ActionButton tone="ghost" class="btn btn-ghost" type="button" :disabled="reviewSaveBusy" kind="important" feedback="external" :show-error="false" :action="() => decideReview('returned')">退回修改</ActionButton><ActionButton tone="primary" kind="important" feedback="external" :show-error="false" class="btn btn-primary" type="submit" :disabled="reviewSaveBusy" :busy="reviewSaveBusy">{{ reviewSaveBusy ? '保存中…' : '通过验收' }}</ActionButton></div>
       </form>
     </Modal>

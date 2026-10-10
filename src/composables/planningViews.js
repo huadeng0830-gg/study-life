@@ -1,6 +1,7 @@
 import { isArchived, isTaskActionable, taskStatus } from './domain/state.js'
 import { sortCountdowns } from './store/countdown.js'
 import { appCalendarDaysBetween, getAppToday } from './timeContext.js'
+import { taskHasTime, taskPlanInPeriod, taskStages, taskTimeSummary } from './tasks/taskTimePlan.ts'
 
 function matchesQuery(values, query) {
   const words = String(query || '').trim().toLocaleLowerCase().split(/\s+/).filter(Boolean)
@@ -10,32 +11,27 @@ function matchesQuery(values, query) {
 
 /** Additional filters shared by the task list, board, and calendar. */
 export function filterTaskWorkspace(tasks, { query = '', priority = 'all', period = 'all', now = new Date(), courseNames = new Map() } = {}) {
-  const today = getAppToday(now)
   return tasks.filter((task) => {
     if (priority !== 'all' && (task.priority || 'normal') !== priority) return false
-    if (!matchesQuery([task.title, courseNames.get(task.courseId), task.course, task.note, task.workCheckpoint?.lastStep, task.workCheckpoint?.blocker, task.workCheckpoint?.nextStep], query)) return false
+    if (!matchesQuery([task.title, courseNames.get(task.courseId), task.course, task.note, task.workCheckpoint?.lastStep, task.workCheckpoint?.blocker, task.workCheckpoint?.nextStep, ...taskStages(task).flatMap((stage) => [stage.label, stage.start?.date, stage.end?.date])], query)) return false
     if (period === 'all') return true
     if (!isTaskActionable(task, now)) return false
-    if (period === 'overdue') return taskStatus(task, now) === 'overdue'
-    if (period === 'unplanned') return !task.dueDate
-    const days = appCalendarDaysBetween(today, task.dueDate)
-    if (period === 'today') return days === 0
-    if (period === 'week') return days >= 0 && days < 7
+    if (period === 'overdue') return taskStatus(task, now) === 'overdue' || taskTimeSummary(task, now.getTime()).risk
+    if (period === 'unplanned') return !taskHasTime(task)
+    if (period === 'today' || period === 'week') return taskPlanInPeriod(task, period, now.getTime())
     return true
   })
 }
 
 /** Counts describe current actionable records, independently of search filters. */
 export function taskWorkspaceSummary(tasks, now = new Date()) {
-  const today = getAppToday(now)
   const summary = { today: 0, overdue: 0, week: 0, unplanned: 0 }
   for (const task of tasks) {
     if (!isTaskActionable(task, now)) continue
-    if (!task.dueDate) summary.unplanned += 1
-    if (taskStatus(task, now) === 'overdue') summary.overdue += 1
-    const days = appCalendarDaysBetween(today, task.dueDate)
-    if (days === 0) summary.today += 1
-    if (days >= 0 && days < 7) summary.week += 1
+    if (!taskHasTime(task)) summary.unplanned += 1
+    if (taskStatus(task, now) === 'overdue' || taskTimeSummary(task, now.getTime()).risk) summary.overdue += 1
+    if (taskPlanInPeriod(task, 'today', now.getTime())) summary.today += 1
+    if (taskPlanInPeriod(task, 'week', now.getTime())) summary.week += 1
   }
   return summary
 }

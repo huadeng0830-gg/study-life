@@ -12,6 +12,7 @@
  * 而 `localStorage` 里一个键都不必新增。
  */
 import { isArchived } from './domain/state.js'
+import { moveTimeDate, taskTimeEntries } from './tasks/taskTimePlan.ts'
 
 /** 视图模式：列表是默认值，且**不带** query 参数（保持地址栏干净）。 */
 export const TASK_VIEW_MODES = Object.freeze([
@@ -117,12 +118,24 @@ export function buildTaskMonthGrid(monthKey, tasks = []) {
 
   const byDate = new Map()
   for (const task of Array.isArray(tasks) ? tasks : []) {
-    const dateKey = String(task?.dueDate || '')
-    if (!DATE_KEY.test(dateKey) || dateKey.slice(0, 7) !== `${match[1]}-${match[2]}`) continue
     if (isArchived(task) || task.status === 'cancelled') continue
-    const bucket = byDate.get(dateKey) ?? []
-    bucket.push(task)
-    byDate.set(dateKey, bucket)
+    const dates = new Set()
+    const firstDate = `${match[1]}-${match[2]}-01`
+    const lastDate = `${match[1]}-${match[2]}-${String(daysInMonth).padStart(2, '0')}`
+    for (const entry of taskTimeEntries(task)) {
+      if (entry.anchor !== 'occupied') dates.add(entry.date)
+      else {
+        let date = entry.date > firstDate ? entry.date : firstDate
+        const end = (entry.endDate || entry.date) < lastDate ? entry.endDate : lastDate
+        while (date && date <= end) { dates.add(date); date = moveTimeDate(date, 1) }
+      }
+    }
+    for (const dateKey of dates) {
+      if (!DATE_KEY.test(dateKey) || dateKey < firstDate || dateKey > lastDate) continue
+      const bucket = byDate.get(dateKey) ?? []
+      bucket.push(task)
+      byDate.set(dateKey, bucket)
+    }
   }
 
   const cells = []
@@ -141,7 +154,7 @@ export function taskCalendarCellLabel(cell) {
   if (!cell) return ''
   const month = Number(String(cell.dateKey).slice(5, 7))
   const date = `${month}月${cell.day}日`
-  return cell.count ? `${date}，${cell.count} 条待办到期` : `${date}，无待办到期`
+  return cell.count ? `${date}，${cell.count} 条待办安排` : `${date}，无待办安排`
 }
 
 /** 当天待办行的可访问名称。 */

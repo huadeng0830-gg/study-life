@@ -32,6 +32,7 @@ import net from 'node:net'
 import process from 'node:process'
 
 import { findChromePath, killProcessTree, makeTempDir, removeQuietly, sleep } from './shared.mjs'
+import { bootAuditFailures } from './boot-verdict.mjs'
 
 const DEFAULT_URL = 'https://study-life.pages.dev'
 const rawArgs = process.argv.slice(2)
@@ -197,6 +198,9 @@ try {
 
   await session.send('Page.enable')
   await session.send('Runtime.enable')
+  await session.send('Emulation.setDeviceMetricsOverride', {
+    width: 390, height: 844, deviceScaleFactor: 1, mobile: true,
+  })
   // 必须在导航之前注入，才能作用于本次加载的第一个文档。
   await session.send('Page.addScriptToEvaluateOnNewDocument', { source: SAFARI_SIMULATION })
 
@@ -211,17 +215,19 @@ log(`打开 ${targetUrl}（iPhone 视口，${simulationLabel}，观察 ${seconds
     expression: `JSON.stringify({
       errorScreen: !!document.querySelector('main.startup-error'),
       errorTitle: (document.querySelector('main.startup-error h1') || {}).textContent || '',
-      appMounted: !!document.querySelector('#app[data-v-app]'),
+      appMounted: !!document.querySelector('#app[data-v-app] main'),
       placeholder: !!document.querySelector('[data-startup-placeholder]'),
       bodyText: (document.body.innerText || '').replace(/\\s+/g, ' ').slice(0, 160),
-      idleCallbackMissing: typeof window.requestIdleCallback === 'undefined'
+      idleCallbackMissing: typeof window.requestIdleCallback === 'undefined',
+      viewport: {width: innerWidth, height: innerHeight}
     })`,
     returnByValue: true,
   })
   const probe = JSON.parse(probeRaw.result?.value || '{}')
 
   const unique = (list, limit = 8) => [...new Set(list)].slice(0, limit)
-  const bootFailure = probe.errorScreen || !probe.appMounted
+  const reasons = bootAuditFailures({ navigationCount: mainFrameNavigations.length, probe, consoleErrors, exceptions })
+  const bootFailure = reasons.length > 0
   const report = {
     tool: 'iphone-boot',
     url: targetUrl,
@@ -230,12 +236,14 @@ log(`打开 ${targetUrl}（iPhone 视口，${simulationLabel}，观察 ${seconds
     mainFrameNavigations: mainFrameNavigations.length,
     navigationSequence: mainFrameNavigations.map((item) => item.url.replace(/^https?:\/\//, '').slice(0, 80)),
     appMounted: probe.appMounted,
+    viewport: probe.viewport,
     placeholderVisible: probe.placeholder,
     errorScreen: probe.errorScreen,
     errorTitle: probe.errorTitle,
     bodyText: probe.bodyText,
     exceptions: unique(exceptions),
     consoleErrors: unique(consoleErrors),
+    reasons,
     verdict: bootFailure ? 'RED' : 'GREEN',
   }
   process.stdout.write(`${JSON.stringify(report, null, 2)}\n`)

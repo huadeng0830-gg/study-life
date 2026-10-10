@@ -7,6 +7,7 @@ import {
   autoSeasonStatusFor,
 } from './store/timeConfig.js'
 import { schedulePolicy } from './settingsPolicy.js'
+import { scheduleExceptions } from './store/schedule.js'
 
 /**
  * 校区 / 作息季切换与作息设置入口（从 ScheduleView 拆出）。
@@ -80,7 +81,10 @@ export function useScheduleCampusSeason({ courses, courseTemplates }) {
         courseUsesPeriod(course, periodId, timeConfig.value.periods),
       ).length,
     0)
-    return activeCount + templateCount
+    const makeupCount = scheduleExceptions.value.reduce((count, item) => count +
+      (item?.type === 'session_makeup' && Array.isArray(item.courseSlots)
+        ? item.courseSlots.filter((slot) => courseUsesPeriod(slot, periodId, timeConfig.value.periods)).length : 0), 0)
+    return activeCount + templateCount + makeupCount
   }
 
   return {

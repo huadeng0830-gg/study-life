@@ -49,7 +49,8 @@ export async function getWallpaper(target) {
 export async function setWallpaper(target, blob) {
   const db = await openDb()
   try {
-    await requestResult(db.transaction(STORE_NAME, 'readwrite').objectStore(STORE_NAME).put(blob, target))
+    const transaction = db.transaction(STORE_NAME, 'readwrite')
+    await Promise.all([requestResult(transaction.objectStore(STORE_NAME).put(blob, target)), transactionDone(transaction)])
     wallpaperRevision.value++
   } finally {
     db.close()
@@ -59,7 +60,8 @@ export async function setWallpaper(target, blob) {
 export async function removeWallpaper(target) {
   const db = await openDb()
   try {
-    await requestResult(db.transaction(STORE_NAME, 'readwrite').objectStore(STORE_NAME).delete(target))
+    const transaction = db.transaction(STORE_NAME, 'readwrite')
+    await Promise.all([requestResult(transaction.objectStore(STORE_NAME).delete(target)), transactionDone(transaction)])
     wallpaperRevision.value++
   } finally {
     db.close()
@@ -69,7 +71,8 @@ export async function removeWallpaper(target) {
 export async function clearAllWallpapers() {
   const db = await openDb()
   try {
-    await requestResult(db.transaction(STORE_NAME, 'readwrite').objectStore(STORE_NAME).clear())
+    const transaction = db.transaction(STORE_NAME, 'readwrite')
+    await Promise.all([requestResult(transaction.objectStore(STORE_NAME).clear()), transactionDone(transaction)])
     wallpaperRevision.value++
   } finally {
     db.close()

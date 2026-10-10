@@ -274,12 +274,20 @@ function saveBill() {
     currency: currencyField(f.currency),
     updatedAt: new Date().toISOString(),
   }
-  if (editingBillId.value) {
-    props.domain.updateBill(editingBillId.value, data)
-    props.notify(`已更新固定账单「${data.name}」（只影响之后，历史记录不变）`)
-  } else {
-    props.domain.createBill({ ...data, createdFrom: 'manual' })
-    props.notify(`已添加固定账单「${data.name}」`)
+  try {
+    if (editingBillId.value) {
+      if (!props.domain.updateBill(editingBillId.value, data)) {
+        setBillError('这条固定账单已不存在，请关闭后重新选择。')
+        return
+      }
+      props.notify(`已更新固定账单「${data.name}」（只影响之后，历史记录不变）`)
+    } else {
+      props.domain.createBill({ ...data, createdFrom: 'manual' })
+      props.notify(`已添加固定账单「${data.name}」`)
+    }
+  } catch (cause) {
+    setBillError(cause instanceof Error ? cause.message : '保存失败，请重试。')
+    return
   }
   formOpen.value = false
 }

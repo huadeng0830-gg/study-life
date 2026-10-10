@@ -87,8 +87,7 @@ jobs:
           npm exec --offline -- electron-builder --config electron-builder.yml --win nsis --x64 --publish never
           npm run desktop:verify
 
-  # 依赖漏洞与过期提示。npm audit 放在独立 job：它是"信息"而非"门禁"，
-  # 单独跑失败不会把整个 PR 标红，但会在 job summary 里看得见。
+  # 严重和高危漏洞阻止合并；同时检查 Electron 应用的独立依赖树。
   dependency-audit:
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -98,6 +97,11 @@ jobs:
         with:
           node-version: '22'
           cache: 'npm'
-      - run: npm ci
+      - name: Install root and desktop dependency trees
+        run: |
+          npm ci
+          npm ci --prefix desktop-app
       - name: Audit
-        run: npm audit --audit-level=high || true
+        run: |
+          npm audit --audit-level=high
+          npm audit --prefix desktop-app --audit-level=high

@@ -32,7 +32,7 @@ let appBooted = false
  * 「有空再做」的任务（更新检查、按时段预测预加载）。
  *
  * 【为什么必须包一层，不能直接裸调 requestIdleCallback】iPhone/iPad 上的 Safari
- * 长期没有 `requestIdleCallback`（iOS 17.4 以前完全没有）。它被裸调时抛的是
+ * 可能没有 `requestIdleCallback`，应按能力检测。它被裸调时抛的是
  * `ReferenceError`，而这段代码跑在 `bootstrap()` 里，于是**一次本来成功的启动**被
  * `.catch()` 判成启动失败 → 注销 Service Worker、清缓存、整页重载 → 重新加载仍然抛
  * （时段没变）→ 自动恢复预算用尽 → 弹出「页面没有完整加载」。用户点「重新加载」也只是
