@@ -9,14 +9,14 @@
 [🌐 在线体验](https://study-life.pages.dev/) · [📦 GitHub](https://github.com/huadeng0830-gg/study-life)
 
 <!-- RELEASE_STATUS:START -->
-> **当前源码版本**：网页 / PWA `2026年10月10日-版本2` · Windows 桌面版 `1.0.15`
+> **当前源码版本**：网页 / PWA `2026年10月10日-版本3` · Windows 桌面版 `1.0.16`
 > **最近更新**：
-> - 齐行支持任务筛选和子任务上下文，完善成果自动保存、草稿冲突恢复、提交版本校验及排期时区
-> - 修复切换账号或项目后的旧请求、重复操作与加载状态，完善好友刷新和协作安排校验
-> - 加强本机数据恢复、导入撤销与取消保护，统一周年提醒、回顾币种与跨日安排
-> - 改善长列表、长图裁切、右滑和键盘操作，修正启动文字可读性、账单反馈与邮箱验证返回页
+> - 修复页面尚在加载时快速切换导航导致的渲染异常，保留页面切换动效与缓存
+> - 补充真实浏览器回归，校验模块在页面退场时完成加载以及返回缓存页面
 > [下载已发布的 Windows 安装包与版本说明](https://github.com/huadeng0830-gg/study-life/releases/latest)
 <!-- RELEASE_STATUS:END -->
+
+本轮上线范围为网页 / PWA 与云端服务，Windows 安装包发布已取消；上面的桌面版本号表示源码版本。
 
 ![Vue 3](https://img.shields.io/badge/Vue-3-42b883?logo=vuedotjs&logoColor=white)
 ![Vite](https://img.shields.io/badge/Vite-8-646cff?logo=vite&logoColor=white)

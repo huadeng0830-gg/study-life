@@ -7,6 +7,14 @@
 // 3. 更早的版本逐条下移，最多保留 3 个版本，超出即删除。
 export const RELEASE_UPDATES = Object.freeze([
   {
+    version: '2026年10月10日-版本3',
+    signature: 'a97d1d0a10',
+    notes: [
+      '修复页面尚在加载时快速切换导航导致的渲染异常，保留页面切换动效与缓存',
+      '补充真实浏览器回归，校验模块在页面退场时完成加载以及返回缓存页面',
+    ],
+  },
+  {
     version: '2026年10月10日-版本2',
     signature: '0da1052396',
     notes: [
@@ -25,21 +33,13 @@ export const RELEASE_UPDATES = Object.freeze([
       '统一阶段完成、占用冲突、提醒去重和周期生成，完善跨日、月末、夏令时及重复规则的撤销校验',
     ],
   },
-  {
-    version: '2026年10月09日-版本3',
-    signature: '987ea21686',
-    notes: [
-      '部分补课支持选择日期并为每门课程设置开始和结束节次，预览与已保存安排显示实际时间',
-      '补课按指定节次显示在课表，点击直接编辑本次调整，兼容旧记录并同步日程冲突和学习空档',
-    ],
-  },
 ])
 
 // 对用户展示、version.txt 和更新检测统一使用此版本号；后续同日发布只递增“版本”序号。
 export const RELEASE_VERSION = RELEASE_UPDATES[0].version
 
 // 与第一条签名保持一致，交给 vite.config.js 校验源码一致性。
-export const RELEASE_SOURCE_SIGNATURE = '0da1052396'
+export const RELEASE_SOURCE_SIGNATURE = 'a97d1d0a10'
 
 // 兼容旧引用：当前版本的更新说明。
 export const RELEASE_NOTES = RELEASE_UPDATES[0].notes

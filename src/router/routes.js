@@ -48,9 +48,12 @@ function asyncRoute(path) {
           .catch(() => { if (!disposed) failed.value = true })
       }
       onBeforeUnmount(() => { disposed = true })
-      return () => loaded.value
+      // Transition/KeepAlive must keep the same DOM root while an import finishes.
+      // Replacing a leaving fallback root can detach its transition anchor before
+      // Vue inserts the loaded view. The inner content may change; this root stays.
+      return () => h('div', { class: 'route-view' }, [loaded.value
         ? h(loaded.value)
-        : failed.value ? h(RouteError) : h(RouteLoading)
+        : failed.value ? h(RouteError) : h(RouteLoading)])
     },
   })
 }
