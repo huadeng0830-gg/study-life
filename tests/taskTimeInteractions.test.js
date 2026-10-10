@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { registerMirrorTeardown } from './helpers/mirrorTeardown.js'
 registerMirrorTeardown()
-let app, host, router, nextTick, domain
+let app, host, router, nextTick, domain, liveRegion
 
 function button(element, text) {
   const target = [...element.querySelectorAll('button')].find((item) => item.textContent.includes(text))
@@ -28,6 +28,8 @@ beforeEach(async () => {
   // 每次挂载隔离测试浮层和播报节点。
   document.body.replaceChildren()
   vi.resetModules()
+  // 保留本次模块重置后的实例，收尾时取消真实交互排队的读屏播报。
+  liveRegion = await import('../src/composables/liveRegion.js')
   localStorage.clear()
   localStorage.setItem('sl_quick_record_settings', JSON.stringify({ timezone: 'UTC' }))
   localStorage.setItem('sl_tasks', JSON.stringify([{ id: 'generic', title: '示例课程展示', status: 'pending', done: false, timeStages: [
@@ -50,7 +52,11 @@ beforeEach(async () => {
   app.mount(host)
   await nextTick()
 })
-afterEach(() => { app?.unmount(); host?.remove() })
+afterEach(() => {
+  app?.unmount()
+  liveRegion?.clearAnnouncement()
+  host?.remove()
+})
 
 describe('实际待办阶段交互', () => {
   it('完成前阶段保留后阶段，最后阶段明确完成事项，撤销恢复原阶段事实', async () => {
