@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { nextTick } from 'vue'
-import { dismissPersistenceNotice, flushStoredWrites, persistenceState, restoreStoredValues, useStoredRef } from '../src/composables/store/core.js'
+import { dismissPersistenceNotice, flushStoredWrites, persistenceState, persistenceWriteStates, restoreStoredValues, useStoredRef } from '../src/composables/store/core.js'
 import { registerMirrorTeardown } from './helpers/mirrorTeardown.js'
 
 // 收尾取消影子副本的待写盘：否则防抖/退避定时器会在环境拆除之后才触发，
@@ -38,7 +38,36 @@ describe('本机持久化状态', () => {
     expect(persistenceState.value.status).toBe('error')
     expect(persistenceState.value.key).toBe(localKey)
     expect(persistenceState.value.message).toContain('本次修改未能保存到本机')
+    expect(persistenceWriteStates.value[localKey].status).toBe('failed')
+    expect(flushStoredWrites()).toMatchObject({ ok: false, pendingKeys: [localKey] })
     setItem.mockRestore()
+    expect(flushStoredWrites()).toMatchObject({ ok: true, pendingKeys: [] })
+    expect(JSON.parse(localStorage.getItem(localKey))).toEqual({ value: 1 })
+    expect(persistenceWriteStates.value[localKey].status).toBe('saved')
+  })
+
+  it('另一个标签页更新同一键时保留本页编辑并进入冲突状态', async () => {
+    const key = 'sl_test_storage_conflict'
+    localStorage.setItem(key, JSON.stringify({ value: 0 }))
+    const state = useStoredRef(key, { value: 0 })
+    await new Promise((resolve) => setTimeout(resolve, 130))
+    state.value.value = 1
+    await nextTick()
+    const external = new StorageEvent('storage', {
+      key,
+      oldValue: JSON.stringify({ value: 0 }),
+      newValue: JSON.stringify({ value: 2 }),
+      storageArea: localStorage,
+    })
+    localStorage.setItem(key, JSON.stringify({ value: 2 }))
+    window.dispatchEvent(external)
+
+    expect(state.value.value).toBe(1)
+    expect(JSON.parse(localStorage.getItem(key))).toEqual({ value: 2 })
+    expect(persistenceState.value.status).toBe('conflict')
+    expect(persistenceWriteStates.value[key].status).toBe('conflict')
+    expect(flushStoredWrites()).toMatchObject({ ok: false, pendingKeys: [key] })
+    localStorage.removeItem(key)
   })
 
   it('IndexedDB 不可用时报告安全副本失败而不是静默吞掉', async () => {

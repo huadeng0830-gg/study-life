@@ -54,11 +54,6 @@ function unmountLast() {
   entry.host.remove()
 }
 
-function latest(selector) {
-  const nodes = [...document.querySelectorAll(selector)]
-  return nodes[nodes.length - 1] || null
-}
-
 function tabsOf(label) {
   const lists = [...document.querySelectorAll(`[role="tablist"][aria-label="${label}"]`)]
   expect(lists.length, `没找到分区列表：${label}`).toBeGreaterThan(0)
@@ -72,13 +67,9 @@ function selectedIndex(label) {
 }
 
 function clickTabAt(label, index) {
-  tabsOf(label)[index].click()
-}
-
-function clickSelector(selector) {
-  const button = latest(selector)
-  expect(button, `没找到分区按钮：${selector}`).toBeTruthy()
-  button.click()
+  const tab = tabsOf(label)[index]
+  if (label === '设置分区') tab.click()
+  else tab.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0, ctrlKey: false }))
 }
 
 afterEach(() => {
@@ -107,7 +98,7 @@ describe('外观设置：关闭再打开回到上次的分区', () => {
     await nextTick()
     expect(selectedIndex('个性化设置分区')).toBe(0)
 
-    clickSelector('#appearance-tab-quotes')
+    clickTabAt('个性化设置分区', 2)
     await nextTick()
     expect(selectedIndex('个性化设置分区')).toBe(2)
 
@@ -122,7 +113,7 @@ describe('外观设置：关闭再打开回到上次的分区', () => {
   it('点分区走的是那个共享 ref，而不是各点各的局部状态', async () => {
     mount(AppearanceSettings, { open: true })
     await nextTick()
-    clickSelector('#appearance-tab-layout')
+    clickTabAt('个性化设置分区', 3)
     await nextTick()
     expect(appearanceTab.value).toBe('layout')
     expect(selectedIndex('个性化设置分区')).toBe(3)

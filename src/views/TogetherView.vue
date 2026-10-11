@@ -9,10 +9,21 @@ import { dateInZone, wallTimeToEpoch, zonedParts } from '../composables/zonedTim
 import { ensureSocialScheduleReady, socialRequest, subscribeSocialNotifications } from '../services/social.js'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 
+/** @typedef {{ userId?: string, nickname?: string, school?: string, [key: string]: any }} SocialProfile */
+/** @typedef {{ id?: string, profile?: SocialProfile, [key: string]: any }} SocialRecord */
+/** @typedef {{ id: string, status: string, activity_type: string, title: string, starts_at: string, ends_at: string, updated_at: string, location?: string, note?: string, self?: { role?: string }, peer?: { user_id?: string, profile?: SocialProfile, proposed_starts_at?: string, proposed_ends_at?: string }, [key: string]: any }} SocialInvitation */
+
 const tabs = [
   { id: 'time', label: '找共同时间' },
   { id: 'invitations', label: '邀约与通知' },
   { id: 'friends', label: '好友' },
+]
+const invitationFilters = [
+  { id: 'action', label: '待我处理' },
+  { id: 'open', label: '进行中' },
+  { id: 'confirmed', label: '已确认' },
+  { id: 'history', label: '已结束' },
+  { id: 'all', label: '全部' },
 ]
 const activityLabels = { meal: '一起吃饭', movie: '看电影', sports: '运动', outing: '逛逛', custom: '自定义' }
 const statusLabels = {
@@ -23,7 +34,8 @@ const notificationLabels = {
   friend_request: '向你发送了好友请求', friend_accepted: '接受了你的好友请求', friend_removed: '已将你从好友中移除',
   invitation: '发来一条新邀约', invitation_updated: '更新了邀约', invitation_cancelled: '取消了一条邀约', invitation_expired: '一条邀约已过期',
 }
-const timeZones = ['Asia/Shanghai', 'Asia/Tokyo', 'Asia/Hong_Kong', 'Asia/Singapore', 'UTC', 'Europe/London', 'America/Los_Angeles', 'America/New_York']
+const browserTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Shanghai'
+const timeZones = [...new Set([browserTimeZone, 'Asia/Shanghai', 'Asia/Tokyo', 'Asia/Hong_Kong', 'Asia/Singapore', 'UTC', 'Europe/London', 'America/Los_Angeles', 'America/New_York'])]
 const durationChoices = [90, 120, 180]
 
 const context = createCollaborationContext(() => [accountUser.value?.id || '', Boolean(accountUser.value?.email_confirmed_at)], { onError: (error) => announce('error', error.message) })
@@ -35,14 +47,15 @@ const profile = context.state(null)
 const profileEditorOpen = ref(false)
 const friendRemovalTarget = context.state(null)
 const invitationCancellationTarget = context.state(null)
+const invitationFilter = context.state('action')
 const profileLoading = context.state(false)
 const profileSaving = context.state(false)
 const profileDraft = context.state(blankProfile)
 const friendLoading = context.state(false)
 const friendsError = context.state('')
-const friends = context.state([])
-const incomingRequests = context.state([])
-const outgoingRequests = context.state([])
+const friends = context.state(/** @type {SocialRecord[]} */ ([]))
+const incomingRequests = context.state(/** @type {SocialRecord[]} */ ([]))
+const outgoingRequests = context.state(/** @type {SocialRecord[]} */ ([]))
 const selectedFriendId = context.state('')
 const searchEmail = context.state('')
 const searchBusy = context.state(false)
@@ -61,7 +74,7 @@ const inviteLocation = context.state('')
 const inviteNote = context.state('')
 const inviteStartInput = context.state('')
 const inviteEndInput = context.state('')
-const invitations = context.state([])
+const invitations = context.state(/** @type {SocialInvitation[]} */ ([]))
 const invitationsBusy = context.state(false)
 const invitationsError = context.state('')
 const notificationItems = context.state([])
@@ -78,16 +91,51 @@ const timezone = computed(() => profile.value?.timezone || profileDraft.value.ti
 const hasProfile = computed(() => Boolean(profile.value?.nickname && profile.value?.scheduleCompleteThrough && profile.value?.semesterEnd))
 const selectedFriend = computed(() => friends.value.find((item) => item.profile?.userId === selectedFriendId.value)?.profile || null)
 const intervals = computed(() => availability.value?.intervals || [])
+const foundFriend = computed(() => friends.value.find((item) => item.profile?.userId === foundProfile.value?.userId)?.profile || null)
+const foundIncomingRequest = computed(() => incomingRequests.value.find((item) => item.profile?.userId === foundProfile.value?.userId) || null)
+const foundOutgoingRequest = computed(() => outgoingRequests.value.some((item) => item.profile?.userId === foundProfile.value?.userId))
+const actionableInvitation = (invite) => (invite.status === 'pending' && invite.self?.role === 'guest')
+  || (invite.status === 'change_proposed' && invite.self?.role === 'host')
+const invitationFilterCounts = computed(() => ({
+  action: invitations.value.filter(actionableInvitation).length,
+  open: invitations.value.filter((invite) => ['pending', 'change_proposed'].includes(invite.status)).length,
+  confirmed: invitations.value.filter((invite) => invite.status === 'confirmed').length,
+  history: invitations.value.filter((invite) => ['declined', 'cancelled', 'expired'].includes(invite.status)).length,
+  all: invitations.value.length,
+}))
+const sortedInvitations = computed(() => [...invitations.value].sort((left, right) => {
+  const priority = (invite) => actionableInvitation(invite) ? 0
+    : ['pending', 'change_proposed'].includes(invite.status) ? 1
+      : invite.status === 'confirmed' ? 2 : 3
+  const byPriority = priority(left) - priority(right)
+  if (byPriority) return byPriority
+  if (priority(left) === 3) return Date.parse(right.updated_at) - Date.parse(left.updated_at)
+  if (priority(left) === 2) {
+    const leftEnded = Date.parse(left.ends_at) < Date.now()
+    const rightEnded = Date.parse(right.ends_at) < Date.now()
+    if (leftEnded !== rightEnded) return leftEnded ? 1 : -1
+    if (leftEnded) return Date.parse(right.starts_at) - Date.parse(left.starts_at)
+  }
+  return Date.parse(left.starts_at) - Date.parse(right.starts_at)
+}))
+const visibleInvitations = computed(() => sortedInvitations.value.filter((invite) => {
+  if (invitationFilter.value === 'action') return actionableInvitation(invite)
+  if (invitationFilter.value === 'open') return ['pending', 'change_proposed'].includes(invite.status)
+  if (invitationFilter.value === 'confirmed') return invite.status === 'confirmed'
+  if (invitationFilter.value === 'history') return ['declined', 'cancelled', 'expired'].includes(invite.status)
+  return true
+}))
 const canUseSocial = computed(() => Boolean(accountUser.value?.email_confirmed_at))
 const emailDiscoverabilityDisabled = computed(() => !accountUser.value?.email_confirmed_at)
 
 let proposalGeneration = 0
+let availabilityGeneration = 0
 let stopRealtime = null
 let realtimeTimer = 0
 
 function blankProfile() {
   return {
-    nickname: '', school: '', emailDiscoverable: false, timezone: 'Asia/Shanghai', scheduleCompleteThrough: '', semesterEnd: '',
+    nickname: '', school: '', emailDiscoverable: false, timezone: browserTimeZone, scheduleCompleteThrough: '', semesterEnd: '',
     availabilityPreferences: { startTime: '09:00', endTime: '22:00', minimumMinutes: 90, classBufferMinutes: 30, includeWeekends: true },
   }
 }
@@ -159,6 +207,12 @@ const groupedIntervals = computed(() => {
 
 function resetAccountData() {
   context.invalidate()
+  activeTab.value = 'time'
+  availabilityDays.value = 7
+  inviteType.value = 'meal'
+  proposalDays.value = 7
+  proposalMinMinutes.value = 90
+  profileEditorOpen.value = false
   proposalGeneration++
   stopRealtime?.()
   stopRealtime = null
@@ -185,7 +239,7 @@ async function loadFriends(token) {
     incomingRequests.value = result.incoming || []
     outgoingRequests.value = result.outgoing || []
     if (!friends.value.some((item) => item.profile?.userId === selectedFriendId.value)) {
-      selectedFriendId.value = friends.value[0]?.profile?.userId || ''
+      selectFriend(friends.value[0]?.profile?.userId || '')
     }
   }, { current: token, busy: friendLoading, onError: (error) => { friendsError.value = error.message } })
 }
@@ -265,6 +319,7 @@ async function saveProfile() {
     })
     if (!token()) return
     applyProfile(result.profile)
+    clearAvailability()
     announce('success', '资料和可约偏好已保存。')
     await loadFriends(token)
   } catch (error) {
@@ -350,7 +405,9 @@ async function queryAvailability(days = availabilityDays.value) {
   // 其余加载函数都有这一层守卫（loadFriends 等用 generation、齐行 loadProject 用
   // detailLoadSequence + selectedProjectId），这里补齐。
   const friendId = selectedFriendId.value
+  const requestGeneration = ++availabilityGeneration
   const token = context.capture()
+  const isCurrentRequest = () => token() && requestGeneration === availabilityGeneration && selectedFriendId.value === friendId
   availabilityDays.value = days
   availabilityBusy.value = true
   availabilityError.value = ''
@@ -360,15 +417,29 @@ async function queryAvailability(days = availabilityDays.value) {
   announce('', '')
   try {
     await ensureSocialScheduleReady()
-    if (!token() || selectedFriendId.value !== friendId) return
+    if (!isCurrentRequest()) return
     const result = await socialRequest('availability_query', { friendId, days })
-    if (!token() || selectedFriendId.value !== friendId) return
+    if (!isCurrentRequest()) return
     availability.value = result
     if (!result.known) availabilityError.value = '暂时无法确认双方在这段日期内的课表是否完整。请检查课表完整日期和同步状态。'
     else if (!result.intervals?.length) availabilityError.value = ''
   } catch (error) {
-    if (token() && selectedFriendId.value === friendId) availabilityError.value = error.message
-  } finally { if (token()) availabilityBusy.value = false }
+    if (isCurrentRequest()) availabilityError.value = error.message
+  } finally { if (isCurrentRequest()) availabilityBusy.value = false }
+}
+
+function clearAvailability() {
+  availabilityGeneration++
+  availabilityBusy.value = false
+  availability.value = null
+  availabilityError.value = ''
+  selectedSlot.value = null
+  composerOpen.value = false
+}
+
+function selectFriend(friendId) {
+  if (friendId !== selectedFriendId.value) clearAvailability()
+  selectedFriendId.value = friendId
 }
 
 function chooseSlot(slot) {
@@ -631,7 +702,7 @@ onBeforeUnmount(() => {
             <p v-if="friendLoading" class="muted">正在读取好友…</p>
             <p v-else-if="friendsError" class="inline-error">{{ friendsError }} <button type="button" class="text-button" @click="loadFriends">重试</button></p>
             <div v-else-if="friends.length" class="friend-list" role="group" aria-label="好友列表">
-              <button v-for="item in friends" :key="item.profile?.userId" type="button" :aria-pressed="selectedFriendId === item.profile?.userId" class="friend-choice" :class="{ selected: selectedFriendId === item.profile?.userId }" @click="selectedFriendId = item.profile.userId; availability = null; selectedSlot = null">
+              <button v-for="item in friends" :key="item.profile?.userId" type="button" :aria-pressed="selectedFriendId === item.profile?.userId" class="friend-choice" :class="{ selected: selectedFriendId === item.profile?.userId }" @click="selectFriend(item.profile.userId)">
                 <span class="avatar">{{ item.profile?.nickname?.slice(0, 1) || '友' }}</span><span class="friend-copy"><b>{{ item.profile?.nickname || '好友' }}</b><small>{{ item.profile?.school || '已添加好友' }}</small></span><span class="choice-check">{{ selectedFriendId === item.profile?.userId ? '✓' : '' }}</span>
               </button>
             </div>
@@ -681,7 +752,12 @@ onBeforeUnmount(() => {
             <p class="muted">只有对方主动开启邮箱发现且完成邮箱验证时，才会显示昵称。搜索不到时无法判断具体原因。</p>
             <form class="email-search-form" @submit.prevent="searchByEmail"><label class="sr-only" for="friend-email">好友完整邮箱</label><input id="friend-email" v-model="searchEmail" type="email" maxlength="254" autocomplete="off" required placeholder="输入完整邮箱地址" /><ActionButton tone="primary" kind="important" feedback="external" :show-error="false" class="btn btn-primary" type="submit" :disabled="searchBusy || !searchEmail.trim()" :busy="searchBusy">{{ searchBusy ? '正在精确查找…' : '搜索' }}</ActionButton></form>
             <div v-if="searchBusy" class="inline-loading">正在查找…</div>
-            <article v-else-if="searched && foundProfile" class="search-result"><span class="avatar">{{ foundProfile.nickname?.slice(0, 1) || '友' }}</span><div><b>{{ foundProfile.nickname }}</b><small>{{ foundProfile.school || '未填写学校' }}</small></div><ActionButton tone="neutral" class="btn" type="button" :disabled="actionBusy === `request-${foundProfile.userId}`" :busy="actionBusy === `request-${foundProfile.userId}`" kind="important" feedback="external" :show-error="false" :action="() => sendFriendRequest()">{{ actionBusy === `request-${foundProfile.userId}` ? '正在发送…' : '发送好友请求' }}</ActionButton></article>
+            <article v-else-if="searched && foundProfile" class="search-result"><span class="avatar">{{ foundProfile.nickname?.slice(0, 1) || '友' }}</span><div><b>{{ foundProfile.nickname }}</b><small>{{ foundProfile.school || '未填写学校' }}</small></div>
+              <button v-if="foundFriend" class="btn btn-ghost" type="button" @click="selectFriend(foundProfile.userId); activeTab = 'time'">找共同时间</button>
+              <ActionButton v-else-if="foundIncomingRequest" tone="primary" class="btn btn-primary" type="button" :disabled="Boolean(actionBusy)" :busy="actionBusy === `friend-${foundIncomingRequest.id}`" kind="important" feedback="external" :show-error="false" :action="() => respondFriendRequest(foundIncomingRequest, 'accept')">接受好友请求</ActionButton>
+              <span v-else-if="foundOutgoingRequest" class="relationship-hint">好友请求已发送，等待回应</span>
+              <ActionButton v-else tone="neutral" class="btn" type="button" :disabled="actionBusy === `request-${foundProfile.userId}`" :busy="actionBusy === `request-${foundProfile.userId}`" kind="important" feedback="external" :show-error="false" :action="() => sendFriendRequest()">{{ actionBusy === `request-${foundProfile.userId}` ? '正在发送…' : '发送好友请求' }}</ActionButton>
+            </article>
             <p v-else-if="searched" class="muted search-generic-hint">没有找到可添加的用户。对方可能尚未注册、未验证邮箱或关闭了邮箱发现。</p>
           </section>
 
@@ -696,7 +772,7 @@ onBeforeUnmount(() => {
               <h3 class="subsection-title">已发送 <span>{{ outgoingRequests.length }}</span></h3>
               <div v-if="outgoingRequests.length" class="request-list"><article v-for="request in outgoingRequests" :key="request.id" class="request-row"><div class="avatar">{{ request.profile?.nickname?.slice(0, 1) || '友' }}</div><div class="friend-copy"><b>{{ request.profile?.nickname || '三两事用户' }}</b><small>等待对方回应</small></div><ActionButton tone="ghost" class="btn btn-ghost" type="button" :disabled="Boolean(actionBusy)" kind="important" feedback="external" :show-error="false" :action="() => respondFriendRequest(request, 'withdraw')">撤回</ActionButton></article></div>
               <h3 class="subsection-title">我的好友 <span>{{ friends.length }}</span></h3>
-              <div v-if="friends.length" class="request-list"><article v-for="item in friends" :key="item.profile?.userId" class="request-row"><div class="avatar">{{ item.profile?.nickname?.slice(0, 1) || '友' }}</div><div class="friend-copy"><b>{{ item.profile?.nickname }}</b><small>{{ item.profile?.school || '已添加好友' }}</small></div><button class="text-button" type="button" @click="selectedFriendId = item.profile.userId; activeTab = 'time'">找时间</button><button class="text-button danger-text" type="button" :disabled="Boolean(actionBusy)" @click="removeFriend(item.profile)">{{ actionBusy === `remove-${item.profile?.userId}` ? '处理中…' : '移除' }}</button></article></div>
+              <div v-if="friends.length" class="request-list"><article v-for="item in friends" :key="item.profile?.userId" class="request-row"><div class="avatar">{{ item.profile?.nickname?.slice(0, 1) || '友' }}</div><div class="friend-copy"><b>{{ item.profile?.nickname }}</b><small>{{ item.profile?.school || '已添加好友' }}</small></div><button class="text-button" type="button" @click="selectFriend(item.profile.userId); activeTab = 'time'">找时间</button><button class="text-button danger-text" type="button" :disabled="Boolean(actionBusy)" @click="removeFriend(item.profile)">{{ actionBusy === `remove-${item.profile?.userId}` ? '处理中…' : '移除' }}</button></article></div>
               <p v-else class="muted empty-copy">添加好友后，就能查找双方都方便的时间。</p>
             </template>
           </section>
@@ -728,8 +804,14 @@ onBeforeUnmount(() => {
           </section>
           <section class="together-card invitation-list-card"><div class="section-heading"><div><span class="eyebrow">共同日程</span><h2>邀约</h2></div><button type="button" class="icon-button" aria-label="刷新邀约" :disabled="invitationsBusy" @click="loadInvitations">↻</button></div>
             <p v-if="invitationsBusy" class="muted">正在读取邀约…</p><p v-else-if="invitationsError" class="inline-error">{{ invitationsError }} <button type="button" class="text-button" @click="loadInvitations">重试</button></p>
-            <div v-else-if="invitations.length" class="invitation-list">
-              <article v-for="invite in invitations" :key="invite.id" class="invitation-row" :class="`invite-${invite.status}`">
+            <div v-else>
+              <div class="invitation-filters" role="group" aria-label="筛选邀约">
+                <button v-for="filter in invitationFilters" :key="filter.id" type="button" :aria-pressed="invitationFilter === filter.id" :class="{ active: invitationFilter === filter.id }" @click="invitationFilter = filter.id">
+                  <span>{{ filter.label }}</span><b>{{ invitationFilterCounts[filter.id] }}</b>
+                </button>
+              </div>
+              <div v-if="visibleInvitations.length" class="invitation-list">
+                <article v-for="invite in visibleInvitations" :key="invite.id" class="invitation-row" :class="`invite-${invite.status}`">
                 <div class="invite-topline"><span class="invite-kind">{{ activityLabels[invite.activity_type] || '好友邀约' }}</span><span class="invite-status">{{ statusLabels[invite.status] || invite.status }}</span></div>
                 <h3>{{ invite.title }}</h3><p class="invite-time">{{ formatTime(invite.starts_at) }} – {{ formatClock(invite.ends_at) }}</p>
                 <p v-if="invite.location" class="muted">地点：{{ invite.location }}</p><p v-if="invite.note" class="muted">备注：{{ invite.note }}</p>
@@ -747,9 +829,11 @@ onBeforeUnmount(() => {
                   <div v-else class="proposal-options"><button v-for="option in proposalOptions.slice(0, 6)" :key="option.startsAt" type="button" class="proposal-option" :disabled="Boolean(actionBusy)" @click="proposalOptions = [option]; runInvitationAction(invite, 'propose_change')">{{ formatTime(option.startsAt) }} – {{ formatClock(option.endsAt) }} · {{ proposalMinMinutes }} 分钟</button></div>
                   <button v-if="proposalDays < 30 && !proposalLoading" type="button" class="text-button" @click="expandProposalDays(proposalDays === 7 ? 14 : 30)">扩大到未来 {{ proposalDays === 7 ? 14 : 30 }} 天</button>
                 </div>
-              </article>
+                </article>
+              </div>
+              <div v-else-if="invitations.length" class="empty-state"><div class="empty-symbol">✓</div><h3>{{ invitationFilter === 'action' ? '暂时没有需要你处理的邀约' : '这个分类里还没有邀约' }}</h3><p>你可以切换上方分类查看其他邀约，或继续查找共同时间。</p><button class="btn btn-primary" type="button" @click="activeTab = 'time'">查找共同时间</button></div>
+              <div v-else class="empty-state"><div class="empty-symbol">✉</div><h3>还没有邀约</h3><p>在“找共同时间”里选中一段空闲，就能向好友发送邀约。</p><button class="btn btn-primary" type="button" @click="activeTab = 'time'">查找共同时间</button></div>
             </div>
-            <div v-else class="empty-state"><div class="empty-symbol">✉</div><h3>还没有邀约</h3><p>在“找共同时间”里选中一段空闲，就能向好友发送邀约。</p><button class="btn btn-primary" type="button" @click="activeTab = 'time'">查找共同时间</button></div>
           </section>
         </section>
     </template>

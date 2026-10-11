@@ -100,11 +100,11 @@ export function formatLunarDate(lunarMonth, lunarDay, isLeapMonth = false) {
  * 氛围层呈现：**复用既有纪念日的 key 与装饰令牌**，不新增动效令牌。
  *
  * 为什么 key 直接用 `'anniversary'` 而不是另起 `'lunar-anniversary'`：
- * `App.vue` 里的 `ANNIVERSARY_KEYS = ['anniversary', 'anniversary-start']` 决定了两件事 ——
- * 金色专属粒子配色 + 4.2s 时长（`decorStyle`）和 `.atmo-halo` 光环是否渲染；`style.css`
- * 用 `[data-festive='<key>']` **精确匹配**写规则。这两处都不在本次允许改动的文件里
- * （App.vue / style.css），换成一个新 key 就会让农历纪念日**静默退回彩带**（没有金色、
- * 没有光环），正是仓库那条跨文件契约测试专门防范的失败模式。
+ * `festiveAtmosphere.js` 里的 `ANNIVERSARY_KEYS = ['anniversary', 'anniversary-start']`
+ * 决定了两件事 —— 金色专属粒子配色 + 4.2s 时长（`decorStyle`）和 `.atmo-halo`
+ * 光环是否渲染；`style.css` 用 `[data-festive='<key>']` **精确匹配**写规则。
+ * 换成一个新 key 就会让农历纪念日**静默退回彩带**（没有金色、没有光环），
+ * 正是仓库那条跨文件契约测试（tests/anniversaryAnimation.test.js）专门防范的失败模式。
  * 复用既有 key 之后，农历纪念日与公历纪念日、使用周年拿到完全相同的呈现，
  * `narrative.js` 的 `NARRATIVE_DYNAMIC_KEYS`（动态文案不翻译）也自动适用。
  * 用户看到的差异只来自 `message`：里面拼的是用户自己填的名称。
@@ -116,7 +116,13 @@ export const LUNAR_ANNIVERSARY_PRESENTATION = Object.freeze({
   message: (label) => `${label}快乐，一起记住今天。`,
 })
 
-const DATE_KEY_RE = /^\d{4}-\d{2}-\d{2}$/
+const DATE_KEY_RE = /^(\d{4})-(\d{2})-(\d{2})$/
+
+function isRealDateKey(value) {
+  if (!DATE_KEY_RE.test(value)) return false
+  const date = new Date(value + 'T00:00:00Z')
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value
+}
 
 /** 把 Date / 'YYYY-MM-DD' 归一成公历日期串；无法识别返回 ''。 */
 export function toDateKey(value) {
@@ -125,15 +131,29 @@ export function toDateKey(value) {
     return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`
   }
   const text = String(value ?? '').trim()
-  return DATE_KEY_RE.test(text) ? text : ''
+  return isRealDateKey(text) ? text : ''
 }
 
 function gregorianYearOf(dateKey) {
   return Number(dateKey.slice(0, 4))
 }
 
-function dayNumber(dateKey) {
-  return Date.UTC(Number(dateKey.slice(0, 4)), Number(dateKey.slice(5, 7)) - 1, Number(dateKey.slice(8, 10))) / 86400000
+const MS_PER_DAY = 86400000
+
+/**
+ * 两个 'YYYY-MM-DD' 之间相差多少天（`to - from`）。全程用 UTC 日序号，
+ * 与本文件其它换算同一套口径，避开时区与夏令时。非法输入返回 null。
+ *
+ * 导出是因为 `anniversarySchedule.js` 的公历倒计时要算同样的差值 —— 日历天数
+ * 不该在两个文件里各写一份（写错时两边都"看起来对"，只有跨闰日才暴露）。
+ */
+export function daysBetweenDateKeys(from, to) {
+  const fromKey = toDateKey(from)
+  const toKey = toDateKey(to)
+  if (!fromKey || !toKey) return null
+  const fromDays = new Date(fromKey + 'T00:00:00Z').getTime()
+  const toDays = new Date(toKey + 'T00:00:00Z').getTime()
+  return (toDays - fromDays) / MS_PER_DAY
 }
 
 /** 农历月日是否合法（月 1–12、日 1–30）。 */
@@ -260,7 +280,7 @@ export function resolveLunarAnniversary(entry, today) {
   if (occurrences.length > 0) {
     const hit = occurrences[0]
     const dateKey = `${hit.year}-${pad2(hit.month)}-${pad2(hit.day)}`
-    const daysFromToday = dayNumber(dateKey) - dayNumber(todayKey)
+    const daysFromToday = daysBetweenDateKeys(todayKey, dateKey)
     return {
       ...withYear,
       status: LUNAR_ANNIVERSARY_STATUS.OK,
@@ -297,16 +317,24 @@ function pad2(value) {
 }
 
 /**
- * 从 today 起（含当天）向后找 20 个公历年内的下一次出现，只用于 UI 的「下一次」提示。
+ * 从 today 起（含当天）向后找到农历表末尾的下一个出现，只用于 UI 的「下一次」提示。
  *
  * 为什么不用 lunar.js 的 `nextLunarMonthDayOnOrAfter`：那个只向前找 5 年，
- * 而某个闰月可能 8~19 年才轮到一次，5 年内会找不到（提示就变成空）。
- * 这里不改变 lunar.js 的任何行为，只是把搜索窗口放长给面板用。
+ * 而某个闰月可能十几年才轮到一次，5 年内会找不到（提示就变成空）。
+ *
+ * 这里的窗口原先是固定 20 年 —— **那个数字是错的**：1900–2100 表内，闰二月与闰八月最长
+ * 要隔 57 年才轮到一次（闰三月/四月/七月 38 年、闰六月 30 年）。从 2027 年往前配的
+ * 「闰四月初八」，下一次要到 2058 年 —— 20 年窗口找不到，于是面板只显示
+ * "该年没有这个闰月"、永远不给"下一次是哪天"，用户以为这个纪念日坏了。
+ * 现在窗口取**农历表能表示的整个剩余区间**（GREGORIAN_SUPPORT_RANGE.max），
+ * 表内真实存在的日子就一定找得到；表里根本没有的（如 2101 年之后）仍返回空，
+ * 与既有"不猜、不回退"的口径一致。这里不改变 lunar.js 的任何行为。
  */
 function nextOccurrenceKeyAfter(todayKey, lunarMonth, lunarDay, isLeapMonth) {
   if (!todayKey) return ''
   const startYear = gregorianYearOf(todayKey)
-  for (let year = startYear; year <= startYear + 20; year += 1) {
+  const lastYear = GREGORIAN_SUPPORT_RANGE.max
+  for (let year = startYear; year <= lastYear; year += 1) {
     for (const hit of lunarMonthDayOccurrences(year, lunarMonth, lunarDay, isLeapMonth)) {
       const key = `${hit.year}-${pad2(hit.month)}-${pad2(hit.day)}`
       // 同年月日格式等长，字符串比较即时间先后。

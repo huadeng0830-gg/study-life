@@ -12,6 +12,8 @@ import {
 } from './backupArchive.js'
 import { markBackedUp } from './backupReminder.js'
 import { buildBackupRestoreValues } from './backupRestore.js'
+import { assertAccountDataIdentity, captureAccountDataIdentity } from './accountSyncIdentity.js'
+import { withAccountDataLock } from './accountLocalData.js'
 import { detachRetiredNoteRelations } from './domain/migrations.js'
 import {
   backupWallpapersForUndo,
@@ -23,7 +25,7 @@ import {
   restoreWallpapersSnapshot,
 } from './wallpaperStorage.js'
 import { clearRestoreCheckpoint, getRestoreCheckpoint, saveRestoreCheckpoint } from './dataVault.js'
-import { flushStoredWrites, restoreStoredValues } from './store'
+import { flushStoredWrites, getPersistenceMutationVersion, restoreStoredValues } from './store'
 import { getAppToday, getAppTime } from './timeContext.js'
 import { cachedDateFormatter, settingsPolicy } from './settingsPolicy.js'
 import { throwIfAborted } from './asyncTask.js'
@@ -53,6 +55,15 @@ let restoreCheckpointLoad = null
 
 const includeWallpapers = ref(false)
 
+function currentFlushStatus() {
+  const result = flushStoredWrites()
+  return result && typeof result === 'object' ? result : { ok: true, pendingKeys: [] }
+}
+
+function storedMutationVersion(key) {
+  return typeof getPersistenceMutationVersion === 'function' ? getPersistenceMutationVersion(key) : 0
+}
+
 async function exportBackup() {
   if (backupBusy.value || fileChecking.value) return
   exporting.value = true
@@ -73,8 +84,15 @@ async function exportBackup() {
   })
   try {
     backupProgress.setStep('collect', 'running', '正在读取文字数据与设置')
-    flushStoredWrites()
-    const backup = createBackupSnapshot()
+    const flush = currentFlushStatus()
+    const identity = captureAccountDataIdentity()
+    const backup = createBackupSnapshot(undefined, {
+      ownerId: identity.userId || identity.ownerId,
+      unsavedKeys: flush.pendingKeys,
+    })
+    if (flush.pendingKeys.length) {
+      backupWarning.value = `备份已包含 ${flush.pendingKeys.length} 项尚未写入本机的最新修改；这些修改仍未保存在本机，请确认文件已下载并稍后重试保存。`
+    }
     backupProgress.setStep('collect', 'completed', '文字数据与设置已收集')
     if (includeImages) {
       backupProgress.setStep('wallpapers', 'running', '正在读取壁纸')
@@ -112,10 +130,10 @@ async function exportBackup() {
       window.setTimeout(() => URL.revokeObjectURL(url), 1000)
     }
     const imageCount = Object.keys(backup.data.__wallpaper_images || {}).length
-    backupMessage.value = `已生成 ${filename}（${formatDataSize(blob.size)}${imageCount ? `，含 ${imageCount} 张壁纸` : ''}）。请确认文件已保存。`
+    backupMessage.value = `已生成 ${filename}（${formatDataSize(blob.size)}${imageCount ? `，含 ${imageCount} 张壁纸` : ''}）。${flush.pendingKeys.length ? `文件包含 ${flush.pendingKeys.length} 项未保存的最新修改；` : ''}请确认文件已保存。`
     markBackedUp()
     backupProgress.setStep('file', 'completed', '备份文件已交给浏览器下载')
-    backupProgress.finish(backupWarning.value ? '文字数据已导出，壁纸需要稍后重试' : '备份文件已生成', backupWarning.value ? 'warning' : 'completed')
+    backupProgress.finish(backupWarning.value ? '备份文件已生成，包含尚未保存修改或需重试的内容' : '备份文件已生成', backupWarning.value ? 'warning' : 'completed')
   } catch (reason) {
     if (reason?.name === 'AbortError' || controller.signal.aborted) {
       await cancelBackup()
@@ -186,6 +204,8 @@ function clearSelectedBackup() {
   selectedName.value = ''
   selectedFileSize.value = 0
   restoreSelection.value = []
+  restoreBackupTarget.value = null
+  crossAccountImportTarget.value = null
   restoreError.value = ''
 }
 
@@ -212,7 +232,8 @@ async function refreshRestoreCheckpoint() {
   if (restoreCheckpointLoad) return restoreCheckpointLoad
   restoreCheckpointLoading.value = true
   restoreCheckpointError.value = ''
-  restoreCheckpointLoad = getRestoreCheckpoint()
+  const identity = captureAccountDataIdentity()
+  restoreCheckpointLoad = getRestoreCheckpoint(identity.userId || identity.ownerId || 'guest')
     .then((value) => {
       if (value && (value.version !== 1 || !value.backup?.data || !Array.isArray(value.selectedModules))) throw new Error('恢复点格式不正确')
       restoreCheckpoint.value = value || null
@@ -225,6 +246,7 @@ async function refreshRestoreCheckpoint() {
 // 恢复备份的确认。快照必须在打开对话框**之前**取：恢复预览里可以换文件，
 // 若确认后才去读 selectedBackup，用户中途换了备份就会写错目标（弹窗套弹窗）。
 const restoreBackupTarget = ref(null)
+const crossAccountImportTarget = ref(null)
 
 /**
  * 「这份备份会覆盖哪些模块」的**纯函数**版本（人话标签数组）。
@@ -239,7 +261,7 @@ const restoreBackupTarget = ref(null)
  * 抽成纯函数是为了能直接对这张表写守卫（不必挂载组件）。
  */
 const restoreBackupModules = computed(() => restoreBackupModuleLabels(restoreBackupTarget.value, {
-  selectedModuleIds: restoreBackupTarget.value?.selectedModules,
+  selectedModuleIds: (restoreBackupTarget.value || crossAccountImportTarget.value)?.selectedModules,
 }))
 const restoreBackupPreviewModules = computed(() => restoreBackupModuleLabels(selectedBackup.value, {
   selectedModuleIds: restoreSelection.value,
@@ -259,10 +281,11 @@ const restoreCheckpointDate = computed(() => {
 
 /** 恢复确认框的文案：与 `restoreBackupModules` 同源，改一处不会两处对不上。 */
 const restoreBackupMessage = computed(() => {
+  const target = restoreBackupTarget.value || crossAccountImportTarget.value
   const labels = restoreBackupModules.value
   const scope = labels.length ? labels.join('、') : '这份备份实际携带的模块'
-  const wallpaperCount = restoreBackupTarget.value?.selectedModules?.includes('wallpapers')
-    ? Object.keys(restoreBackupTarget.value?.data?.__wallpaper_images || {}).length
+  const wallpaperCount = target?.selectedModules?.includes('wallpapers')
+    ? Object.keys(target?.data?.__wallpaper_images || {}).length
     : 0
   const wallpapers = wallpaperCount ? `、壁纸图片（${wallpaperCount} 张）` : ''
   return `将用备份内容覆盖：${scope}${wallpapers}。恢复前会保存本机恢复点，完成后可在此撤回。其它分区保持原样。已开启账号同步时，恢复结果也会同步到其它设备。是否继续？`
@@ -279,21 +302,49 @@ const restoreCheckpointMessage = computed(() => {
 function restoreBackup() {
   const backup = selectedBackup.value
   if (!backup || backupBusy.value || fileChecking.value || restoreSelection.value.length === 0) return
-  restoreBackupTarget.value = { ...backup, selectedModules: [...restoreSelection.value] }
+  const identity = captureAccountDataIdentity()
+  const targetId = identity.userId || identity.ownerId || 'guest'
+  const sourceId = backup.ownerId || ''
+  const target = { ...backup, selectedModules: [...restoreSelection.value], expectedIdentity: identity }
+  if (sourceId !== targetId) {
+    crossAccountImportTarget.value = target
+    return
+  }
+  restoreBackupTarget.value = target
+}
+
+const crossAccountImportMessage = computed(() => {
+  const target = crossAccountImportTarget.value
+  if (!target) return ''
+  const identity = target.expectedIdentity
+  const source = target.ownerId || '来源账号未知（旧版备份）'
+  const destination = identity?.userId || identity?.ownerId || '本机访客数据'
+  return `备份来源：${source}；导入目标：${destination}。${restoreBackupMessage.value}这是独立的跨账号导入，会把所选模块写入目标账号；只有在你明确要迁移这份数据时才继续。`
+})
+
+async function confirmCrossAccountImport() {
+  const backup = crossAccountImportTarget.value
+  crossAccountImportTarget.value = null
+  if (backup) await applyRestorePayload({ ...backup, crossAccountImportConfirmed: true })
 }
 
 async function createRestoreCheckpoint(selectedModules, values) {
-  flushStoredWrites()
+  const flush = currentFlushStatus()
+  if (!flush.ok) throw new Error(`存在未能保存的本机修改（${flush.pendingKeys.join('、')}），请先导出最新数据并重试恢复。`)
   const affectedKeys = new Set(Object.keys(values))
-  const snapshot = createBackupSnapshot({ getItem: (key) => affectedKeys.has(key) ? localStorage.getItem(key) : null })
+  const identity = captureAccountDataIdentity()
+  const ownerId = identity.userId || identity.ownerId || 'guest'
+  const snapshot = createBackupSnapshot({ getItem: (key) => affectedKeys.has(key) ? localStorage.getItem(key) : null }, { ownerId })
   // 缺失字段也保存它的默认值；否则首次导入后，恢复点会跳过原先为空的分区。
   const selectedFields = Object.entries(BACKUP_STORAGE_KEYS).filter(([, key]) => affectedKeys.has(key)).map(([field]) => field)
   const data = Object.fromEntries(selectedFields.map((field) => [field, snapshot.data[field]]))
+  data.__owner_id = ownerId
   const archive = await completeBackupArchive({ ...snapshot, data })
   const wallpaperImages = selectedModules.includes('wallpapers') ? await listWallpapers() : null
   return {
     version: 1,
     createdAt: new Date().toISOString(),
+    ownerId,
     selectedModules: [...selectedModules],
     backup: { ...archive, providedFields: selectedFields },
     storedValues: Object.fromEntries(selectedFields.map((field) => [BACKUP_STORAGE_KEYS[field], snapshot.data[field]])),
@@ -311,6 +362,8 @@ async function applyRestorePayload(backup, { fromCheckpoint = false } = {}) {
   }
   const selectedFields = restoreBackupSelectedFields(backup, selectedModules)
   const restoredValues = JSON.parse(JSON.stringify(buildBackupRestoreValues(backup.data, selectedFields, BACKUP_STORAGE_KEYS)))
+  const expectedIdentity = backup.expectedIdentity || captureAccountDataIdentity()
+  const mutationVersions = Object.fromEntries(Object.keys(restoredValues).map((key) => [key, storedMutationVersion(key)]))
   if (fromCheckpoint && backup.storedValues) {
     const knownKeys = new Set(Object.values(BACKUP_STORAGE_KEYS))
     const allowedKeys = new Set(BACKUP_MODULES.filter((mod) => selectedModules.includes(mod.key)).flatMap((mod) => mod.keys))
@@ -343,58 +396,93 @@ async function applyRestorePayload(backup, { fromCheckpoint = false } = {}) {
   backupProgress.setStep('checkpoint', 'running', '正在读取当前数据并保存可撤回副本')
 
   try {
-    flushStoredWrites()
-    const nextCheckpoint = await createRestoreCheckpoint(selectedModules, restoredValues)
-    previousCheckpoint = await getRestoreCheckpoint()
-    await saveRestoreCheckpoint(nextCheckpoint)
-    restoreCheckpoint.value = nextCheckpoint
-    checkpointSaved = true
-    backupProgress.setStep('checkpoint', 'completed', '恢复前数据已保存在本机安全副本')
-
-    if (hasWallpapers) {
-      backupProgress.setStep('wallpapers', 'running', '正在创建壁纸回滚副本')
-      await backupWallpapersForUndo()
-      wallpaperUndoReady = true
-      if (fromCheckpoint) {
-        await restoreWallpapersSnapshot(backup.wallpaperImages || {})
-      } else {
-        await importWallpapersFromTransfer(backup.data.__wallpaper_images, 'replace', {
-          onProgress: ({ current, total, stage }) => {
-            backupProgress.setPartial({ 壁纸: `${current}/${total}` }, stage === 'committed' ? '壁纸已原子写入本机' : `已处理 ${current}/${total} 张壁纸`)
-          },
-        })
+    await withAccountDataLock(async (assertLock) => {
+      assertLock()
+      const targetId = assertAccountDataIdentity(expectedIdentity) || 'guest'
+      const sourceId = backup.ownerId || ''
+      if (fromCheckpoint && sourceId !== targetId) {
+        throw new Error('本机恢复点属于其他账号或来源未知，已拒绝恢复。')
       }
-      backupProgress.setStep('wallpapers', 'completed', '壁纸恢复完成')
-    } else {
-      backupProgress.setStep('wallpapers', 'completed', '未选择壁纸图片')
-    }
+      if (!fromCheckpoint && sourceId !== targetId && !backup.crossAccountImportConfirmed) {
+        throw new Error('备份来源与当前账号不一致，必须通过独立的跨账号导入确认。')
+      }
+      const initialFlush = currentFlushStatus()
+      if (!initialFlush.ok) throw new Error(`存在未保存修改（${initialFlush.pendingKeys.join('、')}），请先导出当前数据后再恢复。`)
+      const nextCheckpoint = await createRestoreCheckpoint(selectedModules, restoredValues)
+      assertLock(); assertAccountDataIdentity(expectedIdentity)
+      const checkpointOwner = targetId || 'guest'
+      previousCheckpoint = await getRestoreCheckpoint(checkpointOwner)
+      assertLock(); assertAccountDataIdentity(expectedIdentity)
+      await saveRestoreCheckpoint(nextCheckpoint, checkpointOwner)
+      assertLock(); assertAccountDataIdentity(expectedIdentity)
+      restoreCheckpoint.value = nextCheckpoint
+      checkpointSaved = true
+      backupProgress.setStep('checkpoint', 'completed', '恢复前数据已保存在本机安全副本')
 
-    backupProgress.setStep('data', 'running', '正在写入所选分区')
-    dataWriteStarted = true
-    await restoreStoredValues(restoredValues)
-    backupProgress.setStep('data', 'completed', '所选分区已恢复')
-    if (wallpaperUndoReady) {
-      try { await discardWallpaperUndo() } catch { /* durable checkpoint already protects the previous images */ }
-    }
-    backupProgress.setStep('finish', 'completed', '恢复完成，即将重新载入')
-    backupProgress.finish(fromCheckpoint ? '本机恢复点已恢复' : '备份恢复完成')
-    window.setTimeout(() => window.location.reload(), 700)
+      if (hasWallpapers) {
+        backupProgress.setStep('wallpapers', 'running', '正在创建壁纸回滚副本')
+        await backupWallpapersForUndo()
+        wallpaperUndoReady = true
+        assertLock(); assertAccountDataIdentity(expectedIdentity)
+        if (fromCheckpoint) {
+          await restoreWallpapersSnapshot(backup.wallpaperImages || {})
+        } else {
+          await importWallpapersFromTransfer(backup.data.__wallpaper_images, 'replace', {
+            onProgress: ({ current, total, stage }) => {
+              backupProgress.setPartial({ 壁纸: `${current}/${total}` }, stage === 'committed' ? '壁纸已原子写入本机' : `已处理 ${current}/${total} 张壁纸`)
+            },
+          })
+        }
+        assertLock(); assertAccountDataIdentity(expectedIdentity)
+        backupProgress.setStep('wallpapers', 'completed', '壁纸恢复完成')
+      } else {
+        backupProgress.setStep('wallpapers', 'completed', '未选择壁纸图片')
+      }
+
+      const finalFlush = currentFlushStatus()
+      if (!finalFlush.ok) throw new Error(`恢复期间出现未保存修改（${finalFlush.pendingKeys.join('、')}），已取消覆盖。`)
+      const editedKeys = Object.keys(mutationVersions).filter((key) => storedMutationVersion(key) !== mutationVersions[key])
+      if (editedKeys.length) throw new Error(`恢复期间这些数据有新修改（${editedKeys.join('、')}），已取消覆盖。`)
+
+      backupProgress.setStep('data', 'running', '正在写入所选分区')
+      dataWriteStarted = true
+      await restoreStoredValues(restoredValues, { assertBeforeApply: () => { assertLock(); assertAccountDataIdentity(expectedIdentity) } })
+      assertLock(); assertAccountDataIdentity(expectedIdentity)
+      backupProgress.setStep('data', 'completed', '所选分区已恢复')
+      if (wallpaperUndoReady) {
+        try { await discardWallpaperUndo() } catch { /* durable checkpoint already protects the previous images */ }
+      }
+      backupProgress.setStep('finish', 'completed', '恢复完成，即将重新载入')
+      backupProgress.finish(fromCheckpoint ? '本机恢复点已恢复' : '备份恢复完成')
+      window.setTimeout(() => window.location.reload(), 700)
+    })
   } catch (reason) {
     // restoreStoredValues 负责原子回滚文字数据；保存恢复点失败时尚未写入数据。
     const rollbackFailed = dataWriteStarted && Boolean(reason?.rollbackFailed)
     let wallpaperRollbackFailed = false
     if (wallpaperUndoReady) {
-      try { await restoreWallpaperUndo() } catch { wallpaperRollbackFailed = true }
+      try {
+        await withAccountDataLock(async (assertLock) => {
+          assertLock(); assertAccountDataIdentity(expectedIdentity)
+          await restoreWallpaperUndo()
+          assertLock(); assertAccountDataIdentity(expectedIdentity)
+        })
+      } catch { wallpaperRollbackFailed = true }
     }
     if (checkpointSaved && !rollbackFailed && !wallpaperRollbackFailed) {
       try {
-        if (previousCheckpoint) {
-          await saveRestoreCheckpoint(previousCheckpoint)
-          restoreCheckpoint.value = previousCheckpoint
-        } else {
-          await clearRestoreCheckpoint()
-          restoreCheckpoint.value = null
-        }
+        await withAccountDataLock(async (assertLock) => {
+          assertLock(); assertAccountDataIdentity(expectedIdentity)
+          const checkpointOwner = expectedIdentity.userId || expectedIdentity.ownerId || 'guest'
+          if (previousCheckpoint) {
+            await saveRestoreCheckpoint(previousCheckpoint, checkpointOwner)
+            restoreCheckpoint.value = previousCheckpoint
+          } else {
+            await clearRestoreCheckpoint(checkpointOwner)
+            restoreCheckpoint.value = null
+          }
+          assertLock(); assertAccountDataIdentity(expectedIdentity)
+        })
       } catch { /* the newly written checkpoint still contains the pre-restore state */ }
     }
     const detail = reason instanceof Error ? reason.message : '本机数据未能完成写入。'
@@ -404,6 +492,10 @@ async function applyRestorePayload(backup, { fromCheckpoint = false } = {}) {
     restoring.value = false
     const running = backupProgress.state.steps.find((step) => step.status === 'running')?.id
     backupProgress.fail(running, restoreError.value, { retry: false })
+  } finally {
+    // The browser normally reloads after success, but a blocked/failed reload must not
+    // leave this composable permanently reporting an in-progress restore.
+    restoring.value = false
   }
 }
 
@@ -418,6 +510,8 @@ async function applyRestoreCheckpoint() {
   if (!checkpoint?.backup) return
   await applyRestorePayload({
     ...checkpoint.backup,
+    ownerId: checkpoint.ownerId || checkpoint.backup.ownerId || '',
+    expectedIdentity: captureAccountDataIdentity(),
     selectedModules: [...(checkpoint.selectedModules || [])],
     wallpaperImages: checkpoint.wallpaperImages,
     storedValues: checkpoint.storedValues,
@@ -433,6 +527,6 @@ function abortBackup() {
 export function useDataManagerBackup() {
   if (!backupProgress) backupProgress = useTaskProgress()
   return {
-    selectedBackup, selectedName, includeWallpapers, backupProgress, backupBusy, exporting, restoring, fileChecking, exportBackup, retryBackup, continueBackupResult, cancelBackup, abortBackup, selectFile, clearSelectedBackup, summary, restoreBackup, restoreSelection, restoreBackupTarget, restoreBackupModules, restoreBackupPreviewModules, restoreBackupPreviewOptions, restoreBackupMessage, restoreCheckpoint, restoreCheckpointLoading, restoreCheckpointError, restoreCheckpointModules, restoreCheckpointWallpapers, restoreCheckpointDate, restoreCheckpointMessage, refreshRestoreCheckpoint, applyRestoreBackup, applyRestoreCheckpoint,
+    selectedBackup, selectedName, includeWallpapers, backupProgress, backupBusy, exporting, restoring, fileChecking, exportBackup, retryBackup, continueBackupResult, cancelBackup, abortBackup, selectFile, clearSelectedBackup, summary, restoreBackup, restoreSelection, restoreBackupTarget, crossAccountImportTarget, crossAccountImportMessage, restoreBackupModules, restoreBackupPreviewModules, restoreBackupPreviewOptions, restoreBackupMessage, restoreCheckpoint, restoreCheckpointLoading, restoreCheckpointError, restoreCheckpointModules, restoreCheckpointWallpapers, restoreCheckpointDate, restoreCheckpointMessage, refreshRestoreCheckpoint, applyRestoreBackup, applyRestoreCheckpoint, confirmCrossAccountImport,
   }
 }

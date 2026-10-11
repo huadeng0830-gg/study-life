@@ -12,7 +12,7 @@
  * 而 `localStorage` 里一个键都不必新增。
  */
 import { isArchived } from './domain/state.js'
-import { moveTimeDate, taskTimeEntries } from './tasks/taskTimePlan.ts'
+import { moveTimeDate, taskTimeEntries } from './tasks/taskTimePlan'
 
 /** 视图模式：列表是默认值，且**不带** query 参数（保持地址栏干净）。 */
 export const TASK_VIEW_MODES = Object.freeze([

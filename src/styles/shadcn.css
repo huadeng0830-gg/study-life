@@ -1,0 +1,142 @@
+@layer theme, utilities;
+@import "tailwindcss/theme.css" layer(theme);
+@import "tailwindcss/utilities.css" layer(utilities) important;
+
+/* Generate the Tailwind utilities used by shadcn consumers without importing
+   Preflight, so the existing application-wide CSS reset remains authoritative. */
+@source "../components/ui";
+@source "../components/PromptDialog.vue";
+@source "../views/TasksView.vue";
+@source "../views/TodayView.vue";
+@source "../components/TodayActionList.vue";
+@source "../views/WeeklyReviewView.vue";
+@source "../views/ScheduleView.vue";
+@source "../views/ExamsView.vue";
+@source "../views/ledger-panels/TransactionImportDialog.vue";
+@source "../components/learning/LearningNavigation.vue";
+@source "../components/schedule/ScheduleGrid.vue";
+@source "../components/data/AppUpdateSection.vue";
+
+/* shadcn semantic roles resolve to the app's existing theme variables, so
+   light, dark, named, custom, and high-contrast themes stay in sync. */
+@theme inline {
+  --text-xs: var(--fs-12);
+  --text-sm: var(--fs-body);
+  --text-base: var(--fs-16);
+  --color-background: var(--ui-background);
+  --color-foreground: var(--ui-foreground);
+  --color-card: var(--ui-card);
+  --color-card-foreground: var(--ui-card-foreground);
+  --color-popover: var(--ui-card);
+  --color-popover-foreground: var(--ui-card-foreground);
+  --color-primary: var(--ui-primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-foreground: var(--ui-primary-foreground);
+  --color-secondary: var(--ui-secondary);
+  --color-secondary-foreground: var(--ui-secondary-foreground);
+  --color-muted: var(--ui-muted);
+  --color-muted-foreground: var(--ui-muted-foreground);
+  --color-accent: var(--ui-accent);
+  --color-accent-foreground: var(--ui-accent-foreground);
+  --color-destructive: var(--ui-destructive);
+  --color-destructive-foreground: var(--on-danger);
+  --color-border: var(--ui-border);
+  --color-input: var(--ui-input);
+  --color-ring: var(--ui-ring);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --radius-sm: var(--radius-6);
+  --radius-md: var(--radius-control);
+  --radius-lg: var(--ui-radius);
+}
+
+/* Owned component recipes live outside Tailwind's important utilities.
+   Consumers use variants for appearance and class only for layout. Native
+   controls and these primitives share the global focus/validation contract. */
+.text-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--control-height);
+  padding: var(--space-1) var(--space-2);
+  border: none;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--primary);
+  font: var(--fw-600) var(--fs-body) / var(--line-body) var(--font-sans);
+  cursor: pointer;
+}
+.text-button:hover:not(:disabled):not([aria-disabled='true']) { background: var(--primary-soft); }
+.text-button:disabled, .text-button[aria-disabled='true'] { opacity: .48; cursor: not-allowed; }
+@media (pointer: coarse) { .text-button { min-height: var(--tap-min); min-width: var(--tap-min); } }
+
+.ui-button {
+  min-height: var(--control-height);
+  padding: var(--space-2) var(--space-4);
+  gap: var(--space-2);
+  border-radius: var(--radius-control);
+  font: var(--fw-600) var(--fs-body) / 20px var(--font-sans);
+  transition: background-color var(--dur-fast) var(--ease-standard),
+    color var(--dur-fast) var(--ease-standard),
+    border-color var(--dur-fast) var(--ease-standard),
+    opacity var(--dur-fast) var(--ease-standard);
+}
+.ui-button-xs { min-height: 28px; padding: var(--space-1) var(--space-2); font-size: var(--fs-12); }
+.ui-button-sm { min-height: var(--control-compact); padding: var(--space-1) var(--space-3); }
+.ui-button-lg { min-height: var(--control-large); padding-inline: var(--space-5); }
+.ui-button-icon { width: var(--control-height); height: var(--control-height); padding: 0; }
+.ui-button-icon-xs { width: 28px; height: 28px; min-height: 28px; padding: 0; }
+.ui-button-icon-sm { width: var(--control-compact); height: var(--control-compact); min-height: var(--control-compact); padding: 0; }
+.ui-button-icon-lg { width: var(--control-large); height: var(--control-large); padding: 0; }
+.ui-button svg { width: var(--icon-size); height: var(--icon-size); pointer-events: none; flex-shrink: 0; }
+.ui-button:active:not(:disabled):not([aria-disabled='true']) { transform: translateY(1px); }
+.ui-button:disabled { cursor: not-allowed; }
+.ui-toggle {
+  min-width: var(--control-compact);
+  min-height: var(--control-compact);
+  padding: var(--space-1) var(--space-3);
+  gap: var(--space-2);
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  font: var(--fw-500) var(--fs-body) / 20px var(--font-sans);
+  transition: background-color var(--dur-fast), color var(--dur-fast), border-color var(--dur-fast);
+}
+.ui-toggle-outline { border-color: var(--ui-input); }
+.ui-toggle-sm { font-size: var(--fs-aux); }
+.ui-toggle-lg { min-height: var(--control-height); }
+.ui-toggle svg { width: var(--icon-size); height: var(--icon-size); }
+@media (pointer: coarse) { .ui-toggle { min-height: var(--tap-min); min-width: var(--tap-min); } }
+.ui-input {
+  width: 100%;
+  min-width: 0;
+  min-height: var(--control-height);
+  padding: var(--space-2) var(--space-3);
+  line-height: 20px;
+  transition: border-color var(--dur-fast) var(--ease-standard),
+    box-shadow var(--dur-fast) var(--ease-standard);
+}
+.ui-input::placeholder { color: var(--ui-muted-foreground); }
+.ui-input:hover:not(:disabled):not(:focus):not([aria-invalid='true']):not(:user-invalid) { border-color: var(--ink-faint); }
+.ui-input:disabled { color: var(--muted); background: var(--bg-tint); cursor: not-allowed; opacity: .65; }
+.ui-card { gap: var(--space-5); padding-block: var(--surface-padding); border-radius: var(--radius-surface); border: var(--border-width) solid var(--ui-border); }
+.ui-card-header { display: grid; gap: var(--space-1); padding-inline: var(--surface-padding); }
+.ui-card-header.border-b { padding-bottom: var(--surface-padding); }
+.ui-card-content { padding-inline: var(--surface-padding); }
+.ui-card-footer { padding-inline: var(--surface-padding); gap: var(--space-2); }
+.ui-card-footer.border-t { padding-top: var(--surface-padding); }
+.ui-card-title { font-size: var(--fs-16); line-height: var(--line-heading); }
+.ui-card-description { line-height: var(--line-body); }
+
+/* Match the app's existing 900px shell and 520px sheet breakpoints. Coarse
+   pointers enlarge actions without changing desktop information density. */
+@media (pointer: coarse) {
+  .ui-button { min-height: var(--tap-min); min-width: var(--tap-min); }
+  .ui-input { min-height: var(--tap-min); font-size: var(--fs-16); }
+}
+@media (max-width: 520px) {
+  .ui-card { --surface-padding: var(--space-4); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ui-button:active { transform: none; }
+}
+:root[data-performance='reduced'] .ui-button:active { transform: none; }

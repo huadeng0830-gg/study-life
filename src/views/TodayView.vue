@@ -12,15 +12,20 @@ import {
   seasonName,
 } from '../composables/store/timeConfig.js'
 import { appearance, HOME_MODULES } from '../composables/appearance.js'
-import { festiveConfig, moodLog } from '../composables/atmosphereStore.js'
-import { festiveFor } from '../composables/festive.js'
+import { moodLog } from '../composables/atmosphereStore.js'
+// 当天氛围直接用外壳那份共享 computed（见 festiveAtmosphere.js 的说明）：
+// 这里原先自己又算了一遍同一天的 festiveFor()。
+import { festiveToday } from '../composables/festiveAtmosphere.js'
 import { narrativeFor, narrativeLang } from '../composables/narrative.js'
 import MemoryView from '../components/MemoryView.vue'
+import TodayAgenda from '../components/TodayAgenda.vue'
+import TodayActionList from '../components/TodayActionList.vue'
 import FocusPanel from '../components/FocusPanel.vue'
 // Render the guide with the home route; inserting this small panel after paint
 // pushes every visible home section down on a first visit.
 import HomeProductivityPanel from '../components/HomeProductivityPanel.vue'
 import Modal from '../components/Modal.vue'
+import { Button } from '../components/ui/button'
 import { useStoredRef } from '../composables/store/index.js'
 import { animationsEnabled } from '../composables/motion.js'
 import { coursesForDates } from '../composables/store/schedule.js'
@@ -184,8 +189,8 @@ function greeting() {
 
 /* 节日叙事（第五十四轮）。氛围引擎一直在产出节日名与祝福语，但此前**只被用来决定装饰**，
    文案一处都没渲染过（首页问候语是纯时间问候）。这里把它接进页头，并让文案可以走多语言；
-   范围与边界见 composables/narrative.js 的文件头说明。 */
-const festiveToday = computed(() => festiveFor(appToday.value, festiveConfig.value))
+   范围与边界见 composables/narrative.js 的文件头说明。
+   `festiveToday` 直接复用外壳那份共享 computed，首页不再自己算一遍。 */
 const festiveNarrative = computed(() => narrativeFor(festiveToday.value, narrativeLang.value))
 
 const currentQuote = computed(() => {
@@ -346,14 +351,23 @@ function countdownLabel(item) {
 <template>
   <div class="today-layout">
   <div class="page today-page">
-    <header class="page-head">
+    <header class="page-head today-page-head">
       <div class="head-copy">
         <h1 class="greeting">{{ greeting() }}<template v-if="currentQuote">，{{ currentQuote }}</template></h1>
-        <p class="page-desc">{{ dateText }} · 第 {{ weekNum }} 周 · {{ campusName(activeSchedule.campusId) }} · {{ seasonName(activeSchedule.seasonId) }}</p>
+        <p class="page-desc today-context">
+          <time class="today-context-date" :datetime="todayKey()">{{ dateText }}</time>
+          <span class="today-context-chip">第 {{ weekNum }} 周</span>
+          <span class="today-context-chip">{{ campusName(activeSchedule.campusId) }}</span>
+          <span class="today-context-chip">{{ seasonName(activeSchedule.seasonId) }}</span>
+        </p>
         <!-- 节日叙事：只有当天真的有节日/纪念日时才出现，平时不占位置、不进 Tab 序。 -->
-        <p v-if="festiveNarrative" class="festive-narrative">{{ festiveNarrative.name }} · {{ festiveNarrative.message }}</p>
+        <p v-if="festiveNarrative" class="festive-narrative">
+          <span class="festive-narrative-mark" aria-hidden="true">✦</span>
+          <strong>{{ festiveNarrative.name }}</strong>
+          <span>{{ festiveNarrative.message }}</span>
+        </p>
       </div>
-      <div class="head-actions"><button type="button" class="btn btn-ghost replay-btn" @click="showMemory = true">↺ 回放</button></div>
+      <div class="head-actions"><Button variant="ghost" class="replay-btn" @click="showMemory = true">↺ 回放</Button></div>
     </header>
 
     <template v-if="entryReady">
@@ -362,43 +376,39 @@ function countdownLabel(item) {
       <HomeProductivityPanel v-if="!focusRequest" />
 
       <template v-for="id in visibleHomeModuleIds" :key="id">
-        <section v-if="id === 'next'" class="next-panel" :class="nextUp.kind" aria-label="接下来">
-          <div class="next-main">
-            <span class="next-label">接下来</span>
-            <template v-if="nextUp.kind !== 'none'">
-              <strong class="next-title">{{ nextTitle(nextUp) }}</strong>
-              <span class="next-meta">{{ nextMeta(nextUp) }}<template v-if="nextUp.kind === 'course' && nextDeparture"> · {{ nextDeparture }}</template></span>
-              <span v-if="nextUp.state === 'live'" class="next-state live">▶ {{ nextTimingLabel }}</span>
-              <span v-else-if="nextTimingLabel" class="next-state">{{ nextTimingLabel }}</span>
-            </template>
-            <template v-else><span class="next-empty-line">今天暂时没有紧接着要处理的事项。</span><strong class="next-title is-muted">可以自由安排时间</strong></template>
-          </div>
-          <button v-if="nextUp.kind !== 'none'" type="button" class="next-action tap-target" @click="openNext">{{ nextUp.kind === 'course' ? '查看课程表' : '查看' }} →</button>
-          <router-link v-else class="next-action tap-target" to="/tasks?new=1">＋ 新建待办</router-link>
-        </section>
-
-        <template v-else-if="id === 'tasks'">
-          <section v-if="actionItems.length" class="action-panel" aria-label="现在该做">
-            <div class="panel-head"><div><h2>今天最重要</h2><span class="panel-subtitle">最多 3 件，完成后会消失</span></div><router-link to="/tasks" class="panel-link">查看待办 →</router-link></div>
-            <div class="action-list">
-              <div v-for="item in actionItems" :key="item.key" class="action-row">
-                <span class="action-mark">○</span><div class="action-copy"><b>{{ item.title }}</b><span>{{ reminderMeta(item) }}</span></div>
-                <button type="button" class="reminder-action tap-target" @click="completeReminder(item)">{{ reminderAction(item).action === 'complete' ? '完成' : reminderAction(item).action === 'pay' ? '已支付' : '查看' }}</button>
-              </div>
+        <template v-if="id === 'next'">
+          <section class="next-panel" :class="nextUp.kind" aria-label="接下来">
+            <div class="next-main">
+              <span class="next-label">接下来</span>
+              <template v-if="nextUp.kind !== 'none'">
+                <strong class="next-title">{{ nextTitle(nextUp) }}</strong>
+                <span class="next-meta">{{ nextMeta(nextUp) }}<template v-if="nextUp.kind === 'course' && nextDeparture"> · {{ nextDeparture }}</template></span>
+                <span v-if="nextUp.state === 'live'" class="next-state live">▶ {{ nextTimingLabel }}</span>
+                <span v-else-if="nextTimingLabel" class="next-state">{{ nextTimingLabel }}</span>
+              </template>
+              <template v-else><span class="next-empty-line">今天暂时没有紧接着要处理的事项。</span><strong class="next-title is-muted">可以自由安排时间</strong></template>
             </div>
+            <Button v-if="nextUp.kind !== 'none'" class="next-action whitespace-normal" @click="openNext">{{ nextUp.kind === 'course' ? '查看课程表' : nextUp.kind === 'task' ? '处理待办' : nextUp.kind === 'event' ? '查看日程' : '查看详情' }} →</Button>
+            <Button v-else as-child class="next-action whitespace-normal"><RouterLink to="/tasks?new=1">＋ 新建待办</RouterLink></Button>
           </section>
-          <p v-else-if="!riskItems.length" class="quiet-empty">今天暂时没有需要马上处理的事项。</p>
+          <TodayAgenda :courses="courses" :events="events" :today="todayKey()" :now="now" />
         </template>
 
-        <section v-else-if="id === 'countdowns' && riskItems.length" class="action-panel risk-panel" aria-label="需要注意">
-          <div class="panel-head"><div><h2>需要注意</h2><span class="panel-subtitle">逾期、临近截止和即将到期</span></div></div>
-          <div class="action-list">
-            <div v-for="item in riskItems" :key="item.key" class="action-row risk-row">
-              <span class="action-mark">⚠</span><div class="action-copy"><b>{{ item.title }}</b><span>{{ reminderMeta(item) }}</span></div>
-              <button type="button" class="reminder-action tap-target" @click="completeReminder(item)">{{ reminderAction(item).action === 'complete' ? '完成' : reminderAction(item).action === 'pay' ? '已支付' : '查看' }}</button>
-            </div>
-          </div>
-        </section>
+        <TodayActionList
+          v-if="id === 'tasks'"
+          mode="actions"
+          :items="actionItems"
+          :empty="!riskItems.length"
+          :meta="reminderMeta"
+          @activate="completeReminder"
+        />
+        <TodayActionList
+          v-else-if="id === 'countdowns' && riskItems.length"
+          mode="risks"
+          :items="riskItems"
+          :meta="reminderMeta"
+          @activate="completeReminder"
+        />
 
         <section v-else-if="id === 'week'" class="week-progress panel" aria-label="本周进展">
           <div class="panel-head"><div><h2>本周进展</h2><span class="panel-subtitle">{{ pulse.suggestion }}</span></div><router-link class="panel-link" to="/review">查看回顾 →</router-link></div>
@@ -510,18 +520,67 @@ function countdownLabel(item) {
   align-items:center;
   gap:14px;
   display:flex}
+.today-page-head {
+  align-items:flex-end;
+  margin-bottom:2px;
+  padding-bottom:14px;
+  border-bottom:1px solid var(--border)}
+.today-page-head .head-copy { min-width:0; }
 /* 节日叙事（节日名 · 祝福语）。与 .page-desc 同一行距节奏，但用主色以便一眼看见。 */
 .festive-narrative {
-  color:var(--primary);
-  margin-top:4px;
-  font-size:var(--fs-12-5)}
+  display:flex;
+  flex-wrap:wrap;
+  align-items:flex-start;
+  gap:6px;
+  width:fit-content;
+  max-width:100%;
+  color:var(--ink-soft);
+  margin-top:10px;
+  padding:8px 11px;
+  border-left:3px solid var(--atmosphere-accent,var(--primary));
+  border-radius:0 var(--radius-8) var(--radius-8) 0;
+  background:color-mix(in srgb,var(--atmosphere-accent,var(--primary)) 8%,var(--card));
+  font-size:var(--fs-12-5);
+  line-height:1.5}
+.festive-narrative strong {
+  flex:0 1 auto;
+  color:var(--text);
+  font-weight:var(--fw-750);
+  overflow-wrap:anywhere}
+.festive-narrative-mark {
+  flex:0 0 auto;
+  color:var(--atmosphere-accent,var(--primary))}
+.festive-narrative > span:last-child {
+  min-width:0;
+  overflow-wrap:anywhere}
 .greeting {
   letter-spacing:-.01em;
-  font-size:max(19px,min(2.2vw,24px))}
+  color:var(--text);
+  font-size:max(22px,min(2.5vw,30px));
+  font-weight:var(--fw-850);
+  line-height:1.2}
 .page-desc {
   color:var(--ink-soft);
   margin-top:5px;
   font-size:var(--fs-12-5)}
+.today-context {
+  display:flex;
+  flex-wrap:wrap;
+  align-items:center;
+  gap:6px;
+  margin-top:8px}
+.today-context-date {
+  color:var(--text);
+  font-size:var(--fs-12-5);
+  font-weight:var(--fw-700)}
+.today-context-chip {
+  color:var(--ink-soft);
+  border:1px solid var(--border);
+  border-radius:var(--radius-pill);
+  background:var(--card);
+  padding:3px 8px;
+  font-size:var(--fs-11-5);
+  line-height:1.4}
 
 .head-actions {
   flex-wrap:wrap;
@@ -580,7 +639,7 @@ function countdownLabel(item) {
   border-radius:var(--card-radius);
   background:linear-gradient(120deg, var(--primary-soft), var(--card) 72%);
   box-shadow:var(--shadow-sm);
-  border:1px solid #c9d4fb;
+  border:1px solid color-mix(in srgb, var(--primary) 22%, var(--border));
   justify-content:space-between;
   align-items:center;
   gap:14px;
@@ -630,14 +689,26 @@ function countdownLabel(item) {
   background:linear-gradient(135deg,#446de8,#7855dc);
   border-color:#0000}
 .next-action {
-  color:var(--primary);
+  display:inline-flex;
+  justify-content:center;
+  align-items:center;
+  min-height:42px;
+  color:var(--on-primary, #fff);
+  background:var(--primary);
+  border:1px solid var(--primary);
+  border-radius:var(--radius-8);
   white-space:nowrap;
   flex:none;
-  font-size:var(--fs-12-5);
+  padding:0 13px;
+  font-size:var(--fs-12);
   font-weight:var(--fw-750);
-  text-decoration:none}
+  text-decoration:none;
+  transition:background var(--dur-fast) var(--ease-standard), border-color var(--dur-fast) var(--ease-standard), transform var(--dur-fast) var(--ease-standard)}
 .next-action:hover {
-  text-decoration:underline}
+  color:var(--on-primary, #fff);
+  background:var(--primary-hover);
+  border-color:var(--primary-hover);
+  text-decoration:none}
 
 .panel {
   border:1px solid var(--border);
@@ -668,14 +739,6 @@ function countdownLabel(item) {
   border-radius:var(--radius-9);
   padding:8px 12px;
   font-size:var(--fs-12-5)}
-.action-panel {
-  border:1px solid var(--border);
-  border-radius:var(--card-radius);
-  background:var(--card);
-  padding:16px 18px}
-.risk-panel {
-  border-color:color-mix(in srgb, var(--danger) 28%, var(--border));
-  background:color-mix(in srgb, var(--danger) 8%, var(--card))}
 .panel-head>div {
   min-width:0}
 .panel-subtitle {
@@ -684,48 +747,6 @@ function countdownLabel(item) {
   font-size:var(--fs-11-5);
   font-weight:var(--fw-500);
   display:block}
-.action-list {
-  flex-direction:column;
-  display:flex}
-.action-row {
-  border-top:1px solid var(--border);
-  align-items:center;
-  gap:10px;
-  min-height:48px;
-  display:flex}
-.action-row:first-child {
-  border-top:0}
-.action-mark {
-  width:24px;
-  height:24px;
-  color:var(--primary);
-  flex:0 0 24px;
-  place-items:center;
-  font-size:var(--fs-17);
-  display:grid}
-.risk-row .action-mark,.risk-row .action-copy span {
-  color:var(--danger)}
-.action-copy {
-  flex-direction:column;
-  flex:1;
-  gap:2px;
-  min-width:0;
-  display:flex}
-.action-copy b {
-  text-overflow:ellipsis;
-  white-space:nowrap;
-  font-size:var(--fs-13-5);
-  overflow:hidden}
-.action-copy span {
-  color:var(--ink-soft);
-  font-size:var(--fs-11-5)}
-.quiet-empty {
-  color:var(--ink-soft);
-  border:1px dashed var(--border-strong);
-  border-radius:var(--card-radius);
-  background:var(--bg-tint);
-  padding:14px 16px;
-  font-size:var(--fs-13)}
 .compact-link-row {
   min-height:42px;
   color:var(--text);
@@ -860,16 +881,6 @@ function countdownLabel(item) {
 
 
 
-.reminder-action {
-  color:var(--primary);
-  background:var(--primary-soft);
-  border:0;
-  border-radius:var(--radius-6);
-  flex:none;
-  padding:4px 7px;
-  font-size:var(--fs-11);
-  font-weight:var(--fw-750);
-  text-decoration:none}
 .bill-list {
   flex-direction:column;
   display:flex}
@@ -902,13 +913,21 @@ function countdownLabel(item) {
 
 
 @media (max-width:760px) {
-  
-
-
 .next-panel {
+  align-items:flex-start;
+  flex-direction:column;
   padding:16px 18px}
 .next-action {
-  display:block}
+  display:inline-flex}
+}
+@media (max-width: 900px), (pointer: coarse) and (max-height: 520px) {
+  .today-page-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 8px; }
+  .greeting { overflow-wrap: anywhere; line-height: 1.4; }
+  .next-panel { min-width: 0; max-width: 100%; align-items: stretch; flex-direction: column; padding: 16px; box-shadow: none; }
+  .next-main { width: 100%; }
+  .next-title { white-space: normal; overflow-wrap: anywhere; line-height: 1.5; }
+  .next-meta { overflow-wrap: anywhere; }
+  .next-action { min-height: 44px; width: 100%; white-space: normal; }
 }
 @media (max-width:520px) {
   .page {
@@ -924,10 +943,6 @@ function countdownLabel(item) {
 .task-row {
   min-height:56px}
 
-.action-panel {
-  padding:14px}
-.action-row {
-  min-height:52px}
 .compact-link-row {
   flex-wrap:wrap;
   gap:5px 8px;
@@ -972,11 +987,8 @@ function countdownLabel(item) {
   display:grid}
 .today-page>.page-head,.today-page>.experience-message,.today-page>.home-productivity,.today-page>.next-panel,.today-page>.compact-link-row,.today-page>.today-mood-lower {
   grid-column:1/-1}
-.today-page>.quiet-empty {
-  grid-column:1/-1;
-  justify-self:start;
-  width:fit-content;
-  max-width:100%}
+.today-page>.today-agenda {
+  grid-column:1/-1}
 .today-page>.focus-panel {
   grid-column:1/-1;
   justify-self:center;

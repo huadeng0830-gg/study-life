@@ -216,6 +216,7 @@ export interface Milestone {
   courseName?: string
   category?: string
   location?: string
+  note?: string
   repeat?: 'none' | 'yearly'
   pinned?: boolean
   reviewProgress?: number

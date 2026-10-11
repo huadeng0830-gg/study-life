@@ -1,7 +1,9 @@
 import { normalizeFestiveConfig } from './festive.js'
+import { normalizeLunarAnniversaries } from './lunarAnniversaries.js'
 import { normalizeMoodLog } from './mood.js'
 import { normalizeFocusSettings } from './focusTimer.js'
 import { SYNC_DEFAULTS, SYNC_KEYS, isSyncKey } from './syncKeys.js'
+import { normalizeWeeklyReflections } from './weeklyReflections.js'
 
 export { SYNC_DEFAULTS, SYNC_KEYS, isSyncKey }
 
@@ -67,8 +69,13 @@ export function isCompatibleValue(value, expected) {
  * @returns {unknown}
  */
 function normalizeIncomingValue(key, value) {
+  if (key === 'sl_weekly_reflections') return normalizeWeeklyReflections(value)
   if (key === 'sl_festive_config') return normalizeFestiveConfig(value)
   if (key === 'sl_festive_birthday_full') return /^\d{4}-(0[1-9]|1[0-2])-([0-2]\d|3[01])$/.test(String(value ?? '')) ? String(value) : ''
+  // 农历纪念日此前只做了"是不是数组"的检查，条目原样入库 —— 形状不合法的行会跟着
+  // 云端一路同步到别的设备、再写进备份。读取侧确实有兜底归一化，但坏数据留在存储里
+  // 意味着它会**再同步出去**。入库时就按既有口径纠偏，与 sl_festive_config 同一标准。
+  if (key === 'sl_festive_lunar') return normalizeLunarAnniversaries(value)
   if (key === 'sl_mood_log') return normalizeMoodLog(value)
   if (key === 'sl_focus_settings') return normalizeFocusSettings(value)
   if (key === 'sl_performance_mode') {

@@ -1,8 +1,8 @@
 import { nextTick, ref } from 'vue'
 import { detectTaskEventConflicts, detectTimePlanConflicts, getConflictSummary } from '../conflictDetection.js'
 import { normalizeTaskWorkCheckpoint } from './taskWorkProgress.js'
-import { normalizeTimeStages, taskDeadlineError, taskRepeatBase, taskTimePlanError } from './taskTimePlan.ts'
-import { undoTaskTimeShift } from './taskTimeShift.ts'
+import { normalizeTimeStages, taskDeadlineError, taskRepeatBase, taskTimePlanError } from './taskTimePlan'
+import { undoTaskTimeShift } from './taskTimeShift'
 import { isValidPlanningDate } from '../planningViews.js'
 import { defaultReminderMinutes } from '../settingsPolicy.js'
 

@@ -38,11 +38,11 @@ function walk(dir) {
 const JS_FILES = walk(SRC)
 const SOURCE = new Map(JS_FILES.map((file) => [file, readFileSync(file, 'utf8')]))
 
-/** 把相对说明符解析成真实文件（处理目录 → index.js、省略扩展名）。 */
+/** 把相对说明符解析成真实文件（处理 JS/TS、目录 → index 文件、省略扩展名）。 */
 function resolveSpecifier(fromFile, specifier) {
   if (!specifier.startsWith('.')) return null
   const base = resolve(dirname(fromFile), specifier)
-  for (const candidate of [base, `${base}.js`, join(base, 'index.js')]) {
+  for (const candidate of [base, `${base}.js`, `${base}.ts`, join(base, 'index.js'), join(base, 'index.ts')]) {
     if (existsSync(candidate) && statSync(candidate).isFile()) return candidate
   }
   return null

@@ -1,5 +1,6 @@
 import { BACKUP_MODULES, BACKUP_STORAGE_KEYS, restoreBackupModuleOptions } from './backupArchive.js'
 import { measureLocalBusinessStorage } from './localStorageUsage.js'
+import { isWeeklyReflectionsShape } from './weeklyReflections.js'
 
 // 分开统计记录和配置，避免把预算、主题、作息等配置误报成用户记录。
 const RECORD_FIELDS = Object.freeze({
@@ -8,10 +9,12 @@ const RECORD_FIELDS = Object.freeze({
   taskCenterLog: ['快捷记录', '条'], archivedQuickNotes: ['存档笔记', '条'],
   focusSessions: ['专注', '次'], countdowns: ['重要日期', '个'], checklists: ['清单', '份'],
   bills: ['账单', '笔'], expenses: ['收支', '笔'], moodLog: ['心情', '天'], reminderLog: ['提醒', '条'],
+  weeklyReflections: ['周回顾', '周'],
 })
 
 function countRecords(field, value) {
   if (field === 'moodLog') return value && typeof value === 'object' && !Array.isArray(value) ? Object.keys(value).length : 0
+  if (field === 'weeklyReflections') return value && typeof value === 'object' && !Array.isArray(value) ? Object.keys(value).length : 0
   return Array.isArray(value) ? value.length : 0
 }
 
@@ -52,7 +55,8 @@ export function readDataInventory(storage = globalThis.localStorage) {
     try {
       const value = JSON.parse(raw)
       if (value !== null && Object.hasOwn(RECORD_FIELDS, field)
-        && (field === 'moodLog' ? typeof value !== 'object' || Array.isArray(value) : !Array.isArray(value))) throw new Error('记录格式不正确')
+        && (field === 'moodLog' ? typeof value !== 'object' || Array.isArray(value)
+          : field === 'weeklyReflections' ? !isWeeklyReflectionsShape(value) : !Array.isArray(value))) throw new Error('记录格式不正确')
       data[field] = value
     } catch { issues.push({ field, label: fieldLabels[key] || '其它本机设置' }) }
   }

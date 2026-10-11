@@ -19,7 +19,7 @@ import { clock, useStoredRef } from './store/core.js'
 import { policyDateKey, policyDateTime, settings } from './settingsPolicy.js'
 import { countdownTarget } from './store/countdown.js'
 import { isArchived, isTaskActionable } from './domain/state.js'
-import { stageBoundaryAt, stageLabel, stageTimeState, taskStages } from './tasks/taskTimePlan.ts'
+import { stageBoundaryAt, stageLabel, stageTimeState, taskStages } from './tasks/taskTimePlan'
 
 // 直接注册存储 ref，而不是从某个 barrel import —— 后者会把本模块拉进
 // store → domain → … 的依赖链，而这个调度器只需要读三份集合。

@@ -1,12 +1,23 @@
 import { isArchived, isTaskActionable, taskStatus } from './domain/state.js'
 import { sortCountdowns } from './store/countdown.js'
 import { appCalendarDaysBetween, getAppToday } from './timeContext.js'
-import { taskHasTime, taskPlanInPeriod, taskStages, taskTimeSummary } from './tasks/taskTimePlan.ts'
+import { taskHasTime, taskPlanInPeriod, taskStages, taskTimeSummary } from './tasks/taskTimePlan'
 
 function matchesQuery(values, query) {
   const words = String(query || '').trim().toLocaleLowerCase().split(/\s+/).filter(Boolean)
   const text = values.filter(Boolean).join(' ').toLocaleLowerCase()
   return words.every((word) => text.includes(word))
+}
+
+/** Match the fields a person expects to search on an important date. */
+export function matchesMilestoneQuery(item, query, courseNames = new Map()) {
+  return matchesQuery([
+    item.name,
+    item.location,
+    item.note,
+    item.courseName,
+    courseNames.get(item.courseId),
+  ], query)
 }
 
 /** Additional filters shared by the task list, board, and calendar. */
@@ -41,6 +52,20 @@ export function milestoneOccurrenceDate(item) {
   return item.countdown?.target ? getAppToday(item.countdown.target) : ''
 }
 
+/** Return this milestone's occurrence inside a displayed month, clamping Feb 29 in common years. */
+export function milestoneCalendarOccurrenceDate(item, year, month) {
+  if (!Number.isInteger(year) || year < 1 || year > 9999 || !Number.isInteger(month) || month < 1 || month > 12) return ''
+  const date = String(item.date || '')
+  if (!isValidPlanningDate(date)) return ''
+  const [sourceYear, sourceMonth, sourceDay] = date.split('-').map(Number)
+  if (item.repeat === 'yearly') {
+    if (sourceMonth !== month) return ''
+    const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate()
+    return `${year}-${String(month).padStart(2, '0')}-${String(Math.min(sourceDay, lastDay)).padStart(2, '0')}`
+  }
+  return sourceYear === year && sourceMonth === month ? date : ''
+}
+
 export function selectMilestoneWorkspace(items, {
   now = new Date(), query = '', category = 'all', period = 'all', sortKey = 'date',
   showPast = false, showHistory = false, courseNames = new Map(),
@@ -62,7 +87,7 @@ export function selectMilestoneWorkspace(items, {
   const visible = rows.filter((item) => {
     if (isArchived(item) !== showHistory) return false
     if (category !== 'all' && (item.category || '其他') !== category) return false
-    if (!matchesQuery([item.name, item.location, item.courseName, courseNames.get(item.courseId)], query)) return false
+    if (!matchesMilestoneQuery(item, query, courseNames)) return false
     if (showHistory) return true
     if (period === 'past') return item.countdown.isPast
     if (!showPast && item.countdown.isPast) return false

@@ -1,7 +1,7 @@
 import { currentTimes, periodIndex } from './store/timeConfig.js'
 import { courseInWeek } from './store/schedule.js'
 import { isActiveEntity } from './domain/state.js'
-import { taskOccupiedRanges } from './tasks/taskTimePlan.ts'
+import { taskOccupiedRanges } from './tasks/taskTimePlan'
 import { policyDateTime } from './settingsPolicy.js'
 
 // 多阶段待办只检查明确占用的区间，截止和办理窗口不会占用日程。

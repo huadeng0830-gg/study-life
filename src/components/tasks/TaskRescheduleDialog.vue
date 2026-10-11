@@ -6,13 +6,23 @@ import ConfirmDialog from '../ConfirmDialog.vue'
 import { detectTimePlanConflicts, getConflictSummary } from '../../composables/conflictDetection.js'
 import { moveTimeDate, taskDeadlineError, taskTimePlanError } from '../../composables/tasks/taskTimePlan'
 
-const props = defineProps({ task: { type: Object, required: true }, today: { type: String, required: true }, nowMs: { type: Number, required: true }, existingItems: { type: Array, default: () => [] } })
+const props = defineProps({
+  task: { type: Object, required: true },
+  today: { type: String, required: true },
+  nowMs: { type: Number, required: true },
+  existingItems: { type: Array, default: () => [] },
+  /**
+   * 预置的截止日期（`YYYY-MM-DD`）。月历用它把截止日期改为当前查看日，阶段安排保持原样；
+   * 用户仍可在打开的对话框里继续微调时间点再保存，所以预置即视为「已改动」。
+   */
+  initialDate: { type: String, default: '' },
+})
 const emit = defineEmits(['close', 'save'])
 const formId = useId()
 /** @type {import('vue').Ref<import('../../composables/tasks/taskTimePlan').TaskTiming>} */
-const draft = ref(JSON.parse(JSON.stringify({ dueDate: props.task.dueDate || '', dueTime: props.task.dueTime || '', timeStages: props.task.timeStages || [] })))
+const draft = ref(JSON.parse(JSON.stringify({ dueDate: props.initialDate || props.task.dueDate || '', dueTime: props.task.dueTime || '', timeStages: props.task.timeStages || [] })))
 const error = ref('')
-const changed = ref(false)
+const changed = ref(Boolean(props.initialDate))
 const conflictMessage = ref('')
 function apply(plan) { draft.value = JSON.parse(JSON.stringify(plan)); changed.value = true; error.value = '' }
 function setDate(days) { draft.value.dueDate = moveTimeDate(props.today, days); changed.value = true; error.value = '' }
@@ -29,9 +39,10 @@ function save() {
 <template>
   <Modal :open="true" title="重新安排时间" @close="emit('close')">
     <form :id="formId" class="reschedule-form" novalidate @submit.prevent="save">
-      <p>重新安排“{{ task.title }}”。先预览并应用改期，再保存生效。</p>
+      <p v-if="initialDate">将“{{ task.title }}”的截止日期设为 {{ initialDate }}。阶段安排保持原样，保存前仍会检查时间冲突。</p>
+      <p v-else>重新安排“{{ task.title }}”。先预览并应用改期，再保存生效。</p>
       <TaskTimeShift :task="draft" :now-ms="nowMs" @apply="apply" @undo="apply" />
-      <details class="deadline-adjust" :open="!task.timeStages?.length">
+      <details class="deadline-adjust" :open="Boolean(initialDate) || !task.timeStages?.length">
         <summary>单独调整事项截止时间</summary>
         <label>新的截止日期<input v-model="draft.dueDate" type="date" :aria-invalid="Boolean(error) || undefined" @input="changed = true; error = ''; if (!draft.dueDate) draft.dueTime = ''" /></label>
         <div class="date-shortcuts" role="group" aria-label="快速重新安排日期"><button type="button" @click="setDate(0)">今天</button><button type="button" @click="setDate(1)">明天</button><button type="button" @click="setDate(7)">一周后</button></div>

@@ -43,4 +43,8 @@ function updateField(field, event) {
 .task-checkpoint-details summary small { color: var(--muted); font-size: var(--fs-11); font-weight: var(--fw-500); }
 .checkpoint-resource-list { display: flex; flex-direction: column; gap: 5px; margin: 0; padding-left: 20px; font-size: var(--fs-12); }
 .checkpoint-resource-list a { overflow-wrap: anywhere; color: var(--primary); }
+@media (max-width: 900px), (pointer: coarse) and (max-height: 520px) {
+  .task-checkpoint-details summary { min-height: 44px; flex-wrap: wrap; }
+  .checkpoint-resource-list a { display: flex; align-items: center; min-height: 44px; }
+}
 </style>

@@ -457,6 +457,24 @@ function buttonByLabel(root, label) {
   return root.querySelector(`button[aria-label="${label}"]`)
 }
 
+/**
+ * 待办行的次要操作收在「⋯」菜单里（`ActionSheet`，Teleport 到 body），
+ * 所以删除/归档这类按钮要先开菜单再选，不能再直接按 aria-label 找行内按钮。
+ */
+async function chooseRowAction(main, label, settle) {
+  const row = main.querySelector('.task')
+  const trigger = [...row.querySelectorAll('button')].find((item) => item.classList.contains('tra-trigger'))
+  expect(trigger, 'missing row action trigger (⋯)').toBeTruthy()
+  trigger.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+  await settle()
+  const sheets = [...document.querySelectorAll('.sheet-overlay')]
+  const item = [...(sheets[sheets.length - 1]?.querySelectorAll('.sheet-action') ?? [])]
+    .find((element) => element.textContent.includes(label))
+  expect(item, `missing action: ${label}`).toBeTruthy()
+  item.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+  await settle()
+}
+
 /** 当前最上层的浮层（ConfirmDialog 自己 Teleport 到 body，所以从 body 里找）。 */
 function topOverlay() {
   const overlays = [...document.querySelectorAll('.overlay')]
@@ -565,8 +583,7 @@ describe('行为层：确认与取消都要真的分叉', () => {
     ]))
     const { main, settle } = await boot('/tasks')
 
-    buttonByLabel(main, '删除待办').click()
-    await settle()
+    await chooseRowAction(main, '删除', settle)
     let keys = dialogButtons()
     expect(keys).toBeTruthy()
     keys[0].click()
@@ -574,8 +591,7 @@ describe('行为层：确认与取消都要真的分叉', () => {
     await flushWrites()
     expect(readStored('sl_tasks').map((task) => task.title), '取消不该删待办').toEqual(['交作业'])
 
-    buttonByLabel(main, '删除待办').click()
-    await settle()
+    await chooseRowAction(main, '删除', settle)
     keys = dialogButtons()
     keys[1].click()
     await settle()

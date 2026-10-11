@@ -4,7 +4,7 @@ import { policyDateKey, policyDateTime } from '../settingsPolicy.js'
 import { isActiveEntity } from './state.js'
 import { clock } from '../store/core.js'
 import { mySpendCents } from '../ledgerSplit.js'
-import { remainingTimeStages, taskTimeEntries } from '../tasks/taskTimePlan.ts'
+import { remainingTimeStages, taskTimeEntries } from '../tasks/taskTimePlan'
 
 function dateFromKey(key) {
   const [year, month, day] = String(key || '').split('-').map(Number)
@@ -76,17 +76,27 @@ export function selectWeeklyTaskSummary({ tasks = [] } = {}, now = clock.value, 
 
 export function selectWeeklyFinanceSummary({ transactions = [], expenses = [] } = {}, now = clock.value, options = {}) {
   const range = resolveRange(now, options)
+  const convertAmount = typeof options.convertAmount === 'function' ? options.convertAmount : null
   const source = transactions.length ? transactions : expenses
   let count = 0
   let incomeTotal = 0
   let expenseTotal = 0
+  let excludedCount = 0
+  const missingRates = new Set()
   const categoryMap = new Map()
   for (const item of Array.isArray(source) ? source : []) {
     if (!inRange(item.date, range)) continue
     // 与账本页同一口径：支出按「我实际承担」的份额算（未分摊的记录 = 记录金额）。
-    // 金额非法时仍走 numeric 的旧兜底（0），不因为这个口径改动而改变容错行为。
+    // 周回顾可注入基准币换算器；不注入时保留既有纯选择器的金额口径。
     const spendCents = mySpendCents(item)
-    const amount = spendCents === null ? numeric(item.amount) : spendCents / 100
+    const rawAmount = spendCents === null ? numeric(item.amount) : spendCents / 100
+    const converted = convertAmount ? convertAmount(rawAmount, item.currency) : null
+    if (convertAmount && converted?.cents === null) {
+      excludedCount += 1
+      if (converted.reason === 'rate' && converted.currency) missingRates.add(converted.currency)
+      continue
+    }
+    const amount = convertAmount ? converted.cents / 100 : rawAmount
     if (item.direction === 'income') {
       incomeTotal += amount
       count += 1
@@ -102,12 +112,15 @@ export function selectWeeklyFinanceSummary({ transactions = [], expenses = [] } 
     const key = item.cat || item.category || '未分类'
     categoryMap.set(key, (categoryMap.get(key) || 0) + amount)
   }
-  return {
+  const summary = {
     count,
     income: round2(incomeTotal),
     expense: round2(expenseTotal),
     categories: [...categoryMap.entries()].map(([key, amount]) => ({ key, amount: round2(amount) })).sort((a, b) => b.amount - a.amount),
   }
+  return convertAmount
+    ? { ...summary, base: String(options.currencyBase || 'CNY'), excludedCount, missingRates: [...missingRates].sort() }
+    : summary
 }
 
 export function selectWeeklyCourseSummary({ courses = [] } = {}, now = clock.value, options = {}) {
@@ -160,7 +173,8 @@ function highlight(type, item, date, time = '') {
 }
 
 export function selectNextWeekHighlights({ tasks = [], events = [], milestones = [], bills = [] } = {}, now = clock.value, { limit = 8, ...options } = {}) {
-  const range = weekRange(now, { ...options, weekOffset: 1 })
+  const selectedOffset = Number(options.weekOffset)
+  const range = weekRange(now, { ...options, weekOffset: (Number.isFinite(selectedOffset) ? selectedOffset : 0) + 1 })
   const items = []
   tasks.filter((task) => isActiveEntity(task) && !task.done && task.status !== 'completed' && task.status !== 'cancelled').forEach((task) => {
     const entry = taskTimeEntries({ ...task, timeStages: remainingTimeStages(task, now.getTime()) }).filter((item) => inRange(item.date, range) || (item.anchor === 'occupied' && item.date < range.endDate && item.endDate >= range.startDate)).sort((a, b) => a.date.localeCompare(b.date))[0]

@@ -29,7 +29,9 @@ if (!existsSync(updateConfigPath)) fail('缺少 resources/app-update.yml，安�
 const entries = new Set(listPackage(archivePath).map((entry) => entry.replaceAll('\\', '/').replace(/^\/+/, '')))
 const updaterManifestPath = 'node_modules/electron-updater/package.json'
 if (!entries.has(updaterManifestPath)) fail(`app.asar 未包含 ${updaterManifestPath}`)
-if (!entries.has('updaterController.cjs') || !entries.has('cachePaths.cjs') || !entries.has('main.cjs')) fail('主进程更新入口或安装目录缓存配置没有完整打入 app.asar')
+for (const entry of ['main.cjs', 'preload.cjs', 'updaterController.cjs', 'verifiedNsisUpdater.cjs', 'cachePaths.cjs']) {
+  if (!entries.has(entry)) fail(`主进程更新模块 ${entry} 没有打入 app.asar`)
+}
 
 const appManifest = JSON.parse(extractFile(archivePath, 'package.json').toString('utf8'))
 const configuredPackage = JSON.parse(readFileSync(path.join(ROOT, 'desktop-app/package.json'), 'utf8'))

@@ -112,10 +112,14 @@ export function tabOrderIssues(elements) {
       const group = item.el.closest('[role="tablist"]')
       if (group && item.el.getAttribute('role') === 'tab') {
         const hasStop = [...group.querySelectorAll('[role="tab"]')].some((tab) => tab.tabIndex >= 0)
-        if (hasStop) continue
+        // Reka's RovingFocusGroup uses the list itself as the temporary Tab entry point,
+        // then moves focus into the active tab. Accept that documented entry stop too.
+        if (hasStop || group.tabIndex >= 0) continue
         out.push(`<${item.tag}${describe(item.el)}> 所在的 tablist 整组都不在 Tab 序列里：键盘用户到不了这组标签页`)
         continue
       }
+      const toggleGroup = item.el.closest('[data-slot="toggle-group"]')
+      if (toggleGroup && toggleGroup.tabIndex >= 0) continue
       out.push(`可交互的 <${item.tag}${describe(item.el)}> 带 tabindex="-1"：键盘用户 Tab 不到它`)
       continue
     }
@@ -176,7 +180,9 @@ export function tabPanelRefIssues(root = document) {
       out.push(`tabpanel${label} 的 aria-labelledby="${ref}" 指向的不是 tab`)
       continue
     }
-    if (target.getAttribute('aria-selected') !== 'true') {
+    // Unmounted-on-hide libraries may retain a leaving panel briefly with `hidden` set;
+    // its label correctly points at the inactive tab until the transition completes.
+    if (!panel.hasAttribute('hidden') && target.getAttribute('aria-selected') !== 'true') {
       out.push(`tabpanel${label} 的 aria-labelledby="${ref}" 指向的 tab 不是当前选中项`)
     }
   }

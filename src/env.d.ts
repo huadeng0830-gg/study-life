@@ -6,27 +6,38 @@ interface Window {
   __STUDY_LIFE_RELEASE__?: string
 }
 
+interface DesktopUpdateSnapshot {
+  stage: string
+  currentVersion: string
+  availableVersion: string
+  percent: number | null
+  transferred?: number
+  total?: number
+  bytesPerSecond?: number
+  taskId?: number
+  revision?: number
+  startedAt?: number
+  finishedAt?: number
+  taskPending?: boolean
+  canCancel?: boolean
+  canRetry?: boolean
+  error?: { code: string; message: string; retryAction: string } | null
+  timings?: Array<{ stage: string; durationMs: number }>
+  log?: Array<{ at: number; stage: string; code: string }>
+  releaseNotes?: string
+  releaseDate?: string
+  lastCheckedAt: number
+  message: string
+}
+
 interface Window {
   studyLifeDesktop?: {
     isDesktop: boolean
-    getUpdateState?: () => Promise<{
-      stage: string
-      currentVersion: string
-      availableVersion: string
-      percent: number
-      lastCheckedAt: number
-      message: string
-    }>
+    getUpdateState?: () => Promise<DesktopUpdateSnapshot>
     checkForUpdates?: () => Promise<boolean>
     downloadUpdate?: () => Promise<boolean>
     installUpdate?: () => Promise<boolean>
-    onUpdateState?: (listener: (state: {
-      stage: string
-      currentVersion: string
-      availableVersion: string
-      percent: number
-      lastCheckedAt: number
-      message: string
-    }) => void) => () => void
+    cancelUpdate?: () => Promise<boolean>
+    onUpdateState?: (listener: (state: DesktopUpdateSnapshot) => void) => () => void
   }
 }

@@ -14,7 +14,7 @@
  *     宁可少生成一条，也不要在用户没设置过的规则下凭空塞进新待办。
  */
 
-import { moveTimeDate, taskRepeatBase, taskStages, timePlanId } from './tasks/taskTimeFields.ts'
+import { moveTimeDate, taskRepeatBase, taskStages, timePlanId } from './tasks/taskTimeFields'
 
 function dateText(date) {
   const pad = (value) => String(value).padStart(2, '0')

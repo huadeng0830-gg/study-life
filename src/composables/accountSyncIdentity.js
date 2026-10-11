@@ -1,4 +1,4 @@
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { accountUser } from './accountAuth.js'
 
 export const ACCOUNT_DATA_OWNER_KEY = 'study-life-data-owner'
@@ -24,6 +24,34 @@ export function readAccountDataOwner() {
 export const accountDataOwner = ref(readAccountDataOwner())
 export const accountSyncPreparing = ref(false)
 export const accountSyncPreparationError = ref('')
+let identityRevision = 0
+let lastSessionUserId = accountUser.value?.id || ''
+watch(() => accountUser.value?.id || '', (id) => {
+  if (id === lastSessionUserId) return
+  lastSessionUserId = id
+  identityRevision += 1
+}, { flush: 'sync' })
+
+/** Capture both the authenticated user and local-data owner before async work. */
+export function captureAccountDataIdentity() {
+  return {
+    userId: accountUser.value?.id || '',
+    ownerId: accountDataOwner.value || readAccountDataOwner(),
+    revision: identityRevision,
+  }
+}
+
+export function assertAccountDataIdentity(snapshot) {
+  const current = captureAccountDataIdentity()
+  if (!snapshot || current.revision !== snapshot.revision
+    || current.userId !== snapshot.userId || current.ownerId !== snapshot.ownerId) {
+    throw new Error('登录账号或本机数据归属已变化，已取消自动恢复以保护当前数据。')
+  }
+  if (current.userId && current.ownerId && current.userId !== current.ownerId) {
+    throw new Error('当前登录账号与本机数据归属尚未一致，账号数据准备完成后再恢复。')
+  }
+  return current.userId || current.ownerId
+}
 // 【不要在这里直接读 localStorage】原来第 14 行调了 readAccountDataOwner()。
 // computed 只在依赖变化时重算，而 localStorage 不是响应式的：一旦它与
 // accountDataOwner 这个 ref 分叉（被另一上下文清掉、iOS 两个存储容器不互通），
@@ -42,8 +70,13 @@ export function setAccountDataOwner(id) {
     if (id) localStorage.setItem(ACCOUNT_DATA_OWNER_KEY, id)
     else localStorage.removeItem(ACCOUNT_DATA_OWNER_KEY)
   } catch { /* 持久化失败仍保留内存归属 */ }
+  if (accountDataOwner.value !== id) identityRevision += 1
   accountDataOwner.value = id
 }
 if (typeof window !== 'undefined') window.addEventListener('storage', (event) => {
-  if (event.key === ACCOUNT_DATA_OWNER_KEY) accountDataOwner.value = readAccountDataOwner()
+  if (event.key === ACCOUNT_DATA_OWNER_KEY) {
+    const owner = readAccountDataOwner()
+    if (accountDataOwner.value !== owner) identityRevision += 1
+    accountDataOwner.value = owner
+  }
 })

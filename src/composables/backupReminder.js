@@ -1,5 +1,16 @@
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useStoredRef } from './store'
+import { overlayStackRevision, topOverlay } from './overlayStack.js'
+
+// 例行提醒等编辑浮层关闭后恢复，保存错误仍由独立告警处理。
+export function useBackupNotice() {
+  const showBackupNudge = ref(false)
+  const visibleBackupNudge = computed(() => {
+    void overlayStackRevision.value
+    return showBackupNudge.value && !topOverlay()
+  })
+  return { showBackupNudge, visibleBackupNudge }
+}
 
 // iPhone 上主屏幕网页应用的本地存储可能被系统清空（杀后台/删除图标），
 // 用"距上次备份的天数"驱动红点提醒，降低数据丢失风险。

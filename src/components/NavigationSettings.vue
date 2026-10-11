@@ -22,7 +22,7 @@ const editor = useNavigationEditor({ initialMode: props.initialMode
 const { mode, drafts, availableItems, dirty, hasChanges, conflicts,
   saving, error, message, canUndo, canRedo, isDefault } = editor
 const editorEl = ref(null)
-const navAction = ref(null)
+const navAction = ref(/** @type {{phase: string, cancel: () => void} | null} */ (null))
 const newGroupLabel = ref('')
 const targetGroup = ref('')
 const pendingDeparture = ref(null)
@@ -53,8 +53,9 @@ const pinnedIds = computed(() => mode.value === 'mobile' ? drafts.value.mobile :
 const mobileFull = computed(() => drafts.value.mobile.length >= MAX_MOBILE_NAV_ITEMS)
 const removalGroups = computed(() => drafts.value.desktop.filter((group) => group.id !== pendingGroupRemoval.value?.id))
 const deviceLabel = (device) => device === 'mobile' ? '手机导航' : '电脑侧栏'
-async function saveNavigation() {
-  const saved = await editor.save()
+/** @param {{signal?: AbortSignal}} [context] */
+async function saveNavigation({ signal } = {}) {
+  const saved = await editor.save({ signal })
   if (!saved && error.value) throw new Error(error.value)
   return saved
 }
@@ -69,7 +70,13 @@ watch(() => props.open, (open) => {
     newGroupLabel.value = ''
     pendingDeparture.value = null
     pendingGroupRemoval.value = null
-  } else finishDrag(true)
+  } else {
+    finishDrag(true)
+    navAction.value?.cancel()
+    pendingDeparture.value = null
+    pendingGroupRemoval.value = null
+    editor.begin()
+  }
 }, { immediate: true })
 watch(() => drafts.value.desktop.map((group) => group.id), (ids) => {
   if (!ids.includes(targetGroup.value)) targetGroup.value = ids[0] || ''
@@ -197,12 +204,21 @@ function requestClose(path = '') {
   else void depart(intent)
 }
 
-async function saveAndLeave() {
+async function saveAndLeave({ signal }) {
   const intent = pendingDeparture.value
-  if (await editor.save()) await depart(intent)
+  // Keep validation/storage errors in the dialog; a false result must never
+  // become a successful button result or navigate after its scope was closed.
+  if (!intent || signal.aborted || !props.open) return false
+  // Sync can make the draft clean while the departure dialog is open. There
+  // is then no write to perform, but the requested departure remains valid.
+  if (hasChanges.value && !await editor.save({ signal })) return false
+  if (signal.aborted || !props.open) return false
+  await depart(intent)
+  return true
 }
 
 function discardAndLeave() {
+  if (saving.value) return
   const intent = pendingDeparture.value
   editor.begin()
   void depart(intent)
@@ -284,7 +300,7 @@ function discardAndLeave() {
   <Modal v-if="pendingDeparture" :open="true" title="保存导航修改？" @close="!saving && (pendingDeparture = null)">
     <p class="nav-dialog-message">{{ [dirty.mobile && '手机导航', dirty.desktop && '电脑侧栏'].filter(Boolean).join('和') }}还有未保存的修改。</p>
     <p v-if="error" class="navigation-feedback error" role="alert">{{ error }}</p>
-    <template #foot><div class="nav-dialog-actions"><button class="btn btn-ghost" type="button" :disabled="saving" @click="pendingDeparture = null">继续编辑</button><button class="btn btn-ghost nav-discard" type="button" :disabled="saving" @click="discardAndLeave">放弃修改</button><ActionButton tone="primary" class="btn btn-primary" type="button" :disabled="saving" kind="frequent" feedback="external" :show-error="false" :action="() => saveAndLeave()">{{ saving ? '正在保存…' : '保存并离开' }}</ActionButton></div></template>
+    <template #foot><div class="nav-dialog-actions"><button class="btn btn-ghost" type="button" :disabled="saving" @click="pendingDeparture = null">继续编辑</button><button class="btn btn-ghost nav-discard" type="button" :disabled="saving" @click="discardAndLeave">放弃修改</button><ActionButton tone="primary" type="button" :busy="saving" kind="frequent" feedback="external" :show-error="false" :action="saveAndLeave">保存并离开</ActionButton></div></template>
   </Modal>
 
   <Modal v-if="pendingGroupRemoval" :open="true" title="移除分组" @close="pendingGroupRemoval = null">

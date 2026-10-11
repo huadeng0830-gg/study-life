@@ -15,6 +15,8 @@ import { useDataManagerBackup } from '../composables/dataManagerBackup.js'
 import { readDataInventory } from '../composables/dataManagerInventory.js'
 import { flushStoredWrites } from '../composables/store'
 import { announce } from '../composables/liveRegion.js'
+import '../styles/shadcn.css'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 
 const props = defineProps({ open: Boolean })
 const emit = defineEmits(['close'])
@@ -23,10 +25,10 @@ const backup = useDataManagerBackup()
 const {
   backupProgress, backupBusy, restoring, exportBackup, retryBackup,
   continueBackupResult, cancelBackup, abortBackup, clearSelectedBackup,
-  restoreBackupTarget, restoreBackupMessage,
+  restoreBackupTarget, crossAccountImportTarget, crossAccountImportMessage, restoreBackupMessage,
   restoreCheckpoint, restoreCheckpointLoading, restoreCheckpointError, restoreCheckpointModules,
   restoreCheckpointWallpapers, restoreCheckpointDate, restoreCheckpointMessage,
-  refreshRestoreCheckpoint, applyRestoreBackup, applyRestoreCheckpoint,
+  refreshRestoreCheckpoint, applyRestoreBackup, applyRestoreCheckpoint, confirmCrossAccountImport,
 } = backup
 const showCheckpointConfirm = ref(false)
 const inventory = shallowRef(null)
@@ -56,6 +58,7 @@ function closeDataManager() {
     return
   }
   clearSelectedBackup()
+  crossAccountImportTarget.value = null
   emit('close')
 }
 async function confirmRestoreBackup() {
@@ -122,14 +125,17 @@ defineExpose({ exportBackup })
 </script>
 
 <template>
-  <Modal :open="open" title="数据管理" :wide="true" @close="closeDataManager">
+  <Modal :open="open" title="数据管理" :title-level="2" :wide="true" @close="closeDataManager">
     <div class="data-manager">
       <DataOverview :inventory="inventory" :error="inventoryError" @refresh="refreshInventory" />
-      <p v-if="needsBackup" class="backup-hint">{{ backupReminderTitle }}。更换设备或清理浏览器数据前，建议先导出一份完整备份。</p>
+      <Alert v-if="needsBackup" class="backup-hint" role="status">
+        <AlertTitle>建议先备份</AlertTitle>
+        <AlertDescription>{{ backupReminderTitle }}。更换设备或清理浏览器数据前，建议先导出一份完整备份。</AlertDescription>
+      </Alert>
       <nav class="data-manager-nav" aria-label="数据管理分区">
-        <button type="button" :class="{ active: activeSection === 'backup' }" :aria-current="activeSection === 'backup' ? 'location' : undefined" aria-controls="data-backup" @click="jumpToSection('backup')">备份</button>
-        <button type="button" :class="{ active: activeSection === 'restore' }" :aria-current="activeSection === 'restore' ? 'location' : undefined" aria-controls="data-restore" @click="jumpToSection('restore')">恢复</button>
-        <button type="button" :class="{ active: activeSection === 'sync' }" :aria-current="activeSection === 'sync' ? 'location' : undefined" aria-controls="data-sync" @click="jumpToSection('sync')">账号同步</button>
+        <button type="button" :aria-current="activeSection === 'backup' ? 'location' : undefined" aria-controls="data-backup" @click="jumpToSection('backup')"><span class="data-nav-icon" aria-hidden="true">↓</span><span>备份与导出</span></button>
+        <button type="button" :aria-current="activeSection === 'restore' ? 'location' : undefined" aria-controls="data-restore" @click="jumpToSection('restore')"><span class="data-nav-icon" aria-hidden="true">↑</span><span>恢复数据</span></button>
+        <button type="button" :aria-current="activeSection === 'sync' ? 'location' : undefined" aria-controls="data-sync" @click="jumpToSection('sync')"><span class="data-nav-icon" aria-hidden="true">↔</span><span>账号同步</span></button>
       </nav>
       <div ref="operationProgressRef" class="operation-progress">
       <TaskProgress
@@ -198,6 +204,15 @@ defineExpose({ exportBackup })
     @confirm="confirmRestoreBackup"
   />
   <ConfirmDialog
+    v-if="crossAccountImportTarget"
+    :open="Boolean(crossAccountImportTarget)"
+    title="跨账号数据导入"
+    :message="crossAccountImportMessage"
+    confirm-label="明确导入到此账号"
+    @close="crossAccountImportTarget = null"
+    @confirm="confirmCrossAccountImport"
+  />
+  <ConfirmDialog
     v-if="showCheckpointConfirm && restoreCheckpoint"
     :open="showCheckpointConfirm"
     title="恢复本机恢复点"
@@ -218,6 +233,10 @@ defineExpose({ exportBackup })
   margin:0 auto;
   display:flex}
 .backup-hint {
+  display:grid;
+  grid-template-columns:0 minmax(0, 1fr);
+  gap:4px 0;
+  margin:0;
   border:1px solid color-mix(in srgb, var(--warning) 35%, var(--card));
   background:color-mix(in srgb, var(--warning) 10%, var(--card));
   color:var(--warning);
@@ -225,6 +244,8 @@ defineExpose({ exportBackup })
   padding:10px 12px;
   font-size:var(--fs-12);
   line-height:1.55}
+.backup-hint :deep([data-slot="alert-title"]) { margin:0; color:var(--warning); font-size:var(--fs-13); font-weight:var(--fw-700); }
+.backup-hint :deep([data-slot="alert-description"]) { color:var(--ink-soft); font-size:var(--fs-12); line-height:1.55; }
 .data-manager-nav {
   z-index:3;
   position:sticky;
@@ -244,22 +265,26 @@ defineExpose({ exportBackup })
   cursor:pointer;
   border:0;
   border-radius:var(--radius-8);
-  place-items:center;
+  justify-content:center;
+  align-items:center;
+  gap:7px;
   padding:0 8px;
   font-size:var(--fs-12);
   font-weight:var(--fw-700);
-  display:grid}
+  display:flex}
 .data-manager-nav button:hover,
 .data-manager-nav button:active,
-.data-manager-nav button.active {
+.data-manager-nav button[aria-current="location"] {
   color:var(--primary);
   background:var(--primary-soft)}
 .data-manager-nav button:focus-visible {
   outline:var(--focus-width) solid var(--focus-solid);
   outline-offset:var(--focus-offset)}
+.data-nav-icon { color:var(--muted); font-size:var(--fs-15); font-weight:var(--fw-800); }
+.data-manager-nav button[aria-current="location"] .data-nav-icon { color:var(--primary); }
 .data-section {
   border:1px solid var(--border);
-  background:var(--bg-tint);
+  background:var(--card);
   border-radius:var(--radius-12);
   align-items:flex-start;
   gap:13px;
@@ -318,6 +343,7 @@ defineExpose({ exportBackup })
   .data-manager-nav {
   gap:4px;
   padding:5px}
+  .data-manager-nav button { gap:5px; padding-inline:4px; font-size:var(--fs-11); }
   /* 章节滚动定位要避开顶部的粘性分区导航。 */
   .data-section {
   gap:10px;

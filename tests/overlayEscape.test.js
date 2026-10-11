@@ -34,7 +34,9 @@ const FLOATING_CLASS = /(?:^|[\s-])(mask|overlay|sheet|backdrop|popover)(?=$|[\s
 /** 需要 Escape 的浮层角色（`listbox` 刻意不收，见文件头）。 */
 const FLOATING_ROLE = /(?:^|\s)role="(dialog|alertdialog|menu|menubar)"/
 /** 委托给共享浮层：它们自己处理 Escape。 */
-const SHARED_OVERLAY = /<(Modal|ActionSheet)\b/
+// Reka UI primitives own Escape handling internally; consumers should not add a
+// second listener that competes with their focus and dismissal lifecycle.
+const SHARED_OVERLAY = /<(Modal|ActionSheet|PopoverContent|DialogContent|AlertDialogContent|SheetContent|DropdownMenuContent|ContextMenuContent)\b/
 
 /**
  * 真正处理 Escape 的**代码**签名。

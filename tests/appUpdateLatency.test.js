@@ -142,7 +142,7 @@ describe('应用更新检查延迟', () => {
     await expect(check).resolves.toBe(false)
   })
 
-  it('已安装的新版本直接启用，不重复发起检查', async () => {
+  it('已安装的新版本直接显示待应用，不重复检查或擅自启用', async () => {
     vi.useFakeTimers()
     vi.resetModules()
     const registration = setupRegistration(() => new Promise(() => {}))
@@ -156,15 +156,16 @@ describe('应用更新检查延迟', () => {
     })
     registration.waiting = worker
     vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})))
-    const { checkForAppUpdate } = await import('../src/composables/appUpdate.js')
+    const { checkForAppUpdate, updateStage } = await import('../src/composables/appUpdate.js')
     const check = checkForAppUpdate()
     await vi.advanceTimersByTimeAsync(0)
     await expect(check).resolves.toBe(true)
     expect(registration.update).not.toHaveBeenCalled()
-    expect(worker.postMessage).toHaveBeenCalledWith({ type: 'SKIP_WAITING' })
+    expect(updateStage.value).toBe('ready')
+    expect(worker.postMessage).not.toHaveBeenCalled()
   })
 
-  it('检查服务无响应时结束等待，允许重试且不误报最新', async () => {
+  it('Worker 检查无响应时有效发布版本仍可确认最新，且不重复发起 Worker 请求', async () => {
     vi.useFakeTimers()
     vi.resetModules()
     const updateGate = deferred()
@@ -174,11 +175,12 @@ describe('应用更新检查延迟', () => {
     const { checkForAppUpdate, updateChecking, updateStage } = await import('../src/composables/appUpdate.js')
     const check = checkForAppUpdate()
     await vi.advanceTimersByTimeAsync(8000)
-    await expect(check).resolves.toBe(false)
+    await expect(check).resolves.toBe(true)
     expect(updateChecking.value).toBe(false)
-    expect(updateStage.value).toBe('warning')
+    expect(updateStage.value).toBe('latest')
     registration.update.mockResolvedValue(undefined)
     await expect(checkForAppUpdate()).resolves.toBe(true)
+    expect(registration.update).toHaveBeenCalledOnce()
     updateGate.resolve()
     await vi.advanceTimersByTimeAsync(0)
     expect(updateStage.value).toBe('latest')
@@ -223,7 +225,7 @@ describe('应用更新检查延迟', () => {
     await vi.advanceTimersByTimeAsync(0)
     await expect(check).resolves.toBe(true)
     expect(updateChecking.value).toBe(false)
-    expect(updateStage.value).toBe('manual-reload')
+    expect(updateStage.value).toBe('ready')
     expect(needsManualReload.value).toBe(true)
     expect(appUpdateProgress.state.active).toBe(false)
   })

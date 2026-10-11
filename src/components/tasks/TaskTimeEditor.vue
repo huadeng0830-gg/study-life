@@ -178,4 +178,11 @@ watch(() => props.modelValue.length, () => {
 .stage-remove { margin-left: auto; }
 .stage-completion { display: flex; align-items: center; flex-wrap: wrap; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--ink-faint); }
 @media (max-width: 520px) { .stage-boundary { grid-template-columns: minmax(0, 1fr); gap: 4px; } }
+@media (max-width: 900px), (pointer: coarse) and (max-height: 520px) {
+  .time-editor button, .stage-reminders summary, .stage-fields .stage-check { min-height: 44px; }
+  .time-editor button { min-width: 44px; }
+  .stage-reminders summary { display: flex; align-items: center; }
+  .time-heading, .stage-tools { flex-wrap: wrap; }
+  .stage-heading b { overflow-wrap: anywhere; }
+}
 </style>

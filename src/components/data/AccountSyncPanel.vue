@@ -7,6 +7,8 @@ import { accountSyncPreparing, accountSyncPreparationError } from '../../composa
 import { accountConflictKey, accountSyncConflicts, accountSyncError, accountSyncLastSyncedAt, accountSyncStatus, resolveAccountConflicts, syncAccountNow } from '../../composables/accountSyncState.js'
 import { announce, announceAlert } from '../../composables/liveRegion.js'
 import { localSafeMode } from '../../composables/localSafeMode.js'
+import '../../styles/shadcn.css'
+import { Badge } from '@/components/ui/badge'
 const props = defineProps({ sectionId: String, compact: Boolean })
 /** @type {import('vue').Ref<Record<string, string>>} */
 const choices = ref({})
@@ -96,7 +98,7 @@ function toggleAccountSync() {
           <span>{{ accountSyncViaAccount ? '开' : '关' }}</span>
         </button>
       </div>
-      <p class="account-sync-status">{{ statusText }}</p>
+      <Badge as="span" variant="outline" class="account-sync-status" :class="`is-${accountSyncStatus}`">{{ statusText }}</Badge>
       <small v-if="timeText">上次完成：{{ timeText }}</small>
       <p v-if="accountSyncError" class="account-sync-error">{{ accountSyncError }}</p>
       <p v-if="localSafeMode" class="account-sync-error">当前处于本机安全模式，同步已暂停。</p>
@@ -134,7 +136,16 @@ function toggleAccountSync() {
 .account-sync-switch b { display: block; color: var(--text); font-size: var(--fs-13); }
 .account-sync-switch span { display: block; margin-top: 2px; color: var(--muted); font-size: var(--fs-11); line-height: 1.45; }
 .account-sync-panel .btn { margin-top: 10px; }
-.account-sync-panel .account-sync-status { margin: 0 0 4px; color: var(--text); }
+.account-sync-panel .account-sync-status { display:inline-flex; width:fit-content; align-items:center; gap:7px; margin:0 0 4px; padding:5px 9px; border:1px solid var(--border); border-radius:var(--radius-pill); color:var(--text); background:var(--bg-tint); font-size:var(--fs-12); font-weight:var(--fw-650); }
+.account-sync-panel .account-sync-status::before { content:''; width:7px; height:7px; flex:0 0 7px; border-radius:var(--radius-circle); background:var(--muted); }
+.account-sync-panel .account-sync-status.is-synced::before { background:var(--success); }
+.account-sync-panel .account-sync-status.is-pending::before,
+.account-sync-panel .account-sync-status.is-offline::before,
+.account-sync-panel .account-sync-status.is-conflict::before { background:var(--warning); }
+.account-sync-panel .account-sync-status.is-error::before { background:var(--danger); }
+.account-sync-panel .account-sync-status.is-synced { border-color:color-mix(in srgb, var(--success) 24%, var(--border)); color:var(--success); background:color-mix(in srgb, var(--success) 7%, var(--card)); }
+.account-sync-panel .account-sync-status.is-conflict { border-color:color-mix(in srgb, var(--warning) 26%, var(--border)); color:var(--warning); background:color-mix(in srgb, var(--warning) 7%, var(--card)); }
+.account-sync-panel .account-sync-status.is-error { border-color:color-mix(in srgb, var(--danger) 24%, var(--border)); color:var(--danger); background:color-mix(in srgb, var(--danger) 7%, var(--card)); }
 .account-sync-panel .account-sync-error { margin: 8px 0 0; color: var(--danger); }
 .account-sync-panel .switch { min-width: 48px; min-height: 44px; }
 .account-conflicts { display: grid; gap: 12px; margin-top: 16px; }

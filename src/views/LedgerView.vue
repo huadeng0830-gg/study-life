@@ -48,6 +48,7 @@ import FxSettingsModal from './ledger-panels/FxSettingsModal.vue'
 import ReviewPanel from './ledger-panels/ReviewPanel.vue'
 // 新增的两个弹窗组件（从 LedgerView.vue 拆出）
 import QuickEntryModal from './ledger-panels/QuickEntryModal.vue'
+import TransactionImportDialog from './ledger-panels/TransactionImportDialog.vue'
 import TransactionDetailModal from './ledger-panels/TransactionDetailModal.vue'
 
 const domain = useDomainCommands()
@@ -64,12 +65,21 @@ const { onKeydown: onLedgerTabKeydown, tabIndexFor: ledgerTabIndex } = useTabKey
   },
 })
 const openSwipeId = ref('')
+const showImportDialog = ref(false)
 const toast = ref({ open: false, message: '', type: 'info', actionLabel: '', undoFn: null, viewFn: null, duration: 3200 })
 function closeSwipe() {
   openSwipeId.value = ''
 }
 function showToast(message, { type = 'info', actionLabel = '', undoFn = null, viewFn = null, duration = 3200 } = {}) {
   toast.value = { open: true, message, type, actionLabel, undoFn, viewFn, duration }
+}
+/** @param {{ source?: string, count?: number, duplicates?: number }} [result] */
+function onImportedTransactions({ source, count, duplicates } = {}) {
+  if (count > 0) {
+    showToast(`已从${source || '账单'}导入 ${count} 笔${duplicates ? `，跳过重复 ${duplicates} 笔` : ''}`)
+  } else if (duplicates > 0) {
+    showToast(`${source || '账单'}中的记录已全部导入过，本次没有新增`)
+  }
 }
 const ledgerToday = () => appToday.value
 
@@ -630,6 +640,7 @@ const {
         @open-fx-settings="showFxSettings = true"
         @open-budget-settings="showBudgetSettings = true"
         @open-quick="openQuick"
+        @open-import="showImportDialog = true"
         @open-category-manager="openCategoryManager"
         @use-frequent="useFrequent"
         @toggle-filters="showFilters = !showFilters"
@@ -786,6 +797,15 @@ const {
       @select-category="selectQuickCategory"
       :show-quick-record="showQuickRecord"
       @update:show-quick-record="showQuickRecord = $event"
+    />
+
+    <TransactionImportDialog
+      :open="showImportDialog"
+      :base-currency="baseCurrency"
+      :account-options="accountOptions"
+      :create-imported-transactions="domain.createImportedTransactions"
+      @close="showImportDialog = false"
+      @complete="onImportedTransactions"
     />
 
     <!-- ================= 记录详情（拆出到 TransactionDetailModal.vue）=============

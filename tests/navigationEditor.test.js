@@ -25,6 +25,41 @@ function setup(options = {}) {
 }
 
 describe('navigation editing sessions', () => {
+  it('follows stored updates in a new clean session after an old save releases its lock', async () => {
+    let finish
+    const { editor, user, mobile } = setup({ persist: () => new Promise(resolve => { finish = resolve }) })
+    editor.apply({ type: 'mobile:remove', id: 'today' })
+    const pending = editor.save()
+    user.value = { id: 'fictional-new-session' }
+    mobile.value = ['tasks']
+    finish()
+    expect(await pending).toBe(false)
+    expect(editor.drafts.value.mobile).toEqual(['tasks'])
+    expect(editor.hasChanges.value).toBe(false)
+    expect(editor.message.value).toBe('')
+  })
+  it('does not call persistence or report success for an unchanged layout', async () => {
+    const { editor, persist } = setup()
+    expect(await editor.save()).toBe(false)
+    expect(persist).not.toHaveBeenCalled()
+  })
+
+  it('keeps cancelled and disposed writes from publishing success into the editor', async () => {
+    let finish
+    const { editor } = setup({ persist: () => new Promise(resolve => { finish = resolve }) })
+    const controller = new AbortController()
+    editor.apply({ type: 'mobile:remove', id: 'today' })
+    const pending = editor.save({ signal: controller.signal })
+    controller.abort(); finish()
+    expect(await pending).toBe(false)
+    expect(editor.message.value).toBe('')
+    expect(editor.hasChanges.value).toBe(true)
+    const disposed = editor.save()
+    scopes.at(-1).stop(); finish()
+    expect(await disposed).toBe(false)
+    expect(editor.message.value).toBe('')
+    expect(editor.saving.value).toBe(false)
+  })
   it('keeps both devices isolated until one combined save, then publishes both layouts', async () => {
     const { editor, mobile, desktop, persist } = setup()
     editor.apply({ type: 'mobile:remove', id: 'today' })
@@ -37,7 +72,7 @@ describe('navigation editing sessions', () => {
     expect(persist).toHaveBeenCalledTimes(1)
     expect(persist.mock.calls[0][0]).toHaveProperty(MOBILE_NAVIGATION_KEY)
     expect(persist.mock.calls[0][0]).toHaveProperty(DESKTOP_NAVIGATION_KEY)
-    expect(mobile.value).toEqual(['schedule', 'events'])
+    expect(mobile.value).toEqual(['tasks', 'schedule'])
     expect(desktop.value[1].label).toBe('我的学习')
     expect(editor.hasChanges.value).toBe(false)
     expect(editor.canUndo.value).toBe(false)
@@ -52,7 +87,7 @@ describe('navigation editing sessions', () => {
     editor.apply({ type: 'desktop:rename-group', id: 'learning', label: '我的学习' }, { batch: 'rename-1' })
     editor.undo()
     expect(editor.drafts.value.desktop[1].label).toBe('学习')
-    expect(editor.drafts.value.mobile).toEqual(['schedule', 'events'])
+    expect(editor.drafts.value.mobile).toEqual(['tasks', 'schedule'])
     editor.redo()
     expect(editor.drafts.value.desktop[1].label).toBe('我的学习')
     editor.mode.value = 'mobile'
@@ -71,7 +106,7 @@ describe('navigation editing sessions', () => {
     expect(mobile.value).toEqual(DEFAULT_MOBILE_NAVIGATION)
     expect(editor.hasChanges.value).toBe(false)
     editor.undo()
-    expect(editor.drafts.value.mobile).toEqual(['schedule', 'events'])
+    expect(editor.drafts.value.mobile).toEqual(['tasks', 'schedule'])
     expect(editor.hasChanges.value).toBe(true)
   })
 
@@ -91,7 +126,7 @@ describe('navigation editing sessions', () => {
 
   it('rejects over-capacity edits and invalid names before either device can be saved', async () => {
     const { editor, persist } = setup()
-    expect(editor.apply({ type: 'mobile:add', id: 'tasks' })).toBe(false)
+    expect(editor.apply({ type: 'mobile:add', id: 'events' })).toBe(false)
     expect(editor.error.value).toContain('最多添加')
     expect(editor.canUndo.value).toBe(false)
     editor.apply({ type: 'mobile:remove', id: 'today' })
@@ -115,7 +150,7 @@ describe('navigation editing sessions', () => {
     editor.apply({ type: 'mobile:remove', id: 'today' })
     const saving = editor.save()
     expect(editor.saving.value).toBe(true)
-    expect(editor.apply({ type: 'mobile:add', id: 'tasks' })).toBe(false)
+    expect(editor.apply({ type: 'mobile:add', id: 'events' })).toBe(false)
     expect(await editor.save()).toBe(false)
     rejectSave(new Error('存储空间不足'))
     expect(await saving).toBe(false)
@@ -130,7 +165,7 @@ describe('navigation editing sessions', () => {
   it('does not display a conflict while its own save publishes the stored refs', async () => {
     let finishSave
     const { editor, mobile } = setup({ persist: () => {
-      mobile.value = ['schedule', 'events']
+      mobile.value = ['tasks', 'schedule']
       return new Promise((resolve) => { finishSave = resolve })
     } })
     editor.apply({ type: 'mobile:remove', id: 'today' })
@@ -147,7 +182,7 @@ describe('navigation editing sessions', () => {
     desktop.value = [{ id: 'custom', label: '新侧栏', items: ['tasks'] }]
     expect(editor.drafts.value.desktop).toEqual(desktop.value)
     mobile.value = ['projects']
-    expect(editor.drafts.value.mobile).toEqual(['schedule', 'events'])
+    expect(editor.drafts.value.mobile).toEqual(['tasks', 'schedule'])
     expect(editor.conflicts.value).toEqual(['mobile'])
     expect(await editor.save()).toBe(false)
     expect(persist).not.toHaveBeenCalled()
@@ -188,7 +223,7 @@ describe('navigation editing sessions', () => {
     editor.undo({ cancel: true })
     expect(editor.canRedo.value).toBe(true)
     editor.redo()
-    expect(editor.drafts.value.mobile).toEqual(['schedule', 'events'])
+    expect(editor.drafts.value.mobile).toEqual(['tasks', 'schedule'])
   })
 
   it('shows the actual stored layout when another update arrives during persistence', async () => {
@@ -223,7 +258,7 @@ describe('navigation editing sessions', () => {
     expect(editor.drafts.value.desktop).toEqual(desktop.value)
     expect(editor.dirty.value).toEqual({ mobile: failed, desktop: false })
     expect(editor.conflicts.value).toEqual([])
-    expect(editor.drafts.value.mobile).toEqual(['schedule', 'events'])
+    expect(editor.drafts.value.mobile).toEqual(['tasks', 'schedule'])
     if (failed) expect(editor.error.value).toBe('存储空间不足')
   })
 })

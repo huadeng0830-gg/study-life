@@ -1,7 +1,14 @@
 <script setup>
 import { computed, nextTick, ref, onActivated, onBeforeUnmount, onDeactivated, onMounted, watch } from 'vue'
+import { parseDate } from '@internationalized/date'
 import { useRoute, useRouter } from 'vue-router'
 import EmptyState from '../components/EmptyState.vue'
+import { Badge } from '../components/ui/badge'
+import { Button } from '../components/ui/button'
+import { Calendar } from '../components/ui/calendar'
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card'
+import { Input } from '../components/ui/input'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '../components/ui/tabs'
 import Modal from '../components/Modal.vue'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import VirtualList from '../components/VirtualList.vue'
@@ -18,9 +25,9 @@ import { useDomainCommands } from '../composables/domain/commands.js'
 import { isArchived, isTaskActionable, taskStatus } from '../composables/domain/state.js'
 import { menuPlacementFor } from '../composables/menuPlacement.js'
 import { createLongPress } from '../composables/longPress.js'
-import { addAppDays, appNow, appToday } from '../composables/timeContext.js'
+import { addAppDays, appCalendarDaysBetween, appNow, appToday } from '../composables/timeContext.js'
 import { defaultReminderMinutes } from '../composables/settingsPolicy.js'
-import { isValidPlanningDate, selectMilestoneWorkspace } from '../composables/planningViews.js'
+import { isValidPlanningDate, matchesMilestoneQuery, milestoneCalendarOccurrenceDate, selectMilestoneWorkspace } from '../composables/planningViews.js'
 import { useDebouncedRef } from '../composables/useDebouncedRef.js'
 import { countdownState } from '../composables/store/countdown.js'
 import { clearFocusFromRoute, focusElementWhenReady, readFocusQuery } from '../composables/focusNavigation.js'
@@ -37,6 +44,9 @@ const route = useRoute()
 const router = useRouter()
 const showPast = useStoredRef('sl_countdown_show_past', false)
 const showHistory = ref(false)
+const viewMode = useStoredRef('sl_countdown_view', 'list')
+const selectedCalendarDate = ref(parseDate(appToday.value))
+const calendarPlaceholder = ref(parseDate(appToday.value))
 const showForm = ref(false)
 /** @type {import('vue').Ref<string | null>} */
 const editingId = ref(null)
@@ -60,12 +70,26 @@ const focusedMilestoneId = ref('')
 const toast = ref({ open: false, message: '', type: 'info', actionLabel: '', duration: 3200 })
 let focusHandled = ''
 
+watch(appToday, (todayKey, previousTodayKey) => {
+  if (selectedCalendarDate.value.toString() === previousTodayKey) selectedCalendarDate.value = parseDate(todayKey)
+  if (calendarPlaceholder.value.toString() === previousTodayKey) calendarPlaceholder.value = parseDate(todayKey)
+})
+watch(calendarPlaceholder, (monthDate) => {
+  if (selectedCalendarDate.value.year === monthDate.year && selectedCalendarDate.value.month === monthDate.month) return
+  const lastDay = new Date(Date.UTC(monthDate.year, monthDate.month, 0)).getUTCDate()
+  selectedCalendarDate.value = monthDate.set({ day: Math.min(selectedCalendarDate.value.day, lastDay) })
+})
+watch(viewMode, (mode) => {
+  if (mode !== 'list' && mode !== 'calendar') viewMode.value = 'list'
+}, { immediate: true })
+
 function emptyForm() {
   return {
     name: '',
     date: '',
     time: '',
     location: '',
+    note: '',
     category: '学习',
     repeat: 'none',
     pinned: false,
@@ -103,6 +127,7 @@ function openEdit(item) {
     date: item.date,
     time: item.time ?? '',
     location: item.location ?? '',
+    note: item.note ?? '',
     category: item.category ?? '其他',
     repeat: item.repeat ?? 'none',
     pinned: Boolean(item.pinned),
@@ -138,6 +163,7 @@ function save() {
     date: form.value.date,
     time: form.value.time,
     location: form.value.location.trim(),
+    note: form.value.note.trim(),
     category: form.value.category,
     repeat: form.value.repeat,
     pinned: form.value.pinned,
@@ -188,6 +214,66 @@ const milestoneView = computed(() => selectMilestoneWorkspace(exams.value, {
 }))
 const summary = computed(() => milestoneView.value.summary)
 const hasFilters = computed(() => Boolean(query.value.trim() || categoryFilter.value !== 'all' || periodFilter.value !== 'all'))
+
+const calendarItems = computed(() => {
+  const month = calendarPlaceholder.value.month
+  const year = calendarPlaceholder.value.year
+  const rows = []
+
+  for (const item of exams.value) {
+    if (isArchived(item) !== showHistory.value) continue
+    if (categoryFilter.value !== 'all' && (item.category || '其他') !== categoryFilter.value) continue
+    if (!matchesMilestoneQuery(item, searchQuery.value, courseNamesById.value)) continue
+
+    const occurrenceDate = milestoneCalendarOccurrenceDate(item, year, month)
+    if (!occurrenceDate) continue
+    const countdown = countdownState({ ...item, date: occurrenceDate, repeat: 'none' }, appNow.value)
+    const days = appCalendarDaysBetween(appToday.value, occurrenceDate)
+
+    if (!showHistory.value) {
+      if (periodFilter.value === 'past') {
+        if (!countdown.isPast) continue
+      } else {
+        if (!showPast.value && countdown.isPast) continue
+        if (periodFilter.value === 'pinned' && (!item.pinned || countdown.isPast)) continue
+        if (periodFilter.value === 'week' && (countdown.isPast || days < 0 || days >= 7)) continue
+        if (periodFilter.value === 'month' && (countdown.isPast || days < 0 || days >= 30)) continue
+      }
+    }
+    rows.push({ ...item, occurrenceDate, countdown, days })
+  }
+
+  return rows.sort((left, right) => left.occurrenceDate.localeCompare(right.occurrenceDate)
+    || Number(Boolean(right.pinned)) - Number(Boolean(left.pinned))
+    || String(left.time || '').localeCompare(String(right.time || ''))
+    || String(left.name || '').localeCompare(String(right.name || ''), 'zh-CN'))
+})
+
+const calendarMarkedDates = computed(() => [...new Set(calendarItems.value.map((item) => item.occurrenceDate))])
+const selectedCalendarKey = computed(() => selectedCalendarDate.value.toString())
+const selectedCalendarItems = computed(() => calendarItems.value
+  .filter((item) => item.occurrenceDate === selectedCalendarKey.value)
+  .sort((left, right) => Number(Boolean(right.pinned)) - Number(Boolean(left.pinned))
+    || (sortKey.value === 'name' ? String(left.name || '').localeCompare(String(right.name || ''), 'zh-CN') : 0)
+    || (sortKey.value === 'created' ? String(right.createdAt || '').localeCompare(String(left.createdAt || '')) : 0)
+    || String(left.time || '').localeCompare(String(right.time || ''))))
+const calendarMonthLabel = computed(() => new Intl.DateTimeFormat('zh-CN', {
+  year: 'numeric', month: 'long', timeZone: 'UTC',
+}).format(new Date(`${calendarPlaceholder.value.year}-${pad2(calendarPlaceholder.value.month)}-01T00:00:00Z`)))
+const selectedCalendarLabel = computed(() => new Intl.DateTimeFormat('zh-CN', {
+  year: 'numeric', month: 'long', day: 'numeric', weekday: 'long', timeZone: 'UTC',
+}).format(new Date(`${selectedCalendarKey.value}T00:00:00Z`)))
+
+function openAddForSelectedCalendarDate() {
+  openAdd()
+  form.value.date = selectedCalendarKey.value
+}
+
+function goToCalendarToday() {
+  const todayDate = parseDate(appToday.value)
+  selectedCalendarDate.value = todayDate
+  calendarPlaceholder.value = todayDate
+}
 
 function resetFilters() {
   query.value = ''
@@ -519,7 +605,7 @@ function courseLabel(item) {
           <input v-model="showPast" type="checkbox" />
           显示已结束
         </label>
-        <button class="btn btn-primary" @click="openAdd">＋ 添加重要日期</button>
+        <Button v-if="!showHistory" class="btn btn-primary" @click="openAdd">＋ 添加重要日期</Button>
       </div>
     </header>
 
@@ -534,39 +620,46 @@ function courseLabel(item) {
 
     <section class="card date-filters" aria-label="重要日期筛选">
       <div class="filter-topline">
-        <div class="date-search"><label class="sr-only" for="dates-search">搜索重要日期</label><input id="dates-search" v-model="query" type="search" placeholder="搜索名称、课程、地点或备注" /><button v-if="query" type="button" class="link-btn" aria-label="清除重要日期搜索" @click="query = ''; searchQuery.flush('')">×</button></div>
+        <div class="date-search"><label class="sr-only" for="dates-search">搜索重要日期</label><Input id="dates-search" v-model="query" type="search" placeholder="搜索名称、课程、地点或备注" /><button v-if="query" type="button" class="link-btn" aria-label="清除重要日期搜索" @click="query = ''; searchQuery.flush('')">×</button></div>
         <label v-if="!showHistory" class="filter-select"><span>范围</span><select v-model="periodFilter"><option value="all">全部日期</option><option value="week">未来 7 天</option><option value="month">未来 30 天</option><option value="pinned">已置顶</option><option value="past">已结束</option></select></label>
         <label class="filter-select"><span>排序</span><select v-model="sortKey"><option value="date">最近日期优先</option><option value="name">按名称</option><option value="created">最近添加优先</option></select></label>
       </div>
       <div class="filter-bottomline">
         <div class="segmented category-filters" role="group" aria-label="重要日期类型"><button type="button" :class="{ on: categoryFilter === 'all' }" :aria-pressed="categoryFilter === 'all'" @click="categoryFilter = 'all'">全部类型</button><button v-for="category in CATEGORIES" :key="category" type="button" :class="{ on: categoryFilter === category }" :aria-pressed="categoryFilter === category" @click="categoryFilter = category">{{ category }}</button></div>
-        <div class="filter-result"><span role="status">{{ visibleItems.length }} 项{{ showHistory ? '归档日期' : '重要日期' }}</span><button v-if="hasFilters" type="button" class="link-btn" @click="resetFilters">清除筛选</button></div>
+        <div class="filter-result"><span role="status">{{ viewMode === 'calendar' ? calendarItems.length : visibleItems.length }} 项{{ showHistory ? '归档日期' : '重要日期' }}</span><button v-if="hasFilters" type="button" class="link-btn" @click="resetFilters">清除筛选</button></div>
       </div>
     </section>
     <p v-if="reviewMessage" class="review-message" role="status">✓ {{ reviewMessage }}</p>
     <p v-if="focusMessage" class="review-message" role="status">{{ focusMessage }}</p>
 
-    <EmptyState :level="2"
-      v-if="visibleItems.length === 0"
-      class="card empty-box"
-      icon="⏳"
-      :title="emptyInfo.title"
-      :description="emptyInfo.description"
-      :primary-label="emptyInfo.action"
-      @primary="emptyAction"
-    />
+    <Tabs v-model="viewMode" class="date-views">
+      <TabsList class="date-view-switch" aria-label="重要日期显示方式">
+        <TabsTrigger value="list">列表</TabsTrigger>
+        <TabsTrigger value="calendar">月历</TabsTrigger>
+      </TabsList>
 
-    <VirtualList
-      v-else
-      class="list"
-      :class="[isNarrow ? 'narrow' : 'grid', { 'no-anim': visibleItems.length > EXAM_LIST_THRESHOLD }]"
-      :items="visibleItems"
-      item-key="id"
-      :estimated-height="240"
-      :gap="14"
-      :threshold="isNarrow ? EXAM_LIST_THRESHOLD : Number.MAX_SAFE_INTEGER"
-      :reveal-key="focusedMilestoneId"
-    >
+      <TabsContent value="list" class="date-view-panel">
+        <EmptyState :level="2"
+          v-if="visibleItems.length === 0"
+          class="card empty-box"
+          icon="⏳"
+          :title="emptyInfo.title"
+          :description="emptyInfo.description"
+          :primary-label="emptyInfo.action"
+          @primary="emptyAction"
+        />
+
+        <VirtualList
+          v-else
+          class="list"
+          :class="[isNarrow ? 'narrow' : 'grid', { 'no-anim': visibleItems.length > EXAM_LIST_THRESHOLD }]"
+          :items="visibleItems"
+          item-key="id"
+          :estimated-height="240"
+          :gap="14"
+          :threshold="isNarrow ? EXAM_LIST_THRESHOLD : Number.MAX_SAFE_INTEGER"
+          :reveal-key="focusedMilestoneId"
+        >
       <template #default="{ item }">
         <div
           v-if="isMilestoneCard(item)"
@@ -583,10 +676,10 @@ function courseLabel(item) {
         <!-- 顶部：轻量标签 + 操作菜单 -->
         <div class="exam-top">
           <div class="meta-row">
-            <span class="category">{{ item.category ?? '其他' }}</span>
-            <span v-if="item.repeat === 'yearly'" class="repeat-tag">每年重复</span>
-            <span v-if="item.pinned" class="repeat-tag">置顶</span>
-            <span v-if="isArchived(item)" class="repeat-tag">已归档</span>
+            <Badge variant="secondary" class="category">{{ item.category ?? '其他' }}</Badge>
+            <Badge v-if="item.repeat === 'yearly'" variant="outline" class="repeat-tag">每年重复</Badge>
+            <Badge v-if="item.pinned" variant="outline" class="repeat-tag">置顶</Badge>
+            <Badge v-if="isArchived(item)" variant="outline" class="repeat-tag">已归档</Badge>
           </div>
           <button
             type="button"
@@ -615,6 +708,7 @@ function courseLabel(item) {
             <div class="date">{{ shortDateOf(item) }}</div>
             <div v-if="item.category === '学习' && item.course" class="loc" :title="item.course">{{ item.course }}</div>
             <div v-if="item.location" class="loc" :title="item.location">{{ item.location }}</div>
+            <div v-if="item.note" class="note" :title="item.note"><span>备注</span>{{ item.note }}</div>
           </div>
           <div class="count" :class="item.countdown.cls">
             <span v-if="item.countdown.relativeText && (item.countdown.isPast || Number(item.countdown.days) < 3)" class="countdown-human">{{ item.countdown.relativeText }}</span>
@@ -643,7 +737,67 @@ function courseLabel(item) {
         <TaskFocusLink v-if="item.activeReview && item.category === '学习' && !item.countdown.isPast && !isArchived(item)" :task="item.activeReview" />
       </div>
       </template>
-    </VirtualList>
+        </VirtualList>
+      </TabsContent>
+
+      <TabsContent value="calendar" class="date-view-panel">
+        <div class="date-calendar-layout">
+          <Card class="date-calendar-card">
+            <CardHeader class="date-calendar-heading">
+              <CardTitle>{{ calendarMonthLabel }}</CardTitle>
+              <CardDescription>点选日期查看安排；有标记的日期包含重要事项。</CardDescription>
+              <CardAction><Button variant="outline" size="sm" @click="goToCalendarToday">今天</Button></CardAction>
+            </CardHeader>
+            <CardContent class="date-calendar-content">
+              <Calendar
+                v-model="selectedCalendarDate"
+                v-model:placeholder="calendarPlaceholder"
+                :marked-dates="calendarMarkedDates"
+                locale="zh-CN"
+                :week-starts-on="1"
+                :fixed-weeks="true"
+                class="important-date-calendar"
+              />
+            </CardContent>
+          </Card>
+
+          <Card class="date-calendar-day-card">
+            <CardHeader class="date-calendar-heading">
+              <CardTitle>{{ selectedCalendarLabel }}</CardTitle>
+              <CardDescription>{{ selectedCalendarItems.length ? `${selectedCalendarItems.length} 项安排` : '这一天还没有安排' }}</CardDescription>
+            </CardHeader>
+            <CardContent class="date-calendar-day-content">
+              <div v-if="selectedCalendarItems.length" class="date-calendar-events">
+                <Button
+                  v-for="item in selectedCalendarItems"
+                  :key="`${item.id}-${item.occurrenceDate}`"
+                  variant="ghost"
+                  class="date-calendar-event"
+                  :aria-label="`编辑重要日期：${item.name}`"
+                  @click="openEdit(item)"
+                >
+                  <span class="date-calendar-event-time">{{ item.time || '全天' }}</span>
+                  <span class="date-calendar-event-copy">
+                    <span class="date-calendar-event-name">{{ item.name }}</span>
+                    <span class="date-calendar-event-meta">
+                      <Badge variant="secondary">{{ item.category || '其他' }}</Badge>
+                      <span v-if="item.repeat === 'yearly'">每年重复</span>
+                      <span v-if="item.location">{{ item.location }}</span>
+                      <span v-if="item.note">备注：{{ item.note }}</span>
+                    </span>
+                  </span>
+                  <span class="date-calendar-event-arrow" aria-hidden="true">›</span>
+                </Button>
+              </div>
+              <div v-else class="date-calendar-empty">
+                <p>{{ calendarItems.length ? '这一天没有符合当前筛选条件的日期。' : '这个月还没有符合条件的重要日期。' }}</p>
+                <Button v-if="!showHistory" variant="outline" size="sm" @click="openAddForSelectedCalendarDate">＋ 添加到这一天</Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </TabsContent>
+    </Tabs>
 
     <Modal v-if="showForm" :open="showForm" :title="editingId ? '编辑重要日期' : '添加重要日期'" @close="showForm = false">
       <form class="form" novalidate @submit.prevent="save">
@@ -681,8 +835,11 @@ function courseLabel(item) {
 
         <small v-if="form.repeat === 'yearly'" class="field-hint">按公历每年重复，卡片显示下一次日期；2 月 29 日在平年按 2 月最后一天显示。</small>
 
-        <label for="exams-location">备注或地点</label>
-        <textarea id="exams-location" v-model="form.location" rows="2" placeholder="选填，例如：教学楼 A101；携带证件和文具"></textarea>
+        <label for="exams-location">地点</label>
+        <Input id="exams-location" v-model="form.location" maxlength="200" placeholder="选填，例如：教学楼 A101" />
+
+        <label for="exams-note">备注</label>
+        <textarea id="exams-note" v-model="form.note" rows="3" maxlength="2000" placeholder="准备事项、提醒内容或其他补充"></textarea>
 
         <label for="dates-reminder">提前提醒（分钟）</label>
         <input id="dates-reminder" v-model="form.reminderMinutes" type="number" min="0" step="1" :placeholder="`默认提前 ${defaultReminder} 分钟`" :aria-invalid="errorField === 'reminder' || undefined" aria-describedby="dates-reminder-hint" @input="clearFormError('reminder')" />

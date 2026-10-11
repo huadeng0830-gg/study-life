@@ -45,9 +45,11 @@ export function decodeBillText(arrayBuffer) {
  * @returns {string[][] & { truncated?: boolean }}
  */
 export function parseCsv(text, { maxRows = Infinity } = {}) {
+  /** @type {string[][]} */
   const rows = []
   const numericLimit = Number(maxRows)
   const rowLimit = Number.isFinite(numericLimit) ? Math.max(0, Math.floor(numericLimit)) : Infinity
+  /** @type {string[] | null} */
   let row = rowLimit > 0 ? [] : null
   let field = ''
   let rowHasContent = false
@@ -63,7 +65,7 @@ export function parseCsv(text, { maxRows = Infinity } = {}) {
   const finishRow = () => {
     finishField()
     if (rowHasContent) {
-      if (rows.length < rowLimit) rows.push(row)
+      if (rows.length < rowLimit && row) rows.push(row)
       else truncated = true
     }
     rowHasContent = false
@@ -164,7 +166,16 @@ export function splitDateTime(value) {
   const [, y, m, d, hh = '', mm = ''] = matched
   const date = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`
   const time = hh !== '' ? `${String(hh).padStart(2, '0')}:${mm}` : ''
+  if (!isValidImportDate(date) || (time && !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(time))) return { date: '', time: '' }
   return { date, time }
+}
+
+function isValidImportDate(value) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value ?? ''))
+  if (!match) return false
+  const [, year, month, day] = match.map(Number)
+  const date = new Date(Date.UTC(year, month - 1, day))
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day
 }
 
 /** "¥18.50" / "18.50" / "1,234.56" -> 数字；解析不出来返回 null。 */
@@ -200,10 +211,11 @@ const NEUTRAL_WORDS = ['不计收支', '中性交易', '/', '其他']
  */
 const TRANSFER_WORDS = [
   '充值', '提现', '零钱通', '信用卡还款', '余额宝', '账户转出', '账户转入',
-  '转账', '还款', '理财', '基金', '保险', '花呗', '借出', '收款',
+  '转账', '还款', '理财', '基金', '保险', '花呗', '借出',
   '亲属卡', '自动还款', '信用卡', '借记卡', '零钱',
 ]
 
+/** @returns {'skip'|'income'|'expense'|'unknown'} */
 function classifyFlow(rawFlow, rawType = '') {
   const flow = String(rawFlow ?? '').trim()
   const type = String(rawType ?? '').trim()
@@ -220,6 +232,7 @@ function classifyFlow(rawFlow, rawType = '') {
 }
 
 // 关键词 -> 本项目已有分类。映射到既有 key，不新增分类体系。
+/** @type {Array<[string, string[]]>} */
 const CATEGORY_RULES = [
   ['food', ['餐饮', '外卖', '餐', '饭', '食堂', '小吃', '美食', '餐厅', '肯德基', '麦当劳', '星巴克']],
   ['drink', ['饮品', '咖啡', '奶茶', '茶饮', '饮料']],
@@ -263,8 +276,10 @@ export function classifyFlowProbe(flow, type) {
 }
 
 function fingerprint({ date, time, amount, direction, counterparty }) {
-  return [date, time, amount, direction, counterparty].join('|')
+  return JSON.stringify([date, time, amount, direction, counterparty])
 }
+
+/** @typedef {import('../types/domain').Transaction & { direction: 'expense'|'income'|'refund', sourceType: 'wechat-bill'|'alipay-bill', sourceId: string, cat: string, account: string, source: string }} ParsedImportTransaction */
 
 /**
  * 解析账单文件。
@@ -272,11 +287,14 @@ function fingerprint({ date, time, amount, direction, counterparty }) {
  * @param {ArrayBuffer} arrayBuffer
  * @param {{ existingKeys?: string[] }} options existingKeys 传入已有交易的
  *   sourceId 集合，用于跳过重复；不传则不做去重（首次导入）。
- * @returns {{ source: 'wechat'|'alipay'|'unknown', rows: object[], total: number, skipped: { transfers: number, unknown: number, invalid: number, duplicates: number }, headerRow: number }}
+ * @returns {Promise<{ source: 'wechat'|'alipay'|'unknown', rows: ParsedImportTransaction[], total: number, skipped: { transfers: number, unknown: number, invalid: number, duplicates: number }, headerRow: number, truncated: boolean }>}
  */
 export async function parseBillFile(arrayBuffer, { existingKeys = [] } = {}) {
   const text = decodeBillText(arrayBuffer)
-  const table = parseCsv(text)
+  // Keep room for the longest supported preamble and header, then cap actual
+  // statement details at 20,000 rows.
+  const table = parseCsv(text, { maxRows: 20_040 })
+  const parseTruncated = Boolean(table.truncated)
   const known = new Set(existingKeys)
 
   // 微信靠 `收/支` 列区分收支；支付宝没有这一列，靠 `类型` + `资金状态`。
@@ -285,20 +303,26 @@ export async function parseBillFile(arrayBuffer, { existingKeys = [] } = {}) {
   const alipayHeader = findHeader(table, [COLUMN_ALIASES.time, COLUMN_ALIASES.type, COLUMN_ALIASES.amount])
   const header = wechatHeader || alipayHeader
   if (!header) {
-    return { source: 'unknown', rows: [], total: 0, skipped: { transfers: 0, unknown: 0, invalid: 0, duplicates: 0 }, headerRow: -1 }
+    return { source: 'unknown', rows: [], total: 0, skipped: { transfers: 0, unknown: 0, invalid: 0, duplicates: 0 }, headerRow: -1, truncated: parseTruncated }
   }
   const source = wechatHeader ? 'wechat' : 'alipay'
+  const sourceType = source === 'wechat' ? 'wechat-bill' : 'alipay-bill'
+  const firstDetailRow = header.index + 1
+  const lastDetailRow = Math.min(table.length, firstDetailRow + 20_000)
+  const truncated = parseTruncated || table.length - firstDetailRow > 20_000
   const { map } = header
 
+  /** @type {ParsedImportTransaction[]} */
   const rows = []
   const skipped = { transfers: 0, unknown: 0, invalid: 0, duplicates: 0 }
   const seenInFile = new Set()
 
-  for (let index = header.index + 1; index < table.length; index += 1) {
+  for (let index = firstDetailRow; index < lastDetailRow; index += 1) {
     const raw = table[index]
     const { date, time } = splitDateTime(aliasedCell(raw, map, 'time'))
     const amount = parseAmount(aliasedCell(raw, map, 'amount'))
-    if (!date || amount === null) { skipped.invalid += 1; continue }
+    // 记账命令拒绝 0 元记录；在解析阶段先拦住，避免一条无效行阻断整批导入。
+    if (!date || amount === null || amount <= 0) { skipped.invalid += 1; continue }
 
     const rawFlow = aliasedCell(raw, map, 'flow')
     const rawType = aliasedCell(raw, map, 'type')
@@ -318,17 +342,18 @@ export async function parseBillFile(arrayBuffer, { existingKeys = [] } = {}) {
 
     // 已退款：优先映射成 refund（项目已有 direction: 'refund' 语义），
     // 而不是记成负数支出 —— 负数支出会让分类分布与月度合计算错。
-    const refunded = /已退款|已全额退款|退款成功/.test(status)
+    const refunded = /已退款|已全额退款|退款成功|退款/.test(`${rawFlow} ${rawType} ${status}`)
     const direction = refunded ? 'refund' : flow
 
-    const name = [goods, counterparty].filter(Boolean).join(' - ') || (direction === 'income' ? '收入' : '支出')
+    const name = [goods, counterparty].filter(Boolean).join(' - ')
+      || (direction === 'income' ? '收入' : direction === 'refund' ? '退款' : '支出')
     const category = guessCategory(counterparty, goods, rawType) || 'other'
 
-    // sourceId 优先用交易单号；缺失时用稳定指纹（同步 SHA-256 只是避免
-    // 指纹里出现分隔符歧义，不依赖它做唯一性保证）。
+    // sourceId 优先用交易单号；缺失时用 JSON 元组，避免字段里的分隔符造成碰撞。
     const sourceId = orderNo || fingerprint({ date, time, amount, direction, counterparty })
-    if (known.has(sourceId) || seenInFile.has(sourceId)) { skipped.duplicates += 1; continue }
-    seenInFile.add(sourceId)
+    const sourceKey = `${sourceType}:${sourceId}`
+    if (known.has(sourceId) || known.has(sourceKey) || seenInFile.has(sourceKey)) { skipped.duplicates += 1; continue }
+    seenInFile.add(sourceKey)
 
     rows.push({
       id: `import-${date.replace(/-/g, '')}-${sourceId.slice(0, 24)}`,
@@ -338,12 +363,13 @@ export async function parseBillFile(arrayBuffer, { existingKeys = [] } = {}) {
       time,
       direction,
       cat: category,
+      account: source === 'wechat' ? '微信支付' : '支付宝',
       note: [note, payMethod ? `支付方式：${payMethod}` : ''].filter(Boolean).join(' · ').slice(0, 200),
       source: source === 'wechat' ? '微信账单' : '支付宝账单',
-      sourceType: source === 'wechat' ? 'wechat-bill' : 'alipay-bill',
+      sourceType,
       sourceId,
     })
   }
 
-  return { source, rows, total: rows.length, skipped, headerRow: header.index }
+  return { source, rows, total: rows.length, skipped, headerRow: header.index, truncated }
 }

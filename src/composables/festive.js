@@ -31,29 +31,47 @@ function isLeapYear(year) {
 }
 
 /**
- * 月-日是否命中。
+ * 某个「月-日」在指定公历年的**实际日期**（'YYYY-MM-DD'）；月日不合法返回 ''。
  *
  * 直接比较字符串时，配置为 `02-29` 的生日/安装日在**非闰年永远不会命中**：
  * 2027 不匹配、2028 匹配时 elapsed 已经等于 2，于是"第一周年"整年不显示。
- * 这里让 `02-29` 在非闰年落到 `02-28`。
+ * 所以 `02-29` 在非闰年落到 `02-28`。
+ *
+ * 【这条规则必须只有这一处实现】除了引擎自己的命中判断，`anniversarySchedule.js`
+ * 的「下一次落点」倒计时也要用它。两边各写一份时的后果是：`02-29` 纪念日的面板
+ * 写"下一次 2027-02-28"、氛围却在 2027-03-01 才点亮 —— 两处单看都"对"，测试也
+ * 不会红，只有用户会发现倒计时和实际点亮对不上。
  */
+export function monthDayInYear(monthDay, year) {
+  const text = String(monthDay ?? '')
+  if (!isRealMonthDay(text)) return ''
+  const numericYear = Number(year)
+  if (!Number.isInteger(numericYear) || numericYear < 0 || numericYear > 9999) return ''
+  const [month, day] = text.split('-').map(Number)
+  const resolvedDay = text === '02-29' && !isLeapYear(numericYear) ? 28 : day
+  return String(numericYear).padStart(4, '0') + '-' + pad2(month) + '-' + pad2(resolvedDay)
+}
+
+/** 月-日是否命中（`configured` 与 `today` 都是 'MM-DD'）。 */
 function sameMonthDay(configured, today, year) {
-  if (configured === today) return true
-  return configured === '02-29' && today === '02-28' && !isLeapYear(year)
+  const resolved = monthDayInYear(configured, year)
+  return resolved !== '' && resolved.slice(5) === today
 }
 
 /** 正则只校验数字范围，`02-31`、`04-31` 都能通过 —— 用真实日期回读校验。 */
-function isRealMonthDay(value) {
-  if (!MONTH_DAY_RE.test(value)) return false
-  const [month, day] = value.split('-').map(Number)
+export function isRealMonthDay(value) {
+  const text = String(value ?? '')
+  if (!MONTH_DAY_RE.test(text)) return false
+  const [month, day] = text.split('-').map(Number)
   // 以 2000 年（闰年）为探针：02-29 合法，02-31 / 04-31 会被 Date 归一化掉。
   const probe = new Date(Date.UTC(2000, month - 1, day))
   return probe.getUTCMonth() === month - 1 && probe.getUTCDate() === day
 }
 
 function isRealFullDate(value) {
-  if (!FULL_DATE_RE.test(value)) return false
-  const [year, month, day] = value.split('-').map(Number)
+  const text = String(value ?? '')
+  if (!FULL_DATE_RE.test(text)) return false
+  const [year, month, day] = text.split('-').map(Number)
   const probe = new Date(Date.UTC(year, month - 1, day))
   return probe.getUTCFullYear() === year && probe.getUTCMonth() === month - 1 && probe.getUTCDate() === day
 }
@@ -67,9 +85,13 @@ export const DEFAULT_FESTIVE_CONFIG = Object.freeze({
 
 // 坏数据修复：丢弃不合法日期与空标签的纪念日，缺省字段用默认值补齐。
 export function normalizeFestiveConfig(config) {
-  const base = JSON.parse(JSON.stringify(DEFAULT_FESTIVE_CONFIG))
+  // DEFAULT_FESTIVE_CONFIG 是 Object.freeze 的常量，展开一份再把 anniversaries 换成
+  // 新数组就够了。原来那趟 JSON.parse(JSON.stringify()) 深拷贝没有任何作用（三个标量
+  // 字段不受冻结影响，anniversaries 每次都被整体替换），却让每次调用都要序列化再解析
+  // 一遍 —— festiveFor 每次求值都调它，首页与外壳各有一条 computed 会调两次。
+  const base = { ...DEFAULT_FESTIVE_CONFIG, anniversaries: [] }
   if (!config || typeof config !== 'object' || Array.isArray(config)) return base
-  const out = { ...base }
+  const out = base
   out.enabled = config.enabled !== false
   out.birthday = isRealMonthDay(String(config.birthday ?? '')) ? String(config.birthday) : ''
   out.installDate = isRealFullDate(String(config.installDate ?? '')) ? String(config.installDate) : ''

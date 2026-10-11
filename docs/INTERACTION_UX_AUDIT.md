@@ -1,6 +1,6 @@
 # 交互体验与操作反馈审计
 
-审计日期：2026-10-09。范围：Vue 应用的全部页面、弹窗、设置、共享控件及业务事件；启动恢复界面和系统通知入口另外列出。只修改本地源码，测试使用独立浏览器档案与虚构数据。
+初次审计日期：2026-10-09；2026-10-11 全局交互专项第 1 批补充。下方历史扫描与验收记录不等于本轮全面完成。当前逐入口清单见 [INTERACTION_LEDGER.md](optimization/INTERACTION_LEDGER.md)，本批范围与新鲜验证见 [STATUS.md 第 0D 节](optimization/STATUS.md)。只修改本地源码，测试使用独立浏览器档案与虚构数据。
 
 ## 审计结果与实施范围
 
@@ -44,7 +44,7 @@
 | [appearanceFeedback.js](../src/composables/appearanceFeedback.js) | 文字的真实持久化保存；保存期间新输入不会被旧结果覆盖。 |
 | [timePlanDraft.js](../src/composables/timePlanDraft.js) | 保留原校验与同步调用兼容接口，增加等待持久化的保存入口。 |
 | [asyncTask.js](../src/composables/asyncTask.js) | 继续复用 raceWithControls，仅补充准确的类型契约。 |
-| [style.css](../src/style.css)、[action-feedback.css](../src/styles/action-feedback.css)、[DESIGN_TOKENS.md](../DESIGN_TOKENS.md) | 复用 42px / 触屏 44px、高度/圆角/主题与统一时序令牌；原生控件的基础按压和真实忙碌状态。 |
+| [style.css](../src/style.css)、[action-feedback.css](../src/styles/action-feedback.css)、[DESIGN_TOKENS.md](../DESIGN_TOKENS.md) | 复用设计系统 40px / 触屏 44px、高度/圆角/主题与统一时序令牌；原生控件的基础按压和真实忙碌状态。 |
 
 状态流：idle → pressed → collapsing → loading → success/error → restoring → idle。高频、即时、长任务和 external 模式跳过不适用的阶段。即时交互继续使用原生按钮；不把所有 onClick 包成同一动画。
 
@@ -57,12 +57,12 @@
 | 时点 / 阶段 | 行为 |
 | --- | --- |
 | 点击当下 | 先设同步提交锁，再调用业务函数；轻按反馈立即发生，文字在 150ms 内淡出。 |
-| 0–120ms | pressed；不等待动画才发请求。 |
-| 120–420ms | 300ms ease-in-out 收缩，外部 button 宽高、中心与邻居占位不变。 |
-| 420ms 起 | 居中 spinner；实际操作没有完成就一直处理。 |
-| max(真实成功时间, 点击后 1200ms) | 确认真实成功后转 #16A34A，白色 SVG 对勾在 300ms 绘制。 |
+| 0–150ms | pressed，文字淡出；请求已经立即发出。 |
+| 150–470ms | 320ms ease-in-out 收缩，外部 button 宽高、中心与邻居占位不变。 |
+| 470ms 起（仍在请求中） | 居中 spinner；实际操作没有完成就一直处理。 |
+| Promise 真实成功当下 | 立即切换语义绿色成功底与有对比度的图标，SVG 对勾在 320ms 绘制。快速请求可跳过 spinner，形变在成功态继续；没有 1.2 秒最短等待。 |
 | 成功后 1000ms | 开始恢复。 |
-| 恢复 300ms | 展开并恢复原文案、色彩与形状；不重复调用业务。 |
+| 恢复 320ms | 展开并恢复原文案、色彩与形状；不重复调用业务。 |
 | 真实失败 | 立即给出实际错误；错误图标及语义红色，不显示对勾；短暂视觉恢复后错误文字和重试仍可用。 |
 
 高频操作只有实际等待才保持忙碌，无强制最短时间；真实成功的短状态保持 650ms，新一次保存可以覆盖旧视觉状态。没有修改的新作息点击“完成”直接关闭，不展示虚假的保存成功。动画 Promise 不延迟业务返回、正常跳转或弹窗关闭。

@@ -2,7 +2,7 @@
 
 本文件记录 `src/style.css` 与 `src/composables/theme.js` 里对外的设计令牌，以及新增令牌时必须遵守的规则。令牌是唯一事实来源，业务样式不应再写硬编码值。
 
-操作反馈使用 `ActionButton.vue` 与 `actionFeedback.js`。常规按钮最小高度 42px；触屏沿用 `--tap-min` 44px；圆角沿用 `--radius-8`。`--action-collapse: var(--dur-slow)` 当前为 320ms，用于收缩、展开与 SVG 对勾绘制，`--action-fade: 150ms` 用于文案淡出，`--action-ease: ease-in-out` 用于主体变形。`--action-success: #16a34a` 只用于完整成功动画的圆形底色，白色图标按非文本对比度验证；成功文字继续使用 `--success`。失败继续使用 `--danger`，图标统一 22px、2px 描边。JS 时序集中在 `ACTION_TIMING`，业务完成不等待视觉计时器。详见 `docs/INTERACTION_UX_AUDIT.md`。
+操作反馈使用 `ActionButton.vue` 与 `actionFeedback.js`。常规按钮最小高度沿用 `--control-height` 40px；触屏沿用 `--tap-min` 44px；圆角沿用 `--radius-8`。`--action-collapse: var(--dur-slow)` 当前为 320ms，用于收缩、展开与 SVG 对勾绘制，`--action-fade: 150ms` 用于文案淡出，`--action-ease: ease-in-out` 用于主体变形。`--action-success: var(--success)` 用于完整成功动画的圆形底色；图标前景为 `--card`，浅深主题均有非文本对比度，成功文字继续使用 `--success`。失败继续使用 `--danger` 与 `--on-danger`，图标统一 22px、2px 描边。JS 时序集中在 `ACTION_TIMING`，真实 Promise 完成即切成功，不设 1.2 秒演示等待；成功保持 1 秒后恢复。详见 `docs/INTERACTION_UX_AUDIT.md`。
 
 ## 1. 颜色令牌
 
@@ -155,6 +155,11 @@ CSS 定义在 `src/style.css` 的 `:root`，JS 镜像在 `src/composables/motion
 | 焦点 | `--focus-solid`、`--focus-halo`、`--focus-width` 2px、`--focus-offset` 2px |
 | 字体 | `--fs-page-title` 23px（`.page-title`）、`--fs-body` 14px（表单控件与 `.btn`）、`--fs-aux` 12.5px（`.page-desc`）；完整 `--fs-*` / `--fw-*` 刻度见 §3 |
 | 阴影 | `--shadow-sm`、`--shadow-md` |
+| shadcn 语义角色 | `--ui-background`、`--ui-foreground`、`--ui-card`、`--ui-primary`、`--ui-secondary`、`--ui-muted`、`--ui-accent`、`--ui-destructive`、`--ui-border`、`--ui-input`、`--ui-ring`、`--ui-radius`；均映射到上方既有主题令牌 |
+
+### shadcn-vue 语义映射
+
+项目使用 Vue 3 和现有 CSS 令牌。`--ui-*` 只提供 shadcn 风格的语义角色名，不另造一套颜色，也不引入与当前样式体系并行的 Tailwind 配置。共享 `.card`、表单控件和按钮变体通过这些角色消费颜色、边框、焦点环与圆角；新页面沿用卡片分区、状态徽标、字段标签和明确空状态的组合方式。修改 UI 语义角色时，应继续保证具名主题、深色和高对比度分支都从原令牌继承正确颜色。
 
 ### 为什么这里少了几个令牌（历史说明，阶段 4 后语义已变）
 

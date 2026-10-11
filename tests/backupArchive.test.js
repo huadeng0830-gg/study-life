@@ -33,7 +33,7 @@ describe('本机备份文件格式', () => {
 
     expect(snapshot).toMatchObject({
       app: 'study-life',
-      version: 12,
+      version: 13,
       schema: 'study-life.backup/v1',
       data: {
         courses,
@@ -74,6 +74,19 @@ describe('本机备份文件格式', () => {
     expect(parsed.providedFields).toContain('countdowns')
     expect(parsed.data.courses).toEqual([{ id: 'course-1' }])
     expect(snapshot).not.toHaveProperty('checksum')
+  })
+
+  it('备份来源账号与校验和覆盖的来源标记不一致时拒绝导入', async () => {
+    const snapshot = createBackupSnapshot(memoryStorage({
+      'study-life-data-owner': 'fictional-account-a',
+      sl_courses: '[]',
+      sl_exams: '[]',
+    }))
+    const archive = await completeBackupArchive(snapshot)
+
+    await expect(parseBackupArchive({ ...archive, ownerId: 'fictional-account-b' }))
+      .rejects.toThrow('来源账号信息不一致')
+    expect((await parseBackupArchive(archive)).ownerId).toBe('fictional-account-a')
   })
 
   it('数据在封存后被改动时拒绝导入', async () => {

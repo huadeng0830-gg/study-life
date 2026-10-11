@@ -2,13 +2,20 @@ import { TASK_PLAN_STATE, billStatus, isActiveEntity, isArchived, taskStatus } f
 import { countdownState } from '../store/countdown.js'
 import { policyDateKey, policyDateTime } from '../settingsPolicy.js'
 import { clock } from '../store/core.js'
-import { isTaskPlanToday, taskHasTime, taskStages, taskTimeSummary } from '../tasks/taskTimePlan.ts'
+import { isTaskPlanToday, taskHasTime, taskStages, taskTimeSummary } from '../tasks/taskTimePlan'
 
 function dateText(date) { return policyDateKey(date) }
 function dateTime(date, time = '23:59') { return policyDateTime(date, time) }
 function ref(type, item) { return `${type}:${item.id}` }
 
 const TASK_PRIORITY_ORDER = Object.freeze({ high: 0, normal: 1, low: 2 })
+
+/**
+ * 每种排序的基准方向。截止时间和优先级都从「最紧要的」开始，创建时间从「最新的」开始——
+ * 所以 `sortDir` 表达的是「相对基准翻不翻」，而不是一个无条件的升/降序。
+ * 与 `composables/tasks/taskViewQuery.js` 的 `SORT_DEFAULT_DIR` 是同一份约定，两边要一起改。
+ */
+const SORT_DEFAULT_DIR = Object.freeze({ due: 'asc', priority: 'asc', created: 'desc' })
 
 function taskDueAt(task, now) {
   return taskTimeSummary(task, now.getTime()).next?.at ?? Infinity
@@ -25,6 +32,7 @@ function planningStateFromStatus(task, status) {
 export function selectTaskView(tasks = [], {
   now = clock.value,
   sortKey = 'due',
+  sortDir = '',
   filter = String(TASK_PLAN_STATE.scheduled),
   showHistory = false,
 } = {}) {
@@ -51,21 +59,28 @@ export function selectTaskView(tasks = [], {
     return row
   })
 
+  // 方向只作用于「主排序键」。次级排序和「已完成沉底」都不跟着翻：
+  // 反向排序的目的是换一种看顺序，不是把语义也倒过来。
+  const baseDir = SORT_DEFAULT_DIR[sortKey] || 'asc'
+  const flipped = (sortDir === 'asc' || sortDir === 'desc') && sortDir !== baseDir
+  const direction = flipped ? -1 : 1
+
   rows.sort((left, right) => {
     const leftCompleted = left.status === 'completed'
     const rightCompleted = right.status === 'completed'
+    // 已完成永远沉底：否则「还剩什么」就得先往下翻一遍，翻转排序时尤其明显。
     if (leftCompleted !== rightCompleted) return leftCompleted ? 1 : -1
     if (sortKey === 'priority') {
-      const priorityDiff = left.priorityOrder - right.priorityOrder
+      const priorityDiff = (left.priorityOrder - right.priorityOrder) * direction
       if (priorityDiff) return priorityDiff
       return left.dueAt - right.dueAt
     }
     if (sortKey === 'created') {
-      const createdDiff = right.createdAt.localeCompare(left.createdAt)
+      const createdDiff = right.createdAt.localeCompare(left.createdAt) * direction
       if (createdDiff) return createdDiff
       return left.dueAt - right.dueAt
     }
-    const dueDiff = left.dueAt - right.dueAt
+    const dueDiff = (left.dueAt - right.dueAt) * direction
     if (dueDiff) return dueDiff
     return left.priorityOrder - right.priorityOrder
   })

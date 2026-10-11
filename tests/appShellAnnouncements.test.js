@@ -30,7 +30,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { templateOf, walkElements } from './helpers/vueTemplate.js'
 import { registerMirrorTeardown } from './helpers/mirrorTeardown.js'
-import { mountApp, settle } from './helpers/mountApp.js'
+import { gotoRoute, mountApp, settle } from './helpers/mountApp.js'
 
 // This suite verifies the shell's announcement routing, not IndexedDB behavior.
 // happy-dom has no IndexedDB; an unrelated delayed mirror retry could otherwise
@@ -98,6 +98,20 @@ describe('外壳级提示的播报', () => {
 
     expect(liveAlert.value).toBe('本机保存需要注意：配额已满')
     expect(document.querySelector('.global-persistence-alert')?.getAttribute('role')).toBeNull()
+  })
+
+  it('切换页面不会清除尚未解决的本机保存错误', async () => {
+    await mountShell()
+    persistenceState.value = {
+      status: 'error', key: 'sl_tasks', source: 'local', message: '待办的最新编辑尚未保存。', at: Date.now(),
+    }
+    await settle()
+    expect(document.querySelector('.global-persistence-alert')?.textContent).toContain('待办的最新编辑尚未保存。')
+
+    await gotoRoute(mounted, '/tasks')
+
+    expect(persistenceState.value).toMatchObject({ status: 'error', key: 'sl_tasks', source: 'local' })
+    expect(document.querySelector('.global-persistence-alert')?.textContent).toContain('待办的最新编辑尚未保存。')
   })
 
   it('本机保存恢复时以 polite 播报（成功提示不该打断用户）', async () => {

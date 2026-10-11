@@ -6,6 +6,7 @@ const DB_VERSION = 1
 const DB_OPEN_TIMEOUT = 800
 const DB_REQUEST_TIMEOUT = 1200
 const RESTORE_CHECKPOINT_KEY = '__restore_checkpoint_v1__'
+const RECOVERY_DRAFT_PREFIX = '__pending_recovery_draft_v1__:'
 
 function managedKey(key) {
   return typeof key === 'string' && key.startsWith('sl_') && key !== 'sl_transfer_undo'
@@ -17,10 +18,12 @@ const RETIRED_DATA_KEY_SET = new Set(RETIRED_DATA_KEYS)
 let vaultPromise = null
 const pendingMirrorWrites = new Map()
 const mirrorVersions = new Map()
+const recoveryDraftVersions = new Map()
 let mirrorSequence = 0
 let mirrorTimer = null
 let flushingMirrors = false
 let mirrorErrorHandler = null
+let mirrorSuccessHandler = null
 let mirrorTimingHandler = null
 // 连续失败次数：用于镜像写失败后的指数退避。没有它的话，「失败 → 重新排队
 // → 立即重排下一次 flush」会变成一个每 240ms 转一圈的死循环，在隐私模式等
@@ -54,6 +57,10 @@ function mirrorHostAlive() {
 
 export function setMirrorErrorHandler(handler) {
   mirrorErrorHandler = typeof handler === 'function' ? handler : null
+}
+
+export function setMirrorSuccessHandler(handler) {
+  mirrorSuccessHandler = typeof handler === 'function' ? handler : null
 }
 
 export function setMirrorTimingHandler(handler) {
@@ -210,6 +217,9 @@ function reportVaultTiming(onTiming, label, startedAt, details = {}) {
 export async function initializeDataVault({ onTiming } = {}) {
   bindMirrorLifecycleFlush()
   try {
+    let recoveryOwner = 'guest'
+    try { recoveryOwner = localStorage.getItem('study-life-data-owner') || 'guest' } catch { /* Leave owner-bound drafts untouched. */ }
+    const recoveredDrafts = await restorePendingRecoveryDrafts(recoveryOwner)
     // 请求持久化存储，防止 iOS 等系统在存储紧张时自动清除数据
     if (typeof navigator !== 'undefined' && navigator.storage?.persist) {
       void navigator.storage.persist().then((persisted) => {
@@ -288,7 +298,7 @@ export async function initializeDataVault({ onTiming } = {}) {
     // 空集合保护仍由后台 flush 里的 shouldMirrorValue 执行。
     deferStartupMirror(Object.keys(localStorage).filter(managedKey))
     reportVaultTiming(onTiming, 'vault.restore', phaseStartedAt, { restored: restored.length })
-    return restored
+    return [...new Set([...recoveredDrafts.restored, ...restored])]
   } catch {
     // IndexedDB 不可用时仍使用 localStorage，避免阻断应用启动。
     return []
@@ -349,6 +359,7 @@ async function flushMirrorWrites() {
       mirrorFailureCount += 1
     } else {
       mirrorFailureCount = 0
+      mirrorSuccessHandler?.(entries.filter(([key, value]) => mirrorVersions.get(key) === value.version).map(([key]) => key))
     }
     mirrorTimingHandler?.({
       keys: entries.map(([key]) => key),
@@ -496,7 +507,7 @@ export async function mirrorLocalValues(records) {
   const entries = Object.entries(records || {}).filter(([key, value]) =>
     managedKey(key) && typeof value === 'string'
   )
-  if (!entries.length) return
+  if (!entries.length) return true
   for (const [key] of entries) {
     pendingMirrorWrites.delete(key)
     mirrorVersions.set(key, ++mirrorSequence)
@@ -505,13 +516,88 @@ export async function mirrorLocalValues(records) {
     const db = await openVault()
     if (!db) {
       mirrorErrorHandler?.(new Error('IndexedDB 不可用，无法更新本地安全副本'), entries.map(([key]) => key))
-      return
+      return false
     }
     await writeRecords(db, entries)
+    return true
   } catch (error) {
     // 影子备份失败不影响本次恢复；localStorage 仍会保留已恢复的数据。
     mirrorErrorHandler?.(error, entries.map(([key]) => key))
+    return false
   }
+}
+
+function recoveryDraftKey(ownerId, key) {
+  return `${RECOVERY_DRAFT_PREFIX}${encodeURIComponent(ownerId || 'guest')}:${encodeURIComponent(key)}`
+}
+
+/** Persist a failed primary-store write in the device vault, isolated by owner. */
+export async function savePendingRecoveryDraft(ownerId, key, raw, token, previousRaw) {
+  if (!managedKey(key) || typeof raw !== 'string') return false
+  const storageKey = recoveryDraftKey(ownerId, key)
+  recoveryDraftVersions.set(storageKey, token)
+  try {
+    const db = await openVault()
+    if (!db || recoveryDraftVersions.get(storageKey) !== token) return false
+    await writeRecords(db, [[storageKey, { ownerId: ownerId || '', key, raw, token, previousRaw, previousKnown: previousRaw !== undefined }]])
+    return recoveryDraftVersions.get(storageKey) === token
+  } catch { return false }
+}
+
+/** Read an owner's isolated edit drafts without changing shared business keys. */
+export async function getPendingRecoveryDrafts(ownerId) {
+  if (!ownerId) return []
+  try {
+    const db = await openVault()
+    if (!db) throw new Error('本机安全副本暂不可用，无法确认账号的未保存草稿。')
+    const prefix = `${RECOVERY_DRAFT_PREFIX}${encodeURIComponent(ownerId)}:`
+    const keys = (await readRecordKeys(db)).filter((key) => typeof key === 'string' && key.startsWith(prefix))
+    const records = await readRecords(db, keys)
+    return [...records.values()].map((record) => record?.value).filter((draft) =>
+      draft?.ownerId === ownerId && draft?.key?.startsWith('sl_') && typeof draft.raw === 'string')
+  } catch (error) { throw new Error(`无法读取账号 ${ownerId} 的安全恢复草稿，已取消账号切换。`, { cause: error }) }
+}
+
+export async function clearPendingRecoveryDraft(ownerId, key, token) {
+  if (!managedKey(key)) return false
+  const storageKey = recoveryDraftKey(ownerId, key)
+  if (recoveryDraftVersions.has(storageKey) && recoveryDraftVersions.get(storageKey) !== token) return false
+  recoveryDraftVersions.set(storageKey, null)
+  try {
+    const db = await openVault()
+    if (!db) return false
+    const record = (await readRecords(db, [storageKey])).get(storageKey)
+    if (record?.value?.token === token) await deleteRecords(db, [storageKey])
+    return true
+  } catch { return false }
+}
+
+/** Restore only drafts whose owner matches and whose base has not changed. */
+export async function restorePendingRecoveryDrafts(ownerId, storage = globalThis.localStorage) {
+  const result = { restored: [], conflicts: [], failures: [] }
+  try {
+    const db = await openVault()
+    if (!db) return result
+    const prefix = `${RECOVERY_DRAFT_PREFIX}${encodeURIComponent(ownerId || 'guest')}:`
+    const keys = (await readRecordKeys(db)).filter((key) => typeof key === 'string' && key.startsWith(prefix))
+    const records = await readRecords(db, keys)
+    for (const [storageKey, record] of records) {
+      const draft = record?.value
+      if (!draft?.key?.startsWith('sl_') || typeof draft.raw !== 'string') continue
+      try {
+        const current = storage.getItem(draft.key)
+        const baseMatches = current === draft.raw || (draft.previousKnown && current === draft.previousRaw)
+          || (!draft.previousKnown && current === null)
+        if (!baseMatches) { result.conflicts.push(draft.key); continue }
+        if (current !== draft.raw) storage.setItem(draft.key, draft.raw)
+        await deleteRecords(db, [storageKey])
+        result.restored.push(draft.key)
+      } catch {
+        result.failures.push(draft.key)
+      }
+    }
+  } catch { /* Keep the durable draft for a later startup attempt. */ }
+  return result
 }
 
 /**
@@ -519,24 +605,29 @@ export async function mirrorLocalValues(records) {
  * It shares the vault database but does not use an `sl_*` key, so it is never
  * mirrored as business data or included in account synchronization.
  */
-export async function getRestoreCheckpoint() {
+function restoreCheckpointKey(ownerId) {
+  return ownerId ? `${RESTORE_CHECKPOINT_KEY}:${encodeURIComponent(ownerId)}` : RESTORE_CHECKPOINT_KEY
+}
+
+export async function getRestoreCheckpoint(ownerId) {
   const db = await openVault()
   if (!db) throw new Error('本地安全副本不可用，无法读取恢复点。')
-  const record = (await readRecords(db, [RESTORE_CHECKPOINT_KEY])).get(RESTORE_CHECKPOINT_KEY)
+  const key = restoreCheckpointKey(ownerId)
+  const record = (await readRecords(db, [key])).get(key)
   return record?.value ?? null
 }
 
-export async function saveRestoreCheckpoint(value) {
+export async function saveRestoreCheckpoint(value, ownerId) {
   const db = await openVault()
   if (!db) throw new Error('本地安全副本不可用，无法创建恢复点。')
-  await writeRecords(db, [[RESTORE_CHECKPOINT_KEY, value]])
+  await writeRecords(db, [[restoreCheckpointKey(ownerId), value]])
   return value
 }
 
-export async function clearRestoreCheckpoint() {
+export async function clearRestoreCheckpoint(ownerId) {
   const db = await openVault()
   if (!db) throw new Error('本地安全副本不可用，无法清除恢复点。')
-  await deleteRecords(db, [RESTORE_CHECKPOINT_KEY])
+  await deleteRecords(db, [restoreCheckpointKey(ownerId)])
 }
 
 // Retired product data must be removed from the mirror as well as from

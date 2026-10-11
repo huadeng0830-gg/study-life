@@ -13,6 +13,7 @@ files:
   - main.cjs
   - preload.cjs
   - updaterController.cjs
+  - verifiedNsisUpdater.cjs
   - cachePaths.cjs
   - package.json
 extraResources:

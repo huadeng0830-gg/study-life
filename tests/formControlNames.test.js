@@ -50,7 +50,8 @@ export function findUnnamedControls(template) {
     const end = template.indexOf('</label>', match.index)
     if (end !== -1) labelSpans.push([match.index, end])
   }
-  const forIds = new Set([...template.matchAll(/<label[^>]*\bfor="([^"]+)"/g)].map((m) => m[1]))
+  // FieldLabel forwards `for` to the installed shadcn Label primitive.
+  const forIds = new Set([...template.matchAll(/<(?:label|FieldLabel)\b[^>]*\bfor="([^"]+)"/g)].map((m) => m[1]))
 
   const found = []
   const control = /<(input|select|textarea)\b/g
@@ -80,6 +81,7 @@ export function findUnnamedControls(template) {
 describe('findUnnamedControls 的判定力（先证明它抓得住，再拿它扫全仓）', () => {
   const named = {
     'label 用 for 关联': '<div><label for="d">日期</label><input id="d" type="date" /></div>',
+    'shadcn FieldLabel 用 for 关联': '<Field><FieldLabel for="d">日期</FieldLabel><input id="d" type="date" /></Field>',
     '控件被 label 包裹': '<label>日期<input type="date" /></label>',
     '自身有 aria-label': '<input type="date" aria-label="日期" />',
     '动态 :aria-label': '<input type="date" :aria-label="label" />',
@@ -99,6 +101,7 @@ describe('findUnnamedControls 的判定力（先证明它抓得住，再拿它�
     'select 没有名称': '<select v-model="cat"><option>甲</option></select>',
     'textarea 只有 placeholder': '<textarea v-model="note" placeholder="随手写点什么" />',
     'for 指向了别的 id（悬空关联等于没有）': '<label for="other">日期</label><input id="d" type="date" />',
+    'FieldLabel 悬空关联仍然报警': '<FieldLabel for="other">日期</FieldLabel><input id="d" type="date" />',
     'label 区间在控件之后（不算包裹）': '<label>日期</label><div></div><input type="date" />',
   }
   for (const [name, html] of Object.entries(unnamed)) {
@@ -118,8 +121,17 @@ describe('findUnnamedControls 的判定力（先证明它抓得住，再拿它�
 
 const files = walkVueFiles(srcDir)
 const scanned = files.map((file) => ({ file, template: templateOf(readFileSync(file, 'utf8')) }))
+// These primitives intentionally leave accessible naming to their caller. Vue's default
+// single-root attr fallthrough puts attrs on Input's native <input>; NativeSelect forwards
+// $attrs explicitly. The caller-level controls remain in this scan.
+const CONTROL_PRIMITIVES = new Set([
+  'components/ui/input/Input.vue',
+  'components/ui/native-select/NativeSelect.vue',
+])
 const all = scanned.flatMap(({ file, template }) =>
-  findUnnamedControls(template).map((row) => ({ file: file.replace(srcDir, ''), row })),
+  CONTROL_PRIMITIVES.has(file.slice(srcDir.length + 1).replace(/\\/g, '/'))
+    ? []
+    : findUnnamedControls(template).map((row) => ({ file: file.replace(srcDir, ''), row })),
 )
 const total = scanned.reduce((sum, item) => sum + (item.template.match(/<(input|select|textarea)\b/g) || []).length, 0)
 
@@ -137,6 +149,14 @@ const RESIDUAL_FILES = new Set([])
 describe('表单控件必须有关联的可见标签或 aria-label', () => {
   it('守卫真的扫到了控件（正则写坏时会是 0，那是假绿）', () => {
     expect(total).toBeGreaterThan(200)
+  })
+
+  it('shadcn 输入原语把调用者的 accessible-name 属性传给原生控件', () => {
+    const input = readFileSync(resolve(srcDir, 'components/ui/input/Input.vue'), 'utf8')
+    const nativeSelect = readFileSync(resolve(srcDir, 'components/ui/native-select/NativeSelect.vue'), 'utf8')
+    expect(input).toMatch(/<input\b/)
+    expect(input).not.toMatch(/inheritAttrs:\s*false/)
+    expect(nativeSelect).toContain('v-bind="{ ...$attrs, ...delegatedProps }"')
   })
 
   it(`没有新增「无名控件」：当前命中数不得高于存量上限 ${BASELINE}`, () => {

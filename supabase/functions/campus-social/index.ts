@@ -519,24 +519,32 @@ async function createInvitation(userId: string, payload: any) {
 
 async function listInvitations(userId: string) {
   await dispatch(userId, 'expire_invitations')
-  const { data: ownRows, error: ownError } = await admin.from('social_invitation_participants')
-    .select('invitation_id,user_id,role,status,proposed_starts_at,proposed_ends_at,responded_at').eq('user_id', userId)
-  if (ownError) dbError(ownError)
-  const ids = [...new Set((ownRows || []).map((row: any) => row.invitation_id))]
-  if (!ids.length) return { invitations: [] }
-  const [{ data: invitations, error: inviteError }, { data: participants, error: participantsError }] = await Promise.all([
-    admin.from('social_invitations').select('id,created_by,activity_type,title,starts_at,ends_at,location,note,status,expires_at,revision,created_at,updated_at').in('id', ids).order('starts_at', { ascending: true }).limit(100),
-    admin.from('social_invitation_participants').select('invitation_id,user_id,role,status,proposed_starts_at,proposed_ends_at,responded_at').in('invitation_id', ids),
+  const selfProjection = 'self:social_invitation_participants!inner(user_id,role,status,proposed_starts_at,proposed_ends_at,responded_at)'
+  const invitationProjection = `id,created_by,activity_type,title,starts_at,ends_at,location,note,status,expires_at,revision,created_at,updated_at,${selfProjection}`
+  const ownInvitations = () => admin.from('social_invitations').select(invitationProjection).eq('self.user_id', userId)
+  const now = new Date().toISOString()
+  // Keep actionable and upcoming records ahead of an unbounded participant history.
+  // Closed records are still available for review, ordered by their most recent change.
+  const [openResult, upcomingResult, closedResult, pastConfirmedResult] = await Promise.all([
+    ownInvitations().in('status', ['pending', 'change_proposed']).order('starts_at', { ascending: true }).limit(100),
+    ownInvitations().eq('status', 'confirmed').gte('ends_at', now).order('starts_at', { ascending: true }).limit(100),
+    ownInvitations().in('status', ['declined', 'cancelled', 'expired']).order('updated_at', { ascending: false }).limit(50),
+    ownInvitations().eq('status', 'confirmed').lt('ends_at', now).order('ends_at', { ascending: false }).limit(50),
   ])
-  if (inviteError) dbError(inviteError)
+  for (const result of [openResult, upcomingResult, closedResult, pastConfirmedResult]) if (result.error) dbError(result.error)
+  const invitationRows = [...(openResult.data || []), ...(upcomingResult.data || []), ...(closedResult.data || []), ...(pastConfirmedResult.data || [])]
+  const ids = [...new Set(invitationRows.map((row: any) => row.id))]
+  if (!ids.length) return { invitations: [] }
+  const { data: participants, error: participantsError } = await admin.from('social_invitation_participants')
+    .select('invitation_id,user_id,role,status,proposed_starts_at,proposed_ends_at,responded_at').in('invitation_id', ids)
   if (participantsError) dbError(participantsError)
   const peerIds = (participants || []).filter((item: any) => item.user_id !== userId).map((item: any) => item.user_id)
   const profiles = await getProfiles(peerIds)
   const profileMap = new Map(profiles.map((item: any) => [item.user_id, friendView(item)]))
-  const ownMap = new Map((ownRows || []).map((item: any) => [item.invitation_id, item]))
+  const ownMap = new Map(invitationRows.map((item: any) => [item.id, Array.isArray(item.self) ? item.self[0] : item.self]))
   const peersByInvite = new Map((participants || []).filter((item: any) => item.user_id !== userId).map((item: any) => [item.invitation_id, item]))
   return {
-    invitations: (invitations || []).map((invite: any) => ({
+    invitations: invitationRows.map((invite: any) => ({
       ...invite,
       self: ownMap.get(invite.id),
       peer: { ...peersByInvite.get(invite.id), profile: profileMap.get(peersByInvite.get(invite.id)?.user_id) || null },

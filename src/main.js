@@ -108,7 +108,12 @@ function recoverStartupResources() {
   }
   if (startupRecoveryInFlight) return
   startupRecoveryInFlight = true
-  void recoverPwaStartupResources()
+  // Once mounted, report through the shared controller. A lazy chunk error must
+  // never erase caches or navigate independently of an active update.
+  const recovery = appBooted
+    ? import('./composables/appUpdate.js').then((module) => module.reportResourceLoadFailure())
+    : recoverPwaStartupResources()
+  void recovery
     .then((recovered) => {
       if (recovered) return
       // 界面已经在跑：这一次失败的是懒加载分包，路由与页面自己有局部失败界面。
@@ -116,6 +121,10 @@ function recoverStartupResources() {
       // （实测刷出 `Cannot read properties of null (reading 'insertBefore')`）。
       if (appBooted) return
       showStartupError()
+    })
+    .catch(() => {
+      console.warn('[startup] RESOURCE_RECOVERY_FAILED')
+      if (!appBooted) showStartupError()
     })
     .finally(() => { startupRecoveryInFlight = false })
 }

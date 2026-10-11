@@ -27,6 +27,26 @@ afterEach(() => {
 })
 
 describe('Modal 页面锁', () => {
+  it('完整手机编辑器仍由视觉视口、滚动锁与原有浮层栈管理', async () => {
+    const visible = ref(true)
+    Object.defineProperty(window, 'visualViewport', { configurable: true, value: {
+      height: 340, offsetTop: 24, addEventListener() {}, removeEventListener() {},
+    } })
+    mount(() => h(Modal, { open: visible.value, mobileFullScreen: true, title: '编辑待办' }, {
+      default: () => h('textarea', { 'aria-label': '备注' }), foot: () => h('button', '保存'),
+    }))
+    await nextTick()
+    const overlay = document.querySelector('.overlay.full-screen')
+    expect(overlay.style.height).toBe('340px')
+    expect(overlay.style.top).toBe('24px')
+    expect(overlay.querySelector('.modal.mobile-full-screen [aria-label="备注"]')).toBeTruthy()
+    expect(overlay.querySelector('.modal-foot button').textContent).toBe('保存')
+    expect(document.body.dataset.modalOpen).toBe('true')
+    visible.value = false
+    await nextTick()
+    expect(document.querySelector('.overlay.full-screen')).toBeNull()
+    expect(document.body.dataset.modalOpen).toBeUndefined()
+  })
   it('v-if 卸载弹窗时会解除页面锁', async () => {
     const visible = ref(true)
     mount(() => visible.value ? h(Modal, { open: true, title: '测试' }) : null)

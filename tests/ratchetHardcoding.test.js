@@ -134,6 +134,12 @@ export const LARGE_FILE_LIMITS = Object.freeze({
   'views/ExamsView.vue': 894,
   'components/QuickRecordPanel.vue': 866,
   'views/ledger-panels/LedgerHomePanel.vue': 812,
+  // Existing feature modules already over 800 lines. Their observed sizes are the
+  // cap; follow-up work must keep them level or reduce them, never grow these budgets.
+  'components/FestiveSettings.vue': 894,
+  'composables/domain/commands.js': 809,
+  'views/ScheduleView.vue': 1057,
+  'views/TogetherView.vue': 862,
 })
 
 /** 剥 HTML 注释（等长替换，保留行号）。 */

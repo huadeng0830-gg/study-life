@@ -1,3 +1,6 @@
+import { captureAccountDataIdentity } from './accountSyncIdentity.js'
+import { getPendingPersistenceKeys, readLatestStoredRaw } from './store/core.js'
+
 const BACKUP_SCHEMA = 'study-life.backup/v1'
 
 const BACKUP_FIELDS = Object.freeze({
@@ -23,24 +26,42 @@ const BACKUP_FIELDS = Object.freeze({
 
 function readLocalData() {
   const data = {}
-  for (let index = 0; index < localStorage.length; index += 1) {
-    const key = localStorage.key(index)
-    if (!key?.startsWith('sl_') || !BACKUP_FIELDS[key]) continue
-    const raw = localStorage.getItem(key)
-    try { data[BACKUP_FIELDS[key]] = raw === null ? null : JSON.parse(raw) } catch { data[BACKUP_FIELDS[key]] = raw }
+  const missingKeys = []
+  const unreadableKeys = []
+  for (const [key, field] of Object.entries(BACKUP_FIELDS)) {
+    try {
+      const raw = readLatestStoredRaw(key)
+      if (raw === null) continue
+      try { data[field] = JSON.parse(raw) }
+      catch { data[field] = raw; unreadableKeys.push(key) }
+    } catch {
+      missingKeys.push(key)
+    }
   }
-  return data
+  return { data, missingKeys, unreadableKeys }
 }
 
 export function createEmergencyBackup() {
-  const data = readLocalData()
+  const { data, missingKeys, unreadableKeys } = readLocalData()
   data.courses ??= []
   data.countdowns ??= []
+  const identity = captureAccountDataIdentity()
+  const unsavedKeys = getPendingPersistenceKeys()
+  const incompleteKeys = [...new Set([...missingKeys, ...unreadableKeys])]
+  data.__owner_id = identity.userId || identity.ownerId || ''
   return {
     app: 'study-life',
     version: 1,
     schema: BACKUP_SCHEMA,
     exportedAt: new Date().toISOString(),
+    ownerId: identity.userId || identity.ownerId || '',
+    completeness: {
+      complete: incompleteKeys.length === 0,
+      includesLatestEdits: true,
+      unsavedKeys,
+      missingKeys,
+      unreadableKeys,
+    },
     data,
   }
 }

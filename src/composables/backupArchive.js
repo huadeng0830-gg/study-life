@@ -1,6 +1,13 @@
 import { backupProvidedFields } from './backupRestore.js'
 import { normalizeFocusSettings } from './focusTimer.js'
+// 语言清单放在零依赖的模块里：备份解析要校验它，却不能为了校验就把存储层拉进来。
+import {
+  DEFAULT_NARRATIVE_LANGUAGE,
+  isNarrativeLanguage,
+} from './narrativeLanguages.js'
 import { normalizePerformanceMode } from './performanceMode.js'
+import { isWeeklyReflectionsShape, normalizeWeeklyReflections } from './weeklyReflections.js'
+import { getPendingPersistenceKeys, readLatestStoredRaw } from './store/snapshotAccess.js'
 
 export const BACKUP_STORAGE_KEYS = Object.freeze({
   courses: 'sl_courses',
@@ -46,6 +53,7 @@ export const BACKUP_STORAGE_KEYS = Object.freeze({
   activeFocus: 'sl_focus_active',
   taskCenterLog: 'sl_task_center_log',
   archivedQuickNotes: 'sl_archived_quick_notes',
+  weeklyReflections: 'sl_weekly_reflections',
 })
 
 /** 备份恢复预览分类；与账号同步协议解耦，范围由备份文件实际携带的字段决定。 */
@@ -59,6 +67,7 @@ export const BACKUP_MODULES = Object.freeze([
   { key: 'appearance', label: '外观与主题', keys: ['sl_theme', 'sl_custom_theme_color', 'sl_high_contrast', 'sl_auto_wallpaper_color', 'sl_wallpaper_accent', 'sl_appearance', 'sl_wallpaper_config', 'sl_performance_mode', 'sl_navigation_mobile', 'sl_navigation_desktop'] },
   { key: 'atmosphere', label: '氛围与心情', keys: ['sl_festive_config', 'sl_festive_birthday_full', 'sl_mood_log', 'sl_festive_lunar', 'sl_ui_language'] },
   { key: 'reminders', label: '提醒记录', keys: ['sl_reminder_log'] },
+  { key: 'reviews', label: '周回顾记录', keys: ['sl_weekly_reflections'] },
 ])
 
 const BACKUP_ARRAY_FIELDS = ['courses', 'countdowns', 'tasks', 'events', 'focusSessions', 'courseCheckins', 'courseTemplates', 'checklists', 'bills', 'expenses', 'ledgerCategories', 'ledgerTemplates', 'scheduleExceptions', 'festiveLunar', 'reminderLog', 'taskCenterLog', 'archivedQuickNotes']
@@ -73,6 +82,7 @@ function readStored(storage, key, fallback) {
       throw new Error('记录格式不正确')
     }
     if (key === BACKUP_STORAGE_KEYS.moodLog && (typeof value !== 'object' || Array.isArray(value))) throw new Error('记录格式不正确')
+    if (key === BACKUP_STORAGE_KEYS.weeklyReflections && !isWeeklyReflectionsShape(value)) throw new Error('记录格式不正确')
     return value
   } catch (error) {
     const label = BACKUP_MODULES.find((module) => module.keys.includes(key))?.label || '本机数据'
@@ -90,59 +100,72 @@ function browserStorage() {
 }
 
 /** 从本机持久化状态创建一份尚未附加可选壁纸与校验和的备份快照。 */
-export function createBackupSnapshot(storage = browserStorage()) {
+export function createBackupSnapshot(storage = browserStorage(), metadata = {}) {
   if (!storage || typeof storage.getItem !== 'function') throw new Error('本机存储不可用，无法安全读取数据。请检查浏览器的存储权限后重试。')
-  return {
+  const latestStorage = { getItem: (key) => readLatestStoredRaw(key, storage) }
+  let ownerId = metadata.ownerId
+  if (ownerId === undefined) {
+    try { ownerId = storage.getItem('study-life-data-owner') || '' } catch { ownerId = '' }
+  }
+  const unsavedKeys = metadata.unsavedKeys || getPendingPersistenceKeys()
+  const snapshot = {
     app: 'study-life',
-    version: 12,
+    version: 13,
     schema: 'study-life.backup/v1',
     exportedAt: new Date().toISOString(),
+    ownerId: ownerId || '',
+    completeness: { complete: true, includesLatestEdits: true, unsavedKeys: [...unsavedKeys], missingKeys: [] },
     data: {
-      courses: readStored(storage, BACKUP_STORAGE_KEYS.courses, []),
-      countdowns: readStored(storage, BACKUP_STORAGE_KEYS.countdowns, []),
-      tasks: readStored(storage, BACKUP_STORAGE_KEYS.tasks, []),
-      events: readStored(storage, BACKUP_STORAGE_KEYS.events, []),
-      quickRecordSettings: readStored(storage, BACKUP_STORAGE_KEYS.quickRecordSettings, { clipboardHint: true, recentTypes: [] }),
-      captureEnabled: readStored(storage, BACKUP_STORAGE_KEYS.captureEnabled, true),
-      focusSessions: readStored(storage, BACKUP_STORAGE_KEYS.focusSessions, []),
-      focusSettings: readStored(storage, BACKUP_STORAGE_KEYS.focusSettings, { quickTimes: [15, 25, 45, 60], lastUsedMinutes: 25, recentTemporaries: [], soundEnabled: true, vibrationEnabled: true, systemNotificationEnabled: true }),
-      courseCheckins: readStored(storage, BACKUP_STORAGE_KEYS.courseCheckins, []),
-      courseTemplates: readStored(storage, BACKUP_STORAGE_KEYS.courseTemplates, []),
-      checklists: readStored(storage, BACKUP_STORAGE_KEYS.checklists, []),
-      bills: readStored(storage, BACKUP_STORAGE_KEYS.bills, []),
-      expenses: readStored(storage, BACKUP_STORAGE_KEYS.expenses, []),
-      ledgerCategories: readStored(storage, BACKUP_STORAGE_KEYS.ledgerCategories, null),
-      ledgerFreq: readStored(storage, BACKUP_STORAGE_KEYS.ledgerFreq, null),
-      ledgerFx: readStored(storage, BACKUP_STORAGE_KEYS.ledgerFx, null),
-      ledgerBudget: readStored(storage, BACKUP_STORAGE_KEYS.ledgerBudget, null),
-      ledgerTemplates: readStored(storage, BACKUP_STORAGE_KEYS.ledgerTemplates, []),
-      timeConfig: readStored(storage, BACKUP_STORAGE_KEYS.timeConfig, null),
-      semester: readStored(storage, BACKUP_STORAGE_KEYS.semester, null),
-      scheduleExceptions: readStored(storage, BACKUP_STORAGE_KEYS.scheduleExceptions, []),
-      scheduleNote: readStored(storage, BACKUP_STORAGE_KEYS.scheduleNote, ''),
-      theme: readStored(storage, BACKUP_STORAGE_KEYS.theme, 'blue'),
-      customThemeColor: readStored(storage, BACKUP_STORAGE_KEYS.customThemeColor, '#456fe8'),
-      highContrast: readStored(storage, BACKUP_STORAGE_KEYS.highContrast, false),
-      countdownShowPast: readStored(storage, BACKUP_STORAGE_KEYS.countdownShowPast, false),
-      ocrVocabulary: readStored(storage, BACKUP_STORAGE_KEYS.ocrVocabulary, { courses: [], teachers: [], rooms: [], campuses: [] }),
-      appearance: readStored(storage, BACKUP_STORAGE_KEYS.appearance, null),
-      mobileNavigation: readStored(storage, BACKUP_STORAGE_KEYS.mobileNavigation, null),
-      desktopNavigation: readStored(storage, BACKUP_STORAGE_KEYS.desktopNavigation, null),
-      wallpaperConfig: readStored(storage, BACKUP_STORAGE_KEYS.wallpaperConfig, null),
-      autoWallpaperColor: readStored(storage, BACKUP_STORAGE_KEYS.autoWallpaperColor, false),
-      wallpaperAccent: readStored(storage, BACKUP_STORAGE_KEYS.wallpaperAccent, '#456fe8'),
-      performanceMode: readStored(storage, BACKUP_STORAGE_KEYS.performanceMode, 'auto'),
-      festiveConfig: readStored(storage, BACKUP_STORAGE_KEYS.festiveConfig, { enabled: true, birthday: '', installDate: '', anniversaries: [] }),
-      festiveBirthdayFull: readStored(storage, BACKUP_STORAGE_KEYS.festiveBirthdayFull, ''),
-      festiveLunar: readStored(storage, BACKUP_STORAGE_KEYS.festiveLunar, []),
-      uiLanguage: readStored(storage, BACKUP_STORAGE_KEYS.uiLanguage, 'zh'),
-      moodLog: readStored(storage, BACKUP_STORAGE_KEYS.moodLog, {}),
-      reminderLog: readStored(storage, BACKUP_STORAGE_KEYS.reminderLog, []),
-      activeFocus: readStored(storage, BACKUP_STORAGE_KEYS.activeFocus, null),
-      taskCenterLog: readStored(storage, BACKUP_STORAGE_KEYS.taskCenterLog, []),
-      archivedQuickNotes: readStored(storage, BACKUP_STORAGE_KEYS.archivedQuickNotes, []),
+      courses: readStored(latestStorage, BACKUP_STORAGE_KEYS.courses, []),
+      countdowns: readStored(latestStorage, BACKUP_STORAGE_KEYS.countdowns, []),
+      tasks: readStored(latestStorage, BACKUP_STORAGE_KEYS.tasks, []),
+      events: readStored(latestStorage, BACKUP_STORAGE_KEYS.events, []),
+      quickRecordSettings: readStored(latestStorage, BACKUP_STORAGE_KEYS.quickRecordSettings, { clipboardHint: true, recentTypes: [] }),
+      captureEnabled: readStored(latestStorage, BACKUP_STORAGE_KEYS.captureEnabled, true),
+      focusSessions: readStored(latestStorage, BACKUP_STORAGE_KEYS.focusSessions, []),
+      focusSettings: readStored(latestStorage, BACKUP_STORAGE_KEYS.focusSettings, { quickTimes: [15, 25, 45, 60], lastUsedMinutes: 25, recentTemporaries: [], soundEnabled: true, vibrationEnabled: true, systemNotificationEnabled: true }),
+      courseCheckins: readStored(latestStorage, BACKUP_STORAGE_KEYS.courseCheckins, []),
+      courseTemplates: readStored(latestStorage, BACKUP_STORAGE_KEYS.courseTemplates, []),
+      checklists: readStored(latestStorage, BACKUP_STORAGE_KEYS.checklists, []),
+      bills: readStored(latestStorage, BACKUP_STORAGE_KEYS.bills, []),
+      expenses: readStored(latestStorage, BACKUP_STORAGE_KEYS.expenses, []),
+      ledgerCategories: readStored(latestStorage, BACKUP_STORAGE_KEYS.ledgerCategories, null),
+      ledgerFreq: readStored(latestStorage, BACKUP_STORAGE_KEYS.ledgerFreq, null),
+      ledgerFx: readStored(latestStorage, BACKUP_STORAGE_KEYS.ledgerFx, null),
+      ledgerBudget: readStored(latestStorage, BACKUP_STORAGE_KEYS.ledgerBudget, null),
+      ledgerTemplates: readStored(latestStorage, BACKUP_STORAGE_KEYS.ledgerTemplates, []),
+      timeConfig: readStored(latestStorage, BACKUP_STORAGE_KEYS.timeConfig, null),
+      semester: readStored(latestStorage, BACKUP_STORAGE_KEYS.semester, null),
+      scheduleExceptions: readStored(latestStorage, BACKUP_STORAGE_KEYS.scheduleExceptions, []),
+      scheduleNote: readStored(latestStorage, BACKUP_STORAGE_KEYS.scheduleNote, ''),
+      theme: readStored(latestStorage, BACKUP_STORAGE_KEYS.theme, 'blue'),
+      customThemeColor: readStored(latestStorage, BACKUP_STORAGE_KEYS.customThemeColor, '#456fe8'),
+      highContrast: readStored(latestStorage, BACKUP_STORAGE_KEYS.highContrast, false),
+      countdownShowPast: readStored(latestStorage, BACKUP_STORAGE_KEYS.countdownShowPast, false),
+      ocrVocabulary: readStored(latestStorage, BACKUP_STORAGE_KEYS.ocrVocabulary, { courses: [], teachers: [], rooms: [], campuses: [] }),
+      appearance: readStored(latestStorage, BACKUP_STORAGE_KEYS.appearance, null),
+      mobileNavigation: readStored(latestStorage, BACKUP_STORAGE_KEYS.mobileNavigation, null),
+      desktopNavigation: readStored(latestStorage, BACKUP_STORAGE_KEYS.desktopNavigation, null),
+      wallpaperConfig: readStored(latestStorage, BACKUP_STORAGE_KEYS.wallpaperConfig, null),
+      autoWallpaperColor: readStored(latestStorage, BACKUP_STORAGE_KEYS.autoWallpaperColor, false),
+      wallpaperAccent: readStored(latestStorage, BACKUP_STORAGE_KEYS.wallpaperAccent, '#456fe8'),
+      performanceMode: readStored(latestStorage, BACKUP_STORAGE_KEYS.performanceMode, 'auto'),
+      festiveConfig: readStored(latestStorage, BACKUP_STORAGE_KEYS.festiveConfig, { enabled: true, birthday: '', installDate: '', anniversaries: [] }),
+      festiveBirthdayFull: readStored(latestStorage, BACKUP_STORAGE_KEYS.festiveBirthdayFull, ''),
+      festiveLunar: readStored(latestStorage, BACKUP_STORAGE_KEYS.festiveLunar, []),
+      uiLanguage: readStored(latestStorage, BACKUP_STORAGE_KEYS.uiLanguage, 'zh'),
+      moodLog: readStored(latestStorage, BACKUP_STORAGE_KEYS.moodLog, {}),
+      reminderLog: readStored(latestStorage, BACKUP_STORAGE_KEYS.reminderLog, []),
+      activeFocus: readStored(latestStorage, BACKUP_STORAGE_KEYS.activeFocus, null),
+      taskCenterLog: readStored(latestStorage, BACKUP_STORAGE_KEYS.taskCenterLog, []),
+      archivedQuickNotes: readStored(latestStorage, BACKUP_STORAGE_KEYS.archivedQuickNotes, []),
+      weeklyReflections: readStored(latestStorage, BACKUP_STORAGE_KEYS.weeklyReflections, {}),
     },
   }
+  // Keep the source claim inside the checksum-covered payload as well as in
+  // its metadata. A mismatched metadata edit must fail closed during import.
+  snapshot.data.__owner_id = ownerId || ''
+  return snapshot
 }
 
 // 校验和固定基于紧凑 JSON：历史备份都是这么算的，改成缩进格式会让旧备份校验失败。
@@ -187,7 +210,7 @@ function sanitizeWallpaperImages(value) {
 
 /** 校验并归一化导入内容，同时保留原文件实际携带的字段供恢复流程使用。 */
 export async function parseBackupArchive(value) {
-  if (!value || value.app !== 'study-life' || ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12].includes(value.version) || !value.data) {
+  if (!value || value.app !== 'study-life' || ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13].includes(value.version) || !value.data) {
     throw new Error('这不是有效的控制台备份文件')
   }
   if (value.version >= 7 && value.schema !== 'study-life.backup/v1') {
@@ -202,6 +225,9 @@ export async function parseBackupArchive(value) {
     throw new Error('备份文件校验失败，文件可能已损坏或被修改')
   }
   const data = value.data
+  if (value.version >= 13 && (typeof data.__owner_id !== 'string' || value.ownerId !== data.__owner_id)) {
+    throw new Error('备份来源账号信息不一致，已停止恢复。请从原设备重新导出。')
+  }
   if (!Array.isArray(data.courses) || !Array.isArray(data.countdowns)) {
     throw new Error('备份文件中的课程或重要日期数据不完整')
   }
@@ -213,8 +239,12 @@ export async function parseBackupArchive(value) {
   if (data.moodLog !== null && data.moodLog !== undefined && (typeof data.moodLog !== 'object' || Array.isArray(data.moodLog))) {
     throw new Error('备份中的心情记录格式不正确，恢复已停止。')
   }
+  if (data.weeklyReflections !== null && data.weeklyReflections !== undefined && !isWeeklyReflectionsShape(data.weeklyReflections)) {
+    throw new Error('备份中的周回顾记录格式不正确，恢复已停止。')
+  }
   return {
     ...value,
+    ownerId: typeof value.ownerId === 'string' ? value.ownerId : (typeof data.__owner_id === 'string' ? data.__owner_id : ''),
     providedFields: [...backupProvidedFields(data)].filter((field) => data[field] !== null && data[field] !== undefined),
     data: {
       courses: data.courses,
@@ -252,12 +282,13 @@ export async function parseBackupArchive(value) {
       festiveConfig: data.festiveConfig && typeof data.festiveConfig === 'object' ? data.festiveConfig : { enabled: true, birthday: '', installDate: '', anniversaries: [] },
       festiveBirthdayFull: typeof data.festiveBirthdayFull === 'string' ? data.festiveBirthdayFull : '',
       festiveLunar: Array.isArray(data.festiveLunar) ? data.festiveLunar : [],
-      uiLanguage: typeof data.uiLanguage === 'string' ? data.uiLanguage : 'zh',
+      uiLanguage: isNarrativeLanguage(data.uiLanguage) ? data.uiLanguage : DEFAULT_NARRATIVE_LANGUAGE,
       moodLog: data.moodLog && typeof data.moodLog === 'object' ? data.moodLog : {},
       reminderLog: Array.isArray(data.reminderLog) ? data.reminderLog : [],
       activeFocus: data.activeFocus && typeof data.activeFocus === 'object' ? data.activeFocus : null,
       taskCenterLog: Array.isArray(data.taskCenterLog) ? data.taskCenterLog : [],
       archivedQuickNotes: Array.isArray(data.archivedQuickNotes) ? data.archivedQuickNotes : [],
+      weeklyReflections: normalizeWeeklyReflections(data.weeklyReflections),
       __wallpaper_images: sanitizeWallpaperImages(data.__wallpaper_images),
     },
   }

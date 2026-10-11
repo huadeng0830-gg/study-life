@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { registerMirrorTeardown } from './helpers/mirrorTeardown.js'
+import { chooseTaskAction } from './helpers/taskRowActions.js'
 
 registerMirrorTeardown()
 let app, host, router, nextTick, domain
@@ -14,6 +15,13 @@ function buttonWithin(element, text) {
 function inputValue(element, value) {
   element.value = value
   element.dispatchEvent(new Event(element.tagName === 'SELECT' ? 'change' : 'input', { bubbles: true }))
+}
+
+async function clickElement(element) {
+  // happy-dom 的动画帧可能立即执行；跨过一次帧时长，避免 Vue 将同毫秒点击当作旧事件。
+  await new Promise((resolve) => window.setTimeout(resolve, 20))
+  element.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+  await nextTick()
 }
 
 function visibleIds() {
@@ -80,7 +88,7 @@ describe('重要日期与待办交互', () => {
     buttonWithin(host.querySelector('.task-overview'), '需要确认').click()
     await nextTick()
     expect(visibleIds()).toEqual(['overdue'])
-    buttonWithin(host.querySelector('[data-focus-id="overdue"]'), '改期').click()
+    await chooseTaskAction(host.querySelector('[data-focus-id="overdue"]'), '改期', clickElement)
     await nextTick()
     const form = document.querySelector('.reschedule-form')
     buttonWithin(form, '一周后').click()

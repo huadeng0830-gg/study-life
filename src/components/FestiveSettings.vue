@@ -1,13 +1,19 @@
 <script setup>
-import { ref, watch } from 'vue'
+import { ref, watch, computed } from 'vue'
 import Modal from './Modal.vue'
+import { Badge } from './ui/badge'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card'
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from './ui/empty'
+import { Field, FieldDescription, FieldGroup } from './ui/field'
 import { festiveConfig } from '../composables/atmosphereStore.js'
-import { builtInFestivalTable, normalizeFestiveConfig } from '../composables/festive.js'
+import { builtInFestivalTable, isRealMonthDay, normalizeFestiveConfig } from '../composables/festive.js'
 import {
   LUNAR_ANNIVERSARY_HINT,
   LUNAR_DAY_OPTIONS,
   LUNAR_MONTH_OPTIONS,
+  toDateKey,
 } from '../composables/lunarAnniversaries.js'
+import { ANNIVERSARY_SOURCE, upcomingAnniversaries } from '../composables/anniversarySchedule.js'
 import { useLunarAnniversaryEditor } from '../composables/lunarAnniversaryEditor.js'
 import { NARRATIVE_LANGUAGES, narrativeLang } from '../composables/narrative.js'
 import { useStoredRef } from '../composables/store/index.js'
@@ -22,6 +28,12 @@ const tableLoading = ref(false)
 const tableError = ref('')
 
 let anniversarySeq = 0
+const UPCOMING_SOURCE_LABELS = Object.freeze({
+  [ANNIVERSARY_SOURCE.BIRTHDAY]: '生日',
+  [ANNIVERSARY_SOURCE.ANNIVERSARY]: '公历纪念日',
+  [ANNIVERSARY_SOURCE.INSTALL]: '使用周年',
+  [ANNIVERSARY_SOURCE.LUNAR]: '农历纪念日',
+})
 
 // 生日祝福只按月-日触发（sl_festive_config.birthday 保持 MM-DD 语义不变）。
 // 「我的生日」date 输入框需要完整年月日，故用独立 key 记住出生年份，
@@ -30,7 +42,7 @@ const BIRTHDAY_FULL_KEY = 'sl_festive_birthday_full'
 const birthdayFull = useStoredRef(BIRTHDAY_FULL_KEY, '')
 function readBirthdayFull() {
   const value = String(birthdayFull.value ?? '')
-  return /^\d{4}-\d{2}-\d{2}$/.test(value) ? value : ''
+  return toDateKey(value) === value ? value : ''
 }
 function writeBirthdayFull(value) {
   birthdayFull.value = value || ''
@@ -52,6 +64,8 @@ function toRows(list) {
     id: `anni-${Date.now()}-${anniversarySeq++}`,
     date: String(item?.date ?? ''),
     label: String(item?.label ?? ''),
+    savedDate: String(item?.date ?? ''),
+    savedLabel: String(item?.label ?? '').trim(),
   }))
 }
 
@@ -78,18 +92,31 @@ async function refreshTable() {
 }
 
 function setBirthday(value) {
-  birthdayInput.value = value
-  writeBirthdayFull(value)
+  const dateKey = toDateKey(value)
+  birthdayInput.value = dateKey
+  writeBirthdayFull(dateKey)
   commit()
 }
 
 // 每次修改立即归一化后写回 festiveConfig；useStoredRef 会自动持久化。
 function commit() {
+  const savedAnniversaries = anniversaries.value.map((row) => {
+    const label = String(row.label ?? '').trim()
+    if (isRealMonthDay(row.date) && label) {
+      row.savedDate = row.date
+      row.savedLabel = label
+      return { date: row.date, label }
+    }
+    if (row.savedDate && row.savedLabel) {
+      return { date: row.savedDate, label: row.savedLabel }
+    }
+    return { date: row.date, label: row.label }
+  })
   festiveConfig.value = normalizeFestiveConfig({
     enabled: enabled.value,
     birthday: birthdayInput.value ? birthdayInput.value.slice(5) : '',
     installDate: installDateInput.value,
-    anniversaries: anniversaries.value.map((row) => ({ date: row.date, label: row.label })),
+    anniversaries: savedAnniversaries,
   })
 }
 
@@ -98,6 +125,8 @@ function addAnniversary() {
     id: `anni-${Date.now()}-${anniversarySeq++}`,
     date: '',
     label: '',
+    savedDate: '',
+    savedLabel: '',
   })
 }
 
@@ -105,10 +134,37 @@ function anniversaryNeedsFields(row) {
   return !row?.date || !String(row?.label ?? '').trim()
 }
 
+function anniversaryDraftHint(row) {
+  return row?.savedDate && row?.savedLabel
+    ? '本次修改未保存，上次保存的纪念日仍会保留；补齐日期和名称后自动更新。'
+    : '同时填写日期和名称后，这条纪念日才会保存。'
+}
+
+function lunarNameNeedsField(row) {
+  return !String(row?.label ?? '').trim()
+}
+
+function lunarDraftHint(row) {
+  return row?.saved
+    ? '本次修改未保存，上次保存的农历纪念日仍会保留；填写名称后自动更新。'
+    : '填写名称后，这条农历纪念日才会保存。'
+}
+
+function upcomingSourceLabel(source) {
+  return UPCOMING_SOURCE_LABELS[source] || '纪念日'
+}
+
 function setAnniversaryDate(id, value) {
   const row = anniversaries.value.find((item) => item.id === id)
   if (!row) return
   row.date = value ? value.slice(5) : ''
+  commit()
+}
+
+function setAnniversaryLabel(id, value) {
+  const row = anniversaries.value.find((item) => item.id === id)
+  if (!row) return
+  row.label = String(value ?? '')
   commit()
 }
 
@@ -131,6 +187,15 @@ const {
   resolutionClass: lunarResolveClass,
 } = useLunarAnniversaryEditor(appToday)
 
+// 「即将到来」：生日 / 公历纪念日 / 使用周年 / 农历纪念日的下一次落点，按时间升序。
+// 农历行直接用编辑器草稿（比存储新），公历三类走 `festiveConfig`。
+// 不受"启用节日氛围"影响 —— 那是装饰开关，这里回答的是"我登记的日子什么时候回来"。
+const upcoming = computed(() => upcomingAnniversaries(
+  { ...festiveConfig.value, anniversaries: anniversaries.value.map((row) => ({ date: row.date, label: row.label })) },
+  lunarAnniversaries.value,
+  appToday.value,
+))
+
 watch(
   () => props.open,
   (open) => { if (open) { syncFromConfig(); void refreshTable() } },
@@ -152,35 +217,37 @@ watch(
         标签与年数（`${label}快乐…`、`已经一起走过 ${n} 年…`），整句翻译会丢信息，
         所以按原样回落中文 —— 这是有意划的范围，不是漏掉的条目，见 tests/narrativeI18n.test.js。
       -->
-      <div class="field">
-        <label for="festive-language">祝福语语言</label>
-        <select id="festive-language" v-model="narrativeLang">
-          <option v-for="item in NARRATIVE_LANGUAGES" :key="item.id" :value="item.id">{{ item.label }}</option>
-        </select>
-        <small>只影响节日祝福语的文案；界面其它文字仍是中文，个人纪念日与使用周年照原样显示</small>
-      </div>
+      <FieldGroup class="festive-field-group">
+        <Field class="field">
+          <label for="festive-language">祝福语语言</label>
+          <select id="festive-language" v-model="narrativeLang">
+            <option v-for="item in NARRATIVE_LANGUAGES" :key="item.id" :value="item.id">{{ item.label }}</option>
+          </select>
+          <FieldDescription class="field-help">只影响节日祝福语的文案；界面其它文字仍是中文，个人纪念日与使用周年照原样显示</FieldDescription>
+        </Field>
 
-      <div class="field">
-        <label for="festive-birthday">我的生日（月-日）</label>
-        <input
-          id="festive-birthday"
-          type="date"
-          :value="birthdayInput"
-          @change="setBirthday($event.target.value)"
-        />
-        <small>生日祝福按「月-日」触发；你选的出生年份会一并记住</small>
-      </div>
+        <Field class="field">
+          <label for="festive-birthday">我的生日（月-日）</label>
+          <input
+            id="festive-birthday"
+            type="date"
+            :value="birthdayInput"
+            @change="setBirthday($event.target.value)"
+          />
+          <FieldDescription class="field-help">生日祝福按「月-日」触发；你选的出生年份会一并记住</FieldDescription>
+        </Field>
 
-      <div class="field">
-        <label for="festive-install">开始使用日期</label>
-        <input
-          id="festive-install"
-          type="date"
-          :value="installDateInput"
-          @change="installDateInput = $event.target.value; commit()"
-        />
-        <small>满一年后，每年当天会送上「使用周年」祝福</small>
-      </div>
+        <Field class="field">
+          <label for="festive-install">开始使用日期</label>
+          <input
+            id="festive-install"
+            type="date"
+            :value="installDateInput"
+            @change="installDateInput = $event.target.value; commit()"
+          />
+          <FieldDescription class="field-help">满一年后，每年当天会送上「使用周年」祝福</FieldDescription>
+        </Field>
+      </FieldGroup>
 
       <div class="anni-section">
         <div class="anni-head">
@@ -190,7 +257,7 @@ watch(
         <small class="anni-hint">纪念日只保存「月-日」，每年同一天提醒（年份不参与）</small>
         <p v-if="!anniversaries.length" class="empty-line">还没有纪念日，点「添加纪念日」新建一条。</p>
         <div v-else class="anni-list">
-          <div v-for="row in anniversaries" :key="row.id" class="anni-row">
+          <div v-for="(row, index) in anniversaries" :key="row.id" class="anni-row">
             <input
               type="date"
               :value="row.date ? '2000-' + row.date : ''"
@@ -203,13 +270,13 @@ watch(
               :value="row.label"
               maxlength="30"
               placeholder="名称，如：在一起"
-              aria-label="纪念日名称"
+              :aria-label="'纪念日 ' + (row.label || '第 ' + (index + 1) + ' 条') + ' 的名称'"
               :aria-invalid="anniversaryNeedsFields(row)"
               :aria-describedby="anniversaryNeedsFields(row) ? `anniversary-hint-${row.id}` : undefined"
-              @input="commit"
+              @input="setAnniversaryLabel(row.id, $event.target.value)"
             />
             <button type="button" class="del-btn" :aria-label="`删除纪念日 ${row.label || ''}`" @click="removeAnniversary(row.id)">删除</button>
-            <p v-if="anniversaryNeedsFields(row)" :id="`anniversary-hint-${row.id}`" class="anniversary-draft-hint">同时填写日期和名称后，这条纪念日才会保存。</p>
+            <p v-if="anniversaryNeedsFields(row)" :id="`anniversary-hint-${row.id}`" class="anniversary-draft-hint">{{ anniversaryDraftHint(row) }}</p>
           </div>
         </div>
       </div>
@@ -228,6 +295,8 @@ watch(
               maxlength="30"
               placeholder="名称，如：外婆生日"
               aria-label="农历纪念日名称"
+              :aria-invalid="lunarNameNeedsField(row)"
+              :aria-describedby="lunarNameNeedsField(row) ? 'lunar-anniversary-hint-' + row.id : undefined"
               @input="setLunarLabel(row.id, $event.target.value)"
             />
             <select :value="row.lunarMonth" aria-label="农历月份" @change="setLunarMonth(row.id, $event.target.value)">
@@ -251,9 +320,59 @@ watch(
               @click="removeLunarAnniversary(row.id)"
             >删除</button>
             <p class="lunar-resolve" :class="lunarResolveClass(row)">{{ lunarResolveText(row) }}</p>
+            <p
+              v-if="lunarNameNeedsField(row)"
+              :id="'lunar-anniversary-hint-' + row.id"
+              class="lunar-draft-hint"
+            >{{ lunarDraftHint(row) }}</p>
           </div>
         </div>
       </div>
+
+      <!--
+        「即将到来」：四类个人节点的下一次落点，按时间升序。
+        放在两段编辑列表之后、只读对照表之前 —— 用户改完一条，立刻能在这里看到
+        它哪天回来，不必自己心算。这里是**唯一**的倒计时落点，首页刻意不做
+        （首页只渲染"今天"的氛围，见 composables/anniversarySchedule.js 的说明）。
+      -->
+      <Card class="upcoming-section">
+        <CardHeader class="upcoming-heading">
+          <div class="upcoming-heading-copy">
+            <CardTitle class="upcoming-title">即将到来</CardTitle>
+            <CardDescription class="upcoming-description">生日、公历纪念日、使用周年与农历纪念日</CardDescription>
+          </div>
+          <Badge as="span" variant="outline" class="readonly-badge" :class="{ 'is-off': !enabled }">
+            {{ enabled ? upcoming.length + ' 项 · 按日期排序' : '氛围已关闭 · 仍会列出' }}
+          </Badge>
+        </CardHeader>
+        <CardContent class="upcoming-content">
+          <Empty v-if="!upcoming.length" class="upcoming-empty">
+            <EmptyHeader class="upcoming-empty-header">
+              <EmptyTitle class="upcoming-empty-title">还没有登记任何日子</EmptyTitle>
+              <EmptyDescription class="upcoming-empty-description">添加生日、公历或农历纪念日、开始使用日期后，这里会显示下一次日期。</EmptyDescription>
+            </EmptyHeader>
+          </Empty>
+          <ol v-else class="upcoming-list">
+            <li
+              v-for="row in upcoming"
+              :key="row.id"
+              class="upcoming-row"
+              :class="{ 'is-today': row.isToday, 'is-off': row.status !== 'ok' }"
+            >
+              <span class="upcoming-name">
+                {{ row.label }}
+                <small v-if="row.recurrence">{{ row.recurrence }}</small>
+              </span>
+              <Badge as="span" variant="secondary" class="upcoming-kind">{{ upcomingSourceLabel(row.source) }}</Badge>
+              <span class="upcoming-when">
+                <b>{{ row.nextDateKey }}</b>
+                <small>{{ row.relativeText }}</small>
+                <small v-if="row.statusText" class="upcoming-warn">{{ row.statusText }}</small>
+              </span>
+            </li>
+          </ol>
+        </CardContent>
+      </Card>
 
       <div class="table-section">
         <h4>内置节日对照表<span class="readonly-badge">只读 · 供核对</span></h4>
@@ -299,6 +418,11 @@ watch(
   flex-direction: column;
   gap: 14px;
 }
+.festive-field-group {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
 
 .switch-row {
   display: flex;
@@ -324,15 +448,18 @@ watch(
   font-weight: var(--fw-650);
 }
 .switch-row small,
-.field small {
+.field-help {
   color: var(--ink-faint);
   font-size: var(--fs-11);
   font-weight: var(--fw-400);
+  line-height: 1.5;
+  margin: 0;
 }
 
 .field {
   display: flex;
   flex-direction: column;
+  min-width: 0;
   gap: 5px;
 }
 .field label {
@@ -407,6 +534,10 @@ watch(
 .del-btn:hover {
   background: var(--danger-soft);
 }
+.anni-row input[aria-invalid="true"],
+.lunar-row input[aria-invalid="true"] {
+  border-color: color-mix(in srgb, var(--warning) 48%, var(--border));
+}
 
 /* 农历纪念日分区：与上面的公历纪念日同构，但多一列「闰月」与一行解析结果。 */
 .lunar-section {
@@ -463,6 +594,143 @@ watch(
 }
 .lunar-resolve.off {
   color: var(--ink-faint);
+}
+
+/* 「即将到来」清单：只读汇总，纯展示，没有可聚焦控件。
+   语义层级刻意分三层 —— 名称 > 日期 > 相对天数/状态，避免一行里三段同等字重。 */
+.upcoming-section {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--primary) 18%, var(--border));
+  border-radius: var(--radius-12);
+  background: linear-gradient(135deg, color-mix(in srgb, var(--primary) 5%, var(--card)), var(--card) 68%);
+}
+.upcoming-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 14px 14px 10px;
+}
+.upcoming-content {
+  padding: 0 14px 14px;
+}
+.upcoming-heading-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+.upcoming-title {
+  margin: 0;
+  color: var(--text);
+  font-size: var(--fs-13);
+  font-weight: var(--fw-750);
+}
+.upcoming-description {
+  margin: 0;
+  color: var(--ink-faint);
+  font-size: var(--fs-11);
+  line-height: 1.4;
+}
+.upcoming-heading > .readonly-badge {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+.readonly-badge.is-off {
+  color: var(--ink-faint);
+  background: color-mix(in srgb, var(--ink-faint) 10%, var(--card));
+}
+.upcoming-empty {
+  min-height: 0;
+  gap: 0;
+  padding: 12px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-10);
+  background: var(--bg);
+}
+.upcoming-empty-header {
+  gap: 4px;
+}
+.upcoming-empty-title {
+  color: var(--ink-soft);
+  font-size: var(--fs-12-5);
+  font-weight: var(--fw-700);
+}
+.upcoming-empty-description {
+  max-width: 36em;
+  margin: 0;
+  color: var(--ink-faint);
+  font-size: var(--fs-11);
+  line-height: 1.5;
+}
+.upcoming-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.upcoming-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border);
+  border-radius: var(--radius-10);
+  background: var(--card);
+}
+.upcoming-row.is-today {
+  border-left-color: var(--atmosphere-accent, var(--primary));
+  background: color-mix(in srgb, var(--primary) 6%, var(--card));
+}
+.upcoming-row.is-off {
+  border-left-color: var(--warning);
+}
+.upcoming-name {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  color: var(--text);
+  font-size: var(--fs-13);
+  font-weight: var(--fw-650);
+  overflow-wrap: anywhere;
+}
+.upcoming-kind {
+  flex: 0 0 auto;
+  font-size: var(--fs-10);
+}
+.upcoming-when {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+.upcoming-when b {
+  color: var(--text);
+  font-size: var(--fs-12-5);
+  font-weight: var(--fw-700);
+}
+.upcoming-name small,
+.upcoming-when small {
+  color: var(--ink-faint);
+  font-size: var(--fs-11);
+  font-weight: var(--fw-400);
+}
+/* 农历行"今年没有这个闰月 / 是小月没有三十"—— 状态必须看得见，
+   不能因为倒计时还找得到下一次就当成没事发生。 */
+.upcoming-when .upcoming-warn {
+  max-width: 15em;
+  color: var(--warning);
+  text-align: right;
 }
 
 .table-section {
@@ -563,13 +831,15 @@ watch(
   border-radius: var(--radius-5);
   background: var(--bg);
 }
-/* 「已自动保存」提示落在 Modal 的 var(--card) 上：原 #0d9463 浅色 3.87:1、深色 4.11:1。 */
-.anniversary-draft-hint {
-  grid-column:1/-1;
-  margin:0;
-  color:var(--warning);
-  font-size:var(--fs-11);
-  line-height:1.45}
+/* 未完成行使用警告色提示用户当前编辑尚未保存。 */
+.anniversary-draft-hint,
+.lunar-draft-hint {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--warning);
+  font-size: var(--fs-11);
+  line-height: 1.45;
+}
 .saved-hint {
   color: var(--success);
   font-size: var(--fs-12);
@@ -577,6 +847,13 @@ watch(
 }
 
 @media (max-width: 520px) {
+  .upcoming-heading {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .upcoming-heading > .readonly-badge {
+    align-self: flex-start;
+  }
   .anni-row,
   .lunar-row {
     grid-template-columns: 1fr;
@@ -589,6 +866,28 @@ watch(
   .del-btn,
   .lunar-row select {
     width: 100%;
+  }
+  /* 窄屏上名称与日期挤在一行会互相换行成锯齿状，改为上下堆叠。 */
+  .upcoming-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 6px;
+  }
+  .upcoming-name {
+    grid-column: 1 / -1;
+  }
+  .upcoming-kind {
+    grid-column: 1;
+    justify-self: start;
+  }
+  .upcoming-when {
+    grid-column: 2;
+    align-items: flex-start;
+  }
+  .upcoming-when .upcoming-warn {
+    max-width: none;
+    text-align: left;
   }
 }
 </style>

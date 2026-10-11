@@ -3,6 +3,8 @@ import { computed } from 'vue'
 import { lastBackupAt, needsBackup } from '../../composables/backupReminder.js'
 import { formatDataSize } from '../../composables/dataManagerInventory.js'
 import { formatAppDate } from '../../composables/timeContext.js'
+import '../../styles/shadcn.css'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 
 const props = defineProps({ inventory: Object, error: String })
 defineEmits(['refresh'])
@@ -12,7 +14,12 @@ const issueLabels = computed(() => [...new Set(props.inventory?.issues.map((issu
 
 <template>
   <section class="data-overview" aria-label="本机数据概览">
-    <div class="overview-heading"><div><h4>本机数据概览</h4><p>查看当前记录与备份状态，换设备前先留一份副本。</p></div><button type="button" class="btn btn-sm btn-ghost" @click="$emit('refresh')">刷新</button></div>
+    <Card class="data-overview-card">
+      <CardHeader class="overview-heading">
+        <div class="overview-heading-copy"><CardTitle>本机数据概览</CardTitle><CardDescription>查看当前记录与备份状态，换设备前先留一份副本。</CardDescription></div>
+        <button type="button" class="btn btn-sm btn-ghost" @click="$emit('refresh')">刷新</button>
+      </CardHeader>
+      <CardContent class="overview-content">
     <p v-if="error" class="overview-error" role="alert">{{ error }}</p>
     <div v-if="inventory" class="overview-metrics">
       <div><span>记录总量</span><b>{{ inventory.issues.length ? '至少 ' : '' }}{{ inventory.recordCount.toLocaleString() }}<small>项</small></b><span>分布在 {{ inventory.modules.filter(module => module.recordCount > 0).length }} 个分区</span></div>
@@ -26,19 +33,23 @@ const issueLabels = computed(() => [...new Set(props.inventory?.issues.map((issu
       <ul><li v-for="module in inventory.modules" :key="module.id"><div><b>{{ module.label }}</b><span>{{ module.hasIssue ? '部分数据无法读取' : module.detail || module.text }}</span></div><span class="module-size">{{ formatDataSize(module.bytes) }}</span></li></ul>
       <p>占用按本机文本估算；壁纸图片和恢复点另占空间。账号资料、项目协作与成果文件由账号保存，不包含在本机 JSON 备份中。</p>
     </details>
+      </CardContent>
+    </Card>
   </section>
 </template>
 
 <style scoped>
-.data-overview { padding:18px; border:1px solid var(--border); border-radius:var(--radius-12); background:var(--card); }
-.overview-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
-.overview-heading h4 { margin:0; font-size:var(--fs-15); }
-.overview-heading p { margin:5px 0 0; color:var(--muted); font-size:var(--fs-12); line-height:1.6; }
+.data-overview-card { gap:0; padding:0; border-color:var(--border); border-radius:var(--radius-12); background:var(--card); box-shadow:var(--shadow-sm); }
+.overview-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; padding:16px 18px 0; }
+.overview-heading-copy { display:grid; gap:5px; min-width:0; }
+.overview-heading :deep([data-slot="card-title"]) { margin:0; font-size:var(--fs-15); }
+.overview-heading :deep([data-slot="card-description"]) { margin:0; color:var(--muted); font-size:var(--fs-12); line-height:1.6; }
+.overview-content { display:grid; gap:0; padding:16px 18px 18px; }
 .overview-heading .btn { flex-shrink:0; min-height:44px; }
-.overview-metrics { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin-top:16px; }
-.overview-metrics > div { display:flex; flex-direction:column; gap:7px; min-width:0; padding:12px; background:var(--bg-tint); border-radius:var(--radius-10); }
+.overview-metrics { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin-top:0; }
+.overview-metrics > div { display:flex; flex-direction:column; gap:7px; min-width:0; padding:12px; border:1px solid var(--border); background:var(--bg-tint); border-radius:var(--radius-10); }
 .overview-metrics span { color:var(--ink-soft); font-size:var(--fs-11); line-height:1.5; }
-.overview-metrics b { color:var(--text); font-size:var(--fs-22); overflow-wrap:anywhere; }
+.overview-metrics b { color:var(--text); font-size:var(--fs-22); font-variant-numeric:tabular-nums; overflow-wrap:anywhere; }
 .overview-metrics b.backup-date { font-size:var(--fs-15); min-height:27px; display:flex; align-items:center; }
 .overview-metrics small { margin-left:5px; font-size:var(--fs-12); font-weight:var(--fw-500); }
 .overview-metrics .overview-warning { color:var(--warning); }
@@ -56,7 +67,8 @@ const issueLabels = computed(() => [...new Set(props.inventory?.issues.map((issu
 .inventory-details .module-size { white-space:nowrap; flex-shrink:0; }
 .inventory-details p { margin:10px 0 0; }
 @media (max-width:520px) {
-  .data-overview { padding:14px; }
+  .overview-heading { padding:14px 14px 0; }
+  .overview-content { padding:14px; }
   .overview-metrics { grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
   .overview-metrics > div:last-child { grid-column:1/-1; display:grid; grid-template-columns:1fr 1fr; align-items:center; }
   .overview-metrics > div:last-child > span:last-child { grid-column:1/-1; }

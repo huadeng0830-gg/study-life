@@ -8,6 +8,9 @@ import {
 } from './lunarAnniversaries.js'
 import { useStoredRef } from './store/index.js'
 
+/** @typedef {{ label: string, lunarMonth: number, lunarDay: number, isLeapMonth: boolean }} SavedAnniversary */
+/** @typedef {{ id: string, label: string, lunarMonth: number, lunarDay: number, isLeapMonth: boolean, saved: SavedAnniversary | null }} AnniversaryEditorRow */
+
 /**
  * 农历纪念日设置面板的编辑模型。
  *
@@ -19,23 +22,31 @@ export function useLunarAnniversaryEditor(today) {
   const stored = useStoredRef(LUNAR_ANNIVERSARY_KEY, [])
   let idSequence = 0
 
+  /** @param {unknown} list @returns {AnniversaryEditorRow[]} */
   function rowsFrom(list) {
     const seen = new Set()
-    return normalizeLunarAnniversaries(list).map((item) => {
+    return normalizeLunarAnniversaries(list).flatMap((item) => {
+      if (!item) return []
       let id = item.id
       while (seen.has(id)) id = `${item.id}-${idSequence++}`
       seen.add(id)
-      return {
+      return [{
         id,
         label: item.label,
         lunarMonth: item.lunarMonth,
         lunarDay: item.lunarDay,
         isLeapMonth: item.isLeapMonth,
-      }
+        saved: {
+          label: item.label,
+          lunarMonth: item.lunarMonth,
+          lunarDay: item.lunarDay,
+          isLeapMonth: item.isLeapMonth,
+        },
+      }]
     })
   }
 
-  const rows = ref(rowsFrom(stored.value))
+  const rows = ref(/** @type {AnniversaryEditorRow[]} */ (rowsFrom(stored.value)))
 
   /** 重开面板时从持久化真源补入，并立即刷新氛围判断使用的镜像。 */
   function sync() {
@@ -47,11 +58,31 @@ export function useLunarAnniversaryEditor(today) {
   function commit() {
     const normalized = normalizeLunarAnniversaries(rows.value.map((row) => ({
       id: row.id,
-      label: row.label,
-      lunarMonth: row.lunarMonth,
-      lunarDay: row.lunarDay,
-      isLeapMonth: row.isLeapMonth,
+      ...(String(row.label ?? '').trim()
+        ? {
+            label: row.label,
+            lunarMonth: row.lunarMonth,
+            lunarDay: row.lunarDay,
+            isLeapMonth: row.isLeapMonth,
+          }
+        : row.saved ?? {
+            label: row.label,
+            lunarMonth: row.lunarMonth,
+            lunarDay: row.lunarDay,
+            isLeapMonth: row.isLeapMonth,
+          }),
     })))
+    for (const row of rows.value) {
+      const saved = normalized.find((item) => item.id === row.id)
+      if (saved) {
+        row.saved = {
+          label: saved.label,
+          lunarMonth: saved.lunarMonth,
+          lunarDay: saved.lunarDay,
+          isLeapMonth: saved.isLeapMonth,
+        }
+      }
+    }
     stored.value = normalized
     publishLunarAnniversaries(normalized)
   }
@@ -61,12 +92,14 @@ export function useLunarAnniversaryEditor(today) {
   }
 
   function add() {
+    /** @type {AnniversaryEditorRow} */
     const row = {
       id: `lunar-${Date.now()}-${idSequence++}`,
       label: '',
       lunarMonth: 1,
       lunarDay: 1,
       isLeapMonth: false,
+      saved: null,
     }
     rows.value.push(row)
     return row.id
@@ -114,7 +147,7 @@ export function useLunarAnniversaryEditor(today) {
     if (!resolved) return ''
     const head = resolved.lunarText ? `${resolved.lunarText} · ` : ''
     if (resolved.status === LUNAR_ANNIVERSARY_STATUS.OK) {
-      const next = resolved.nextDateKey && resolved.daysFromToday < 0 ? `，${resolved.nextText}` : ''
+      const next = resolved.nextDateKey && resolved.daysFromToday !== null && resolved.daysFromToday < 0 ? `，${resolved.nextText}` : ''
       return `${head}${resolved.dateKey}（${resolved.relativeText}${next}）`
     }
     return resolved.nextText

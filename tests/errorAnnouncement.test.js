@@ -136,8 +136,20 @@ export function idLiteralsFromBinding(raw) {
   return segments.slice(1).flatMap((segment) => [...segment.matchAll(/'([^']+)'|"([^"]+)"/g)].map((mm) => mm[1] ?? mm[2]))
 }
 
+/** Resolve a simple `prefix + row.id` expression to the same dynamic ID target. */
+function dynamicIdParts(raw) {
+  const match = raw.match(/['"]([^'"]+)['"]\s*\+\s*([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)/)
+  return match ? { prefix: match[1], suffix: match[2] } : null
+}
+
 export function findDanglingAriaRefs(template) {
   const ids = declaredIds(template)
+  const dynamicIds = new Set()
+  for (const { attrs } of openTags(template)) {
+    const binding = attrs.match(/(?:^|\s):id="([^"]*)"/)
+    const parts = binding && dynamicIdParts(binding[1])
+    if (parts) dynamicIds.add(`${parts.prefix}\u0000${parts.suffix}`)
+  }
   const out = []
   for (const { tag, attrs } of openTags(template)) {
     for (const attr of REF_ATTRS) {
@@ -145,6 +157,9 @@ export function findDanglingAriaRefs(template) {
       if (!m) continue
       const bound = m[1] === ':'
       const raw = m[2]
+      const dynamicParts = bound ? dynamicIdParts(raw) : null
+      const hasMatchingDynamicTarget = dynamicParts
+        && dynamicIds.has(`${dynamicParts.prefix}\u0000${dynamicParts.suffix}`)
       const candidates = (bound ? idLiteralsFromBinding(raw) : [raw.trim()])
         // 【每个候选都要按空白再切一次】ARIA 的 IDREF 列表本身就是空格分隔的，
         // 所以 `:aria-describedby="cond ? 'a b' : 'a'"` 里的字面量同样可能含多个 id。
@@ -153,6 +168,9 @@ export function findDanglingAriaRefs(template) {
         .flatMap((part) => String(part).trim().split(/\s+/)).filter(Boolean)
       for (const id of candidates) {
         if (!id || id === 'undefined') continue
+        // A dynamic prefix is valid only when the same prefix and suffix expression
+        // appears on an element's :id in this template.
+        if (hasMatchingDynamicTarget && id === dynamicParts.prefix) continue
         if (!ids.has(id)) out.push({ tag, attr, id })
       }
     }
@@ -256,6 +274,11 @@ describe('ARIA 引用不得悬空', () => {
     expect(findDanglingAriaRefs('<input aria-describedby="a b"><p id="a"></p>')).toHaveLength(1)
     // 写变量时无法静态解出 → 跳过，不是漏报
     expect(findDanglingAriaRefs('<input :aria-labelledby="titleId"><h2 :id="titleId"></h2>')).toEqual([])
+  })
+
+  it('绑定到动态 id 时，前缀与后缀表达式必须匹配', () => {
+    expect(findDanglingAriaRefs(`<input :aria-describedby="invalid ? 'hint-' + row.id : undefined"><p :id="'hint-' + row.id"></p>`)).toEqual([])
+    expect(findDanglingAriaRefs(`<input :aria-describedby="invalid ? 'missing-' + row.id : undefined"><p :id="'hint-' + row.id"></p>`)).toHaveLength(1)
   })
 
   it('夹具：条件里的字段名不是 id，取值分支里的才是', () => {

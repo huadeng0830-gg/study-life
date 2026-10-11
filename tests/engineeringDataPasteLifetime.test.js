@@ -3,8 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createApp } from 'vue'
 
 vi.mock('../src/composables/dataVault.js', () => ({
+  clearPendingRecoveryDraft: vi.fn(async () => true), savePendingRecoveryDraft: vi.fn(async () => true),
   clearDataVault: vi.fn(async () => true), mirrorLocalValue: vi.fn(async () => true),
-  mirrorLocalValues: vi.fn(async () => true), setMirrorErrorHandler: vi.fn(), setMirrorTimingHandler: vi.fn(),
+  mirrorLocalValues: vi.fn(async () => true), setMirrorErrorHandler: vi.fn(), setMirrorSuccessHandler: vi.fn(), setMirrorTimingHandler: vi.fn(),
 }))
 
 let app, host

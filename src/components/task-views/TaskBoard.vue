@@ -13,6 +13,7 @@
  */
 import { nextTick, ref } from 'vue'
 import { TASK_BOARD_COLUMNS } from '../../composables/taskViews.js'
+import TaskRowActions from '../tasks/TaskRowActions.vue'
 import VirtualList from '../VirtualList.vue'
 
 const props = defineProps({
@@ -26,9 +27,13 @@ const props = defineProps({
   courseNameOf: { type: Function, required: true },
   /** (task) => 重复规则文案（如「每周」），不重复时返回空串 */
   repeatLabelOf: { type: Function, default: () => '' },
+  /** (task) => 行的主动作 `{ label }`；没有就只留菜单。与列表视图同一套口径。 */
+  primaryOf: { type: Function, default: () => null },
+  /** (task) => 菜单项数组（`ActionSheet` 的形状）。编辑 / 归档 / 删除等次要操作都收在这里。 */
+  actionsOf: { type: Function, default: () => [] },
 })
 
-const emit = defineEmits(['open', 'toggle', 'archive', 'remove', 'set-status'])
+const emit = defineEmits(['open', 'toggle', 'set-status', 'primary', 'action'])
 
 const root = ref(null)
 const listRefs = new Map()
@@ -158,9 +163,9 @@ async function setTaskStatus(task, status) {
             v-if="column.key === 'pending'"
             type="button"
             class="link-btn board-status-btn tap-target"
-            :aria-label="`将待办「${task.title}」移到进行中`"
+            :aria-label="`将待办「${task.title}」标记为进行中`"
             @click="setTaskStatus(task, 'in_progress')"
-          >开始</button>
+          >设为进行中</button>
           <button
             v-else-if="column.key === 'in_progress'"
             type="button"
@@ -175,9 +180,15 @@ async function setTaskStatus(task, status) {
             :aria-label="toggleLabel(task)"
             @click="emit('toggle', task)"
           >{{ statusOf(task) === 'completed' ? '✓' : '' }}</button>
-          <button v-if="statusOf(task) === 'completed'" type="button" class="link-btn" aria-label="归档待办" title="归档待办" @click="emit('archive', task)">▱</button>
-          <button type="button" class="link-btn" aria-label="编辑待办" title="编辑待办" @click="emit('open', task)">✎</button>
-          <button type="button" class="link-btn danger" aria-label="删除待办" title="删除待办" @click="emit('remove', task)">🗑</button>
+          <!-- 状态流转留在卡片上（看板的主交互），编辑 / 归档 / 删除收进「⋯」菜单，
+               与列表视图共用同一个 `TaskRowActions`，免得两个视图的操作口径各走各的。 -->
+          <TaskRowActions
+            :primary="primaryOf(task)"
+            :actions="actionsOf(task)"
+            :subject="task.title"
+            @primary="emit('primary', task)"
+            @select="emit('action', task, $event)"
+          />
         </div>
           </article>
         </template>
@@ -348,5 +359,11 @@ async function setTaskStatus(task, status) {
   .task-board {
     grid-template-columns: minmax(0, 1fr);
   }
+}
+@media (max-width: 900px), (pointer: coarse) and (max-height: 520px) {
+  .board-title { white-space: normal; overflow-wrap: anywhere; }
+  .board-main, .board-status-btn, .check { min-height: 44px; }
+  .check { min-width: 44px; }
+  .board-meta { flex-wrap: wrap; }
 }
 </style>

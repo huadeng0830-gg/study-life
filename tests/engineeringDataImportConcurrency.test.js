@@ -3,8 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createApp, h, nextTick, ref } from 'vue'
 
 vi.mock('../src/composables/dataVault.js', () => ({
+  clearPendingRecoveryDraft: vi.fn(async () => true), savePendingRecoveryDraft: vi.fn(async () => true),
   clearDataVault: vi.fn(async () => true), mirrorLocalValue: vi.fn(async () => true),
-  mirrorLocalValues: vi.fn(async () => true), setMirrorErrorHandler: vi.fn(), setMirrorTimingHandler: vi.fn(),
+  mirrorLocalValues: vi.fn(async () => true), setMirrorErrorHandler: vi.fn(), setMirrorSuccessHandler: vi.fn(), setMirrorTimingHandler: vi.fn(),
 }))
 const scopes = []
 beforeEach(() => {
@@ -24,6 +25,10 @@ function externalRestore(key, value) {
   window.dispatchEvent(new StorageEvent('storage', { key, newValue: raw, storageArea: localStorage }))
 }
 function clone(value) { return JSON.parse(JSON.stringify(value)) }
+async function flushLocalWrites() {
+  const core = await import('../src/composables/store/core.js')
+  return core.flushStoredWrites()
+}
 
 async function courseReview() {
   const { useDomainCommands } = await import('../src/composables/domain/commands.js')
@@ -39,6 +44,7 @@ async function courseReview() {
   app.mount(host)
   scopes.push({ stop() { app.unmount(); host.remove() } })
   await api.beginCourseImport([incoming])
+  await flushLocalWrites()
   expect(api.showImportConflict.value).toBe(true)
   api.setImportDecision(0, 'replace')
   return { api, input, domain, original, incoming }
@@ -55,6 +61,7 @@ async function timeReview() {
     periods: [{ id: 'fictional-period', label: '第1节课' }],
     times: { 'fictional-season': { 'fictional-campus': [{ start: '07:00', end: '07:45' }] } },
   }
+  await flushLocalWrites()
   await schemes.startRecognition(await flow.parseScheduleText('虚构作息 虚构校区\n第一节课 08:00-08:45'), 'fictional.txt')
   plan.openImportPlan()
   return { plan, timeConfig }
@@ -84,8 +91,9 @@ describe('课程与作息导入保留并发的新编辑', () => {
   it('换号后不能把上一账号的课表快照撤销到当前账号', async () => {
     const { api, domain } = await courseReview()
     await api.commitCourseImport()
-    const { accountDataOwner } = await import('../src/composables/accountSyncIdentity.js')
-    accountDataOwner.value = 'fictional-next-owner'
+    await flushLocalWrites()
+    const identity = await import('../src/composables/accountSyncIdentity.js')
+    identity.setAccountDataOwner('fictional-next-owner')
     const latest = [{ id: 'fictional-owner-b-course', name: '虚构 B 课程', day: 1, start: 'p1', end: 'p1' }]
     externalRestore('sl_courses', latest)
     api.undoLastCourseImport()
@@ -125,6 +133,7 @@ describe('课程与作息导入保留并发的新编辑', () => {
 
   it('作息执行到保存前的等待期间收到跨页恢复，不再宣称旧导入成功', async () => {
     const { plan, timeConfig } = await timeReview()
+    const core = await import('../src/composables/store/core.js')
     const saving = plan.confirmImportPlan()
     await vi.advanceTimersByTimeAsync(440)
     const latest = clone(timeConfig.value)
@@ -132,9 +141,11 @@ describe('课程与作息导入保留并发的新编辑', () => {
     externalRestore('sl_timecfg', latest)
     await vi.advanceTimersByTimeAsync(1000)
     await saving
-    expect(timeConfig.value).toMatchObject(latest)
+    expect(JSON.parse(localStorage.getItem('sl_timecfg'))).toMatchObject(latest)
+    expect(core.persistenceState.value).toMatchObject({ status: 'conflict', key: 'sl_timecfg' })
     expect(plan.lastImportResult.value).toBeNull()
     expect(plan.importFailed.value).toBe(true)
+    expect(core.flushStoredWrites()).toMatchObject({ ok: false, pendingKeys: ['sl_timecfg'] })
   })
 
   it('作息导入后手动更新的时间不能被整份撤销回滚', async () => {

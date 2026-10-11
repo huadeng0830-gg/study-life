@@ -1,4 +1,4 @@
-import { computed, ref, shallowRef, watch } from 'vue'
+import { computed, onScopeDispose, ref, shallowRef, watch } from 'vue'
 import { accountUser } from './accountAuth.js'
 import { restoreStoredValues } from './store/cloudAccess.js'
 import { availableNavigationItems } from '../router/navigation.js'
@@ -34,6 +34,8 @@ export function useNavigationEditor({
   const error = ref('')
   const message = ref('')
   let session = 0
+  let disposed = false
+  onScopeDispose(() => { disposed = true; session++ })
   let groupSequence = 0
 
   const readSaved = (device) => device === 'mobile'
@@ -225,9 +227,10 @@ export function useNavigationEditor({
     return true
   }
 
-  async function save() {
-    if (saving.value) return false
-    if (!hasChanges.value) return true
+  /** @param {{signal?: AbortSignal}} [options] */
+  async function save({ signal } = {}) {
+    if (disposed || saving.value || signal?.aborted) return false
+    if (!hasChanges.value) return false
     error.value = ''
     message.value = ''
     const savedSession = session
@@ -243,7 +246,7 @@ export function useNavigationEditor({
       saving.value = true
       // Keep the drafts owned by this editor; the store receives separate values.
       await persist(clone(values))
-      if (session !== savedSession) return false
+      if (disposed || signal?.aborted || session !== savedSession) return false
       let receivedUpdate = false
       for (const device of devices) {
         const saved = readSaved(device)
@@ -255,13 +258,13 @@ export function useNavigationEditor({
         : devices[0] === 'mobile' ? '手机底部导航已保存并立即生效。' : '电脑侧栏布局已保存并立即生效。'
       return true
     } catch (cause) {
-      if (session === savedSession) error.value = cause?.message || '保存失败，请稍后重试。'
+      if (!disposed && !signal?.aborted && session === savedSession) error.value = cause?.message || '保存失败，请稍后重试。'
       return false
     } finally {
       saving.value = false
       // Watchers pause during persistence; catch up untouched devices as well,
       // including updates received while a failed save was being rolled back.
-      if (session === savedSession) {
+      if (!disposed) {
         for (const device of MODES) {
           if (!dirty.value[device] && !equal(readSaved(device), baseline.value[device])) adoptSaved(device)
         }

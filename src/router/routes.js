@@ -62,7 +62,7 @@ export const routes = [
   // meta.title 用于两处：标签页标题，以及路由切换时的读屏播报。
   { path: '/', name: 'today', meta: { title: '今天', navigation: { id: 'today', icon: '☀️', groupId: 'workspace', groupLabel: '今日', defaultDesktop: true, shortcut: 1 } }, component: asyncRoute('/') },
   { path: '/today', redirect: '/' },
-  { path: '/schedule', name: 'schedule', meta: { title: '课程表', navigation: { id: 'schedule', icon: '📅', mobileLabel: '学习', groupId: 'learning', groupLabel: '学习', defaultDesktop: true, shortcut: 2 } }, component: asyncRoute('/schedule') },
+  { path: '/schedule', name: 'schedule', meta: { title: '课程表', navigation: { id: 'schedule', icon: '📅', mobileLabel: '课表', groupId: 'learning', groupLabel: '学习', defaultDesktop: true, shortcut: 2 } }, component: asyncRoute('/schedule') },
   { path: '/course', name: 'course-archive', meta: { title: '课程进度', navigation: { id: 'course', icon: '📚', groupId: 'learning', groupLabel: '学习', defaultDesktop: true } }, component: asyncRoute('/course') },
   { path: '/tasks', name: 'tasks', meta: { title: '待办', navigation: { id: 'tasks', icon: '✅', groupId: 'learning', groupLabel: '学习', defaultDesktop: true, shortcut: 3 } }, component: asyncRoute('/tasks') },
   { path: '/exams', name: 'exams', meta: { title: '重要日期', navigation: { id: 'exams', icon: '⏳', groupId: 'learning', groupLabel: '学习', defaultDesktop: true, shortcut: 4 } }, component: asyncRoute('/exams') },

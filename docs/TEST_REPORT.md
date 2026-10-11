@@ -1,6 +1,8 @@
 # 测试与验证报告
 
-> 2026-10-10 最终本地验收。冻结源码0da1052396；Node26覆盖率与Node22完整check各307文件2771例、0失败0跳过；正式dist613检查、SQL与未签名Windows包校验通过。历史失败、环境/夹具限制、生产未部署和未测平台保留如下。
+> 最新最终独立验收见 [optimization/TEST_REPORT.md](optimization/TEST_REPORT.md)：常规 2921 用例通过，额外安全验收 2 失败/1 通过，两项开放 P1 阻塞发布，当前不符合发布条件。本文件其余内容保留历史证据边界。
+
+> 历史冻结快照（2026-10-10 首轮验收）：源码签名0da1052396、307个测试文件及2771项测试对应当时的完整check。最新复验数字和发布签名见文末后续记录；本报告保留首轮命令和失败历史。生产仍未部署。
 
 ## 1. 环境、数据与证据边界
 
@@ -372,3 +374,34 @@ V8报告336个实际参与文件：src316、scripts10、desktop-app2、Supabase1
 | PWA安装/离线/更新、桌面更新 | 现有测试/配置、更新控制器真实延迟边界、本地Worker构建 | 稳定dist离线/SW已绿；physical安装/签名升级未验 |
 
 最终本地验收已完成。SOURCE/TEST/config冻结复核一致，三报告和逐文件CSV在测试后写入；真实生产迁移/配置、托管业务、物理终端与签名安装/升级仍需相应环境和明确部署范围，已列具体边界。原始失败记录和0执行/定向skip均未改称最终通过。
+
+## 2026-10-10 后续复验
+
+本节记录首轮快照之后的实现与验证。全量测试发生在发布元数据更新之前；发布更新后另跑发布专项用例，二者不是同一次测试，也不将专项结果冒充第二次全量运行。
+
+| 检查 | 命令/范围 | 结果 |
+| --- | --- | --- |
+| 全量测试 | `npm test -- --run --maxWorkers=1 --testTimeout=20000 --reporter=json --outputFile=.tmp/codex-vitest-results-final-20261010.json` | 310个测试文件，2814通过，0失败，0跳过，Vitest JSON `success: true` |
+| 发布元数据专项 | `npm test -- --run tests/sourceSignature.test.js tests/releaseNotes.test.js tests/releaseReadme.test.js tests/versionUtils.test.js tests/desktopSignature.test.js tests/engineeringConfig.test.js` | 6个文件、33项通过；在release:bump更新后执行 |
+| Lint / 类型 | `npm run lint`；`npm run typecheck` | 均exit 0 |
+| 类型债务ratchet | `npm run typecheck:ratchet` | 当前2878，对照基线2914，下降36；未改写基线 |
+| 其他配置守卫 | `npm run check:release-readme`；`npm run pages:verify-config`；`tests/ratchetHardcoding.test.js` | README与Pages配置通过；硬编码ratchet 23项通过 |
+| 定向回归 | 当轮涉及的13个测试文件 | 157项通过；用于全量运行前修复后复核 |
+| Web构建 | `npm run build` | Vite 8.2.2构建通过；PWA生成187个预缓存项 |
+| 桌面构建 | `npm run build:desktop` | 通过 |
+
+构建时使用明确的示例Supabase公开URL/JWT构建变量；没有读取`.env.local`，不含真实凭证，也没有连接该示例地址。release:bump脚本将版本元数据更新为2026年10月10日-版本5、桌面1.0.18，源码签名`a703bfc017`；没有执行发布、部署或桌面签名。
+
+### 浏览器抽查
+
+临时本地生产预览检查首页（1440×900）、课表（1440×900及390×844）、待办（1440×900及390×844）和重要日期（768×1024）。手机课表能横向滑动查看后续星期；这些页面抽查时控制台错误数为0。检查后恢复默认视口、关闭临时标签并停止预览服务。没有将该抽查计入完整路由/视口自动化矩阵，也没有使用真实个人数据。
+
+### 仍未验证
+
+- 真实生产Supabase/Cloudflare配置、迁移应用、Edge/PostgREST/Storage/SMTP及跨账号/跨设备竞争。
+- 实体iOS Safari、软键盘、安全区、真实读屏器、辅助设备和完整WCAG认证。
+- 用户真实照片OCR质量、大型文件/超大数据集的设备内存和现场耗时。
+- 已安装签名桌面包的安装、升级、回滚和信任链；远程CI及生产发布。
+- 本轮的LCP/INP/API延迟和长期内存测量。
+
+因此，“通过”仅表示上表实际执行的本地自动化、静态门禁、构建和选定浏览器抽查；不表示未验证环境或所有业务异常组合通过。

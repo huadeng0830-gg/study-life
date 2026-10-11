@@ -1,7 +1,15 @@
 import { effectScope, nextTick, ref, triggerRef, watch, shallowRef } from 'vue'
-import { isSyncKey } from '../syncKeys.js'
-import { clearDataVault, mirrorLocalValue, mirrorLocalValues, setMirrorErrorHandler, setMirrorTimingHandler } from '../dataVault.js'
 import { recordSilentError } from '../globalError.js'
+import { isSyncKey } from '../syncKeys.js'
+import { registerStoredSnapshotAccessors } from './snapshotAccess.js'
+import { clearDataVault, mirrorLocalValue, mirrorLocalValues, setMirrorTimingHandler } from '../dataVault.js'
+import { clearPendingWriteOwner as clearPendingWriteOwnerState, clearRecoveryDraft, recoveryDraftOwner, storeRecoveryDraft } from './persistenceDrafts.js'
+import { createOwnerTransitionFence } from './ownerTransitionFence.js'
+import {
+  markPersistenceSuccess, persistenceWriteStates,
+  reportPersistenceFailure, setPersistenceWriteState,
+} from './persistenceState.js'
+export { dismissPersistenceNotice, persistenceState, persistenceWriteStates, reportPersistenceFailure } from './persistenceState.js'
 
 // 存储层只发出本机数据变更信号；账号同步监听同一个事件，不反向耦合存储实现。
 function notifyLocalChanged(key = '', rawValue = undefined) {
@@ -114,47 +122,25 @@ setMirrorTimingHandler(({ keys = [], durationMs = 0 } = {}) => {
 
 export const clock = ref(new Date())
 
-// 持久化失败不能只进入静默日志：用户仍可继续使用内存中的本次状态，
-// 但必须明确知道刷新/关闭页面前需要导出数据。
-export const persistenceState = ref({
-  status: 'idle',
-  key: '',
-  source: '',
-  message: '',
-  at: 0,
-})
+const conflictedStorageKeys = new Set()
+const persistenceMutationVersions = new Map()
 
-export function reportPersistenceFailure(error, key = '', source = 'local') {
-  const isMirror = source === 'mirror'
-  persistenceState.value = {
-    status: 'error',
-    key,
-    source,
-    message: isMirror
-      ? '本机主数据已写入，但安全副本未能更新；建议立即导出当前数据。'
-      : '本次修改未能保存到本机；刷新或关闭页面前请先导出当前数据。',
-    at: Date.now(),
-  }
-  recordSilentError(`storage-${source}`, error)
+export function getPersistenceMutationVersion(key) {
+  return persistenceMutationVersions.get(key) || 0
 }
 
-export function dismissPersistenceNotice() {
-  persistenceState.value = { status: 'idle', key: '', source: '', message: '', at: 0 }
+/** Return the newest registered in-memory value before a debounced/failed write. */
+export function readLatestStoredRaw(key, storage = globalThis.localStorage) {
+  if (storedRefs.has(key)) return JSON.stringify(storedRefs.get(key).value)
+  return storage?.getItem(key) ?? null
 }
 
-setMirrorErrorHandler((error, keys = []) => {
-  reportPersistenceFailure(error, keys[0] || '', 'mirror')
-})
-
-function markPersistenceSuccess() {
-  if (persistenceState.value.status !== 'error') return
-  persistenceState.value = {
-    ...persistenceState.value,
-    status: 'recovered',
-    message: '本机保存已恢复。',
-    at: Date.now(),
-  }
+export function getPendingPersistenceKeys() {
+  return [...new Set([...pendingWrites.keys(), ...Object.entries(persistenceWriteStates.value)
+    .filter(([key, state]) => key.startsWith('sl_') && !['mirror', 'owner-draft'].includes(state.source) && ['failed', 'dirty', 'saving', 'conflict'].includes(state.status))
+    .map(([key]) => key)])]
 }
+registerStoredSnapshotAccessors({ readLatestStoredRaw, getPendingPersistenceKeys })
 
 const CLOCK_INTERVAL = 60 * 1000
 let clockTimer = null
@@ -201,8 +187,14 @@ const WRITE_DELAY_BY_TYPE = {
   settings: 1000,   // 设置类：低频变更，延迟更久避免抖动
 }
 const pendingWrites = new Map()
+const pendingWriteOwners = new Map()
+const pendingWriteBases = new Map()
 let writeTimer = null
 let idleWrite = null
+
+function clearPendingWriteOwner(key) {
+  clearPendingWriteOwnerState(key, pendingWriteOwners, pendingWriteBases)
+}
 
 function getWriteDelay(key) {
   if (key.startsWith('sl_') && (key.includes('expense') || key.includes('task') || key.includes('course') || key.includes('bill') || key.includes('event'))) {
@@ -217,32 +209,51 @@ function getWriteDelay(key) {
   return WRITE_DELAY_BY_TYPE.default
 }
 
-function writeNow(key, makeRaw) {
+function writeNow(key, makeRaw, retryProducer = makeRaw, ownerId = pendingWriteOwners.get(key) ?? recoveryDraftOwner()) {
   let raw
+  let previousRaw
   try {
     const serializeStartedAt = performanceNow()
     raw = makeRaw()
+    if (ownerId !== recoveryDraftOwner()) {
+      void storeRecoveryDraft(key, raw, pendingWriteBases.get(key), ownerId).then((saved) => {
+        reportPersistenceFailure(new Error('账号数据已切换，已停止写入旧账号修改。'), key,
+          saved ? 'owner-draft' : 'owner-draft-failed', { ownerId })
+      })
+      pendingWrites.delete(key)
+      clearPendingWriteOwner(key)
+      return false
+    }
     const serializeMs = Math.round((performanceNow() - serializeStartedAt) * 100) / 100
-    if (raw === localStorage.getItem(key)) return
+    previousRaw = localStorage.getItem(key)
+    if (raw === previousRaw) { markPersistenceSuccess(key, 'local'); clearRecoveryDraft(key, ownerId); clearPendingWriteOwner(key); return true }
     const fingerprint = rawFingerprint(raw)
     // Keep only a compact fingerprint for the last committed serialization.
     // This suppresses a change-and-revert before first persistence without
     // retaining another full JSON string for every large collection.
-    if (fingerprint === writtenFingerprints.get(key)) return
+    if (fingerprint === writtenFingerprints.get(key)) { markPersistenceSuccess(key, 'local'); clearPendingWriteOwner(key); return true }
     const localStartedAt = performanceNow()
     localStorage.setItem(key, raw)
+    clearRecoveryDraft(key, ownerId)
+    clearPendingWriteOwner(key)
     if (typeof window !== 'undefined') window.dispatchEvent(new Event('study-life:storage-updated'))
     writtenFingerprints.set(key, fingerprint)
     const localStorageMs = Math.round((performanceNow() - localStartedAt) * 100) / 100
     observeStorage(key, { payloadBytes: payloadBytes(raw), serializeMs, localStorageMs })
-    markPersistenceSuccess()
+    markPersistenceSuccess(key, 'local')
     // 来自响应式业务状态的写入是用户已确认的最新事实；即便是空集合，
     // 也必须覆盖影子副本，避免之后把已删除的数据重新恢复出来。
     mirrorLocalValue(key, raw, { allowEmpty: true }).catch((error) => reportPersistenceFailure(error, key, 'mirror'))
     if (isSyncKey(key)) notifyLocalChanged(key, raw)
+    return true
   } catch (error) {
     // 配额溢出/隐私模式等失败不阻塞应用，但必须留下排查线索。
     reportPersistenceFailure(error, key, 'local')
+    if (typeof raw === 'string') void storeRecoveryDraft(key, raw, previousRaw, ownerId)
+    // Retain the producer so an explicit retry serializes the newest edit,
+    // rather than retrying a stale value captured before the failed write.
+    if (!conflictedStorageKeys.has(key)) pendingWrites.set(key, retryProducer)
+    return false
   }
 }
 
@@ -259,11 +270,18 @@ function cancelScheduledBatch() {
 
 function writePendingBatch() {
   cancelScheduledBatch()
-  const batch = [...pendingWrites.entries()]
+  const batch = [...pendingWrites.entries()].map(([key, producer]) => [
+    key, producer, pendingWriteOwners.get(key) ?? recoveryDraftOwner(), pendingWriteBases.get(key),
+  ])
   pendingWrites.clear()
   // Serialize all values first to avoid interleaved layout thrashing
   const serialized = new Map()
   for (const [key, producer] of batch) {
+    if (conflictedStorageKeys.has(key)) {
+      pendingWrites.set(key, producer)
+      continue
+    }
+    setPersistenceWriteState(key, 'saving')
     try {
       serialized.set(key, producer())
     } catch {
@@ -272,33 +290,58 @@ function writePendingBatch() {
     }
   }
   for (const [key, rawOrProducer] of serialized) {
+    const [, retryProducer, ownerId, baseRaw] = batch.find(([batchKey]) => batchKey === key)
+    if (ownerId !== recoveryDraftOwner()) {
+      const raw = typeof rawOrProducer === 'function' ? rawOrProducer() : rawOrProducer
+      void storeRecoveryDraft(key, raw, baseRaw, ownerId).then((saved) => {
+        reportPersistenceFailure(new Error('账号数据已切换，已停止写入旧账号修改。'), key,
+          saved ? 'owner-draft' : 'owner-draft-failed', { ownerId })
+      })
+      clearPendingWriteOwner(key)
+      continue
+    }
     if (typeof rawOrProducer === 'function') {
-      writeNow(key, rawOrProducer)
+      writeNow(key, rawOrProducer, retryProducer, ownerId)
     } else {
       // Already serialized
       const raw = rawOrProducer
+      let previousRaw
       try {
-        if (raw === localStorage.getItem(key)) continue
+        previousRaw = localStorage.getItem(key)
+        if (raw === previousRaw) { markPersistenceSuccess(key, 'local'); clearRecoveryDraft(key, ownerId); clearPendingWriteOwner(key); continue }
         const fingerprint = rawFingerprint(raw)
-        if (fingerprint === writtenFingerprints.get(key)) continue
+        if (fingerprint === writtenFingerprints.get(key)) { markPersistenceSuccess(key, 'local'); clearPendingWriteOwner(key); continue }
         const localStartedAt = performanceNow()
         localStorage.setItem(key, raw)
+        clearRecoveryDraft(key, ownerId)
+        clearPendingWriteOwner(key)
         if (typeof window !== 'undefined') window.dispatchEvent(new Event('study-life:storage-updated'))
         writtenFingerprints.set(key, fingerprint)
         const localStorageMs = Math.round((performanceNow() - localStartedAt) * 100) / 100
         observeStorage(key, { payloadBytes: payloadBytes(raw), serializeMs: 0, localStorageMs })
-        markPersistenceSuccess()
+        markPersistenceSuccess(key, 'local')
         mirrorLocalValue(key, raw, { allowEmpty: true }).catch((error) => reportPersistenceFailure(error, key, 'mirror'))
         if (isSyncKey(key)) notifyLocalChanged(key, raw)
       } catch (error) {
         reportPersistenceFailure(error, key, 'local')
+        void storeRecoveryDraft(key, raw, previousRaw, ownerId)
+        if (!conflictedStorageKeys.has(key)) {
+          if (retryProducer) pendingWrites.set(key, retryProducer)
+        }
       }
     }
   }
 }
 
 function scheduleWrite(key, makeRaw) {
+  if (ownerTransitionFence.holdPendingEdit(key)) return
+  if (!pendingWriteOwners.has(key)) {
+    pendingWriteOwners.set(key, recoveryDraftOwner())
+    try { pendingWriteBases.set(key, localStorage.getItem(key)) } catch { pendingWriteBases.set(key, undefined) }
+  }
   pendingWrites.set(key, makeRaw)
+  persistenceMutationVersions.set(key, getPersistenceMutationVersion(key) + 1)
+  setPersistenceWriteState(key, 'dirty')
   if (writeTimer) clearTimeout(writeTimer)
   const delay = getWriteDelay(key)
   writeTimer = setTimeout(() => {
@@ -319,10 +362,21 @@ function flushAllWrites() {
 
 export function flushStoredWrites() {
   flushAllWrites()
+  const pendingKeys = getPendingPersistenceKeys()
+  return { ok: pendingKeys.length === 0, pendingKeys }
+}
+
+function flushBeforeUnload(event) {
+  flushAllWrites()
+  if (!getPendingPersistenceKeys().length) return
+  event.preventDefault()
+  event.returnValue = ''
+  return ''
 }
 
 function cancelPendingWrite(key) {
   pendingWrites.delete(key)
+  clearPendingWriteOwner(key)
   if (!pendingWrites.size) cancelScheduledBatch()
 }
 
@@ -331,11 +385,18 @@ if (typeof document !== 'undefined') {
     if (document.visibilityState === 'hidden') flushAllWrites()
   })
   window.addEventListener('pagehide', flushAllWrites)
-  window.addEventListener('beforeunload', flushAllWrites)
+  window.addEventListener('beforeunload', flushBeforeUnload)
 }
 
 const persistenceScope = effectScope()
 const pendingWatcherInstalls = new Map()
+const ownerTransitionFence = createOwnerTransitionFence({
+  pendingWrites, pendingWriteOwners, pendingWriteBases, storedRefs, storedDefaults,
+  pendingWatcherInstalls, conflictedStorageKeys, writtenFingerprints, externallyRestoredRaw,
+  recoveryDraftOwner, readLatestStoredRaw, storeRecoveryDraft, clearPendingWriteOwner,
+  cancelScheduledBatch, cancelPendingWrite, rawFingerprint, normalizeStoredValue, isPlainObject,
+  setPersistenceWriteState, reportPersistenceFailure, markPersistenceSuccess,
+})
 
 function installPersistenceWatcher(key) {
   const pending = pendingWatcherInstalls.get(key)
@@ -472,7 +533,8 @@ export function useStoredRef(key, defaultValue, options = {}) {
 
 /** Clear user-owned keys and reset mounted refs after account logout or a full local purge. */
 export async function clearStoredDataByPrefix(prefix = 'sl_') {
-  flushAllWrites()
+  const flush = flushStoredWrites()
+  if (!flush.ok) throw new Error(`存在未能保存的本机修改（${flush.pendingKeys.join('、')}），已保留数据并取消清理。`)
   const keys = new Set([...storedRefs.keys(), ...storedDefaults.keys()])
   try {
     for (let index = 0; index < localStorage.length; index += 1) {
@@ -566,9 +628,17 @@ async function publishLunarMirror(values) {
   }
 }
 
-export async function restoreStoredValues(values, { markChanged = true } = {}) {
+export async function restoreStoredValues(values, { markChanged = true, assertBeforeApply = () => {} } = {}) {
   const entries = Object.entries(values || {}).filter(([key]) => typeof key === 'string' && key.startsWith('sl_'))
   if (!entries.length) return
+  const conflictedKeys = entries.map(([key]) => key).filter((key) => conflictedStorageKeys.has(key))
+  if (conflictedKeys.length) throw new Error(`这些数据存在跨页面冲突（${conflictedKeys.join('、')}），已取消恢复以保留两个版本。`)
+  const pendingKeys = entries.map(([key]) => key).filter((key) => pendingWrites.has(key))
+  if (pendingKeys.length) {
+    flushStoredWrites()
+    const failedKeys = pendingKeys.filter((key) => pendingWrites.has(key))
+    if (failedKeys.length) throw new Error(`这些数据还有未保存修改（${failedKeys.join('、')}），已取消恢复以保留原内容。`)
+  }
   const rawValues = Object.fromEntries(entries.map(([key, value]) => [key, JSON.stringify(value)]))
   const previous = Object.fromEntries(entries.map(([key]) => [key, localStorage.getItem(key)]))
   const previousFingerprints = new Map(entries.map(([key]) => [key, writtenFingerprints.get(key)]))
@@ -579,10 +649,13 @@ export async function restoreStoredValues(values, { markChanged = true } = {}) {
       : []
   )))
   try {
+    assertBeforeApply()
     for (const [key, raw] of Object.entries(rawValues)) {
       localStorage.setItem(key, raw)
       writtenFingerprints.set(key, rawFingerprint(raw))
+      setPersistenceWriteState(key, 'saving', 'restore')
     }
+    assertBeforeApply()
     for (const [key, value] of entries) {
       if (storedRefs.has(key)) {
         const state = storedRefs.get(key)
@@ -601,10 +674,18 @@ export async function restoreStoredValues(values, { markChanged = true } = {}) {
     // like an independent user edit to the account-sync sequence guard.
     await nextTick()
     for (const state of suppressedRefs) suppressedRestoreRefs.delete(state)
-    await mirrorLocalValues(rawValues)
+    assertBeforeApply()
+    const mirrored = await mirrorLocalValues(rawValues)
     if (typeof window !== 'undefined') window.dispatchEvent(new Event('study-life:storage-updated'))
     if (markChanged && entries.some(([key]) => isSyncKey(key))) notifyLocalChanged()
-    markPersistenceSuccess()
+    for (const [key] of entries) {
+      conflictedStorageKeys.delete(key)
+      markPersistenceSuccess(key, 'local')
+      if (mirrored) markPersistenceSuccess(key, 'mirror')
+      else setPersistenceWriteState(key, 'saved', 'local')
+    }
+    markPersistenceSuccess('restore', 'local')
+    markPersistenceSuccess('restore', 'rollback')
   } catch (error) {
     let rollbackError = null
     try {
@@ -623,7 +704,7 @@ export async function restoreStoredValues(values, { markChanged = true } = {}) {
       error.rollbackFailed = true
       error.rollbackError = rollbackError
     }
-    reportPersistenceFailure(error, 'restore', 'local')
+    reportPersistenceFailure(error, 'restore', error?.rollbackFailed ? 'rollback' : 'local')
     throw error
   }
   await publishLunarMirror(values)
@@ -634,6 +715,10 @@ if (typeof window !== 'undefined') {
     // storage 事件对 sessionStorage 也会触发；这里只关心业务数据的 localStorage。
     // 不判断的话，任何写 sessionStorage 的代码都会让本标签页取消待写入并覆盖内存值。
     if (event.storageArea && event.storageArea !== window.localStorage) return
+    if (event.key === 'study-life-data-owner') {
+      ownerTransitionFence.observeExternalOwner(event.newValue || '')
+      return
+    }
     const keys = event.key ? [event.key] : [...storedRefs.keys()]
     for (const key of keys) {
       const state = storedRefs.get(key)
@@ -641,12 +726,20 @@ if (typeof window !== 'undefined') {
       try {
         const fallback = storedDefaults.get(key)
         const saved = event.newValue === null ? null : JSON.parse(event.newValue)
-        // Invalid external values must not discard pending local edits or put a
-        // string/object into a collection that every consumer expects to be an array.
+        // Reject malformed external data before checking for a conflict. A bad
+        // value from another tab must not freeze this tab's valid pending edit.
         if (saved !== null && (Array.isArray(fallback) ? !Array.isArray(saved)
           : isPlainObject(fallback) ? !isPlainObject(saved)
             : fallback !== null && typeof saved !== typeof fallback)) {
           throw new Error('其他页面写入的本机数据格式异常，本页修改已保留。')
+        }
+        // Preserve local in-memory edits when another tab writes the same key.
+        // Keep the external value in localStorage and the local edit in memory;
+        // neither version is silently discarded.
+        if (pendingWrites.has(key) || conflictedStorageKeys.has(key)) {
+          conflictedStorageKeys.add(key)
+          reportPersistenceFailure(new Error('Concurrent localStorage edit'), key, 'conflict')
+          continue
         }
         const value = saved === null ? JSON.parse(JSON.stringify(fallback)) : normalizeStoredValue(saved, fallback).value
         const raw = JSON.stringify(value)
@@ -657,6 +750,7 @@ if (typeof window !== 'undefined') {
         if (pending) pending.baselineFingerprint = rawFingerprint(raw)
         else externallyRestoredRaw.set(state, raw)
         state.value = value
+        markPersistenceSuccess(key, 'local')
       } catch (error) {
         reportPersistenceFailure(error, key, 'read')
       }

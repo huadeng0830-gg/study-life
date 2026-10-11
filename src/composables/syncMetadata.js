@@ -26,6 +26,7 @@ const SYNC_SINGLETON_KEYS = new Set([
   'sl_wallpaper_accent', 'sl_appearance', 'sl_wallpaper_config', 'sl_performance_mode',
   'sl_ledger_fx', 'sl_ledger_budget', 'sl_festive_lunar', 'sl_ui_language', 'sl_high_contrast',
   'sl_archived_quick_notes', 'sl_navigation_mobile', 'sl_navigation_desktop',
+  'sl_weekly_reflections',
 ])
 
 /**

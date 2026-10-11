@@ -3,10 +3,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { nextTick } from 'vue'
 
 vi.mock('../src/composables/dataVault.js', () => ({
+  clearPendingRecoveryDraft: vi.fn(async () => true), savePendingRecoveryDraft: vi.fn(async () => true),
   clearDataVault: vi.fn(async () => true),
   mirrorLocalValue: vi.fn(async () => true),
   mirrorLocalValues: vi.fn(async () => true),
   setMirrorErrorHandler: vi.fn(),
+  setMirrorSuccessHandler: vi.fn(),
   setMirrorTimingHandler: vi.fn(),
 }))
 
@@ -48,19 +50,21 @@ describe('跨标签页数据变更与持久化异常', () => {
     expect(tasks.value).toEqual([])
   })
 
-  it('跨页删除会清理内存和待写队列，避免旧账号任务再次写回', async () => {
+  it('跨页删除时保留本页编辑并阻止旧队列写回', async () => {
     const core = await import('../src/composables/store/core.js')
+    const { persistenceState } = core
     const { useDomainCommands } = await import('../src/composables/domain/commands.js')
     const domain = useDomainCommands()
     await vi.advanceTimersByTimeAsync(150)
-    domain.createTask({ title: '虚构账号 A 的待办' })
+    const task = domain.createTask({ title: '虚构账号 A 的待办' })
     await nextTick()
     localStorage.removeItem('sl_tasks')
     storageEvent('sl_tasks', null)
     await nextTick()
-    core.flushStoredWrites()
-    expect(core.useStoredRef('sl_tasks', []).value).toEqual([])
+    expect(core.flushStoredWrites()).toMatchObject({ ok: false, pendingKeys: ['sl_tasks'] })
+    expect(core.useStoredRef('sl_tasks', []).value.map((item) => item.id)).toEqual([task.id])
     expect(localStorage.getItem('sl_tasks')).toBeNull()
+    expect(persistenceState.value).toMatchObject({ status: 'conflict', key: 'sl_tasks' })
   })
 
   it('批量冲刷的读取异常保留内存修改并显示保存失败，而不会抛到全局', async () => {

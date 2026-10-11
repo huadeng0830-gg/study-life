@@ -6,6 +6,31 @@
 .page-actions {
   gap: 14px;
 }
+.date-views { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.date-view-switch { width: max-content; }
+.date-view-panel { min-width: 0; }
+.date-calendar-layout { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(280px, 0.8fr); gap: 14px; align-items: start; }
+.date-calendar-card, .date-calendar-day-card { min-width: 0; overflow: hidden; }
+.date-calendar-heading { padding-bottom: 0; }
+.date-calendar-content { padding-top: 0; }
+.important-date-calendar { width: 100%; padding: 0; --cell-size: clamp(2.2rem, 5vw, 3rem); }
+.important-date-calendar :deep([data-slot="calendar-cell-trigger"]) { position: relative; display: flex; flex-direction: column; gap: 2px; line-height: 1; }
+.important-date-calendar :deep([data-slot="calendar-cell-trigger"][data-has-events="true"]:not([data-selected])) { color: var(--primary); font-weight: var(--fw-800); }
+.important-date-calendar :deep(.important-date-calendar__day) { display: grid; min-height: 1.3em; place-items: center; }
+.important-date-calendar :deep(.important-date-calendar__dot) { width: 4px; height: 4px; flex: 0 0 4px; border-radius: var(--radius-circle); background: currentColor; }
+.date-calendar-day-content { padding-top: 0; }
+.date-calendar-events { display: flex; flex-direction: column; gap: 7px; }
+.date-calendar-event { display: grid; width: 100%; min-height: 60px; height: auto; grid-template-columns: 50px minmax(0, 1fr) auto; justify-content: initial; align-items: center; gap: 10px; padding: 10px; border: 1px solid var(--ui-border); border-radius: var(--radius-10); text-align: left; white-space: normal; }
+.date-calendar-event-time { color: var(--primary); font-size: var(--fs-11-5); font-weight: var(--fw-750); font-variant-numeric: tabular-nums; }
+.date-calendar-event-copy { display: flex; min-width: 0; flex-direction: column; gap: 5px; }
+.date-calendar-event-name { overflow-wrap: anywhere; color: var(--ink); font-size: var(--fs-13); font-weight: var(--fw-750); }
+.date-calendar-event-meta { display: flex; min-width: 0; flex-wrap: wrap; align-items: center; gap: 5px 7px; color: var(--ink-faint); font-size: var(--fs-11); font-weight: var(--fw-450); }
+.date-calendar-event-arrow { color: var(--ink-faint); font-size: 20px; }
+.date-calendar-empty { display: flex; min-height: 140px; flex-direction: column; align-items: center; justify-content: center; gap: 12px; color: var(--ink-faint); text-align: center; }
+.date-calendar-empty p { margin: 0; font-size: var(--fs-12-5); }
+.note { display: flex; gap: 5px; overflow: hidden; color: var(--ink-faint); font-size: var(--fs-11-5); text-overflow: ellipsis; white-space: nowrap; }
+.note span { flex: 0 0 auto; color: var(--ink-soft); font-weight: var(--fw-650); }
+.meta-row [data-slot="badge"] { min-height: 22px; padding-inline: 8px; font-size: var(--fs-10-5); }
 .date-overview { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
 .overview-item { display: grid; gap: 5px; padding: 15px 18px; text-align: left; color: var(--ink-soft); }
 .overview-item span { font-size: var(--fs-12-5); font-weight: var(--fw-650); }
@@ -287,6 +312,10 @@
 .card-menu.up { top: auto; bottom: 26px; }
 
 @media (max-width: 760px) {
+  .date-calendar-layout { grid-template-columns: minmax(0, 1fr); }
+  .date-calendar-card, .date-calendar-day-card { border-radius: var(--radius-12); }
+  .important-date-calendar { --cell-size: clamp(2.25rem, 10vw, 3rem); }
+  .date-calendar-event { grid-template-columns: 44px minmax(0, 1fr) auto; padding: 9px; }
   .date-overview { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
   .overview-item { padding: 12px 14px; }
   .date-filters { padding: 12px; }

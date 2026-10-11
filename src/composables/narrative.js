@@ -18,19 +18,22 @@
  */
 
 import { useStoredRef } from './store/index.js'
+import {
+  DEFAULT_NARRATIVE_LANGUAGE,
+  NARRATIVE_LANGUAGES,
+  isNarrativeLanguage,
+} from './narrativeLanguages.js'
 
 /** 语言偏好键（新增；不改任何既有 `sl_*` 的语义）。 */
 export const NARRATIVE_LANGUAGE_KEY = 'sl_ui_language'
-export const DEFAULT_NARRATIVE_LANGUAGE = 'zh'
 
-export const NARRATIVE_LANGUAGES = Object.freeze([
-  { id: 'zh', label: '中文' },
-  { id: 'en', label: 'English' },
-])
+// 语言清单本身在零依赖的 narrativeLanguages.js 里（备份导入要在不触碰存储的前提下
+// 校验它），这里原样再导出，保持本文件原有的对外形状不变。
+export { NARRATIVE_LANGUAGES, DEFAULT_NARRATIVE_LANGUAGE }
 
 export const narrativeLang = useStoredRef(NARRATIVE_LANGUAGE_KEY, DEFAULT_NARRATIVE_LANGUAGE)
 // 坏值修复：存了不认识的语言就退回默认，不让界面拿到 undefined。
-if (!NARRATIVE_LANGUAGES.some((item) => item.id === narrativeLang.value)) {
+if (!isNarrativeLanguage(narrativeLang.value)) {
   narrativeLang.value = DEFAULT_NARRATIVE_LANGUAGE
 }
 

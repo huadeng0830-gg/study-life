@@ -11,8 +11,12 @@ export const HOME_MODULES = [
 export function normalizeHomeModuleOrder(value, definitions = HOME_MODULES) {
   const existing = Array.isArray(value) ? value : []
   const knownIds = new Set(definitions.map((item) => item.id))
-  const ordered = existing.filter((entry) => entry && knownIds.has(entry.id))
-  const seen = new Set(ordered.map((entry) => entry.id))
+  const seen = new Set()
+  const ordered = existing.filter((entry) => {
+    if (!entry || !knownIds.has(entry.id) || seen.has(entry.id)) return false
+    seen.add(entry.id)
+    return true
+  })
   for (const item of definitions) {
     if (!seen.has(item.id)) ordered.push({ id: item.id, visible: true })
   }

@@ -1,4 +1,5 @@
 @import './styles/action-feedback.css';
+@import './styles/shadcn.css';
 
 :root {
   color-scheme: light;
@@ -6,25 +7,16 @@
   --card: #ffffff;
   --text: #172033;
   --muted: #667085;
-  /* 主色经过 AA 校准：白字在 --primary 上 ≥ 4.66:1，
-     --primary 在 --primary-soft 上 ≥ 4.7:1（改动前分别是 4.48 与 4.0）。
-     可用 `node scripts/audit-contrast.mjs` 复核。 */
+  /* 主色按 WCAG AA 对比度校准；复核见 scripts/audit-contrast.mjs。 */
   --primary: #3d63d8;
   --primary-hover: #3151b8;
   --primary-soft: #edf2ff;
   --danger: #c62828;
   --danger-soft: color-mix(in srgb, var(--danger) 9%, var(--card));
-  /* 成功/警告语义色。此前全仓只有 --danger 有令牌，成功与警告一律写死
-     （#07805d / #0d9463 / #9a6414 等 33 处），于是深色主题下这些文字仍是深色，
-     落在深色卡片上几乎读不出来；而 ExamsView 的 .review-message 甚至写了
-     var(--success) —— 那个令牌从来不存在，整条声明失效、回退成继承色，
-     「已安排复习」的绿色提示一直是假的。
-     取值经过对比度校准（底色按 Toast 的 color-mix 比例算）：
-     浅色 #067654 在 10% 混合底上 4.88:1、直接在 --card 上 5.6:1。 */
+  /* 成功与警告语义色；深色主题在下方使用更亮的色值。 */
   --success: #067654;
   --warning: #8a5a12;
-  /* 主色/危险色实底上的文字色。浅色主题用白字；深色主题的
-     --primary 本身是亮色，白字只有 3.17:1，必须在深色分支改成深字。 */
+  /* 主色与危险色按钮的前景色；深色模式会调整主色前景。 */
   --on-primary: #ffffff;
   --on-danger: #ffffff;
   --border: #e3e8f2;
@@ -33,23 +25,13 @@
   --shadow-sm: 0 1px 2px rgba(22, 34, 64, 0.04);
   --shadow-md: 0 8px 24px rgba(35, 52, 93, 0.08);
 
-  /* ---------- v2 Design Tokens ----------
-     这里原来写的是「本轮追加，课程表不引用，零影响」——那是刚铺令牌时的状态。
-     现在这一块里的每个令牌都有真实消费者（--card-radius / --radius-s /
-     --border-strong / --bg-tint / --focus-ring 在组件与公共规范里，--fs-body
-     在本文件的基础声明里），不再有「只定义不消费」的令牌：
-     tests/styleHooks.test.js 会守住这条。 */
+  /* V2 semantic tokens used by shared components and public styles. */
   --border-strong: #d3dbea;
   --ink-soft: #55607a;
   --ink-faint: #626d84;
   --ink: var(--text);
   --bg-tint: #f9fafd;
-  /* ---------- v5 尺度令牌：字号 / 字重 / 圆角（阶段 4 全量迁移） ----------
-     此前全仓 font-size 约 678 处、font-weight 约 229 处、border-radius 约 333 处
-     硬编码，语义别名只有 --fs-body/--fs-aux/--fs-page-title 与 --card-radius/--radius-s。
-     现在把实际出现过的每一档数值都收成刻度令牌，并由组件侧机械替换消费——
-     令牌与消费者同一批提交，tests/styleHooks.test.js 挡住「只定义不消费」。
-     语义别名保留，改为指向刻度（单值事实来源）。 */
+  /* Type, weight, and radius scales shared by the component styles. */
   --radius-2: 2px;
   --radius-3: 3px;
   --radius-4: 4px;
@@ -67,7 +49,7 @@
   --radius-18: 18px;
   --radius-pill: 999px;
   --radius-circle: 50%;
-  --card-radius: var(--radius-14);
+  --card-radius: var(--radius-surface);
   --radius-s: var(--radius-9);
 
   --fs-8: 8px;
@@ -105,6 +87,7 @@
   --fs-aux: var(--fs-12-5);
 
   --fw-400: 400;
+  --fw-450: 450;
   --fw-500: 500;
   --fw-600: 600;
   --fw-650: 650;
@@ -114,13 +97,33 @@
   --fw-850: 850;
   --fw-900: 900;
 
+  /* Tailwind v4 spacing scale used by shadcn arbitrary grid/gap utilities. */
+  --spacing: 4px;
+
+  /* Foundation contract. Legacy numeric tokens remain compatible; new shared
+     components consume these roles instead of inventing their own scales. */
+  --font-sans: 'Microsoft YaHei', 'PingFang SC', system-ui, -apple-system, sans-serif;
+  --line-body: 1.6;
+  --line-heading: 1.4;
+  --space-1: var(--spacing);
+  --space-2: calc(var(--spacing) * 2);
+  --space-3: calc(var(--spacing) * 3);
+  --space-4: calc(var(--spacing) * 4);
+  --space-5: calc(var(--spacing) * 5);
+  --space-6: calc(var(--spacing) * 6);
+  --control-height: 40px;
+  --control-compact: 32px;
+  --control-large: 44px;
+  --radius-control: var(--radius-8);
+  --radius-surface: var(--radius-12);
+  --border-width: 1px;
+  --surface-padding: var(--space-5);
+  --icon-size: 16px;
+  --shadow-overlay: 0 12px 32px color-mix(in srgb, var(--text) 12%, transparent);
+
   --focus-ring: rgba(61, 99, 216, 0.28);
 
-  /* ---------- v3 动效 token：统一时长与缓动曲线 ----------
-     此前各组件硬编码 0.13s~0.3s 与各不相同的缓动，手感不一致。
-     这里收敛成一套；JS 侧同名常量见 src/composables/motion.js。
-     注意：data-performance='reduced' 时下面的全局规则会把
-     transition/animation 压到 0.01ms，CSS 动效自动降级。 */
+  /* Shared motion durations and curves; JS counterparts live in motion.js. */
   --dur-instant: 90ms;
   --dur-fast: 150ms;
   --dur-base: 220ms;
@@ -133,32 +136,35 @@
   --action-collapse: var(--dur-slow);
   --action-fade: 150ms;
   --action-ease: ease-in-out;
-  --action-success: #16a34a;
+  --action-success: var(--success);
 
-  /* ---------- v4 焦点可见性 ----------
-     原来的 --focus-ring 是 16% 透明度的品牌色，只适合做“输入框激活阴影”，
-     当作键盘焦点环时在浅色卡片上几乎看不见。
-     这里另立一对实色 token：
-       --focus-solid 画 outline（实色，任何背景都能分辨）；
-       --focus-halo  画 outline 外的一圈对比光环，抵消壁纸明暗差异。
-     两圈是**互补**的，不是重复：outline 在浅底上很稳（默认主题对 --card 是 5.87:1），
-     但压到主色按钮上只剩 1.11:1——那时靠 halo 顶上（对 --primary 是 4.75:1）。
-     所以可感知性由"至少一圈达标"保证（WCAG 1.4.11 要求 3:1）。
-     实测口径见 scripts/audit-contrast.mjs 的 focusIndicatorOffenders：
-     6 个主题 × 7 类相邻背景共 42 组，全部达标，最弱一处 4.75:1。
-     注：这里原先写着"由 appearance.js 按壁纸亮度在浅/深之间切换"，那句话是**错的**——
-     appearance.js 里没有这段代码，--focus-halo 是纯 CSS 令牌（第四十五轮核实）。
-     壁纸与主题不匹配时 halo 可能看不出来，但那种情况下 outline 仍然达标、
-     指示器整体依旧可感知，故不为此引入运行时切换。 */
+  /* Keyboard focus pairs a solid outline with a contrasting halo; verified across themes. */
   --focus-solid: #2b5bd7;
   --focus-halo: rgba(255, 255, 255, 0.92);
   --focus-width: 2px;
   --focus-offset: 2px;
 
-  /* ---------- v4 触摸目标 ----------
-     44px 是本项目的触屏目标；WCAG 2.2 AA (2.5.8) 最低为 24 CSS px（含间距等例外）。
-     只在粗指针设备上放大，桌面保持紧凑密度。 */
+  /* Coarse pointers use 44px targets while desktop keeps compact density. */
   --tap-min: 44px;
+
+  /* shadcn semantic roles bridge to the existing theme tokens. */
+  --ui-background: var(--bg);
+  --ui-foreground: var(--text);
+  --ui-card: var(--card);
+  --ui-card-foreground: var(--text);
+  --ui-primary: var(--primary);
+  --ui-primary-foreground: var(--on-primary);
+  --ui-secondary: var(--bg-tint);
+  --ui-secondary-foreground: var(--text);
+  --ui-muted: var(--bg-tint);
+  --ui-muted-foreground: var(--muted);
+  --ui-accent: var(--primary-soft);
+  --ui-accent-foreground: var(--primary);
+  --ui-destructive: var(--danger);
+  --ui-border: var(--border);
+  --ui-input: color-mix(in srgb, var(--ink-faint) 80%, var(--card));
+  --ui-ring: var(--focus-solid);
+  --ui-radius: var(--radius-surface);
 }
 
 /* 深色主题：焦点实色提亮，光环压暗，保证在深色卡片上仍然清晰。 */
@@ -213,10 +219,9 @@
 html,
 body {
   min-height: 100%;
-  background: var(--bg);
-  color: var(--text);
-  font-family: 'Microsoft YaHei', 'PingFang SC', system-ui, -apple-system,
-    sans-serif;
+  background: var(--ui-background);
+  color: var(--ui-foreground);
+  font-family: var(--font-sans);
   font-size: var(--fs-15);
 }
 
@@ -235,7 +240,7 @@ body {
 }
 
 /* Reused by small secondary copy across pages, including together.css users. */
-.muted { color: var(--muted); }
+.muted { color: var(--ui-muted-foreground); }
 
 /* 横屏 / 移动浏览器地址栏收放时，100vh 会大于真正的可见高度，
    底部内容会被推出屏幕。有 dvh 就跟着动态视口走。 */
@@ -263,8 +268,8 @@ textarea {
      是两个「基础定义点」，先接上才能让 --fs-body 有真实消费者。 */
   font-size: var(--fs-body);
   padding: 8px 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-8);
+  border: var(--border-width) solid var(--ui-input);
+  border-radius: var(--radius-control);
   outline: none;
   background: var(--card);
   color: var(--text);
@@ -282,7 +287,7 @@ textarea {
 input:focus,
 select:focus,
 textarea:focus {
-  border-color: var(--primary);
+  border-color: var(--ui-ring);
   box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
@@ -317,7 +322,7 @@ select:focus-visible,
 textarea:focus-visible,
 summary:focus-visible,
 [tabindex]:focus-visible {
-  outline: var(--focus-width) solid var(--focus-solid);
+  outline: var(--focus-width) solid var(--ui-ring);
   outline-offset: var(--focus-offset);
   box-shadow: 0 0 0 calc(var(--focus-width) + var(--focus-offset) + 1px) var(--focus-halo);
 }
@@ -351,11 +356,11 @@ summary:focus:not(:focus-visible) {
 
 .btn {
   position: relative;
-  min-height: 42px;
+  min-height: var(--control-height);
   line-height: 20px;
   text-decoration: none;
   border: none;
-  border-radius: var(--radius-8);
+  border-radius: var(--radius-control);
   padding: 9px 18px;
   font-size: var(--fs-body);
   font-weight: var(--fw-600);
@@ -405,9 +410,9 @@ summary:focus:not(:focus-visible) {
 }
 
 .btn-primary {
-  background: var(--primary);
-  color: var(--on-primary, #fff);
-  box-shadow: 0 3px 10px color-mix(in srgb, var(--primary) 24%, transparent);
+  background: var(--ui-primary);
+  color: var(--ui-primary-foreground, #fff);
+  box-shadow: none;
 }
 
 .btn-primary:hover {
@@ -415,33 +420,49 @@ summary:focus:not(:focus-visible) {
 }
 
 .btn-ghost {
-  background: var(--primary-soft);
-  color: var(--primary);
+  background: var(--ui-accent);
+  color: var(--ui-accent-foreground);
 }
 
 .btn-ghost:hover {
-  background: color-mix(in srgb, var(--primary) 14%, var(--primary-soft));
+  background: color-mix(in srgb, var(--ui-accent-foreground) 14%, var(--ui-accent));
 }
 
 /* 危险按钮：底色从 --danger 与 --card 混出来，而不是写死的浅红。
    写死 #fee2e2 在暗色主题下会变成"浅粉底 + 浅红字"，几乎读不出来；
    用 color-mix 后浅色主题观感不变，暗色主题自动得到深红底 + 亮红字。 */
 .btn-danger {
-  background: color-mix(in srgb, var(--danger) 14%, var(--card));
-  color: var(--danger);
+  background: color-mix(in srgb, var(--ui-destructive) 14%, var(--ui-card));
+  color: var(--ui-destructive);
 }
 
 .btn-danger:hover {
-  background: color-mix(in srgb, var(--danger) 24%, var(--card));
+  background: color-mix(in srgb, var(--ui-destructive) 24%, var(--ui-card));
 }
 
 .card {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-14);
-  padding: 22px;
+  color: var(--ui-card-foreground);
+  background: var(--ui-card);
+  border: 1px solid var(--ui-border);
+  border-radius: var(--ui-radius);
+  padding: var(--surface-padding);
   box-shadow: var(--shadow-sm);
 }
+
+.btn-secondary {
+  color: var(--ui-secondary-foreground);
+  background: var(--ui-secondary);
+}
+
+.btn-secondary:hover { background: color-mix(in srgb, var(--ui-border) 42%, var(--ui-secondary)); }
+
+.btn-outline {
+  border: 1px solid var(--ui-border);
+  color: var(--ui-foreground);
+  background: var(--ui-card);
+}
+
+.btn-outline:hover { background: var(--ui-muted); }
 
 @media (prefers-reduced-motion: reduce) {
   *,
@@ -770,7 +791,7 @@ summary:focus:not(:focus-visible) {
    而是让外壳额外打一个 data-festive 属性用来分叉：金色星芒**向上**升起、
    边升边旋转，方向与彩带的下落相反，一眼能区分。粒子颜色与时长仍由 JS 内联提供。
    时长没有新令牌 —— 粒子用内联时长，光环用既有的 --dur-reveal。 */
-/* 注意选择器要**逐个列出** App.vue 里 ANNIVERSARY_KEYS 的每个 key：
+/* 注意选择器要**逐个列出** festiveAtmosphere.js 里 ANNIVERSARY_KEYS 的每个 key：
    属性选择器是精确匹配，写成 [data-festive='anniversary'] 是**匹配不到**
    'anniversary-start'（使用周年）的 —— 那样使用周年会静默退回彩带，
    看起来"功能做了"，实际只有一半生效。守卫会把两边的清单对起来验。 */

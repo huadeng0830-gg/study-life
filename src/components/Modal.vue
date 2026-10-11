@@ -26,6 +26,8 @@ const props = defineProps({
   title: String,
   wide: Boolean,
   medium: Boolean,
+  // Complex editors use the whole visual viewport on phones, without drag dismissal.
+  mobileFullScreen: Boolean,
   // 窄屏下升级为可拖拽的底部抽屉：顶部出现把手，上拖展开、下拖收回。
   // 默认关闭，未显式开启的弹窗渲染结果与改造前完全一致。
   sheet: Boolean,
@@ -333,10 +335,10 @@ onBeforeUnmount(cleanup)
 
 <template>
   <Teleport to="body">
-    <div v-if="open" ref="overlayEl" class="overlay" :style="overlayStyle" @click.self="emit('close')">
+    <div v-if="open" ref="overlayEl" class="overlay" :class="{ 'full-screen': mobileFullScreen }" :style="overlayStyle" @click.self="emit('close')">
       <div
         class="modal"
-        :class="{ wide, medium, sheet: sheetActive, dragging: sheetDragging }"
+        :class="{ wide, medium, 'mobile-full-screen': mobileFullScreen, sheet: sheetActive, dragging: sheetDragging }"
         :style="sheetActive ? { height: `${sheetHeight}px` } : null"
         role="dialog"
         aria-modal="true"
@@ -400,13 +402,13 @@ onBeforeUnmount(cleanup)
   display: flex;
   flex-direction: column;
   background: var(--card);
-  border-radius: var(--radius-14);
+  border-radius: var(--radius-surface);
   width: 420px;
   max-width: 100%;
   max-height: 85vh;
   max-height: 85dvh;
   overflow: hidden;
-  box-shadow: 0 10px 40px rgba(30, 40, 80, 0.2);
+  box-shadow: var(--shadow-overlay);
   animation: modal-in var(--dur-base) var(--ease-out);
 }
 .modal.wide {
@@ -422,7 +424,7 @@ onBeforeUnmount(cleanup)
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 18px 22px 0;
+  padding: var(--space-4) var(--space-6) 0;
 }
 .close {
   border: none;
@@ -455,6 +457,15 @@ onBeforeUnmount(cleanup)
   flex: 0 0 auto;
   align-items: center;
   gap: 6px;
+}
+
+@media (max-width: 900px), (pointer: coarse) and (max-height: 520px) {
+  .overlay.full-screen { padding: 0; }
+  .modal.mobile-full-screen { width: 100%; height: 100%; max-height: 100%; border-radius: 0; }
+  .mobile-full-screen .modal-head { gap: 12px; padding: max(12px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) 12px max(16px, env(safe-area-inset-left, 0px)); border-bottom: 1px solid var(--border); }
+  .mobile-full-screen .modal-head > :is(h2, h3, h4) { min-width: 0; overflow-wrap: anywhere; }
+  .mobile-full-screen .close { width: 44px; height: 44px; }
+  .mobile-full-screen .modal-body { flex: 1 1 auto; padding: 16px max(16px, env(safe-area-inset-right, 0px)) 24px max(16px, env(safe-area-inset-left, 0px)); scroll-padding-block: 16px; }
 }
 
 /* ---------- 底部抽屉（sheet）：把手拖拽 + 两档高度吸附（仅窄屏启用） ---------- */

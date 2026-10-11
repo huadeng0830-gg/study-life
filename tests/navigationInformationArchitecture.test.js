@@ -11,13 +11,13 @@ describe('导航信息架构', () => {
     expect(desktopNavigationGroups.map((group) => group.label)).toEqual(['今日', '学习', '日程', '齐行', '其他'])
     expect(desktopNavigationGroups.find((group) => group.id === 'learning').items.map((item) => item.id)).toEqual(['schedule', 'course', 'tasks', 'exams'])
     expect(desktopNavigationGroups.find((group) => group.id === 'other').items.map((item) => item.id)).toEqual(['lists', 'bills', 'review'])
-    expect(navigationRegistry.find((item) => item.id === 'schedule').mobileLabel).toBe('学习')
+    expect(navigationRegistry.find((item) => item.id === 'schedule').mobileLabel).toBe('课表')
     expect(routes.find((route) => route.path === '/notes')?.redirect).toBe('/')
   })
 
   it('保持既有数字快捷键映射，手机最多自选三个页面并保留两个常驻入口', () => {
     expect(desktopShortcutRoutes).toEqual(['/', '/schedule', '/tasks', '/exams', '/lists', '/bills', '/events', '/review'])
-    expect(DEFAULT_MOBILE_NAVIGATION).toEqual(['today', 'schedule', 'events'])
+    expect(DEFAULT_MOBILE_NAVIGATION).toEqual(['today', 'tasks', 'schedule'])
     expect(normalizeMobileNavigation(['tasks', 'tasks', 'course', 'bills', 'events'])).toEqual(['tasks', 'course', 'bills'])
     expect(normalizeMobileNavigation(['tasks', 'course', 'bills', 'events', 'projects'])).toHaveLength(3)
   })

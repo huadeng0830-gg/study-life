@@ -1,9 +1,9 @@
 // 账号同步独立运行；仅复用纯数据校验/合并规则和可回滚的本机存储接口。
 import { accountUser } from './accountAuth.js'
 import { localSafeMode } from './localSafeMode.js'
-import { accountSyncActive, randomToken, readAccountDataOwner } from './accountSyncIdentity.js'
+import { accountSyncActive, assertAccountDataIdentity, captureAccountDataIdentity, randomToken, readAccountDataOwner } from './accountSyncIdentity.js'
 import { accountSyncViaAccount } from './accountSyncMode.js'
-import { accountDefaultValues, accountLocalSnapshot, ACCOUNT_DATA_LOCK } from './accountLocalData.js'
+import { accountDefaultValues, accountLocalSnapshot, ACCOUNT_DATA_LOCK, withAccountDataLock } from './accountLocalData.js'
 import { accountConflictKey, accountSyncConflicts, accountSyncError, accountSyncLastSyncedAt, accountSyncStatus } from './accountSyncState.js'
 import { SYNC_DEFAULTS, SYNC_KEYS, assertValidSyncPayload, cloneValue, validateSyncPayload } from './accountSyncData.js'
 import { buildEntityManifest, buildSyncManifest, hashSyncValue, mergeRestoreMarkers, stableEntityId, validateStableEntityIds, validateSyncManifest } from './syncMetadata.js'
@@ -75,7 +75,8 @@ function setState(state, error = '') { accountSyncStatus.value = state; accountS
 function clearTimers() { window.clearTimeout(timer); window.clearInterval(poll); timer = null; poll = null }
 async function localValues() {
   const { flushStoredWrites, useStoredRef } = await import('./store/cloudAccess.js')
-  flushStoredWrites()
+  const flushed = flushStoredWrites()
+  if (!flushed.ok) throw new Error(`本机仍有未保存或冲突的数据（${flushed.pendingKeys.join('、')}），已暂停账号同步以保留最新修改。`)
   const values = Object.fromEntries(SYNC_KEYS.map((key) => [key, cloneValue(useStoredRef(key, cloneValue(SYNC_DEFAULTS[key])).value)]))
   assertValidSyncPayload(values)
   if (validateStableEntityIds(values).length) throw new Error('本机记录缺少稳定编号，请在数据管理中修复后再同步。')
@@ -183,11 +184,11 @@ async function provider(operation, body, id, revision) {
     return result
   } finally { window.clearTimeout(timeout); controller = null }
 }
-async function cycle(id, revision, choices) {
+async function cycle(id, revision, choices, assertLock = () => {}) {
   // 每轮重置：drift 是"这一轮拉到的快照"的状态，不是设备的持久属性。
   manifestDrifted = false
   if (localStorage.getItem(ACCOUNT_SYNC_COMMIT_KEY)) {
-    const recovered = await recoverAccountSyncCommit()
+    const recovered = await recoverAccountSyncCommitUnlocked(assertLock)
     if (!recovered.ok) throw recovered.error
   }
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -319,11 +320,14 @@ async function cycle(id, revision, choices) {
       await accountLocalSnapshot('rollback:' + id, { values: local, meta })
       assertCurrent(id, revision)
       if (sequence !== localSequence) continue
+      assertLock()
+      assertCurrent(id, revision)
       localStorage.setItem(ACCOUNT_SYNC_COMMIT_KEY, JSON.stringify({ id }))
       const { restoreStoredValues } = await import('./store/cloudAccess.js')
+      assertLock()
       assertCurrent(id, revision)
       if (sequence !== localSequence) { localStorage.removeItem(ACCOUNT_SYNC_COMMIT_KEY); continue }
-      await restoreStoredValues(values, { markChanged: false })
+      await restoreStoredValues(values, { markChanged: false, assertBeforeApply: () => { assertLock(); assertCurrent(id, revision) } })
       // 账号切换会等待本次提交；一旦应用开始，完整保存基线后再允许切换。
       await accountLocalSnapshot('metadata:' + id, nextMeta)
       localStorage.removeItem(ACCOUNT_SYNC_COMMIT_KEY)
@@ -376,7 +380,7 @@ export function runAccountSync(choices = null) {
           return false
         })
       }
-      return await cycle(id, revision, choices)
+      return await withAccountDataLock((assertLock) => cycle(id, revision, choices, assertLock))
     } catch (error) {
       if (localStorage.getItem(ACCOUNT_SYNC_COMMIT_KEY)) {
         const recovered = await recoverAccountSyncCommit()
@@ -407,20 +411,35 @@ export function runAccountSync(choices = null) {
   })()
   return running
 }
-export async function recoverAccountSyncCommit() {
+async function recoverAccountSyncCommitUnlocked(assertLock = () => {}) {
   const raw = localStorage.getItem(ACCOUNT_SYNC_COMMIT_KEY)
   if (!raw) return { ok: true, recovered: false }
   try {
     const { id } = JSON.parse(raw)
     if (!id || readAccountDataOwner() !== id) throw new Error('账号同步恢复归属异常，请先导出本机记录。')
+    const identity = captureAccountDataIdentity()
+    const assertIdentity = () => {
+      assertLock()
+      assertAccountDataIdentity(identity)
+      if (identity.userId && identity.userId !== id) throw new Error('提交恢复所属账号已变化，已取消自动恢复。')
+      if (identity.ownerId && identity.ownerId !== id) throw new Error('提交恢复所属本机数据归属已变化，已取消自动恢复。')
+    }
     const snapshot = await accountLocalSnapshot('rollback:' + id)
     if (!snapshot?.values || !snapshot.meta) throw new Error('找不到账号同步前的本机副本。')
+    assertIdentity()
     const { restoreStoredValues } = await import('./store/cloudAccess.js')
-    await restoreStoredValues(validateSyncPayload(snapshot.values), { markChanged: false })
+    assertIdentity()
+    await restoreStoredValues(validateSyncPayload(snapshot.values), { markChanged: false, assertBeforeApply: assertIdentity })
+    assertIdentity()
     await accountLocalSnapshot('metadata:' + id, snapshot.meta)
+    assertIdentity()
     localStorage.removeItem(ACCOUNT_SYNC_COMMIT_KEY)
     return { ok: true, recovered: true }
   } catch (error) { return { ok: false, error } }
+}
+export async function recoverAccountSyncCommit() {
+  try { return await withAccountDataLock((assertLock) => recoverAccountSyncCommitUnlocked(assertLock)) }
+  catch (error) { return { ok: false, error } }
 }
 /**
  * 这条 manifest 问题算"版本错位"还是"数据不可信"。
@@ -478,6 +497,7 @@ export async function startAccountSync(id) {
   accountSyncLastSyncedAt.value = meta.lastSyncedAt || ''
   // 把上次没走完的冲突接回来：横幅与逐项选择直接恢复，用户不用从头再来。
   const pending = await loadPendingConflicts(id)
+  assertCurrent(id, revision)
   if (pending?.conflicts?.length) {
     pendingSignature = pending.signature
     accountSyncConflicts.value = pending.conflicts

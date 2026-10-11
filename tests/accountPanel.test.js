@@ -5,6 +5,33 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const adapter = vi.hoisted(() => ({ getSupabaseClient: vi.fn(), getSupabaseConfig: vi.fn(), verifyAccountCurrentPassword: vi.fn() }))
 vi.mock('../src/services/supabase.js', () => adapter)
 
+function fakeIndexedDB() {
+  const databases = new Map()
+  return {
+    open(name) {
+      const request = { result: null, onsuccess: null, onupgradeneeded: null }
+      const stores = databases.get(name) || new Map()
+      databases.set(name, stores)
+      request.result = {
+        objectStoreNames: { contains: (storeName) => stores.has(storeName) },
+        createObjectStore(storeName) { stores.set(storeName, new Map()) },
+        close() {},
+        transaction(storeName) {
+          const tx = { oncomplete: null, onerror: null, onabort: null }
+          const records = stores.get(storeName) || new Map()
+          tx.objectStore = () => ({ clear() { records.clear(); setTimeout(() => tx.oncomplete?.(), 0) } })
+          return tx
+        },
+      }
+      setTimeout(() => {
+        if (!stores.size) request.onupgradeneeded?.()
+        request.onsuccess?.()
+      }, 0)
+      return request
+    },
+  }
+}
+
 let app
 let host
 let client
@@ -19,6 +46,7 @@ beforeEach(async () => {
   vi.clearAllMocks()
   localStorage.clear()
   sessionStorage.clear()
+  vi.stubGlobal('indexedDB', fakeIndexedDB())
   adapter.getSupabaseConfig.mockReturnValue({ url: 'https://example.supabase.co', key: 'sb_publishable_example' })
   client = {
     auth: {
@@ -49,6 +77,7 @@ afterEach(() => {
   clearAnnouncement?.()
   vi.useRealTimers()
   vi.restoreAllMocks()
+  vi.unstubAllGlobals()
 })
 
 async function mountPanel(withDataModal = false) {

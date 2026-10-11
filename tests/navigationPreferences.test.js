@@ -85,8 +85,9 @@ describe('navigation registry and saved layouts', () => {
       const app = await mountApp({ hash: '/' })
     try {
       expect(document.querySelectorAll('.mobile-nav > a, .mobile-nav > button')).toHaveLength(5)
-      expect(document.querySelector('.mobile-nav a[href="#/schedule"] small')?.textContent).toBe('学习')
-      expect(document.querySelector('.mobile-nav a[href="#/schedule"]')?.getAttribute('aria-label')).toBe('学习')
+      expect(document.querySelector('.mobile-nav a[href="#/tasks"]')).toBeTruthy()
+      expect(document.querySelector('.mobile-nav a[href="#/schedule"] small')?.textContent).toBe('课表')
+      expect(document.querySelector('.mobile-nav a[href="#/schedule"]')?.getAttribute('aria-label')).toBe('课表')
       const quickRecordAction = document.querySelector('.mobile-nav .capture-trigger')
       expect(quickRecordAction).toBeTruthy()
       quickRecordAction.click()
@@ -137,7 +138,7 @@ describe('navigation registry and saved layouts', () => {
         else delete document.elementFromPoint
       }
       expect([...document.querySelectorAll('.navigation-edit-row .nav-item-name')].map((item) => item.textContent))
-        .toEqual(['学习', '今天', '日程'])
+        .toEqual(['待办', '今天', '课表'])
 
       document.querySelector('[aria-label="移除今天"]').click()
       document.querySelector('.nav-save').click()

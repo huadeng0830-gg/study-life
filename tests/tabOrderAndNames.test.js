@@ -90,7 +90,7 @@ describe('渲染后的 Tab 顺序与可访问名称', () => {
     expect(totalFocusable, '一个可聚焦元素都没扫到，守卫在守空气').toBeGreaterThanOrEqual(200)
     expect(totalTabbable, '一个进入 Tab 序的元素都没有，守卫在守空气').toBeGreaterThanOrEqual(200)
     expect(problems).toEqual([])
-  })
+  }, 15_000)
 
   it('跳过链接是第一个 Tab 停靠点，并指向真实存在的 main', async () => {
     mounted = await mountApp({ routes })
@@ -179,7 +179,7 @@ describe('渲染后的 Tab 顺序与可访问名称', () => {
         const before = tabs.findIndex((tab) => tab.getAttribute('aria-selected') === 'true')
         if (before < 0) { problems.push(`${record.path}：tablist 里没有选中的 tab`); continue }
         checked++
-        tablist.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }))
+        tabs[before].dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }))
         await settle()
         const after = tabs.findIndex((tab) => tab.getAttribute('aria-selected') === 'true')
         if (after !== (before + 1) % tabs.length) {

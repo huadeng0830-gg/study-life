@@ -1,6 +1,6 @@
 import { policyDateKey, policyDateTime } from '../settingsPolicy.js'
 import { clock } from '../store/core.js'
-import { taskHasTime } from '../tasks/taskTimePlan.ts'
+import { taskHasTime } from '../tasks/taskTimePlan'
 
 export const TASK_STATUS = Object.freeze({ pending: 'pending', inProgress: 'in_progress', completed: 'completed', cancelled: 'cancelled', archived: 'archived' })
 export const TASK_PLAN_STATE = Object.freeze({ unplanned: 'unplanned', scheduled: 'scheduled', completed: 'completed' })

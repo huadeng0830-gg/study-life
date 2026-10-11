@@ -20,7 +20,7 @@
  * 只发 `close`（对话框照常收起来）。也就是"什么也没改"，由组件自己兜住——调用方即使忘了
  * 判断，也写不进一个空名字。取消与 Escape 同样只走 `close`，一条写入路径都不碰。
  *
- * 【Enter 确认、Escape 取消】Enter 由输入框自己的 `@keydown.enter` 处理（回传值）；
+ * 【Enter 确认、Escape 取消】Enter 由输入框处理；输入法正在组词时只确认候选词；
  * Escape **不再自己写一遍**：`Modal` 已经在 document 上按浮层栈处理 Escape（只关最上面
  * 一层），这里再接一手会和它抢、并产生两次 close。这也是 `ConfirmDialog` 的既有做法。
  *
@@ -28,6 +28,9 @@
  */
 import { ref, useId, watch } from 'vue'
 import Modal from './Modal.vue'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Field, FieldError, FieldGroup, FieldLabel } from '@/components/ui/field'
 
 const props = defineProps({
   open: Boolean,
@@ -70,63 +73,54 @@ function submit() {
   }
   emit('confirm', value)
 }
+
+function onEnter(event) {
+  if (event.isComposing) return
+  event.preventDefault()
+  submit()
+}
 </script>
 
 <template>
   <Modal :open="open" :title="title" @close="$emit('close')">
-    <div class="prompt-field">
-      <label v-if="label" class="prompt-label" :for="inputId">{{ label }}</label>
-      <input
-        :id="inputId"
-        class="prompt-input"
-        :type="inputType"
-        :value="draft"
-        :maxlength="maxlength ?? undefined"
-        :aria-label="label ? undefined : title"
-        :aria-invalid="error ? 'true' : undefined"
-        :aria-describedby="error ? errorId : undefined"
-        autocomplete="off"
-        autofocus
-        @input="draft = $event.target.value; emit('input', draft)"
-        @keydown.enter.prevent="submit"
-      />
-      <p v-if="error" :id="errorId" class="prompt-error" role="alert">{{ error }}</p>
-    </div>
+    <FieldGroup>
+      <Field class="prompt-field" :data-invalid="Boolean(error)">
+        <FieldLabel v-if="label" class="prompt-label" :for="inputId">{{ label }}</FieldLabel>
+        <Input
+          :id="inputId"
+          class="prompt-input"
+          :type="inputType"
+          :model-value="draft"
+          :maxlength="maxlength ?? undefined"
+          :aria-label="label ? undefined : title"
+          :aria-invalid="error ? 'true' : undefined"
+          :aria-describedby="error ? errorId : undefined"
+          autocomplete="off"
+          autofocus
+          @update:model-value="draft = String($event); emit('input', draft)"
+          @keydown.enter="onEnter"
+        />
+        <FieldError v-if="error" :id="errorId">{{ error }}</FieldError>
+      </Field>
+    </FieldGroup>
     <template #foot>
       <div class="actions">
-        <button type="button" class="btn btn-ghost" @click="$emit('close')">{{ cancelLabel }}</button>
-        <button type="button" class="btn btn-primary" @click="submit">{{ confirmLabel }}</button>
+        <Button type="button" variant="outline" @click="$emit('close')">{{ cancelLabel }}</Button>
+        <Button type="button" @click="submit">{{ confirmLabel }}</Button>
       </div>
     </template>
   </Modal>
 </template>
 
 <style scoped>
-/* 只补布局。边框、底色、聚焦环、触屏 16px 字号都沿用 style.css 里 input 的基础定义，
-   不在这里重复声明——两套等价机制只会让下一个改的人改错其中一套（同 style.css
-   表单无效态那段的理由）。焦点也不必手动搬：Modal 会聚焦 `[autofocus]` 元素，
-   关闭时把焦点还给打开它的那个元素。 */
-.prompt-field {
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-}
-.prompt-label {
-  color: var(--ink-soft);
-  font-size: var(--fs-aux);
-}
-.prompt-error {
-  margin: 0;
-  color: var(--danger);
-  font-size: var(--fs-11);
-  line-height: 1.45;
-}
+/* Appearance belongs to the primitives; this compatibility hook is layout only. */
 .prompt-input {
   width: 100%;
 }
 .actions {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
-  gap: 9px;
+  gap: var(--space-2);
 }
 </style>

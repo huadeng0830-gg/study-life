@@ -103,23 +103,37 @@ export async function recoverPwaStartupResources({
   const recent = readRecentAttempts(storage, now)
   if (recent.length >= STARTUP_RECOVERY_MAX_ATTEMPTS) return false
 
-  try {
-    session.setItem(STARTUP_RESOURCE_RECOVERY_KEY, '1')
-  } catch {
-    return false
+  const bounded = async (task) => {
+    let timer
+    try {
+      return await Promise.race([task, new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error('RECOVERY_TIMEOUT')), 6000)
+      })])
+    } finally { clearTimeout(timer) }
   }
-  writeAttempts(storage, [...recent, now()])
-
-  try {
-    const registrations = await navigatorRef?.serviceWorker?.getRegistrations?.() || []
-    await Promise.all(registrations.map((registration) => registration.unregister()))
-  } catch {}
-
-  try {
-    const keys = await cachesRef?.keys?.() || []
-    await Promise.all(keys.map((key) => cachesRef.delete(key)))
-  } catch {}
-
-  reload()
-  return true
+  const recover = async () => {
+    try {
+      const registration = await bounded(Promise.resolve(navigatorRef?.serviceWorker?.getRegistration?.()))
+      // A UI timeout releases the window's lock, but cannot cancel browser-owned work.
+      if (registration?.installing || [registration?.waiting, registration?.active]
+        .some((worker) => worker?.state === 'activating')) return false
+      session.setItem(STARTUP_RESOURCE_RECOVERY_KEY, '1')
+      writeAttempts(storage, [...recent, now()])
+      if (registration) await bounded(registration.unregister())
+      const keys = await bounded(Promise.resolve(cachesRef?.keys?.() || []))
+      const scope = registration?.scope || (globalThis.location ? `${globalThis.location.origin}/` : '')
+      const appKeys = keys.filter((key) => key === 'study-life-lazy-assets' ||
+        (scope && key.startsWith('workbox-precache-') && key.endsWith(scope)))
+      const deleted = await bounded(Promise.all(appKeys.map((key) => cachesRef.delete(key))))
+      if (deleted.some((ok) => !ok)) throw new Error('RECOVERY_CACHE_FAILED')
+      reload()
+      return true
+    } catch {
+      console.warn('[startup] RESOURCE_RECOVERY_FAILED')
+      return false
+    }
+  }
+  if (navigatorRef?.locks?.request) return navigatorRef.locks.request('study-life-app-update', { ifAvailable: true },
+    (lock) => lock ? recover() : false)
+  return recover()
 }

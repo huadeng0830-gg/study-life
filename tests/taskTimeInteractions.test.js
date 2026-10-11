@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { registerMirrorTeardown } from './helpers/mirrorTeardown.js'
+import { chooseTaskAction } from './helpers/taskRowActions.js'
 registerMirrorTeardown()
 let app, host, router, nextTick, domain, liveRegion
 
@@ -110,7 +111,7 @@ describe('实际待办阶段交互', () => {
   it('纯日期按小时改期须补时刻，输入保持可修改，保存为明确的时刻', async () => {
     const item = domain.createTask({ id: 'date-only', title: '示例提交', dueDate: '2026-10-11' })
     await nextTick()
-    await click(host.querySelector('[data-focus-id="date-only"]'), '改期')
+    await chooseTaskAction(host.querySelector('[data-focus-id="date-only"]'), '改期', clickElement)
     const form = document.querySelector('.reschedule-form')
     await click(form, '移动剩余安排')
     expect(button(form, '应用到草稿').disabled).toBe(true)
@@ -151,7 +152,7 @@ describe('实际待办阶段交互', () => {
   })
 
   it('保存改期后撤销只恢复移动时间，保留后来新增、改名和完成的阶段', async () => {
-    await click(row(), '改期')
+    await chooseTaskAction(row(), '改期', clickElement)
     const form = document.querySelector('.reschedule-form')
     await click(form, '移动剩余安排')
     await click(form, '应用到草稿')
@@ -192,8 +193,8 @@ describe('实际待办阶段交互', () => {
     domain.updateTask(item.id, { repeatAnchorDay: 31 })
     await nextTick()
     const itemRow = host.querySelector('[data-focus-id="monthly-undo"]')
-    if (entry === '编辑') await clickElement(itemRow.querySelector('[aria-label="编辑待办"]'))
-    else await click(itemRow, '改期')
+    if (entry === '编辑') await chooseTaskAction(itemRow, '编辑', clickElement)
+    else await chooseTaskAction(itemRow, '改期', clickElement)
     const form = document.querySelector(entry === '编辑' ? 'form.form' : '.reschedule-form')
     value(form.querySelector('input[type="date"]'), '2027-02-01')
     await nextTick()
@@ -212,7 +213,7 @@ describe('实际待办阶段交互', () => {
     domain.setTaskStageCompleted('generic', 'prep', true)
     domain.createTask({ id: 'other', title: '另一场展示', timeStages: [{ id: 'other-stage', label: '现场', kind: 'scheduled', start: { date: '2026-10-13', time: '01:30' }, end: { date: '2026-10-13', time: '03:30' }, reminders: [] }] })
     await nextTick()
-    await click(row(), '改期')
+    await chooseTaskAction(row(), '改期', clickElement)
     const form = document.querySelector('.reschedule-form')
     await click(form, '移动剩余安排')
     await click(form, '应用到草稿')

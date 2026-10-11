@@ -12,6 +12,7 @@
  */
 
 import { ref, watch } from 'vue'
+import { flushStoredWrites } from './store/core.js'
 import { timeConfig } from './store/timeConfig.js'
 import { useTaskProgress } from './taskProgress.js'
 import { importError, pasteText, showToast } from './timeSettingsShared.js'
@@ -181,6 +182,8 @@ export async function confirmImportPlan() {
     importProgress.setStep('save', 'running')
     await sleep(120)
     assertCurrent()
+    const saved = flushStoredWrites()
+    if (!saved.ok) throw new Error(`本机数据存在冲突或保存失败（${saved.pendingKeys.join('、')}），导入未提交。`)
     importProgress.setStep('save', 'completed')
     importProgress.finish(`已成功导入 ${applied.length} 组作息`)
     const replace = applied.filter((item) => item.action === 'replace').length

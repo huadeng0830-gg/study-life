@@ -5,8 +5,8 @@ import { animationsEnabled } from './motion.js'
 // CSS timing tokens in style.css use the same values. Business completion never
 // waits for these timers: only the visual state does.
 export const ACTION_TIMING = Object.freeze({
-  press: 120, collapse: 300, fade: 150, minimumImportant: 1200,
-  successImportant: 1000, successFrequent: 650, error: 1000, restore: 300,
+  press: 150, collapse: 320, fade: 150,
+  successImportant: 1000, successFrequent: 650, error: 1000, restore: 320,
 })
 export const ACTION_PHASES = Object.freeze(['idle', 'pressed', 'collapsing', 'loading', 'success', 'error', 'restoring'])
 
@@ -58,6 +58,9 @@ export function useActionFeedback({ kind = 'frequent', feedback = true, timeoutM
     pending.value = false
     result.value = wasPending ? 'cancelled' : ''
     phase.value = 'idle'
+    error.value = ''
+    failure.value = null
+    morph.value = false
   }
   function dispose() {
     cancel()
@@ -69,7 +72,6 @@ export function useActionFeedback({ kind = 'frequent', feedback = true, timeoutM
     if (disposed || locked.value || typeof action !== 'function') return false
     clearTimers()
     const id = ++generation
-    const started = Date.now()
     const animated = full()
     morph.value = animated
     const mode = toValue(kind)
@@ -109,13 +111,11 @@ export function useActionFeedback({ kind = 'frequent', feedback = true, timeoutM
         phase.value = 'idle'
         return value
       }
-      const showSuccess = () => {
-        clearTimers()
-        phase.value = 'success'
-        later(() => restore(id, animated), animated ? ACTION_TIMING.successImportant : ACTION_TIMING.successFrequent, id)
-      }
-      if (animated) later(showSuccess, ACTION_TIMING.minimumImportant - (Date.now() - started), id)
-      else showSuccess()
+      // The Promise, never a visual minimum, determines completion. Fast
+      // writes may skip the spinner; the surface can finish morphing in success.
+      clearTimers()
+      phase.value = 'success'
+      later(() => restore(id, animated), mode === 'important' ? ACTION_TIMING.successImportant : ACTION_TIMING.successFrequent, id)
       return value
     } catch (cause) {
       if (disposed || id !== generation) return false

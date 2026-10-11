@@ -10,7 +10,7 @@ export const MAX_NAV_GROUP_LABEL_LENGTH = 24
 export const MOBILE_NAVIGATION_KEY = 'sl_navigation_mobile'
 export const DESKTOP_NAVIGATION_KEY = 'sl_navigation_desktop'
 
-export const DEFAULT_MOBILE_NAVIGATION = Object.freeze(['today', 'schedule', 'events'])
+export const DEFAULT_MOBILE_NAVIGATION = Object.freeze(['today', 'tasks', 'schedule'])
 export const DEFAULT_DESKTOP_NAVIGATION = Object.freeze(desktopNavigationGroups.map((group) => Object.freeze({
   id: group.id,
   label: group.label,

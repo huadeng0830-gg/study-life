@@ -55,6 +55,7 @@ export const SYNC_DEFAULTS = {
   sl_reminder_log: [],
   // 已退役的独立笔记只作为归档数据保留，避免旧云快照在升级时丢失正文。
   sl_archived_quick_notes: [],
+  sl_weekly_reflections: {},
 }
 
 /**

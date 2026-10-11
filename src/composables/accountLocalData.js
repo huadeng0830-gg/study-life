@@ -1,4 +1,5 @@
 import { ACCOUNT_SWITCH_MARKER_KEY, randomToken, readAccountDataOwner, setAccountDataOwner } from './accountSyncIdentity.js'
+import { clearPendingRecoveryDraft, getPendingRecoveryDrafts } from './dataVault.js'
 
 // 锁名与引擎侧保持一致：这是**同一把**锁，不是两把各管各的。
 export const ACCOUNT_DATA_LOCK = 'study-life-account-data'
@@ -240,7 +241,53 @@ export async function clearAccountLocalData() {
     return true
   } finally { db.close() }
 }
-export async function recoverAccountDataSwitch() {
+// 读锁标记。存储可能被外部写坏（用户手改、另一版本残留、隐私模式下的怪值），
+// 而这层锁只在"准备账号数据"时用到 —— 它绝不该因为一行脏数据就把整个账号
+// 同步打进死胡同：accountSyncLifecycle 对准备失败没有任何自动重试。
+function readDataLock() {
+  try { return JSON.parse(localStorage.getItem(ACCOUNT_DATA_LOCK_KEY) || 'null') } catch { return null }
+}
+
+export async function withAccountDataLock(action) {
+  // 【必须带 ifAvailable】原来这里是**排队**等待。同一把锁名也被账号同步引擎用
+  // （accountSyncEngine 的 runAccountSync 带 ifAvailable）。一旦另一个上下文
+  // —— 最常见的就是手机上还活着的那个 PWA，或桌面浏览器里没关的旧标签页 ——
+  // 持有这把锁，请求就永远不 resolve：accountSyncPreparing 一直是 true，
+  // accountSyncStatus 一直卡在 'preparing'，面板上的"立即同步"永远是禁用的
+  // 「正在同步…」，连重试按钮自己都会一起挂住。除了杀掉应用没有别的出路。
+  if (typeof navigator !== 'undefined' && navigator.locks?.request) {
+    return navigator.locks.request(ACCOUNT_DATA_LOCK, { ifAvailable: true }, (lock) => {
+      if (!lock) throw new Error('其他页面正在处理账号数据，请稍后重试。')
+      return action(() => {})
+    })
+  }
+  const token = randomToken()
+  const leaseMs = 20000
+  const now = Date.now()
+  if (readDataLock()?.expires > now) throw new Error('其他页面正在处理账号数据，请稍后重试。')
+  localStorage.setItem(ACCOUNT_DATA_LOCK_KEY, JSON.stringify({ token, expires: now + leaseMs }))
+  const assertLock = () => {
+    const lock = readDataLock()
+    if (lock?.token !== token || lock.expires <= Date.now()) throw new Error('账号数据操作锁已失效，请重试。')
+  }
+  const heartbeat = setInterval(() => {
+    try {
+      assertLock()
+      localStorage.setItem(ACCOUNT_DATA_LOCK_KEY, JSON.stringify({ token, expires: Date.now() + leaseMs }))
+    } catch { /* The next fenced write fails closed if this tab lost the lease. */ }
+  }, Math.floor(leaseMs / 3))
+  try {
+    assertLock()
+    // Let simultaneous claimants finish their set/read check before any data work starts.
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    assertLock()
+    return await action(assertLock)
+  } finally {
+    clearInterval(heartbeat)
+    if (readDataLock()?.token === token) localStorage.removeItem(ACCOUNT_DATA_LOCK_KEY)
+  }
+}
+async function recoverAccountDataSwitchUnlocked(assertLock = () => {}) {
   const raw = localStorage.getItem(ACCOUNT_SWITCH_MARKER_KEY)
   if (!raw) return { ok: true, recovered: false }
   try {
@@ -249,65 +296,69 @@ export async function recoverAccountDataSwitch() {
     if (readAccountDataOwner() !== marker.to) {
       const values = await accountLocalSnapshot(marker.from)
       if (!values) throw new Error('找不到账号切换前的本机副本。')
+      assertLock()
       const { restoreStoredValues } = await import('./store/cloudAccess.js')
-      await restoreStoredValues({ ...validateSyncPayload(values), ...localAccountStateFromSnapshot(values) }, { markChanged: false })
+      assertLock()
+      await restoreStoredValues({ ...validateSyncPayload(values), ...localAccountStateFromSnapshot(values) }, { markChanged: false, assertBeforeApply: assertLock })
+      assertLock()
       setAccountDataOwner(marker.from)
     }
+    assertLock()
     localStorage.removeItem(ACCOUNT_SWITCH_MARKER_KEY)
     return { ok: true, recovered: true }
   } catch (error) { return { ok: false, error } }
 }
 
-// 读锁标记。存储可能被外部写坏（用户手改、另一版本残留、隐私模式下的怪值），
-// 而这层锁只在"准备账号数据"时用到 —— 它绝不该因为一行脏数据就把整个账号
-// 同步打进死胡同：accountSyncLifecycle 对准备失败没有任何自动重试。
-function readDataLock() {
-  try { return JSON.parse(localStorage.getItem(ACCOUNT_DATA_LOCK_KEY) || 'null') } catch { return null }
+export async function recoverAccountDataSwitch() {
+  try { return await withAccountDataLock((assertLock) => recoverAccountDataSwitchUnlocked(assertLock)) }
+  catch (error) { return { ok: false, error } }
 }
 
-async function withAccountDataLock(action) {
-  // 【必须带 ifAvailable】原来这里是**排队**等待。同一把锁名也被账号同步引擎用
-  // （accountSyncEngine 的 runAccountSync 带 ifAvailable）。一旦另一个上下文
-  // —— 最常见的就是手机上还活着的那个 PWA，或桌面浏览器里没关的旧标签页 ——
-  // 持有这把锁，请求就永远不 resolve：accountSyncPreparing 一直是 true，
-  // accountSyncStatus 一直卡在 'preparing'，面板上的"立即同步"永远是禁用的
-  // 「正在同步…」，连重试按钮自己都会一起挂住。除了杀掉应用没有别的出路。
-  if (navigator.locks?.request) {
-    return navigator.locks.request(ACCOUNT_DATA_LOCK, { ifAvailable: true }, (lock) => {
-      if (!lock) throw new Error('其他页面正在处理账号数据，请稍后重试。')
-      return action()
-    })
-  }
-  const token = randomToken()
-  const now = Date.now()
-  if (readDataLock()?.expires > now) throw new Error('其他页面正在切换账号，请稍后重试。')
-  localStorage.setItem(ACCOUNT_DATA_LOCK_KEY, JSON.stringify({ token, expires: now + 20000 }))
-  const assertLock = () => {
-    if (readDataLock()?.token !== token) throw new Error('账号切换已在其他页面完成，请重试。')
-  }
-  try { assertLock(); return await action(assertLock) } finally {
-    if (readDataLock()?.token === token) localStorage.removeItem(ACCOUNT_DATA_LOCK_KEY)
-  }
-}
 export async function prepareAccountLocalData(id, getCurrentValues, isCurrent = () => true) {
   return withAccountDataLock(async (assertLock = () => {}) => {
-    const recovered = await recoverAccountDataSwitch()
+    const recovered = await recoverAccountDataSwitchUnlocked(assertLock)
     if (!recovered.ok) throw recovered.error
     if (!isCurrent()) return false
     const from = readAccountDataOwner()
     if (!from || from === id) { setAccountDataOwner(id); return true }
     // 必须先持久化旧账号离线改动，随后才载入目标账号；不能把旧账号记录推给新账号。
-    await accountLocalSnapshot(from, { ...(await getCurrentValues()), __localAccountState: readLocalAccountState() })
+    const currentValues = await getCurrentValues()
+    assertLock()
+    if (!isCurrent()) return false
+    await accountLocalSnapshot(from, { ...currentValues, __localAccountState: readLocalAccountState() })
+    assertLock()
+    if (!isCurrent()) return false
     const saved = await accountLocalSnapshot(id)
+    assertLock()
+    if (!isCurrent()) return false
     const target = saved ? validateSyncPayload(saved) : accountDefaultValues()
+    const recoveryDrafts = await getPendingRecoveryDrafts(id)
+    assertLock()
+    if (!isCurrent()) return false
+    const recoveredDrafts = []
+    for (const draft of recoveryDrafts) {
+      const storedValue = saved && Object.prototype.hasOwnProperty.call(saved, draft.key) ? saved[draft.key] : undefined
+      const storedRaw = storedValue === undefined ? null : JSON.stringify(storedValue)
+      if (storedRaw !== draft.raw && (!draft.previousKnown || storedRaw !== draft.previousRaw)) {
+        throw new Error(`账号 ${id} 的未保存草稿与本机副本存在冲突（${draft.key}）；两份数据均已保留，已取消切换。`)
+      }
+      if (storedRaw !== draft.raw) target[draft.key] = JSON.parse(draft.raw)
+      recoveredDrafts.push(draft)
+    }
+    assertLock()
     assertLock()
     if (!isCurrent()) return false
     localStorage.setItem(ACCOUNT_SWITCH_MARKER_KEY, JSON.stringify({ from, to: id }))
     const { restoreStoredValues } = await import('./store/cloudAccess.js')
-    await restoreStoredValues({ ...target, ...localAccountStateFromSnapshot(saved) }, { markChanged: false })
+    const assertCurrent = () => {
+      assertLock()
+      if (!isCurrent()) throw new Error('登录账号已变化，已取消本机数据切换。')
+    }
+    await restoreStoredValues({ ...target, ...localAccountStateFromSnapshot(saved) }, { markChanged: false, assertBeforeApply: assertCurrent })
     assertLock()
     setAccountDataOwner(id)
     localStorage.removeItem(ACCOUNT_SWITCH_MARKER_KEY)
+    await Promise.all(recoveredDrafts.map((draft) => clearPendingRecoveryDraft(id, draft.key, draft.token)))
     return true
   })
 }

@@ -13,6 +13,10 @@ import {
 } from '../composables/accountAuth.js'
 import { announce, announceAlert } from '../composables/liveRegion.js'
 import { useAccountEmailCooldown } from '../composables/accountEmailCooldown.js'
+import '../styles/shadcn.css'
+import { Alert, AlertDescription } from '@/components/ui/alert'
+import { Badge } from '@/components/ui/badge'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 
 const DataManager = defineAsyncComponent(() => import('./DataManager.vue'))
 
@@ -243,14 +247,14 @@ onBeforeUnmount(() => {
         <div><h3>{{ mode === 'recovery' ? '找回你的账号' : mode === 'register' ? '把记录带到更多设备' : '欢迎回来' }}</h3><p class="account-description">登录后同步课程、待办与日常记录，已有的本机记录会合并保留。</p></div>
       </div>
       <p v-if="!accountAvailable" class="account-service-note">此版本未包含账号服务，无法注册或登录。本机功能仍可使用。</p>
-      <p v-show="formError" id="account-form-error" class="account-feedback account-error">{{ formError }}</p>
-      <p v-if="feedback" class="account-feedback account-success">{{ feedback }}</p>
+      <Alert v-show="formError" variant="destructive" class="account-error-alert"><AlertDescription id="account-form-error">{{ formError }}</AlertDescription></Alert>
+      <p v-if="feedback" class="account-feedback account-success"><span class="account-feedback-icon" aria-hidden="true">✓</span><span>{{ feedback }}</span></p>
 
       <template v-if="accountUser">
         <section class="account-summary" aria-labelledby="account-summary-title">
           <span class="account-avatar" aria-hidden="true">{{ avatarText }}</span>
           <div class="account-identity"><h3 id="account-summary-title" ref="summaryHeading" tabindex="-1">{{ accountName }}</h3><p class="account-email">{{ accountUser.email }}</p></div>
-          <span class="account-badge">已登录</span>
+          <Badge as="span" variant="outline" class="account-badge">已登录</Badge>
         </section>
           <div v-if="!accountPasswordRecovery" class="account-mode" role="group" aria-label="账号设置分区">
             <button type="button" class="btn" :class="{ 'btn-primary': activeSection === 'overview' }" :aria-pressed="activeSection === 'overview'" :disabled="busy" @click="activeSection = 'overview'">账号概览</button>
@@ -261,7 +265,7 @@ onBeforeUnmount(() => {
               <h3 id="account-details-title">账号信息</h3>
               <dl class="account-details">
                 <div><dt>登录邮箱</dt><dd class="account-email">{{ accountUser.email }}</dd></div>
-                <div><dt>邮箱验证</dt><dd :class="accountUser.email_confirmed_at ? 'account-verified' : 'account-pending'">{{ accountUser.email_confirmed_at ? '已验证' : '尚未验证' }}</dd></div>
+                <div><dt>邮箱验证</dt><dd><Badge as="span" variant="outline" :class="accountUser.email_confirmed_at ? 'account-verified' : 'account-pending'">{{ accountUser.email_confirmed_at ? '已验证' : '尚未验证' }}</Badge></dd></div>
                 <div><dt>注册时间</dt><dd>{{ formatDate(accountUser.created_at) }}</dd></div>
                 <div><dt>最近登录</dt><dd>{{ formatDate(accountUser.last_sign_in_at) }}</dd></div>
               </dl>
@@ -304,39 +308,46 @@ onBeforeUnmount(() => {
       </section>
 
       <template v-else>
-        <div v-if="mode !== 'recovery'" class="account-mode" role="group" aria-label="账号操作">
-          <button type="button" class="btn" :class="{ 'btn-primary': mode === 'login' }" :aria-pressed="mode === 'login'" :disabled="busy" @click="changeMode('login')">登录</button>
-          <button type="button" class="btn" :class="{ 'btn-primary': mode === 'register' }" :aria-pressed="mode === 'register'" :disabled="busy" @click="changeMode('register')">注册</button>
-        </div>
-        <p v-else class="account-help">输入注册邮箱，我们会发送密码重设链接。</p>
-        <form class="account-form" novalidate :aria-busy="busy" @submit.prevent="submit">
-          <div class="account-field">
-            <label for="account-email">邮箱</label>
-            <!-- 登录态用 autocomplete="username"：密码管理器靠这一对绑定，
-                 "email" 在部分管理器里绑定不到密码框。 -->
-            <input id="account-email" ref="emailInput" v-model="email" name="email" type="email" :autocomplete="mode === 'login' ? 'username' : 'email'" inputmode="email" autocapitalize="none" autocorrect="off" :spellcheck="false" placeholder="输入邮箱地址" required :disabled="busy || !accountAvailable" :aria-invalid="Boolean(errors.email)" :aria-describedby="errors.email ? 'account-email-error account-form-error' : 'account-form-error'" @input="clearFieldError('email')" />
-            <p v-if="errors.email" id="account-email-error" class="account-error">{{ errors.email }}</p>
+        <Card class="account-auth-card">
+          <CardHeader class="account-auth-header">
+            <CardTitle>{{ mode === 'recovery' ? '重设密码' : mode === 'register' ? '创建账号' : '登录账号' }}</CardTitle>
+            <CardDescription>{{ mode === 'recovery' ? '输入注册邮箱，我们会发送密码重设链接。' : mode === 'register' ? '注册后可在不同设备间同步课程、待办和日常记录。' : '登录后继续同步你的课程、待办与日常记录。' }}</CardDescription>
+          </CardHeader>
+          <CardContent class="account-auth-content">
+          <div v-if="mode !== 'recovery'" class="account-mode" role="group" aria-label="账号操作">
+            <button type="button" class="btn" :class="{ 'btn-primary': mode === 'login' }" :aria-pressed="mode === 'login'" :disabled="busy" @click="changeMode('login')">登录</button>
+            <button type="button" class="btn" :class="{ 'btn-primary': mode === 'register' }" :aria-pressed="mode === 'register'" :disabled="busy" @click="changeMode('register')">注册</button>
           </div>
-          <div v-if="mode !== 'recovery'" class="account-field">
-            <div class="account-field-heading"><label for="account-password">密码</label><button v-if="mode === 'login'" type="button" class="account-text-button" :disabled="busy || !accountAvailable" @click="changeMode('recovery')">忘记密码？</button></div>
-            <!-- 【iOS 必须关掉自动大写与自动纠错】只给邮箱设了 autocapitalize="none"，
-                 密码框用的是默认值。iOS Safari 会把首字母大写、还会跑拼写纠错，
-                 于是用户照着原样输入却一直得到"邮箱或密码不正确"，极难自查。 -->
-            <input id="account-password" ref="passwordInput" v-model="password" name="password" :type="passwordVisible ? 'text' : 'password'" :autocomplete="mode === 'register' ? 'new-password' : 'current-password'" autocapitalize="none" autocorrect="off" :spellcheck="false" placeholder="输入密码" required :disabled="busy || !accountAvailable" :aria-invalid="Boolean(errors.password)" :aria-describedby="errors.password ? 'account-password-error account-password-help' : 'account-password-help'" @input="clearFieldError('password')" @keydown="capsLock = Boolean($event.getModifierState?.('CapsLock'))" @keyup="capsLock = Boolean($event.getModifierState?.('CapsLock'))" @blur="capsLock = false" />
-            <p id="account-password-help" class="account-help">{{ mode === 'register' ? '至少 8 位，建议混合字母、数字和符号。' : '请输入注册时设置的密码。' }}</p>
-            <p v-if="errors.password" id="account-password-error" class="account-error">{{ errors.password }}</p>
-            <p v-if="capsLock" class="account-service-note">大写锁定已开启，请注意密码大小写。</p>
-          </div>
-          <div v-if="mode === 'register'" class="account-field">
-            <label for="account-confirmation">再次输入密码</label>
-            <input id="account-confirmation" ref="confirmationInput" v-model="confirmation" name="confirmation" :type="passwordVisible ? 'text' : 'password'" autocomplete="new-password" autocapitalize="none" autocorrect="off" :spellcheck="false" required :disabled="busy || !accountAvailable" :aria-invalid="Boolean(errors.confirmation)" :aria-describedby="errors.confirmation ? 'account-confirmation-error' : undefined" @input="clearFieldError('confirmation')" />
-            <p v-if="errors.confirmation" id="account-confirmation-error" class="account-error">{{ errors.confirmation }}</p>
-          </div>
-          <label v-if="mode !== 'recovery'" class="account-password-toggle"><input v-model="passwordVisible" type="checkbox" :disabled="busy || !accountAvailable" />显示密码</label>
-          <ActionButton tone="primary" kind="important" feedback="external" :show-error="false" type="submit" class="btn btn-primary account-submit" :disabled="busy || !accountAvailable || (isEmailFlow && resendSeconds > 0)" :busy="busy">{{ busy ? '正在处理…' : isEmailFlow && resendSeconds > 0 ? resendSeconds + ' 秒后可发送' : mode === 'register' ? '创建账号' : mode === 'recovery' ? '发送重设邮件' : '登录' }}</ActionButton>
-          <button v-if="mode === 'recovery'" type="button" class="btn btn-ghost" :disabled="busy" @click="changeMode('login')">返回登录</button>
-          <ActionButton tone="neutral" v-if="accountCallbackError && accountAvailable" type="button" class="btn" :disabled="busy || resendSeconds > 0" kind="important" feedback="external" :show-error="false" :action="() => resend()">{{ resendSeconds > 0 ? resendSeconds + ' 秒后可重发' : '重新发送验证邮件' }}</ActionButton>
-        </form>
+          <form class="account-form" novalidate :aria-busy="busy" @submit.prevent="submit">
+            <div class="account-field">
+              <label for="account-email">邮箱</label>
+              <!-- 登录态用 autocomplete="username"：密码管理器靠这一对绑定，
+                   "email" 在部分管理器里绑定不到密码框。 -->
+              <input id="account-email" ref="emailInput" v-model="email" name="email" type="email" :autocomplete="mode === 'login' ? 'username' : 'email'" inputmode="email" autocapitalize="none" autocorrect="off" :spellcheck="false" placeholder="输入邮箱地址" required :disabled="busy || !accountAvailable" :aria-invalid="Boolean(errors.email)" :aria-describedby="errors.email ? 'account-email-error account-form-error' : 'account-form-error'" @input="clearFieldError('email')" />
+              <p v-if="errors.email" id="account-email-error" class="account-error">{{ errors.email }}</p>
+            </div>
+            <div v-if="mode !== 'recovery'" class="account-field">
+              <div class="account-field-heading"><label for="account-password">密码</label><button v-if="mode === 'login'" type="button" class="account-text-button" :disabled="busy || !accountAvailable" @click="changeMode('recovery')">忘记密码？</button></div>
+              <!-- 【iOS 必须关掉自动大写与自动纠错】只给邮箱设了 autocapitalize="none"，
+                   密码框用的是默认值。iOS Safari 会把首字母大写、还会跑拼写纠错，
+                   于是用户照着原样输入却一直得到"邮箱或密码不正确"，极难自查。 -->
+              <input id="account-password" ref="passwordInput" v-model="password" name="password" :type="passwordVisible ? 'text' : 'password'" :autocomplete="mode === 'register' ? 'new-password' : 'current-password'" autocapitalize="none" autocorrect="off" :spellcheck="false" placeholder="输入密码" required :disabled="busy || !accountAvailable" :aria-invalid="Boolean(errors.password)" :aria-describedby="errors.password ? 'account-password-error account-password-help' : 'account-password-help'" @input="clearFieldError('password')" @keydown="capsLock = Boolean($event.getModifierState?.('CapsLock'))" @keyup="capsLock = Boolean($event.getModifierState?.('CapsLock'))" @blur="capsLock = false" />
+              <p id="account-password-help" class="account-help">{{ mode === 'register' ? '至少 8 位，建议混合字母、数字和符号。' : '请输入注册时设置的密码。' }}</p>
+              <p v-if="errors.password" id="account-password-error" class="account-error">{{ errors.password }}</p>
+              <p v-if="capsLock" class="account-service-note">大写锁定已开启，请注意密码大小写。</p>
+            </div>
+            <div v-if="mode === 'register'" class="account-field">
+              <label for="account-confirmation">再次输入密码</label>
+              <input id="account-confirmation" ref="confirmationInput" v-model="confirmation" name="confirmation" :type="passwordVisible ? 'text' : 'password'" autocomplete="new-password" autocapitalize="none" autocorrect="off" :spellcheck="false" required :disabled="busy || !accountAvailable" :aria-invalid="Boolean(errors.confirmation)" :aria-describedby="errors.confirmation ? 'account-confirmation-error' : undefined" @input="clearFieldError('confirmation')" />
+              <p v-if="errors.confirmation" id="account-confirmation-error" class="account-error">{{ errors.confirmation }}</p>
+            </div>
+            <label v-if="mode !== 'recovery'" class="account-password-toggle"><input v-model="passwordVisible" type="checkbox" :disabled="busy || !accountAvailable" />显示密码</label>
+            <ActionButton tone="primary" kind="important" feedback="external" :show-error="false" type="submit" class="btn btn-primary account-submit" :disabled="busy || !accountAvailable || (isEmailFlow && resendSeconds > 0)" :busy="busy">{{ busy ? '正在处理…' : isEmailFlow && resendSeconds > 0 ? resendSeconds + ' 秒后可发送' : mode === 'register' ? '创建账号' : mode === 'recovery' ? '发送重设邮件' : '登录' }}</ActionButton>
+            <button v-if="mode === 'recovery'" type="button" class="btn btn-ghost" :disabled="busy" @click="changeMode('login')">返回登录</button>
+            <ActionButton tone="neutral" v-if="accountCallbackError && accountAvailable" type="button" class="btn" :disabled="busy || resendSeconds > 0" kind="important" feedback="external" :show-error="false" :action="() => resend()">{{ resendSeconds > 0 ? resendSeconds + ' 秒后可重发' : '重新发送验证邮件' }}</ActionButton>
+          </form>
+          </CardContent>
+        </Card>
       </template>
       <p class="account-privacy">{{ accountUser ? '账号同步通过加密连接传输；壁纸图片保存在本机，导出备份时可选择携带。' : '账号为可选功能，不登录也可以在本机记录。密码只用于账号验证，不进入业务备份或数据同步。' }}</p>
     </div>
@@ -349,7 +360,7 @@ onBeforeUnmount(() => {
 .account-panel p { margin: 0; line-height: 1.6; }
 .account-description, .account-help, .account-privacy { color: var(--muted); }
 .account-help, .account-privacy { font-size: var(--fs-13); }
-.account-service-note { color: var(--warning); }
+.account-service-note { padding:10px 12px; border:1px solid color-mix(in srgb, var(--warning) 26%, var(--border)); border-radius:var(--radius-8); color:var(--warning); background:color-mix(in srgb, var(--warning) 7%, var(--card)); }
 .account-welcome { display: flex; align-items: center; gap: 14px; padding: 4px 0 8px; }
 .account-welcome h3 { margin: 0 0 4px; font-size: var(--fs-20); }
 .account-description { font-size: var(--fs-13); }
@@ -357,6 +368,11 @@ onBeforeUnmount(() => {
 .account-mode { display: flex; gap: 6px; padding: 4px; border-radius: var(--radius-12); background: var(--bg); }
 .account-mode .btn { flex: 1; }
 .account-mode .btn:not(.btn-primary) { border-color: transparent; background: transparent; }
+.account-auth-card { display:grid; gap:0; padding:0; border-color:var(--border); border-radius:var(--radius-12); background:var(--card); box-shadow:var(--shadow-sm); }
+.account-auth-header { display:grid; gap:6px; padding:16px 16px 0; }
+.account-auth-header :deep([data-slot="card-title"]) { margin:0; color:var(--text); font-size:var(--fs-17); font-weight:var(--fw-750); }
+.account-auth-header :deep([data-slot="card-description"]) { color:var(--muted); font-size:var(--fs-13); line-height:1.55; }
+.account-auth-content { display:grid; gap:16px; padding:16px; }
 .account-form, .account-field, .account-confirmation { display: grid; gap: 8px; }
 .account-form { gap: 16px; }
 .account-field label { font-weight: var(--fw-600); }
@@ -365,23 +381,32 @@ onBeforeUnmount(() => {
 .account-text-button:disabled { opacity: .5; cursor: default; }
 .account-field input { width: 100%; min-width: 0; box-sizing: border-box; }
 .account-error { color: var(--danger); font-size: var(--fs-13); }
+.account-error-alert { margin:0; border-color:color-mix(in srgb, var(--danger) 26%, var(--border)); background:color-mix(in srgb, var(--danger) 7%, var(--card)); }
+.account-error-alert :deep([data-slot="alert-description"]) { color:var(--danger); font-size:var(--fs-13); line-height:1.55; }
 .account-success { color: var(--success); }
-.account-feedback { padding: 12px; background: var(--bg); border-radius: var(--radius-8); }
+.account-feedback { display:flex; align-items:flex-start; gap:9px; padding:12px; border:1px solid var(--border); background:var(--bg-tint); border-radius:var(--radius-8); font-size:var(--fs-13); }
+.account-feedback-icon { display:grid; width:20px; height:20px; flex:0 0 20px; place-items:center; border-radius:var(--radius-circle); font-size:var(--fs-12); font-weight:var(--fw-800); }
+.account-feedback.account-error { border-color:color-mix(in srgb, var(--danger) 26%, var(--border)); background:color-mix(in srgb, var(--danger) 7%, var(--card)); }
+.account-feedback.account-error .account-feedback-icon { color:var(--danger); background:color-mix(in srgb, var(--danger) 12%, var(--card)); }
+.account-feedback.account-success { border-color:color-mix(in srgb, var(--success) 24%, var(--border)); background:color-mix(in srgb, var(--success) 7%, var(--card)); }
+.account-feedback.account-success .account-feedback-icon { color:var(--success); background:color-mix(in srgb, var(--success) 12%, var(--card)); }
 .account-summary, .account-confirmation { padding: 16px; border: 1px solid var(--border); border-radius: var(--radius-12); background: var(--bg-tint); }
 .account-summary { display: flex; align-items: center; gap: 12px; }
 .account-identity { min-width: 0; flex: 1; }
 .account-summary h3, .account-confirmation h3 { margin: 0; font-size: var(--fs-16); }
 .account-summary h3 { overflow-wrap: anywhere; }
 .account-summary .account-email { margin-top: 4px; color: var(--muted); font-size: var(--fs-13); }
-.account-badge { flex-shrink: 0; padding: 4px 8px; border-radius: var(--radius-pill); background: var(--card); color: var(--success); font-size: var(--fs-12); }
+.account-badge { flex-shrink:0; border-color:color-mix(in srgb, var(--success) 24%, var(--border)); background:color-mix(in srgb, var(--success) 8%, var(--card)); color:var(--success); font-size:var(--fs-12); font-weight:var(--fw-650); }
 .account-card { padding: 18px; border: 1px solid var(--border); border-radius: var(--radius-12); background: var(--card); }
 .account-card > h3 { margin: 0 0 14px; font-size: var(--fs-16); }
-.account-details { display: grid; gap: 12px; margin: 0 0 14px; }
-.account-details > div { display: grid; grid-template-columns: 80px minmax(0, 1fr); gap: 12px; }
+.account-details { display: grid; gap: 0; margin: 0 0 14px; }
+.account-details > div { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 12px; padding:9px 0; border-bottom:1px solid var(--border); }
+.account-details > div:last-child { border-bottom:0; }
 .account-details dt { color: var(--muted); font-size: var(--fs-13); }
 .account-details dd { margin: 0; font-size: var(--fs-13); }
-.account-verified { color: var(--success); }
-.account-pending { color: var(--warning); }
+.account-verified, .account-pending { width:fit-content; font-size:var(--fs-11); font-weight:var(--fw-650); }
+.account-verified { border-color:color-mix(in srgb, var(--success) 24%, var(--border)); color:var(--success); background:color-mix(in srgb, var(--success) 8%, var(--card)); }
+.account-pending { border-color:color-mix(in srgb, var(--warning) 26%, var(--border)); color:var(--warning); background:color-mix(in srgb, var(--warning) 8%, var(--card)); }
 .account-email { overflow-wrap: anywhere; }
 .account-password-toggle { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; justify-self: start; cursor: pointer; }
 .account-submit { width: 100%; }
@@ -392,6 +417,9 @@ onBeforeUnmount(() => {
   .account-summary { flex-wrap: wrap; }
   .account-avatar { width: 44px; height: 44px; }
   .account-card { padding: 14px; }
+  .account-auth-header { padding:14px 14px 0; }
+  .account-auth-content { padding:14px; }
+  .account-details > div { grid-template-columns:84px minmax(0,1fr); gap:8px; }
   .account-welcome h3 { font-size: var(--fs-18); }
 }
 </style>

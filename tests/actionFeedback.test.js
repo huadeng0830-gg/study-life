@@ -45,17 +45,15 @@ describe('action feedback across the real task contract', () => {
     expect(execute).toHaveBeenCalledTimes(1)
   })
 
-  it('keeps the 1200 ms visual minimum without delaying the business continuation', async () => {
+  it('shows real success immediately, without a demo minimum, then restores after one second', async () => {
     const action = feedback({ kind: 'important' })
     expect(await action.run(() => true)).toBe(true)
-    expect(action.phase.value).toBe('pressed')
-    await vi.advanceTimersByTimeAsync(1199)
-    expect(action.phase.value).toBe('loading')
-    await vi.advanceTimersByTimeAsync(1)
     expect(action.phase.value).toBe('success')
-    await vi.advanceTimersByTimeAsync(1000)
+    await vi.advanceTimersByTimeAsync(999)
+    expect(action.phase.value).toBe('success')
+    await vi.advanceTimersByTimeAsync(1)
     expect(action.phase.value).toBe('restoring')
-    await vi.advanceTimersByTimeAsync(300)
+    await vi.advanceTimersByTimeAsync(ACTION_TIMING.restore)
     expect(action.phase.value).toBe('idle')
     expect(action.locked.value).toBe(false)
   })

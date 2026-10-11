@@ -9,14 +9,19 @@ const mocks = vi.hoisted(() => ({
 }))
 vi.mock('../src/composables/store', async () => {
   const { ref } = await import('vue')
-  return { useStoredRef: (_key, initial) => ref(initial), flushStoredWrites: vi.fn(), restoreStoredValues: mocks.restoreValues }
+  return { useStoredRef: (_key, initial) => ref(initial), flushStoredWrites: vi.fn(), getPersistenceMutationVersion: () => 0, restoreStoredValues: mocks.restoreValues }
 })
 vi.mock('../src/composables/timeContext.js', () => ({ getAppToday: () => '2026-10-09', getAppTime: () => '12:30' }))
 vi.mock('../src/composables/settingsPolicy.js', async () => {
   const { ref } = await import('vue')
   return { settingsPolicy: ref({ timezone: 'Asia/Shanghai' }), cachedDateFormatter: (timezone, options) => new Intl.DateTimeFormat('zh-CN', { timeZone: timezone, ...options }) }
 })
-vi.mock('../src/composables/dataVault.js', () => ({ getRestoreCheckpoint: mocks.getCheckpoint, saveRestoreCheckpoint: mocks.saveCheckpoint, clearRestoreCheckpoint: mocks.clearCheckpoint }))
+vi.mock('../src/composables/dataVault.js', () => ({
+  getRestoreCheckpoint: mocks.getCheckpoint, saveRestoreCheckpoint: mocks.saveCheckpoint, clearRestoreCheckpoint: mocks.clearCheckpoint,
+  clearDataVault: vi.fn(async () => true), clearPendingRecoveryDraft: vi.fn(async () => true),
+  savePendingRecoveryDraft: vi.fn(async () => true), mirrorLocalValue: vi.fn(async () => true), mirrorLocalValues: vi.fn(async () => true),
+  setMirrorErrorHandler: vi.fn(), setMirrorSuccessHandler: vi.fn(), setMirrorTimingHandler: vi.fn(),
+}))
 vi.mock('../src/composables/wallpaperStorage.js', () => ({
   exportWallpapersForTransfer: mocks.wallpapers, backupWallpapersForUndo: mocks.wallpaperUndo,
   discardWallpaperUndo: mocks.discardUndo, importWallpapersFromTransfer: mocks.importWallpapers,
@@ -30,7 +35,7 @@ let savedCheckpoint
 let downloads
 function fileEvent(file) { return { target: { files: [file], value: 'selected' } } }
 function backupFile(name, data = {}) {
-  return { name, size: 100, text: async () => JSON.stringify({ app: 'study-life', version: 1, data: { courses: [], countdowns: [], ...data } }) }
+  return { name, size: 100, text: async () => JSON.stringify({ app: 'study-life', version: 1, ownerId: 'guest', data: { courses: [], countdowns: [], ...data } }) }
 }
 function deferred() {
   let resolve
@@ -44,6 +49,7 @@ beforeEach(async () => {
   vi.clearAllMocks()
   vi.useFakeTimers()
   localStorage.clear()
+  Object.defineProperty(navigator, 'locks', { configurable: true, value: { request: async (_name, _options, callback) => callback({}) } })
   savedCheckpoint = null
   downloads = []
   mocks.getCheckpoint.mockImplementation(async () => savedCheckpoint)

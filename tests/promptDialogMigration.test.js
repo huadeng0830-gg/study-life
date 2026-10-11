@@ -378,6 +378,30 @@ async function click(node) {
 }
 
 describe('PromptDialog：确认回传 trim 后的值，取消与 Escape 只关不写', () => {
+  it('输入法确认候选词不提交，结束组词后 Enter 才确认', async () => {
+    mountPrompt({ title: '修改分类名称', label: '分类名称', initialValue: '示例名称' })
+    await settle()
+    const input = dialogInput()
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', isComposing: true, bubbles: true }))
+    await settle()
+    expect(confirmEvents()).toEqual([])
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    await settle()
+    expect(confirmEvents()).toEqual([{ type: 'confirm', value: '示例名称' }])
+  })
+
+  it('错误说明关联到输入框，保持初值和模态焦点', async () => {
+    mountPrompt({ label: '分类名称', initialValue: '示例名称', error: '名称已存在，请修改' })
+    await settle()
+    const input = dialogInput()
+    expect(input.value).toBe('示例名称')
+    expect(input.getAttribute('aria-invalid')).toBe('true')
+    const error = document.getElementById(input.getAttribute('aria-describedby'))
+    expect(error?.getAttribute('role')).toBe('alert')
+    expect(error?.textContent).toContain('名称已存在，请修改')
+    expect(document.activeElement).toBe(input)
+  })
+
   it('打开时预填初值、焦点落在输入框、页面锁生效，确认回传 trim 后的值', async () => {
     mountPrompt({ title: '修改分类名称', label: '分类名称', initialValue: '餐饮' })
     await settle()
@@ -391,8 +415,8 @@ describe('PromptDialog：确认回传 trim 后的值，取消与 Escape 只关�
     await settle()
     const buttons = footButtons()
     expect(buttons.map((button) => button.textContent.trim()), '默认按钮文案与原生 prompt 一致').toEqual(['取消', '确定'])
-    expect(buttons[1].className).toContain('btn-primary')
-    expect(buttons[1].className).not.toContain('btn-danger')
+    expect(buttons[1].getAttribute('data-variant')).toBe('default')
+    expect(buttons[0].getAttribute('data-variant')).toBe('outline')
 
     await click(buttons[1])
     expect(confirmEvents(), '确认必须回传 trim 后的值').toEqual([{ type: 'confirm', value: '常吃' }])

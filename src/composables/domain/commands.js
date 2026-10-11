@@ -11,7 +11,7 @@ import { isBillPayment, transactionBillId } from '../ledgerRelations.js'
 import { detachCourseRelations } from './relations.js'
 import { defaultAccount, defaultReminderMinutes, policyDateKey, policyTimeKey } from '../settingsPolicy.js'
 import { eventInputError } from '../events/eventFields.js'
-import { normalizeTimeStages, taskRepeatBase, taskStages } from '../tasks/taskTimePlan.ts'
+import { normalizeTimeStages, taskRepeatBase, taskStages } from '../tasks/taskTimePlan'
 
 let lastStamp = 0
 function stamp() {
@@ -262,7 +262,7 @@ export function useDomainCommands() {
     if (restored) commitTasks()
     return restored
   }
-  function createMilestone(value) { const now = stamp(); const item = { id: value.id || createId('e'), name: String(value.name || value.title || '').trim(), date: value.date || '', time: value.time || '', location: value.location || '', category: value.category || '学习', repeat: value.repeat || 'none', pinned: Boolean(value.pinned), courseId: value.courseId || '', courseName: value.courseName || value.course || '', reviewProgress: Number(value.reviewProgress) || 0, reminderMinutes: defaultReminderMinutes('milestone', value.reminderMinutes), kind: value.kind || 'countdown', createdAt: now, updatedAt: now, ...origin(value) }; if (!item.name || !item.date) throw new Error('请补充名称和目标日期'); milestones.value.push(item); commitMilestones(); return item }
+  function createMilestone(value) { const now = stamp(); const item = { id: value.id || createId('e'), name: String(value.name || value.title || '').trim(), date: value.date || '', time: value.time || '', location: value.location || '', note: value.note || '', category: value.category || '学习', repeat: value.repeat || 'none', pinned: Boolean(value.pinned), courseId: value.courseId || '', courseName: value.courseName || value.course || '', reviewProgress: Number(value.reviewProgress) || 0, reminderMinutes: defaultReminderMinutes('milestone', value.reminderMinutes), kind: value.kind || 'countdown', createdAt: now, updatedAt: now, ...origin(value) }; if (!item.name || !item.date) throw new Error('请补充名称和目标日期'); milestones.value.push(item); commitMilestones(); return item }
   function updateMilestone(id, value) { const item = milestones.value.find((entry) => entry.id === id); if (!item) return null; Object.assign(item, value, { updatedAt: stamp() }); commitMilestones(); return item }
   const milestoneRestoreRelations = new Map()
   function deleteMilestone(id) {
@@ -308,13 +308,15 @@ export function useDomainCommands() {
     commitEvents()
     return item
   }
-  function createTransaction(value = {}) {
+  function buildTransaction(value = {}) {
     const now = stamp()
-    const direction = value.direction === 'income' || value.type === 'income' ? 'income' : 'expense'
+    const direction = value.direction === 'refund' ? 'refund' : value.direction === 'income' || value.type === 'income' ? 'income' : 'expense'
     const amount = normalizeAmount(value.amount)
-    const name = String(value.name || value.title || '').trim() || (direction === 'income' ? '收入' : '日常支出')
+    const name = String(value.name || value.title || '').trim() || (direction === 'income' ? '收入' : direction === 'refund' ? '退款' : '日常支出')
     const date = value.date || policyDateKey(now)
-    const time = normalizeLedgerTime(value.time === undefined || value.time === null || value.time === '' ? policyTimeKey(now) : value.time)
+    const time = normalizeLedgerTime(value.time === undefined || value.time === null || value.time === ''
+      ? value.createdFrom === 'import' ? '' : policyTimeKey(now)
+      : value.time)
     if (amount === null) throw new Error('金额需大于 0，且最多保留两位小数')
     if (!validDateKey(date)) throw new Error('日期格式不正确')
     if (time === null) throw new Error('时间格式不正确')
@@ -340,9 +342,58 @@ export function useDomainCommands() {
       ...(hasSplitInput ? { split: normalizeSplit(value.split) } : {}),
       createdAt: now, updatedAt: now, ...origin(value),
     }
+    return item
+  }
+  function createTransaction(value = {}) {
+    const item = buildTransaction(value)
     transactions.value.push(item)
     commitTransactions()
     return item
+  }
+  /** Validate the complete import before writing once; a bad row cannot leave a partial import. */
+  function createImportedTransactions(values = []) {
+    if (!Array.isArray(values)) throw new Error('导入记录格式不正确')
+    const existingKeys = new Set(transactions.value
+      .filter((item) => item?.sourceType && item?.sourceId)
+      .map((item) => `${item.sourceType}:${item.sourceId}`))
+    const seen = new Set()
+    const items = []
+    let skippedDuplicates = 0
+    for (const value of values) {
+      const sourceType = String(value?.sourceType ?? '').trim()
+      const sourceId = String(value?.sourceId ?? '').trim()
+      if (!['wechat-bill', 'alipay-bill'].includes(sourceType) || !sourceId) {
+        throw new Error('导入记录缺少可去重的来源标识')
+      }
+      const sourceKey = `${sourceType}:${sourceId}`
+      if (existingKeys.has(sourceKey) || seen.has(sourceKey)) {
+        skippedDuplicates += 1
+        continue
+      }
+      const direction = String(value?.direction ?? '')
+      if (!['expense', 'income', 'refund'].includes(direction)) {
+        throw new Error('导入记录的收支类型不正确')
+      }
+      const categoryId = String(value?.cat ?? value?.category ?? '').trim()
+      const categoryScope = direction === 'income' ? 'income' : 'expense'
+      if (categoryId && !categoriesForScope(categoryScope).some((category) => category.key === categoryId)) {
+        throw new Error('导入记录的分类与收支类型不匹配')
+      }
+      const item = buildTransaction({
+        ...value,
+        id: '',
+        createdFrom: 'import',
+        sourceType,
+        sourceId,
+      })
+      items.push(item)
+      seen.add(sourceKey)
+    }
+    if (items.length) {
+      transactions.value.push(...items)
+      commitTransactions()
+    }
+    return { created: items, skippedDuplicates }
   }
   function updateTransaction(id, value = {}) {
     const item = transactions.value.find((entry) => entry.id === id)
@@ -753,5 +804,5 @@ export function useDomainCommands() {
     if (session.todoId) recordTaskFocusSession(session.todoId, session)
     return session
   }
-  return { tasks, courses, milestones, bills, transactions, events, focusSessions, createTask, updateTask, toggleTask, completeTask, setTaskStageCompleted, deleteTask, restoreDeletedTask, archiveTask, restoreTask, createMilestone, updateMilestone, deleteMilestone, restoreDeletedMilestone, archiveMilestone, restoreMilestone, createEvent, updateEvent, deleteEvent, restoreDeletedEvent, archiveEvent, restoreEvent, createTransaction, updateTransaction, updateTransactionCategories, deleteTransaction, restoreDeletedTransaction, refundTransaction, undoBillPayment, createBill, updateBill, deleteBill, archiveBill, restoreBill, setBillActive, skipBill, deleteCourse, createCourse, replaceCourses, archiveCourse, restoreCourse, recordTaskFocusSession, recordFocusSession, payBill }
+  return { tasks, courses, milestones, bills, transactions, events, focusSessions, createTask, updateTask, toggleTask, completeTask, setTaskStageCompleted, deleteTask, restoreDeletedTask, archiveTask, restoreTask, createMilestone, updateMilestone, deleteMilestone, restoreDeletedMilestone, archiveMilestone, restoreMilestone, createEvent, updateEvent, deleteEvent, restoreDeletedEvent, archiveEvent, restoreEvent, createTransaction, createImportedTransactions, updateTransaction, updateTransactionCategories, deleteTransaction, restoreDeletedTransaction, refundTransaction, undoBillPayment, createBill, updateBill, deleteBill, archiveBill, restoreBill, setBillActive, skipBill, deleteCourse, createCourse, replaceCourses, archiveCourse, restoreCourse, recordTaskFocusSession, recordFocusSession, payBill }
 }

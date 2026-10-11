@@ -21,19 +21,20 @@ function sessionLike() {
 }
 
 describe('PWA 启动资源恢复', () => {
-  it('首次启动资源错误会注销 Service Worker、清理 Cache Storage 并只刷新一次', async () => {
+  it('首次启动资源错误只恢复当前应用的 Worker 与缓存，并只刷新一次', async () => {
     const session = new Map()
-    const firstWorker = { unregister: vi.fn(async () => true) }
+    const firstWorker = { scope: 'https://fixture.invalid/', unregister: vi.fn(async () => true) }
     const secondWorker = { unregister: vi.fn(async () => true) }
     const cacheStorage = {
-      keys: vi.fn(async () => ['workbox-precache-old', 'study-life-lazy-assets']),
+      keys: vi.fn(async () => ['workbox-precache-v2-https://fixture.invalid/', 'study-life-lazy-assets',
+        'study-life-ocr-language-v1', 'workbox-precache-v2-https://fixture.invalid/other/']),
       delete: vi.fn(async () => true),
     }
     const reload = vi.fn()
 
     const first = await recoverPwaStartupResources({
       session: { getItem: (key) => session.get(key) || null, setItem: (key, value) => session.set(key, value) },
-      navigatorRef: { serviceWorker: { getRegistrations: vi.fn(async () => [firstWorker, secondWorker]) } },
+      navigatorRef: { serviceWorker: { getRegistration: vi.fn(async () => firstWorker), getRegistrations: vi.fn(async () => [firstWorker, secondWorker]) } },
       cachesRef: cacheStorage,
       reload,
     })
@@ -48,9 +49,49 @@ describe('PWA 启动资源恢复', () => {
     expect(second).toBe(false)
     expect(session.get(STARTUP_RESOURCE_RECOVERY_KEY)).toBe('1')
     expect(firstWorker.unregister).toHaveBeenCalledOnce()
-    expect(secondWorker.unregister).toHaveBeenCalledOnce()
+    expect(secondWorker.unregister).not.toHaveBeenCalled()
     expect(cacheStorage.delete).toHaveBeenCalledTimes(2)
     expect(reload).toHaveBeenCalledOnce()
+  })
+
+  it('其他窗口持有更新锁时启动恢复不破坏该任务的资源', async () => {
+    const worker = { unregister: vi.fn(async () => true) }
+    const cacheStorage = { keys: vi.fn(async () => []), delete: vi.fn(async () => true) }
+    const reload = vi.fn()
+    expect(await recoverPwaStartupResources({ session: sessionLike(), storage: null, cachesRef: cacheStorage, reload,
+      navigatorRef: { locks: { request: async (_name, _options, callback) => callback(null) },
+        serviceWorker: { getRegistration: async () => worker } } })).toBe(false)
+    expect(worker.unregister).not.toHaveBeenCalled()
+    expect(cacheStorage.keys).not.toHaveBeenCalled()
+    expect(reload).not.toHaveBeenCalled()
+  })
+
+  it.each(['installing', 'activating'])('共享锁已释放但 Worker 仍为 %s 时不注销或删除资源', async (state) => {
+    const activeWorker = { state }
+    const registration = { unregister: vi.fn(async () => true),
+      installing: state === 'installing' ? activeWorker : null,
+      active: state === 'activating' ? activeWorker : { state: 'activated' } }
+    const cacheStorage = { keys: vi.fn(async () => ['study-life-lazy-assets']), delete: vi.fn(async () => true) }
+    const reload = vi.fn()
+    const session = sessionLike()
+    expect(await recoverPwaStartupResources({ session, storage: null, cachesRef: cacheStorage, reload,
+      navigatorRef: { locks: { request: async (_name, _options, callback) => callback({}) },
+        serviceWorker: { getRegistration: async () => registration } } })).toBe(false)
+    expect(registration.unregister).not.toHaveBeenCalled()
+    expect(cacheStorage.keys).not.toHaveBeenCalled()
+    expect(reload).not.toHaveBeenCalled()
+    expect(session.getItem(STARTUP_RESOURCE_RECOVERY_KEY)).toBeNull()
+  })
+
+  it('缓存删除失败会停止恢复，不吞掉失败并直接重载', async () => {
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const reload = vi.fn()
+    try {
+      expect(await recoverPwaStartupResources({ session: sessionLike(), storage: null, reload,
+        cachesRef: { keys: async () => ['study-life-lazy-assets'], delete: async () => false } })).toBe(false)
+      expect(reload).not.toHaveBeenCalled()
+      expect(warning).toHaveBeenCalledWith('[startup] RESOURCE_RECOVERY_FAILED')
+    } finally { warning.mockRestore() }
   })
 
   // 这是手机端「打不开、一直在刷新首页」的回归测试。

@@ -25,7 +25,7 @@ const buttonType = computed(() => attrs.type === 'submit' ? 'submit' : attrs.typ
 const ariaLabel = computed(() => typeof attrs['aria-label'] === 'string' ? attrs['aria-label'] : undefined)
 let activation = 0
 const statusId = `action-status-${useId()}`
-const { phase, pending, locked, error, failure, result, morph, run, cancel } = useActionFeedback({ kind: () => props.kind, feedback: () => props.feedback === 'local' })
+const { phase, pending, locked, error, failure, result, morph, run, cancel: cancelFeedback } = useActionFeedback({ kind: () => props.kind, feedback: () => props.feedback === 'local' })
 const busy = computed(() => props.busy || pending.value)
 const showSymbol = computed(() => props.kind !== 'instant' && (morph.value
   ? ['loading', 'success', 'error'].includes(phase.value)
@@ -70,10 +70,15 @@ async function activate(event) {
   else if (result.value === 'success') emit('done', value)
 }
 async function retry(event) {
+  if (props.disabled || props.busy || pending.value) return
   cancel()
   await nextTick()
   button.value?.focus()
   await activate(event)
+}
+function cancel() {
+  activation++
+  cancelFeedback()
 }
 onDeactivated(cancel)
 defineExpose({ activate, cancel, phase, pending, error })
@@ -105,14 +110,16 @@ defineExpose({ activate, cancel, phase, pending, error })
     </span>
     <span v-if="feedback === 'local'" :id="statusId" class="sr-only">{{ statusText }}</span>
   </button>
-  <ActionFeedback v-if="error && showError" :message="error" tone="error" :announce="false" :retryable="true" :busy="pending" @retry="retry" />
+  <ActionFeedback v-if="error && showError" :message="error" tone="error" :announce="false" :retryable="Boolean(action)" :busy="busy || disabled" @retry="retry" />
 </template>
 
 <style scoped>
-.action-button{position:relative;isolation:isolate;display:inline-flex;align-items:center;justify-content:center;gap:6px;max-width:100%;vertical-align:middle;background:transparent;box-shadow:none;min-height:42px}
+.action-button{position:relative;isolation:isolate;display:inline-flex;align-items:center;justify-content:center;gap:var(--space-2);max-width:100%;vertical-align:middle;background:transparent;box-shadow:none;min-height:var(--control-height)}
 .action-button:hover{transform:none;background:transparent}
 .action-button:active:not(:disabled):not([aria-disabled='true']),.action-button[data-action-phase='pressed']{transform:scale(.98)}
-.action-button[aria-busy='true'],.action-button[aria-disabled='true']:not(:disabled){opacity:1;filter:none;pointer-events:auto;cursor:progress}
+.action-button[aria-disabled='true']:not(:disabled){opacity:1;filter:none;pointer-events:auto;cursor:default}
+.action-button[aria-busy='true']{cursor:progress}
+.action-button:hover:disabled{opacity:.6;cursor:not-allowed}
 .action-button[aria-busy='true']::after{display:none}
 .action-surface{position:absolute;z-index:0;inset-block:0;left:50%;width:100%;transform:translateX(-50%);border-radius:inherit;background:var(--primary);transition:width var(--action-collapse) var(--action-ease),border-radius var(--action-collapse) var(--action-ease),background var(--dur-fast) var(--action-ease)}
 .btn-primary:hover:not([aria-disabled='true']) .action-surface{background:var(--primary-hover)}
@@ -125,10 +132,11 @@ defineExpose({ activate, cancel, phase, pending, error })
 .action-morph:not([data-action-phase='restoring']) .action-surface{width:var(--action-size,42px);border-radius:var(--radius-pill)}
 .action-symbol{position:absolute;z-index:1;inset:0;display:flex;align-items:center;justify-content:center;gap:5px;pointer-events:none}
 .action-symbol svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
-.action-morph:not([data-action-phase='restoring']) .action-symbol{color:var(--on-primary,#fff)}
+.action-morph:not([data-action-phase='restoring']) .action-symbol{color:inherit}
 .action-morph[data-action-phase='success'] .action-surface{background:var(--action-success)}
 .action-morph[data-action-phase='error'] .action-surface{background:var(--danger)}
-.action-morph[data-action-phase='success'] .action-symbol,.action-morph[data-action-phase='error'] .action-symbol{color:#fff}
+.action-morph[data-action-phase='success'] .action-symbol{color:var(--card)}
+.action-morph[data-action-phase='error'] .action-symbol{color:var(--on-danger)}
 .action-check path{stroke-dasharray:1;stroke-dashoffset:1;animation:action-check var(--action-collapse) var(--action-ease) forwards}
 .action-spinner{width:18px;height:18px;border:2px solid currentColor;border-top-color:transparent;border-radius:var(--radius-circle);animation:btn-spin 720ms linear infinite}
 .action-button:not(.action-morph)[aria-busy='true'] .action-symbol{inset-inline-start:auto;inset-inline-end:3px;width:14px}
@@ -141,7 +149,8 @@ defineExpose({ activate, cancel, phase, pending, error })
 .action-button:not(.action-morph):is([data-action-phase='success'],[data-action-phase='error']) .action-surface{transition:none}
 .action-success-label{font-size:var(--fs-12);font-weight:var(--fw-600)}
 @keyframes action-check{to{stroke-dashoffset:0}}
-@media(prefers-reduced-motion:reduce){.action-morph .action-surface{width:100%!important;border-radius:inherit!important}.action-check path{stroke-dashoffset:0}.action-spinner{border-top-color:currentColor;border-style:dotted}.action-button:active,.action-button[data-action-phase='pressed']{transform:none}}
+@media(prefers-reduced-motion:reduce){.action-surface,.action-label{transition:none}.action-morph .action-surface{width:100%!important;border-radius:inherit!important}.action-check path{animation:none;stroke-dashoffset:0}.action-spinner{animation:none;border-top-color:currentColor;border-style:dotted}.action-button:active,.action-button[data-action-phase='pressed']{transform:none}}
+:global(:root[data-performance='reduced']) .action-spinner{animation:none;border-top-color:currentColor;border-style:dotted}
 :global(:root[data-performance='reduced']) .action-check path{stroke-dashoffset:0}
 :global(:root[data-performance='reduced']) .action-morph .action-surface{width:100%;border-radius:inherit}
 :global(:root[data-performance='reduced']) .action-button[data-action-phase='pressed']{transform:none}

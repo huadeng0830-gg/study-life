@@ -1,296 +1,274 @@
 <script setup>
-import ActionButton from '../ActionButton.vue'
-import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { APP_RELEASE } from '../../composables/releaseNotes.js'
-import {
-  appUpdateProgress, checkForAppUpdate, forceRecoverToLatest, lastCheckedAt, lastCheckOutcome,
-  needsManualReload, reloadAppToApplyUpdate, retryAppUpdate, updateChecking, updateMessage, updateStage, updateTone,
-} from '../../composables/appUpdate.js'
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref } from 'vue'
+import { CheckIcon, CircleAlertIcon, CopyIcon, HistoryIcon, RefreshCwIcon } from '@lucide/vue'
 import { announce, announceAlert } from '../../composables/liveRegion.js'
-import {
-  checkDesktopAppUpdate, desktopUpdateState, downloadDesktopAppUpdate, installDesktopAppUpdate,
-  isDesktopApp, subscribeToDesktopUpdateState,
-} from '../../composables/desktopAppUpdate.js'
-import TaskProgress from '../TaskProgress.vue'
+import { applyAppUpdate, checkForAppUpdate, forceRecoverToLatest, retryAppUpdate, webUpdateState } from '../../composables/appUpdate.js'
+import { cancelDesktopAppUpdate, checkDesktopAppUpdate, desktopUpdateState, downloadDesktopAppUpdate,
+  installDesktopAppUpdate, isDesktopApp, subscribeToDesktopUpdateState } from '../../composables/desktopAppUpdate.js'
+import { getUpdatePresentation } from '../../composables/updatePresentation.js'
+import { formatUpdateDiagnostic } from '../../composables/updateProtocol.js'
+import { performanceMode } from '../../composables/performanceMode.js'
+import '../../styles/shadcn.css'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
+import { Progress } from '@/components/ui/progress'
+import { Separator } from '@/components/ui/separator'
+import { Spinner } from '@/components/ui/spinner'
+import { cn } from '@/lib/utils'
 const loadReleaseNotesBrowser = () => import('../ReleaseNotesBrowser.vue')
 const ReleaseNotesBrowser = defineAsyncComponent(loadReleaseNotesBrowser)
-
-// 【不要再拿中文文案反推语气与出口】
-// 原来这里是 `if (/失败/.test(updateMessage.value)) return 'error'`，按钮则靠
-// `updateMessage.includes('重新加载页面')`。改一句提示就会改配色，还会把**唯一
-// 的手动重载出口**删掉。现在语气读 updateTone，出口读 needsManualReload。
-const recovering = ref(false)
 const notesOpen = ref(false)
-let unsubscribeDesktopUpdates = () => {}
-
+const copyMessage = ref('')
+const clock = ref(Date.now())
+let stopDesktop = () => {}
+let timer
 onMounted(() => {
-  if (isDesktopApp) unsubscribeDesktopUpdates = subscribeToDesktopUpdateState()
+  if (isDesktopApp) stopDesktop = subscribeToDesktopUpdateState()
+  timer = window.setInterval(() => { clock.value = Date.now() }, 1000)
 })
-onBeforeUnmount(() => unsubscribeDesktopUpdates())
-
-const currentLastCheckedAt = computed(() => (
-  isDesktopApp ? desktopUpdateState.value.lastCheckedAt : lastCheckedAt.value
-))
-const checkBusy = computed(() => (
-  recovering.value || (isDesktopApp
-    ? ['checking', 'downloading', 'installing'].includes(desktopUpdateState.value.stage)
-    : updateChecking.value || ['downloading', 'ready', 'updating'].includes(updateStage.value))
-))
-const hasApplyAction = computed(() => (
-  isDesktopApp ? ['available', 'ready'].includes(desktopUpdateState.value.stage) : needsManualReload.value
-))
-const currentVersionLabel = computed(() => (
-  isDesktopApp ? desktopUpdateState.value.currentVersion || '桌面版' : APP_RELEASE
-))
-const checkButtonLabel = computed(() => {
-  if (recovering.value) return '正在修复…'
-  if (!isDesktopApp) {
-    if (updateStage.value === 'downloading') return '正在下载…'
-    if (['ready', 'updating'].includes(updateStage.value)) return '正在应用…'
-    if (updateChecking.value) return '正在检查…'
-    return ['warning', 'error'].includes(updateStage.value) ? '重新检查' : '检查更新'
-  }
-  if (desktopUpdateState.value.stage === 'checking') return '正在检查…'
-  if (desktopUpdateState.value.stage === 'downloading') return '正在下载…'
-  if (desktopUpdateState.value.stage === 'installing') return '正在安装…'
-  return ['error', 'unavailable'].includes(desktopUpdateState.value.stage) ? '重新检查' : '检查更新'
-})
-
+onBeforeUnmount(() => { stopDesktop(); window.clearInterval(timer) })
+const state = computed(() => isDesktopApp ? desktopUpdateState.value : webUpdateState)
+const ui = computed(() => getUpdatePresentation(state.value, isDesktopApp))
+const statusClass = computed(() => cn('update-status', {
+  'is-success': ui.value.tone === 'success', 'is-error': ui.value.tone === 'error',
+  'is-warning': ui.value.tone === 'warning', 'is-info': ui.value.tone === 'info',
+}))
+const currentVersionLabel = computed(() => state.value.currentVersion || '正在读取版本…')
+const lastCheckedIso = computed(() => state.value.lastCheckedAt ? new Date(state.value.lastCheckedAt).toISOString() : undefined)
 const lastCheckText = computed(() => {
-  if (!currentLastCheckedAt.value) return ''
-  const checkedAt = new Date(currentLastCheckedAt.value)
-  if (!Number.isFinite(checkedAt.getTime())) return ''
-  const today = checkedAt.toDateString() === new Date().toDateString()
-  const day = today ? '今天' : checkedAt.toLocaleDateString('zh-CN', { month: 'numeric', day: 'numeric' })
-  const time = checkedAt.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
-  return `上次检查 ${day} ${time}`
+  if (!state.value.lastCheckedAt) return '尚未成功检查'
+  return `上次成功检查：${new Date(state.value.lastCheckedAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}`
 })
-const statusLabel = computed(() => {
+const elapsedText = computed(() => {
+  if (!state.value.startedAt) return ''
+  const seconds = Math.max(0, Math.floor(((state.value.finishedAt || clock.value) - state.value.startedAt) / 1000))
+  return seconds < 60 ? `已用时 ${seconds} 秒` : `已用时 ${Math.floor(seconds / 60)} 分 ${seconds % 60} 秒`
+})
+function bytes(value) {
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`
+  return `${(value / 1024 / 1024).toFixed(1)} MB`
+}
+const downloadSize = computed(() => {
+  if (!isDesktopApp || !state.value.transferred) return ''
+  return state.value.total ? `${bytes(state.value.transferred)} / ${bytes(state.value.total)}` : `已下载 ${bytes(state.value.transferred)}`
+})
+const diagnostic = computed(() => formatUpdateDiagnostic(isDesktopApp ? 'windows' : 'web', state.value))
+const sourceText = isDesktopApp ? '已安装客户端配置的正式发布通道，校验更新包与 Windows 发布者签名。' : `${window.location.origin}/version.txt`
+const steps = ['核对版本', '下载资源', isDesktopApp ? '重启安装' : '启用资源', '验证版本']
+const motionOptions = [{ value: 'auto', label: '自动' }, { value: 'on', label: '减少动画' }, { value: 'off', label: '完整效果' }]
+function primaryAction() {
+  if (ui.value.disabled) return
   if (isDesktopApp) {
-    const labels = {
-      idle: '自动更新已开启',
-      checking: '检查中',
-      latest: '已是最新',
-      available: '发现新版本',
-      downloading: '正在下载',
-      ready: '新版已就绪',
-      installing: '正在安装',
-      error: '检查失败',
-      unavailable: '更新暂不可用',
-    }
-    return labels[desktopUpdateState.value.stage] || '自动更新已开启'
+    if (ui.value.action === 'download') return downloadDesktopAppUpdate()
+    if (ui.value.action === 'install') return installDesktopAppUpdate()
+    return checkDesktopAppUpdate()
   }
-  if (needsManualReload.value) return '新版待应用'
-  const labels = {
-    available: '发现新版本',
-    downloading: '正在下载新版本',
-    ready: '新版本已准备',
-    updating: '正在启用新版本',
-    latest: '已是最新',
-    warning: '需要留意',
-    error: '检查失败',
-    checking: '检查中',
-  }
-  if (labels[updateStage.value]) return labels[updateStage.value]
-  if (updateChecking.value) return '检查中'
-  if (lastCheckOutcome.value === '已是最新版本') return '已是最新'
-  if (lastCheckOutcome.value === '检查失败') return '检查失败'
-  return '自动检查已开启'
-})
-const statusTone = computed(() => {
-  if (isDesktopApp) {
-    if (desktopUpdateState.value.stage === 'error' || desktopUpdateState.value.stage === 'unavailable') return 'error'
-    if (['latest', 'ready', 'installing'].includes(desktopUpdateState.value.stage)) return 'success'
-    if (desktopUpdateState.value.stage === 'available') return 'warning'
-    return 'info'
-  }
-  if (needsManualReload.value) return 'warning'
-  if (updateChecking.value || updateStage.value !== 'idle') return updateTone.value
-  if (lastCheckOutcome.value === '检查失败') return 'error'
-  if (lastCheckOutcome.value === '已是最新版本') return 'success'
-  return 'info'
-})
-const statusGlyph = computed(() => {
-  if (isDesktopApp) {
-    if (statusTone.value === 'error' || statusTone.value === 'warning') return statusTone.value === 'error' ? '!' : '↓'
-    if (statusTone.value === 'success') return '✓'
-    if (['checking', 'downloading', 'installing'].includes(desktopUpdateState.value.stage)) return '↻'
-    return '·'
-  }
-  if (statusTone.value === 'error' || statusTone.value === 'warning') return '!'
-  if (statusTone.value === 'success') return '✓'
-  if (updateChecking.value || ['available', 'downloading', 'ready', 'updating'].includes(updateStage.value)) return '↻'
-  return '·'
-})
-const statusDetail = computed(() => (
-  isDesktopApp
-    ? desktopUpdateState.value.message || '应用启动后会自动检查桌面版本；你也可以手动检查。'
-    : updateMessage.value || lastCheckOutcome.value || '应用启动和联网时会自动检查；你也可以随时手动检查。'
-))
-const lastCheckedIso = computed(() => {
-  const timestamp = Number(currentLastCheckedAt.value)
-  return Number.isFinite(timestamp) && timestamp > 0 ? new Date(timestamp).toISOString() : undefined
-})
-
-function checkUpdates() {
-  if (checkBusy.value) return
-  return isDesktopApp ? checkDesktopAppUpdate() : checkForAppUpdate()
+  if (ui.value.action === 'apply') return applyAppUpdate()
+  if (ui.value.action === 'repair') return forceRecoverToLatest()
+  if (ui.value.action === 'wait') return retryAppUpdate()
+  return checkForAppUpdate()
 }
-
-function warmReleaseNotes() {
-  void loadReleaseNotesBrowser().catch(() => {})
-}
-
-function downloadDesktopUpdate() {
-  return downloadDesktopAppUpdate()
-}
-
-function installDesktopUpdate() {
-  return installDesktopAppUpdate()
-}
-
-// 这段提示是 v-if 插入的"新节点带内容"，VoiceOver 可能一个字都不播（见 liveRegion.js）。
-// 视觉照旧保留，发声交给常驻通道：语气决定走礼貌还是紧急。
-// 记上次文本是为了不重复播报同一句话。
-let lastSpoken = ''
-watch(updateMessage, (message) => {
-  if (!message || message === lastSpoken) return
-  lastSpoken = message
-  if (updateTone.value === 'error' || updateTone.value === 'warning') announceAlert(message)
-  else announce(message)
-})
-watch(() => desktopUpdateState.value.message, (message) => {
-  if (!isDesktopApp || !message || message === lastSpoken) return
-  lastSpoken = message
-  if (desktopUpdateState.value.stage === 'error') announceAlert(message)
-  else announce(message)
-})
-
-// 强制恢复是异常时的自助修复入口；常规更新保持一键检查，避免误清理资源缓存。
-async function recoverToLatest() {
-  if (recovering.value) return
-  recovering.value = true
-  announce('正在强制获取最新版本，请稍候…')
+function checkAgain() { return isDesktopApp ? checkDesktopAppUpdate() : checkForAppUpdate() }
+function warmReleaseNotes() { void loadReleaseNotesBrowser().catch(() => {}) }
+async function copyDiagnostic() {
   try {
-    const ok = await forceRecoverToLatest()
-    if (!ok) announceAlert('暂时无法强制更新，请关闭应用后重新打开。')
-  } finally {
-    recovering.value = false
+    await navigator.clipboard.writeText(diagnostic.value)
+    copyMessage.value = '诊断信息已复制'
+    announce(copyMessage.value)
+  } catch {
+    copyMessage.value = '复制失败，可以选中下方诊断文本手动复制'
+    announceAlert(copyMessage.value)
   }
 }
 </script>
 
 <template>
-  <section class="version-update-section" aria-label="应用版本与更新状态">
-    <header class="update-heading">
-      <div class="version-heading">
-        <span class="version-caption">当前版本</span>
-        <strong class="version-badge">{{ currentVersionLabel }}</strong>
+  <Card class="version-update-section gap-0 py-0 border-border" role="region" aria-label="应用版本与更新状态">
+    <CardHeader class="update-card-header">
+      <CardTitle>三两事</CardTitle>
+      <CardDescription>检查、获取并验证应用更新</CardDescription>
+    </CardHeader>
+    <CardContent class="update-card-content">
+      <header class="update-heading">
+        <div class="version-heading">
+          <span class="version-caption">当前运行版本</span>
+          <strong class="version-number">{{ currentVersionLabel }}</strong>
+        </div>
+        <Badge variant="secondary">{{ isDesktopApp ? 'Windows' : '网页 / PWA' }}</Badge>
+      </header>
+      <div class="update-overview" role="status" aria-live="polite" aria-atomic="true">
+        <span :class="cn('update-state-symbol', { 'is-success': ui.tone === 'success', 'is-error': ui.tone === 'error' })" aria-hidden="true">
+          <CheckIcon v-if="ui.tone === 'success'" />
+          <CircleAlertIcon v-else-if="ui.tone === 'error' || ui.tone === 'warning'" />
+          <Spinner v-else-if="ui.busy" aria-hidden="true" />
+          <RefreshCwIcon v-else />
+        </span>
+        <div class="section-copy">
+          <strong :class="statusClass">{{ ui.statusLabel }}</strong>
+          <p class="update-detail">{{ state.message || '启动和联网时自动检查，也可以手动检查。' }}</p>
+          <time class="update-last-check" :datetime="lastCheckedIso">{{ lastCheckText }}</time>
+        </div>
       </div>
-      <span class="update-platform">{{ isDesktopApp ? '桌面版' : '网页应用' }}</span>
-    </header>
-    <p v-if="isDesktopApp && desktopUpdateState.availableVersion && desktopUpdateState.availableVersion !== currentVersionLabel" class="update-next-version">新版本 {{ desktopUpdateState.availableVersion }}</p>
-    <div class="update-overview" :class="`is-${statusTone}`">
-      <div class="section-icon update" :class="`is-${statusTone}`" aria-hidden="true">{{ statusGlyph }}</div>
-      <div class="section-copy">
-        <strong class="update-status" :class="`is-${statusTone}`">{{ statusLabel }}</strong>
-        <p class="update-detail">{{ statusDetail }}</p>
-        <time v-if="lastCheckText" class="update-last-check" :datetime="lastCheckedIso">{{ lastCheckText }}</time>
+      <p v-if="state.availableVersion && state.availableVersion !== currentVersionLabel && state.stage !== 'completed'" class="update-next-version">
+        新版本 <strong>{{ state.availableVersion }}</strong>
+      </p>
+      <Alert v-if="state.error" variant="destructive">
+        <CircleAlertIcon />
+        <AlertTitle>本次更新未完成</AlertTitle>
+        <AlertDescription>{{ state.error.message }} 详细诊断可在下方展开查看。</AlertDescription>
+      </Alert>
+      <section v-if="ui.showProgress" class="update-progress" aria-label="更新进度">
+        <ol class="update-phase-list">
+          <li v-for="(step, index) in steps" :key="step"
+              :class="cn({ 'is-done': index < ui.phaseIndex, 'is-current': index === ui.phaseIndex })"
+              :aria-current="index === ui.phaseIndex ? 'step' : undefined">
+            <span aria-hidden="true">{{ index < ui.phaseIndex ? '✓' : index + 1 }}</span>{{ step }}
+          </li>
+        </ol>
+        <Progress v-if="ui.busy" :model-value="isDesktopApp && state.stage === 'downloading' ? state.percent : null"
+                  :aria-label="ui.statusLabel" class="update-progress-bar" />
+        <div class="update-progress-meta">
+          <span>{{ downloadSize || (state.stage === 'downloading' ? '正在接收资源，进度以浏览器事件为准' : '实际版本验证完成后才会显示更新成功') }}</span>
+          <b v-if="isDesktopApp && state.stage === 'downloading' && state.percent !== null">{{ state.percent }}%</b>
+          <time>{{ elapsedText }}</time>
+        </div>
+      </section>
+      <div class="update-actions">
+        <div class="update-main-action-slot">
+          <Button type="button" class="update-check-button transition-[width] duration-[var(--dur-slow)] ease-in-out motion-reduce:transition-none in-data-[performance=reduced]:transition-none" :variant="ui.tone === 'success' ? 'secondary' : 'default'"
+                  data-primary-action :data-pending="state.stage === 'checking' ? '' : undefined"
+                  :data-success="ui.tone === 'success' ? '' : undefined"
+                  :disabled="ui.disabled" :aria-busy="ui.busy" :aria-label="ui.actionLabel" @click="primaryAction">
+            <Spinner v-if="state.stage === 'checking'" class="update-button-spinner" aria-hidden="true" />
+            <span class="update-button-label"><CheckIcon v-if="ui.tone === 'success'" data-icon="inline-start" aria-hidden="true" />{{ ui.actionLabel }}</span>
+          </Button>
+        </div>
+        <Button v-if="isDesktopApp && state.canCancel" type="button" variant="ghost" @click="cancelDesktopAppUpdate">取消下载</Button>
+        <p v-if="['ready', 'manual-reload'].includes(state.stage)" class="update-later-note">可以稍后处理，关闭此面板仍可继续使用当前版本。</p>
       </div>
-    </div>
-    <div class="update-actions" :class="{ 'has-apply-action': hasApplyAction }">
-      <button v-if="isDesktopApp && desktopUpdateState.stage === 'available'" type="button" class="btn btn-primary" @click="downloadDesktopUpdate">下载新版本</button>
-      <button v-if="isDesktopApp && desktopUpdateState.stage === 'ready'" type="button" class="btn btn-primary" @click="installDesktopUpdate">重启并安装</button>
-      <button v-if="!isDesktopApp && needsManualReload" type="button" class="btn btn-primary" @click="reloadAppToApplyUpdate">立即重新加载</button>
-      <button type="button" class="btn update-check-button" :class="hasApplyAction ? 'btn-secondary' : 'btn-primary'" :disabled="checkBusy" :aria-busy="checkBusy" @click="checkUpdates">
-        <span v-if="checkBusy" class="update-check-spinner" aria-hidden="true"></span>
-        {{ checkButtonLabel }}
-      </button>
-      <button type="button" class="btn btn-secondary update-notes-button" aria-haspopup="dialog" @pointerenter="warmReleaseNotes" @pointerdown="warmReleaseNotes" @focus="warmReleaseNotes" @click="notesOpen = true"><span aria-hidden="true">≡</span>查看更新记录<span aria-hidden="true">›</span></button>
-    </div>
-    <div
-      v-if="isDesktopApp && desktopUpdateState.stage === 'downloading'"
-      class="desktop-update-progress"
-      role="progressbar"
-      aria-label="下载桌面更新"
-      :aria-valuenow="desktopUpdateState.percent"
-      aria-valuemin="0"
-      aria-valuemax="100"
-    >
-      <span class="desktop-update-progress-track"><i :style="{ width: `${desktopUpdateState.percent}%` }"></i></span>
-      <b>{{ desktopUpdateState.percent }}%</b>
-    </div>
-    <TaskProgress
-      v-if="!isDesktopApp && appUpdateProgress.state.active && appUpdateProgress.state.visible"
-      :task="appUpdateProgress.state"
-      :elapsed-seconds="appUpdateProgress.elapsedSeconds.value ?? undefined"
-      :activity-age-seconds="appUpdateProgress.activityAgeSeconds.value"
-      :stalled="appUpdateProgress.isStalled.value"
-      compact
-      @retry="retryAppUpdate"
-      @wait="appUpdateProgress.continueWaiting"
-    />
-    <p class="update-auto-note"><span aria-hidden="true">↻</span>{{ isDesktopApp ? '启动时自动检查更新' : '启动和联网时自动检查更新' }}</p>
-    <details v-if="!isDesktopApp" class="update-recovery">
-      <summary>版本异常或更新卡住？</summary>
-      <div class="update-recovery-content">
-        <p>修复会重建应用资源缓存并重新加载，不会删除本机课程、待办或账本记录。</p>
-        <ActionButton tone="neutral" type="button" class="btn btn-secondary" :disabled="checkBusy" :busy="recovering" kind="task" feedback="external" :show-error="false" :action="() => recoverToLatest()">
-          {{ recovering ? '正在修复…' : '修复更新缓存' }}
-        </ActionButton>
-      </div>
-    </details>
-  </section>
+      <details v-if="isDesktopApp && state.releaseNotes && state.availableVersion" class="update-release-info">
+        <summary>本次更新内容</summary>
+        <p v-if="state.releaseDate" class="update-last-check">发布时间：{{ new Date(state.releaseDate).toLocaleDateString('zh-CN') }}</p>
+        <p class="update-release-notes">{{ state.releaseNotes }}</p>
+      </details>
+      <details class="update-motion-settings">
+        <summary>动画效果</summary>
+        <div class="update-motion-options" role="group" aria-label="动画效果">
+          <Button v-for="option in motionOptions" :key="option.value" type="button" size="sm"
+                  :variant="performanceMode === option.value ? 'secondary' : 'outline'"
+                  :aria-pressed="performanceMode === option.value" @click="performanceMode = option.value">{{ option.label }}</Button>
+        </div>
+        <p class="update-motion-note">应用到所有页面；系统减少动画偏好同样生效。</p>
+      </details>
+      <Separator />
+      <details class="update-diagnostics">
+        <summary>更新来源与诊断</summary>
+        <div class="update-diagnostics-content">
+          <p class="update-source">{{ sourceText }}</p>
+          <dl v-if="state.timings.length" class="update-timings">
+            <template v-for="(item, index) in state.timings" :key="index">
+              <dt>{{ { checking: '版本检查', downloading: '资源下载', installing: '安装 / 启用', verifying: '版本验证' }[item.stage] || item.stage }}</dt>
+              <dd>{{ (item.durationMs / 1000).toFixed(2) }} 秒</dd>
+            </template>
+          </dl>
+          <div class="update-diagnostic-actions">
+            <Button v-if="ui.canCheckAgain" type="button" variant="outline" size="sm" @click="checkAgain">重新检查</Button>
+            <Button type="button" variant="outline" size="sm" @click="copyDiagnostic"><CopyIcon data-icon="inline-start" />复制诊断信息</Button>
+            <Button v-if="!isDesktopApp" type="button" variant="ghost" size="sm"
+                    :disabled="ui.busy || state.taskPending" @click="forceRecoverToLatest">修复更新缓存</Button>
+          </div>
+          <p v-if="!isDesktopApp" class="update-repair-note">修复会先核对发布资源，再重建当前应用的离线缓存。课程、待办、账本和 OCR 模型缓存会保留。</p>
+          <p v-if="copyMessage" role="status" class="update-copy-result">{{ copyMessage }}</p>
+          <textarea class="update-diagnostic-text" aria-label="更新诊断信息" readonly :value="diagnostic"></textarea>
+        </div>
+      </details>
+    </CardContent>
+    <CardFooter class="update-card-footer">
+      <Button type="button" variant="ghost" class="update-notes-button" aria-haspopup="dialog"
+              @pointerenter="warmReleaseNotes" @focus="warmReleaseNotes" @click="notesOpen = true">
+        <HistoryIcon data-icon="inline-start" />查看更新记录
+      </Button>
+      <span class="update-auto-note">{{ state.stage === 'unavailable' ? '更新服务未启用' : '自动检查已开启' }}</span>
+    </CardFooter>
+  </Card>
   <ReleaseNotesBrowser v-if="notesOpen" :open="notesOpen" @close="notesOpen = false" />
 </template>
 
 <style scoped>
-.version-update-section { display: grid; min-width: 0; gap: 16px; }
-.update-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
-.version-heading { display: grid; min-width: 0; gap: 6px; }
-.version-caption { color: var(--muted); font-size: var(--fs-12); }
-.version-badge { color: var(--ink); font-size: var(--fs-19); font-weight: var(--fw-800); line-height: 1.4; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
-.update-platform { flex: 0 0 auto; padding: 4px 8px; border: 1px solid var(--border); border-radius: var(--radius-pill); color: var(--ink-soft); background: var(--bg-tint); font-size: var(--fs-10); }
-.update-next-version { margin: -8px 0 0; color: var(--primary); font-size: var(--fs-12); overflow-wrap: anywhere; }
-.update-overview { display: grid; grid-template-columns: 38px minmax(0, 1fr); align-items: start; gap: 12px; padding: 14px; border: 1px solid var(--border); border-radius: var(--radius-12); background: var(--bg-tint); }
-.update-overview.is-success { border-color: color-mix(in srgb, var(--success) 22%, var(--border)); }
-.update-overview.is-warning { border-color: color-mix(in srgb, var(--warning) 24%, var(--border)); }
-.update-overview.is-error { border-color: color-mix(in srgb, var(--danger) 22%, var(--border)); }
-.section-icon { display: grid; width: 38px; height: 38px; place-items: center; border-radius: var(--radius-10); color: var(--primary); background: var(--primary-soft); font-size: var(--fs-20); font-weight: var(--fw-800); }
-.section-icon.update.is-success { color:var(--success); background:color-mix(in srgb, var(--success) 11%, var(--card)); }
-.section-icon.update.is-warning { color:var(--warning); background:color-mix(in srgb, var(--warning) 12%, var(--card)); }
-.section-icon.update.is-error { color:var(--danger); background:color-mix(in srgb, var(--danger) 10%, var(--card)); }
-.section-copy { display: grid; min-width: 0; gap: 5px; }
-.update-status { color: var(--primary); font-size: var(--fs-14); font-weight: var(--fw-750); }
-.update-status.is-success { color: var(--success); }
-.update-status.is-warning { color: var(--warning); }
-.update-status.is-error { color: var(--danger); }
-.update-detail { margin: 0; color: var(--ink-soft); font-size: var(--fs-12); line-height: 1.6; overflow-wrap: anywhere; }
-.update-last-check { color: var(--ink-faint); font-size: var(--fs-11); font-variant-numeric: tabular-nums; }
-.update-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-.update-actions .btn { display: flex; min-width: 0; min-height: 44px; align-items: center; justify-content: center; gap: 8px; }
-.update-actions > .btn-primary { grid-column: 1 / -1; }
-.update-actions:not(.has-apply-action) .update-notes-button { grid-column: 1 / -1; }
-.update-actions .update-notes-button { justify-content: space-between; color: var(--ink-soft); }
-.update-check-spinner { width: 14px; height: 14px; flex: 0 0 14px; border: 2px solid currentColor; border-right-color: transparent; border-radius: var(--radius-circle); animation: update-spin 900ms linear infinite; }
-.update-auto-note { display: flex; align-items: center; justify-content: center; gap: 6px; margin: -4px 0 0; color: var(--ink-faint); font-size: var(--fs-11); }
-.desktop-update-progress { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:10px; color:var(--ink-soft); font-size:var(--fs-11); font-variant-numeric:tabular-nums; }
-.desktop-update-progress-track { display:block; height:8px; overflow:hidden; border-radius:var(--radius-pill); background:var(--border); }
-.desktop-update-progress-track i { display:block; height:100%; border-radius:inherit; background:var(--primary); transition:width var(--dur-fast, 150ms) var(--ease-standard, ease); }
-.desktop-update-progress b { min-width:34px; color:var(--ink); text-align:right; }
-.update-recovery { border-top: 1px solid var(--border); }
-.update-recovery summary { min-height: 44px; padding-block: 12px; color: var(--muted); font-size: var(--fs-12); font-weight: var(--fw-600); cursor: pointer; }
-.update-recovery-content { display:grid; justify-items:start; gap:8px; padding-top:9px; }
-.update-recovery-content p { margin:0; color:var(--muted); font-size:var(--fs-11); line-height:1.5; }
-.update-recovery summary:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; border-radius: var(--radius-6); }
-@keyframes update-spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .update-check-spinner { animation: none; } .desktop-update-progress-track i { transition: none; } }
+.version-update-section { gap:0; padding-block:0; min-width:0; }
+.update-card-header { padding:20px 20px 0; }
+.update-card-content { display:flex; flex-direction:column; gap:18px; padding:20px; }
+.update-card-footer { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:0 20px 16px; }
+.update-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
+.version-heading { display:flex; flex-direction:column; gap:5px; min-width:0; }
+.version-caption { color:var(--muted); font-size:var(--fs-12); }
+.version-number { color:var(--text); font-size:var(--fs-20); line-height:1.45; font-weight:var(--fw-750); overflow-wrap:anywhere; font-variant-numeric:tabular-nums; }
+.update-overview { display:grid; grid-template-columns:32px minmax(0,1fr); gap:12px; align-items:start; min-height:83px; }
+.update-state-symbol { display:grid; width:32px; height:32px; place-items:center; border-radius:var(--radius-circle); background:var(--primary-soft); color:var(--primary); }
+.update-state-symbol :deep(svg) { width:18px; height:18px; }
+.update-state-symbol.is-success { background:color-mix(in srgb,var(--success) 9%,var(--card)); color:var(--success); }
+.update-state-symbol.is-error { background:var(--danger-soft); color:var(--danger); }
+.section-copy { display:flex; flex-direction:column; gap:5px; min-width:0; }
+.update-status { font-size:var(--fs-14); font-weight:var(--fw-750); color:var(--text); }
+.update-status.is-success { color:var(--success); }
+.update-status.is-warning { color:var(--warning); }
+.update-status.is-error { color:var(--danger); }
+.update-detail { margin:0; color:var(--ink-soft); font-size:var(--fs-12); line-height:1.6; overflow-wrap:anywhere; }
+.update-last-check { font-size:var(--fs-11); color:var(--muted); font-variant-numeric:tabular-nums; }
+.update-next-version { margin:0; font-size:var(--fs-12); color:var(--primary); overflow-wrap:anywhere; }
+.update-main-action-slot { display:flex; align-items:center; justify-content:center; min-height:48px; }
+.version-update-section :deep(button) { min-height:44px; }
+.update-check-button { width:176px; min-height:44px; position:relative; overflow:hidden; transition:width var(--dur-slow) var(--action-ease); }
+.update-check-button[data-pending] { width:44px; }
+.update-button-label { display:inline-flex; gap:8px; align-items:center; white-space:nowrap; transition:opacity var(--dur-fast) var(--action-ease); }
+.update-check-button[data-pending] .update-button-label { opacity:0; pointer-events:none; }
+.update-button-spinner { position:absolute; inset:0; margin:auto; }
+.update-check-button[data-success] .update-button-label :deep(svg) { color:var(--success); animation:update-check-in var(--dur-base) var(--ease-out); }
+.update-actions { display:flex; flex-direction:column; align-items:center; gap:6px; }
+.update-later-note { margin:0; text-align:center; color:var(--muted); font-size:var(--fs-11); line-height:1.6; }
+.update-progress { display:flex; flex-direction:column; gap:12px; }
+.update-phase-list { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:6px; list-style:none; margin:0; padding:0; }
+.update-phase-list li { display:flex; flex-direction:column; align-items:center; gap:7px; color:var(--muted); font-size:var(--fs-11); }
+.update-phase-list li > span { display:grid; place-items:center; width:24px; height:24px; border:1px solid var(--border); border-radius:var(--radius-circle); font-variant-numeric:tabular-nums; }
+.update-phase-list .is-current { color:var(--primary); }
+.update-phase-list .is-current > span { border-color:var(--primary); background:var(--primary-soft); }
+.update-phase-list .is-done > span { color:var(--primary); border-color:var(--border); }
+.update-progress-bar { height:6px; }
+.update-progress-meta { display:flex; flex-wrap:wrap; align-items:center; gap:8px; color:var(--muted); font-size:var(--fs-11); line-height:1.5; font-variant-numeric:tabular-nums; }
+.update-progress-meta > time { margin-left:auto; white-space:nowrap; }
+.update-diagnostics summary,.update-release-info summary,.update-motion-settings summary { display:flex; align-items:center; min-height:44px; color:var(--muted); font-size:var(--fs-12); cursor:pointer; list-style:revert; }
+.update-diagnostics summary:focus-visible,.update-release-info summary:focus-visible,.update-motion-settings summary:focus-visible { outline:2px solid var(--focus-solid); outline-offset:2px; border-radius:var(--radius-6); }
+.update-motion-options { display:flex; flex-wrap:wrap; gap:8px; }
+.update-motion-note { margin:8px 0 0; color:var(--muted); font-size:var(--fs-11); line-height:1.6; }
+.update-diagnostics-content { display:flex; flex-direction:column; gap:12px; padding-top:6px; }
+.update-source,.update-repair-note,.update-copy-result { margin:0; color:var(--muted); font-size:var(--fs-11); line-height:1.6; overflow-wrap:anywhere; }
+.update-diagnostic-actions { display:flex; flex-wrap:wrap; gap:8px; }
+.update-diagnostic-actions :deep(button) { min-height:44px; }
+.update-diagnostic-text { width:100%; min-height:140px; max-height:260px; resize:vertical; padding:10px; border:1px solid var(--border); border-radius:var(--radius-8); background:var(--bg-tint); color:var(--ink-soft); font:var(--fs-11)/1.5 monospace; }
+.update-timings { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:6px; margin:0; color:var(--muted); font-size:var(--fs-11); }
+.update-timings dd { margin:0; font-variant-numeric:tabular-nums; }
+.update-release-notes { color:var(--ink-soft); font-size:var(--fs-12); line-height:1.6; white-space:pre-wrap; overflow-wrap:anywhere; }
+.update-notes-button { min-height:44px; }
+.update-auto-note { color:var(--muted); font-size:var(--fs-11); white-space:nowrap; }
+@keyframes update-check-in { from { opacity:0; transform:scale(.75); } to { opacity:1; transform:scale(1); } }
+:global(html[data-performance="reduced"] .update-check-button),
+:global(html[data-performance="reduced"] .update-button-label) { transition:none; }
+:global(html[data-performance="reduced"] .update-state-symbol svg),
+:global(html[data-performance="reduced"] .update-button-spinner),
+:global(html[data-performance="reduced"] .update-check-button[data-success] .update-button-label svg) { animation:none; }
 @media (max-width:520px) {
-  .version-update-section { gap: 14px; }
-  .update-heading { flex-wrap: wrap; gap: 8px; }
-  .version-heading { flex: 1 1 210px; }
-  .version-badge { font-size: var(--fs-17); }
-  .section-icon { width: 32px; height: 32px; font-size: var(--fs-17); }
-  .update-overview { grid-template-columns: 32px minmax(0, 1fr); gap: 10px; padding: 12px; }
-  .update-actions .btn { padding-inline: 9px; }
-}</style>
+  .update-card-header { padding:16px 14px 0; }
+  .update-card-content { gap:16px; padding:16px 14px; }
+  .update-card-footer { padding:0 14px 12px; gap:6px; }
+  .version-number { font-size:var(--fs-18); }
+  .update-heading { flex-wrap:wrap; }
+  .update-progress-meta > time { margin-left:0; }
+}
+@media (prefers-reduced-motion:reduce) {
+  .update-check-button,.update-button-label { transition:none; }
+  .update-check-button[data-success] .update-button-label :deep(svg) { animation:none; }
+  .update-state-symbol :deep(svg),.update-button-spinner { animation:none; }
+}
+</style>

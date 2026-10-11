@@ -1,12 +1,13 @@
 .together-page { width:min(1180px,100%); margin:0 auto; padding:28px clamp(14px,3vw,34px) 52px; color:var(--text); }
-.together-header { display:flex; align-items:flex-end; justify-content:space-between; gap:16px; margin-bottom:18px; }
+.together-header { display:flex; align-items:flex-end; justify-content:space-between; gap:16px; margin-bottom:20px; padding:4px 2px; }
 .together-header h1 { margin:3px 0 5px; font-size:var(--fs-page-title); }
 .eyebrow { display:block; color:var(--primary); font-size:var(--fs-11); font-weight:var(--fw-800); letter-spacing:.04em; }
 .page-intro,.muted { color:var(--muted); font-size:var(--fs-13); line-height:1.55; }
 .page-intro { margin:0; }
-.together-tabs { display:flex; gap:5px; padding:5px; border:1px solid var(--border); border-radius:var(--radius-12); background:var(--bg-tint); margin-bottom:16px; overflow:auto; }
+.together-tabs { display:flex; gap:5px; padding:5px; border:1px solid var(--border); border-radius:var(--radius-12); background:var(--bg-tint); margin-bottom:16px; overflow:auto; scrollbar-width:thin; }
 .together-tabs button { display:flex; align-items:center; justify-content:center; gap:7px; min-height:40px; padding:0 16px; border:0; border-radius:var(--radius-9); background:transparent; color:var(--muted); font:inherit; font-weight:var(--fw-700); white-space:nowrap; cursor:pointer; }
 .together-tabs button.active { color:var(--primary); background:var(--card); box-shadow:var(--shadow-sm); }
+.together-tabs button:focus-visible,.invitation-filters button:focus-visible { outline:2px solid var(--focus-solid); outline-offset:2px; }
 .unread-badge { display:inline-grid; place-items:center; min-width:19px; height:19px; padding:0 5px; border-radius:var(--radius-pill); color:var(--on-danger, #fff); background:var(--danger); font-size:var(--fs-10); }
 .together-card { min-width:0; padding:20px; border:1px solid var(--border); border-radius:var(--card-radius); background:var(--card); box-shadow:var(--shadow-sm); }
 .together-notice { margin:0 0 14px; padding:11px 14px; border:1px solid var(--border); border-radius:var(--radius-10); background:var(--bg-tint); font-size:var(--fs-13); }
@@ -63,8 +64,9 @@
 .range-select { display:flex; align-items:center; gap:8px; color:var(--muted); font-size:var(--fs-11); font-weight:var(--fw-700); }
 .range-select select { width:auto; min-height:36px; padding:5px 26px 5px 9px; font-size:var(--fs-12); }
 .availability-actions { display:flex; align-items:center; justify-content:space-between; gap:12px; margin:15px 0; }
-.interval-groups { display:grid; gap:14px; }
-.interval-day h3 { margin:2px 0 8px; color:var(--ink-soft); font-size:var(--fs-13); }
+.interval-groups { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,270px),1fr)); gap:12px; }
+.interval-day { min-width:0; padding:12px; border:1px solid var(--border); border-radius:var(--radius-10); background:color-mix(in srgb,var(--bg-tint) 45%,var(--card)); }
+.interval-day h3 { margin:2px 0 9px; color:var(--ink-soft); font-size:var(--fs-13); }
 .interval-card { display:flex; align-items:center; justify-content:space-between; gap:14px; margin-bottom:7px; padding:11px 12px; border:1px solid var(--border); border-radius:var(--radius-10); background:var(--bg-tint); }
 .interval-card.chosen { border-color:var(--primary); background:var(--primary-soft); }
 .interval-main { display:flex; flex-direction:column; gap:4px; }
@@ -84,6 +86,7 @@
 .search-result { display:flex; align-items:center; gap:11px; margin-top:13px; padding:11px; border:1px solid var(--border); border-radius:var(--radius-10); background:var(--bg-tint); }
 .search-result > div { display:flex; flex:1; flex-direction:column; gap:3px; }
 .search-result small { color:var(--muted); font-size:var(--fs-11); }
+.relationship-hint { color:var(--muted); font-size:var(--fs-12); font-weight:var(--fw-700); }
 .search-generic-hint { margin:12px 0 0; }
 .subsection-title { display:flex; align-items:center; justify-content:space-between; margin:20px 0 8px; font-size:var(--fs-13); }
 .subsection-title span { display:grid; place-items:center; min-width:22px; height:22px; border-radius:var(--radius-pill); background:var(--bg-tint); color:var(--muted); font-size:var(--fs-11); }
@@ -100,6 +103,12 @@
 .notification-row.unread .notification-dot { opacity:1; }
 .notification-row > div { display:grid; grid-template-columns:auto 1fr; gap:3px 6px; font-size:var(--fs-12); }
 .notification-row small { grid-column:1/-1; color:var(--muted); font-size:var(--fs-10); }
+.invitation-filters { display:flex; gap:7px; margin:14px 0 4px; padding-bottom:2px; overflow-x:auto; scrollbar-width:thin; }
+.invitation-filters button { display:flex; flex:0 0 auto; align-items:center; gap:8px; min-height:36px; padding:0 11px; border:1px solid var(--border); border-radius:var(--radius-pill); background:var(--card); color:var(--muted); font:inherit; font-size:var(--fs-12); font-weight:var(--fw-700); cursor:pointer; }
+.invitation-filters button:hover { border-color:var(--primary); color:var(--primary); }
+.invitation-filters button.active { border-color:var(--primary); background:var(--primary-soft); color:var(--primary); }
+.invitation-filters b { display:grid; place-items:center; min-width:20px; height:20px; padding:0 5px; border-radius:var(--radius-pill); background:var(--bg-tint); color:inherit; font-size:var(--fs-10); }
+.invitation-filters button.active b { background:var(--card); }
 .invitation-row { padding:15px; border:1px solid var(--border); border-radius:var(--radius-12); background:var(--bg-tint); }
 .invite-topline { display:flex; justify-content:space-between; gap:12px; }
 .invite-kind { color:var(--primary); font-size:var(--fs-11); font-weight:var(--fw-800); }
@@ -158,6 +167,7 @@ button:focus-visible,.text-button:focus-visible,.icon-button:focus-visible { out
   .email-search-form .btn { width:100%; }
   .search-result { align-items:flex-start; flex-wrap:wrap; }
   .search-result .btn { width:100%; }
+  .search-result .relationship-hint { flex-basis:100%; }
   .request-row { flex-wrap:wrap; }
   .request-row .friend-copy { flex-basis:calc(100% - 55px); }
   .request-row > .btn,.request-row > .text-button { flex:1; }
@@ -165,4 +175,5 @@ button:focus-visible,.text-button:focus-visible,.icon-button:focus-visible { out
   .invitation-toolbar .btn { align-self:flex-start; }
   .notification-row > div { grid-template-columns:1fr; }
   .notification-row small { grid-column:auto; }
+  .invitation-filters { margin-right:-4px; padding:0 4px 5px 0; }
 }

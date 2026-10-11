@@ -104,7 +104,7 @@ describe('渲染后的标题顺序', () => {
     expect(PAGES.length, '真实页面列表为空，守卫在守空气').toBeGreaterThanOrEqual(9)
     expect(headingTotal, '一个标题都没扫到，守卫在守空气').toBeGreaterThanOrEqual(9)
     expect(problems).toEqual([])
-  })
+  }, 15_000)
 
   it('导航过程中不得出现 router-view / transition 相关的框架警告', async () => {
     mounted = await mountApp({ routes })

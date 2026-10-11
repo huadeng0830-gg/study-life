@@ -17,7 +17,8 @@
  */
 import { computed } from 'vue'
 import { taskCalendarCellLabel, taskCalendarRowLabel, taskCalendarDotClass } from '../../composables/taskViews.js'
-import { taskTimeOnDate } from '../../composables/tasks/taskTimePlan.ts'
+import { taskTimeOnDate } from '../../composables/tasks/taskTimePlan'
+import TaskRowActions from '../tasks/TaskRowActions.vue'
 
 const props = defineProps({
   /** `YYYY-MM`。 */
@@ -35,9 +36,15 @@ const props = defineProps({
   monthLabel: { type: String, default: '' },
   dueInfoOf: { type: Function, required: true },
   statusOf: { type: Function, required: true },
+  /**
+   * 行动作 `{ label }` 与菜单项数组，与列表 / 看板同一个口径。
+   * 当某条待办因阶段安排出现在另一天时，额外提供「将截止日期改为这一天」。
+   */
+  primaryOf: { type: Function, default: () => null },
+  actionsOf: { type: Function, default: () => [] },
 })
 
-const emit = defineEmits(['shift-month', 'select-date', 'open', 'toggle'])
+const emit = defineEmits(['shift-month', 'select-date', 'open', 'toggle', 'primary', 'action', 'set-deadline'])
 
 const WEEKDAYS = ['一', '二', '三', '四', '五', '六', '日']
 
@@ -63,6 +70,28 @@ function rowLabel(task) {
 function toggleLabel(task) {
   return props.statusOf(task) === 'completed' ? '标记为未完成' : '标记为已完成'
 }
+
+/**
+ * 仅当任务因阶段安排出现在非截止日期时，才提供将截止日期设为当前日的快捷入口。
+ *
+ * 日历明细本身已经列出当前日期上的任务；若截止日期本来就在这天，就不显示重复的改期入口。
+ * 项目任务的时间由项目工作台管理，也不能显示这个个人待办操作。
+ */
+function actionsOfDay(task) {
+  const base = props.actionsOf(task)
+  if (
+    !props.selectedDate
+    || task?.sourceType === 'project-task'
+    || task?.dueDate === props.selectedDate
+    || ['completed', 'cancelled'].includes(props.statusOf(task))
+  ) return base
+  return [{ key: 'deadline', label: `将截止日期改为 ${selectedLabel.value}`, hint: '只调整事项截止日期，阶段安排保持原样' }, ...base]
+}
+
+function onAction(task, key) {
+  if (key === 'deadline') emit('set-deadline', task, props.selectedDate)
+  else emit('action', task, key)
+}
 </script>
 
 <template>
@@ -81,6 +110,8 @@ function toggleLabel(task) {
 
     <h2 class="cal-title">月历点迹</h2>
 
+    <p class="cal-scroll-hint">左右滑动日期区，选择要查看的日期。</p>
+    <div class="cal-dates" role="region" aria-label="待办月历日期，可左右滚动" tabindex="0">
     <div class="cal-week">
       <span v-for="w in WEEKDAYS" :key="w">{{ w }}</span>
     </div>
@@ -99,6 +130,7 @@ function toggleLabel(task) {
       </template>
     </div>
 
+    </div>
     <div v-if="selectedDate" class="cal-detail">
       <b>{{ selectedLabel }}</b>
       <small>{{ selectedTasks.length }} 条待办安排</small>
@@ -115,6 +147,13 @@ function toggleLabel(task) {
           :aria-label="toggleLabel(task)"
           @click="emit('toggle', task)"
         >{{ statusOf(task) === 'completed' ? '✓' : '' }}</button>
+        <TaskRowActions
+          :primary="primaryOf(task)"
+          :actions="actionsOfDay(task)"
+          :subject="task.title"
+          @primary="emit('primary', task)"
+          @select="onAction(task, $event)"
+        />
       </div>
     </div>
     <p v-else class="cal-hint">点一天，查看阶段起止、跨日安排和截止时间。</p>
@@ -159,6 +198,7 @@ function toggleLabel(task) {
   font-size: var(--fs-13-5);
   font-weight: var(--fw-750);
 }
+.cal-scroll-hint { display: none; }
 .cal-week {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
@@ -311,7 +351,20 @@ function toggleLabel(task) {
 }
 @media (max-width: 760px) {
   .cal-cell {
-    height: 40px;
+    min-height: 44px;
   }
+}
+@media (max-width: 900px), (pointer: coarse) and (max-height: 520px) {
+  .cal-dates { overflow-x: auto; overscroll-behavior-x: contain; }
+  .cal-grid, .cal-week { min-width: 320px; gap: 2px; }
+  .cal-cell { height: auto; min-height: 44px; min-width: 44px; }
+  .cd-row { flex-wrap: wrap; align-items: flex-start; }
+  .cd-main, .cd-phase, .check { min-height: 44px; }
+  .check { min-width: 44px; }
+  .cd-name { white-space: normal; overflow-wrap: anywhere; }
+  .cal-nav b { min-width: 0; text-align: center; overflow-wrap: anywhere; }
+}
+@media (max-width: 520px) {
+  .cal-scroll-hint { display: block; margin-bottom: 8px; font-size: var(--fs-aux); color: var(--ink-soft); }
 }
 </style>

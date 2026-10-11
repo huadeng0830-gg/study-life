@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
+import { openTags, templateOf } from './helpers/vueTemplate.js'
 
 /*
  * 加载中的按钮必须真的显示加载态。
@@ -18,6 +19,15 @@ const root = new URL('../src/', import.meta.url)
 
 function source(path) {
   return readFileSync(fileURLToPath(new URL(path, root)), 'utf8')
+}
+
+// openTags lowercases HTML/component names before returning them.
+const BUTTON_TAGS = new Set(['button', 'actionbutton'])
+
+function busyButtonAttrs(sfc) {
+  return [...openTags(templateOf(sfc))]
+    .filter(({ tag, attrs }) => BUTTON_TAGS.has(tag) && /:(?:aria-busy|busy)="/.test(attrs))
+    .map(({ attrs }) => attrs)
 }
 
 // 提交期间会 disabled 的按钮所在的文件，以及各自期望的绑定数量。
@@ -40,22 +50,24 @@ describe('按钮加载态接线', () => {
       const text = source(path)
       // Shared ActionButton maps :busy to aria-busy and guards repeated native
       // clicks synchronously while keeping keyboard focus on the button.
-      const bound = text.match(/:(?:aria-busy|busy)="/g) || []
+      const bound = busyButtonAttrs(text)
       expect(bound).toHaveLength(expected)
       // 每个 aria-busy 都必须和 :disabled 绑在同一个状态上，
       // 否则会出现"按钮转圈但还能再点一次"。disabled 可以额外带上别的条件
       // （比如 `busy || cameraStarting`），这里只要求它提到 aria-busy 的那个状态。
-      expect(text).toMatch(/:disabled="[^"]*(\w+)[^"]*"\s+:(?:aria-busy|busy)="\1 \|\| undefined"/)
-      expect(text).not.toMatch(/:aria-busy="undefined"/)
+      for (const attrs of bound) {
+        expect(attrs).toMatch(/:disabled="[^"]*(\w+)[^"]*"\s+:(?:aria-busy|busy)="\1 \|\| undefined"/)
+        expect(attrs).not.toContain(':aria-busy="undefined"')
+      }
     })
   }
 
   it('aria-busy 只在忙碌时出现，避免静态 aria-busy="false" 被读屏忽略', () => {
     for (const [path] of BUTTONS) {
-      const text = source(path)
+      const attrs = busyButtonAttrs(source(path))
       // `busy || undefined` 在空闲时会让 Vue 移除该属性；
       // 直接绑 `:aria-busy="busy"` 会渲染成 aria-busy="false"（合法但无意义）。
-      const direct = text.match(/:aria-busy="(?!\w+ \|\| undefined)[^"]*"/g) || []
+      const direct = attrs.flatMap((entry) => entry.match(/:aria-busy="(?!\w+ \|\| undefined)[^"]*"/g) || [])
       expect(direct).toEqual([])
     }
   })

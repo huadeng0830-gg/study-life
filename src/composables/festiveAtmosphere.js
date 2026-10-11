@@ -8,10 +8,21 @@ const ANNIVERSARY_KEYS = ['anniversary', 'anniversary-start']
 const ANNIVERSARY_COLORS = ['#fbbf24', '#fcd34d', '#fde68a', '#eab308', '#f59e0b', '#f97316']
 const ANNIVERSARY_DURATION = 4.2
 
+/**
+ * 当天的氛围（key / name / 主题色 / 祝福语 / 装饰类型）。
+ *
+ * 【为什么放在模块级而不是 composable 里】外壳（装饰层）与首页（节日叙事）读的是**同一天
+ * 的同一个值**，此前两边各有一条 computed，于是 `festiveFor()` 每天算两遍 —— 每遍都要
+ * 重新归一化配置、并读一次农历纪念日的存储镜像。共享一个 computed 之后，
+ * `appToday` 或 `festiveConfig` 变化时也只会求值一次。
+ *
+ * 纯只读派生，没有任何副作用；写 `--atmosphere-accent` 的副作用仍留在下面的
+ * `useFestiveAtmosphere()` 里，由外壳决定何时挂载。
+ */
+export const festiveToday = computed(() => festiveFor(appToday.value, festiveConfig.value))
+
 /** Keeps the calendar-derived atmosphere and its decorative particle projection together. */
 export function useFestiveAtmosphere() {
-  const festiveToday = computed(() => festiveFor(appToday.value, festiveConfig.value))
-  const atmosphereKey = computed(() => festiveToday.value?.key ?? 'none')
   const isAnniversary = computed(() => ANNIVERSARY_KEYS.includes(festiveToday.value?.key ?? ''))
 
   // Reduce independently promoted animation layers on smaller devices.
@@ -47,5 +58,7 @@ export function useFestiveAtmosphere() {
     applyAtmosphere(festiveToday.value ? { accentColor: festiveToday.value.accentColor, decor: festiveToday.value.decor } : null)
   })
 
-  return { festiveToday, atmosphereKey, isAnniversary, decorParticles, decorStyle }
+  // `atmosphereKey` 原先也在这里对外返回，供外壳打 data-atmosphere —— 那个属性全仓无人读，
+// 已连同它的 computed 一起删掉（留着就是"看起来接线了"的死钩子）。
+  return { festiveToday, isAnniversary, decorParticles, decorStyle }
 }

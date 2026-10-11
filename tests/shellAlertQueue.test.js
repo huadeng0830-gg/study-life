@@ -223,6 +223,7 @@ function leafRules(css) {
 }
 
 const APP_SOURCE = readFileSync(resolve(import.meta.dirname, '..', 'src', 'App.vue'), 'utf8')
+const PERSISTENCE_ALERT_SOURCE = readFileSync(resolve(import.meta.dirname, '..', 'src', 'components', 'PersistenceErrorAlert.vue'), 'utf8')
 const APP_CSS = styleOfApp()
 const ruleBody = (selector) => leafRules(APP_CSS)
   .filter((rule) => rule.selector.split(',').some((one) => one.trim() === selector))
@@ -279,11 +280,14 @@ describe('源码级：没有 CSS 参与，只能在这里红的三条不变量',
     // 备份提醒由挂载期的 6s 定时器驱动，测试里不伪造这段时序；它与"保存失败"共用
     // `.global-persistence-alert` 这条规则与队列里的同一个位次，所以几何是同一件事。
     const lineOf = (needle) => APP_SOURCE.split(/\r?\n/).find((line) => line.includes(needle)) ?? ''
-    const backup = lineOf('v-if="showBackupNudge"')
-    const failure = lineOf('v-if="persistenceState.status === \'error\'"')
+    const backup = lineOf('v-if="visibleBackupNudge"')
+    const failure = lineOf('<PersistenceErrorAlert v-if=')
+    const failureRoot = PERSISTENCE_ALERT_SOURCE.split(/\r?\n/).find((line) => line.includes('class="global-persistence-alert"')) ?? ''
     expect(backup, '模板里找不到备份提醒那条').not.toBe('')
     expect(failure, '模板里找不到保存失败那条').not.toBe('')
-    for (const [label, line] of [['备份提醒', backup], ['保存失败', failure]]) {
+    expect(failure).toContain('persistenceState.status === \'error\' || persistenceState.status === \'conflict\'')
+    expect(failureRoot, '保存失败组件没有进入共享告警样式').not.toBe('')
+    for (const [label, line] of [['备份提醒', backup], ['保存失败', failureRoot]]) {
       expect(line, `${label}必须落在 .global-persistence-alert 这条规则上`).toContain('class="global-persistence-alert')
       expect(line, `${label}必须绑定自己的槽位序号（否则队列里没有它的位次）`).toContain("'--alert-slot'")
     }

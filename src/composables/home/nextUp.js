@@ -3,7 +3,7 @@ import { courseTimeRange, currentTimes, periodIndex } from '../store/timeConfig.
 import { isArchived, isBillDueSoon, isTaskActionable } from '../domain/state.js'
 import { addAppDays, appDateTime } from '../timeContext.js'
 import { courseTiming } from '../courseTime.js'
-import { taskStages, taskTimeSummary } from '../tasks/taskTimePlan.ts'
+import { taskStages, taskTimeSummary } from '../tasks/taskTimePlan'
 import { countdownState } from '../store/countdown.js'
 import { policyDateKey } from '../settingsPolicy.js'
 

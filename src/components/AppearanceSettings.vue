@@ -1,20 +1,23 @@
 <script setup>
 import ActionButton from './ActionButton.vue'
-import { computed, defineComponent, h, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import Modal from './Modal.vue'
 import ActionSheet from './ActionSheet.vue'
 import ConfirmDialog from './ConfirmDialog.vue'
+import AppearanceSwipeSettings from './AppearanceSwipeSettings.vue'
 import { appearance, HOME_MODULES, resetAppearanceState, resetWallpapersOnly, WALLPAPER_TARGETS, wallpaperConfig } from '../composables/appearance.js'
 import { autoWallpaperColor, themeKey, wallpaperAccent, customThemeColor, THEMES } from '../composables/theme.js'
 import { performanceMode } from '../composables/performanceMode.js'
 import { highContrast } from '../composables/contrast.js'
 import { originFromEvent, revealChange } from '../composables/motion.js'
 import { clearAllWallpapers, compressWallpaper, getWallpaper, removeWallpaper, setWallpaper, wallpaperRevision } from '../composables/wallpaperStorage.js'
-import { useTabKeys } from '../composables/tabKeys.js'
 import { appearanceTab } from '../composables/modalSections.js'
 import { reorderHomeModules, resetHomeModuleOrder as resetHomeModuleOrderValue } from '../composables/homeModules.js'
 import { useLatestTask } from '../composables/latestTask.js'
 import { useAppearanceQuoteSave } from '../composables/appearanceFeedback.js'
+import '../styles/shadcn.css'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
 // 高对比度开关（与 style.css 的 :root[data-contrast='high'] 对应）。
 // 用 computed 双向绑定，select 才能用布尔值当 v-model。
@@ -23,75 +26,21 @@ const highContrastMode = computed({
   set: (value) => { highContrast.value = Boolean(value) },
 })
 
-const SwipeActionSelector = defineComponent({
-  props: {
-    modelValue: String,
-    title: String,
-    options: Array,
-    color: String,
-  },
-  emits: ['update:modelValue'],
-  setup(props, { emit }) {
-    const optionColors = {
-      none: 'muted',
-      complete: 'success',
-      edit: 'primary',
-      delete: 'danger',
-    }
-    const optionIcons = {
-      none: '➖',
-      complete: '✅',
-      edit: '✏️',
-      delete: '🗑️',
-    }
-    const colorMap = {
-      // success 的文字色原为 #07805d，配自己的浅底 #e7f8f1 只有 4.49:1 —— 差 0.01
-      // 不到 AA。同族的 primary / danger 早就按 AA 调过（见下一条注释），说明这是漏网
-      // 而不是有意。改成与 style.css 的 --success 同值，5.12:1。
-      success: { bg: '#e7f8f1', border: '#14966d', text: '#067654' },
-      // primary 整组改引令牌：底 --primary-soft、字与描边 --primary，浅色 / 深色 / 具名主题下
-      // 底与字始终同源（原来写死同色值，只在默认蓝色主题里成立）。原值偏亮、已按 AA 调整过。
-      primary: { bg: 'var(--primary-soft)', border: 'var(--primary)', text: 'var(--primary)' },
-      // danger / success / muted 仍写死：它们的**浅底**没有对应令牌（DESIGN_TOKENS 里只有
-      // --danger / --success 这样的文字色，没有对应的 soft 浅底）。只把字换成 var() 会变成
-      // 「写死浅底 + 跟主题走的字」，深色主题下亮字压浅底会撞色；要迁就得三件套一起迁，
-      // 那需要先补令牌（阶段7 遗留项，补令牌要同步改 DESIGN_TOKENS.md）。
-      danger: { bg: '#feecec', border: '#c62828', text: '#c62828' },
-      muted: { bg: '#f3f4f6', border: '#9ca3af', text: '#5f6775' },
-    }
-    return () => {
-      const opt = props.options.find(o => o.id === props.modelValue) || props.options[0]
-      const c = colorMap[optionColors[opt.id] || 'muted']
-      const style = { background: c.bg, borderColor: c.border, color: c.text }
-      return h('div', { class: 'swipe-action-card' }, [
-        h('div', { class: 'swipe-action-title' }, props.title),
-        h('label', { class: 'swipe-action-select-wrap' }, [
-          h('select', {
-            value: props.modelValue,
-            onInput: (e) => emit('update:modelValue', e.target.value),
-            class: 'swipe-action-select',
-            style,
-          }, props.options.map(o => h('option', { value: o.id, key: o.id }, `${optionIcons[o.id] || ''} ${o.label}`))),
-        ]),
-      ])
-    }
-  },
-})
-
 const props = defineProps({ open: Boolean })
 const emit = defineEmits(['close', 'edit-navigation'])
 const uploads = useLatestTask()
 
 // 分区状态存在 composables/modalSections.js 的模块级 ref 里：关闭再打开回到上次所在的分区。
 const tab = appearanceTab
-const APPEARANCE_TAB_KEYS = ['theme', 'wallpaper', 'quotes', 'layout', 'swipe', 'navigation']
-const { onKeydown: onAppearanceTabKeydown, tabIndexFor: appearanceTabIndex } = useTabKeys({
-  keys: APPEARANCE_TAB_KEYS,
-  active: () => tab.value,
-  select: (key) => {
-    tab.value = key
-  },
-})
+const APPEARANCE_TABS = Object.freeze([
+  { key: 'theme', label: '主题与课表', title: '主题与显示效果', description: '调整主题色、课表样式和阅读辅助选项。' },
+  { key: 'wallpaper', label: '本地壁纸', title: '本地壁纸', description: '按页面设置壁纸；图片压缩后仅保存在当前设备。' },
+  { key: 'quotes', label: '今天页文字', title: '今天页文字', description: '管理每日文字、显示方式和个人签名。' },
+  { key: 'layout', label: '首页布局', title: '首页布局', description: '排序或隐藏今天页模块，隐藏模块不会删除数据。' },
+  { key: 'swipe', label: '滑动操作', title: '滑动操作', description: '自定义手机端待办和清单的左右滑动行为。' },
+  { key: 'navigation', label: '导航自定义', title: '导航自定义', description: '整理侧栏、手机底栏和常用页面入口。' },
+])
+const activeAppearanceTab = computed(() => APPEARANCE_TABS.find((item) => item.key === tab.value) || APPEARANCE_TABS[0])
 const selectedTarget = ref('global')
 const previewUrl = ref('')
 const hasOwnImage = ref(false)
@@ -107,13 +56,6 @@ const resetWallpapersTarget = ref(false)
 const quoteDraft = ref('')
 const quoteSaves = useAppearanceQuoteSave({ draft: quoteDraft, error, message })
 let previewRequest = 0
-const SWIPE_OPTIONS = [
-  { id: 'none', label: '无操作' },
-  { id: 'complete', label: '完成 / 取消完成' },
-  { id: 'edit', label: '编辑' },
-  { id: 'delete', label: '删除（会再次确认）' },
-]
-
 const targetConfig = computed(() => wallpaperConfig.value.targets[selectedTarget.value])
 const isGlobal = computed(() => selectedTarget.value === 'global')
 const ownMode = computed(() => isGlobal.value || targetConfig.value.mode === 'own')
@@ -240,6 +182,7 @@ function chooseTarget(key) {
 }
 
 function setPageMode(mode) {
+  if (busy.value) return
   targetConfig.value.mode = mode
   loadPreview()
 }
@@ -387,9 +330,19 @@ const previewStyle = computed(() => ({
 </script>
 
 <template>
-  <Modal :open="open" title="🎨 个性化外观" wide sheet :sheet-detents="[0.55, 0.92]" @close="emit('close')">
-    <div class="appearance-tabs" role="tablist" aria-label="个性化设置分区" @keydown="onAppearanceTabKeydown"><button id="appearance-tab-theme" role="tab" :tabindex="appearanceTabIndex('theme')" :aria-selected="tab === 'theme'" :class="{ on: tab === 'theme' }" @click="tab = 'theme'">主题与课表</button><button id="appearance-tab-wallpaper" role="tab" :tabindex="appearanceTabIndex('wallpaper')" :aria-selected="tab === 'wallpaper'" :class="{ on: tab === 'wallpaper' }" @click="tab = 'wallpaper'">本地壁纸</button><button id="appearance-tab-quotes" role="tab" :tabindex="appearanceTabIndex('quotes')" :aria-selected="tab === 'quotes'" :class="{ on: tab === 'quotes' }" @click="tab = 'quotes'">今天页文字</button><button id="appearance-tab-layout" role="tab" :tabindex="appearanceTabIndex('layout')" :aria-selected="tab === 'layout'" :class="{ on: tab === 'layout' }" @click="tab = 'layout'">首页布局</button><button id="appearance-tab-swipe" role="tab" :tabindex="appearanceTabIndex('swipe')" :aria-selected="tab === 'swipe'" :class="{ on: tab === 'swipe' }" @click="tab = 'swipe'">滑动操作</button><button id="appearance-tab-navigation" role="tab" :tabindex="appearanceTabIndex('navigation')" :aria-selected="tab === 'navigation'" :class="{ on: tab === 'navigation' }" @click="tab = 'navigation'">导航自定义</button></div>
-    <div v-if="tab === 'theme'" class="theme-editor" role="tabpanel" aria-labelledby="appearance-tab-theme">
+  <Modal :open="open" title="🎨 个性化外观" :title-level="2" wide sheet :sheet-detents="[0.55, 0.92]" @close="emit('close')">
+    <Tabs v-model="tab" class="appearance-tabs-root">
+      <TabsList class="appearance-tabs" aria-label="个性化设置分区">
+        <TabsTrigger v-for="item in APPEARANCE_TABS" :key="item.key" :value="item.key">{{ item.label }}</TabsTrigger>
+      </TabsList>
+      <Card class="appearance-panel-card">
+        <CardHeader class="appearance-panel-heading">
+          <span class="appearance-panel-eyebrow">个性化设置</span>
+          <CardTitle>{{ activeAppearanceTab.title }}</CardTitle>
+          <CardDescription>{{ activeAppearanceTab.description }}</CardDescription>
+        </CardHeader>
+        <CardContent class="appearance-panel-content">
+    <TabsContent value="theme" class="theme-editor appearance-panel" tabindex="0" :aria-busy="busy || undefined" :inert="busy">
       <div class="theme-grid" role="group" aria-label="主题色选择">
         <button v-for="(theme, key) in THEMES" :key="key" type="button" class="theme-cell" :class="{ on: themeKey === key }" :aria-pressed="themeKey === key" @click="chooseTheme(key, $event)">
           <span class="theme-dot" :style="{ background: theme.primary || 'transparent', border: theme.primary ? 'none' : '2px dashed var(--border)' }"></span>
@@ -418,13 +371,13 @@ const previewStyle = computed(() => ({
       </label>
       <div class="divider"></div>
       <div class="schedule-style"><div><b>课表显示</b><small>只改变课程表视觉，不影响课程数据。</small></div><div class="skin-options"><label v-for="skin in [{id:'classic',name:'经典表格',icon:'▦'},{id:'notebook',name:'校园笔记',icon:'📒'},{id:'timeline',name:'极简时间轴',icon:'⌁'}]" :key="skin.id" :class="{ on: appearance.scheduleSkin === skin.id }"><input v-model="appearance.scheduleSkin" type="radio" :value="skin.id" /><span>{{ skin.icon }}</span><b>{{ skin.name }}</b></label></div></div>
-    </div>
+    </TabsContent>
 
-    <div v-else-if="tab === 'wallpaper'" class="wallpaper-layout" role="tabpanel" aria-labelledby="appearance-tab-wallpaper">
-      <aside class="target-list"><button v-for="(target, key) in WALLPAPER_TARGETS" :key="key" :class="{ on: selectedTarget === key }" @click="chooseTarget(key)">{{ target.label }}</button></aside>
+    <TabsContent value="wallpaper" class="wallpaper-layout appearance-panel" tabindex="0" :aria-busy="busy || undefined" :inert="busy">
+      <aside class="target-list" aria-label="选择设置壁纸的页面"><button v-for="(target, key) in WALLPAPER_TARGETS" :key="key" type="button" :disabled="busy" :aria-pressed="selectedTarget === key" :class="{ on: selectedTarget === key }" @click="chooseTarget(key)">{{ target.label }}</button></aside>
       <section class="wallpaper-editor">
-        <div v-if="!isGlobal" class="mode-row"><button :class="{ on: targetConfig.mode === 'inherit' }" @click="setPageMode('inherit')">跟随全站</button><button :class="{ on: targetConfig.mode === 'own' }" @click="setPageMode('own')">单独设置</button><button :class="{ on: targetConfig.mode === 'none' }" @click="setPageMode('none')">此页关闭</button></div>
-        <label v-else class="enable-row"><input v-model="targetConfig.enabled" type="checkbox" /> 启用全站默认壁纸</label>
+        <div v-if="!isGlobal" class="mode-row" role="group" aria-label="页面壁纸模式"><button type="button" :disabled="busy" :aria-pressed="targetConfig.mode === 'inherit'" :class="{ on: targetConfig.mode === 'inherit' }" @click="setPageMode('inherit')">跟随全站</button><button type="button" :disabled="busy" :aria-pressed="targetConfig.mode === 'own'" :class="{ on: targetConfig.mode === 'own' }" @click="setPageMode('own')">单独设置</button><button type="button" :disabled="busy" :aria-pressed="targetConfig.mode === 'none'" :class="{ on: targetConfig.mode === 'none' }" @click="setPageMode('none')">此页关闭</button></div>
+        <label v-else class="enable-row"><input v-model="targetConfig.enabled" type="checkbox" :disabled="busy" /> 启用全站默认壁纸</label>
 
         <div class="wallpaper-preview"><div class="preview-image" :style="previewStyle"></div><div class="preview-overlay" :style="{ opacity: previewSettings.overlay / 100 }"></div><div class="preview-card"><b>{{ WALLPAPER_TARGETS[selectedTarget].label }}</b><span>{{ previewUrl ? imageInfo : '尚未选择图片' }}</span></div></div>
 
@@ -438,36 +391,36 @@ const previewStyle = computed(() => ({
             <button v-if="hasOwnImage" class="btn btn-danger" :disabled="busy" :aria-busy="busy || undefined" @click="removeImage">删除壁纸</button>
           </div>
           <div class="control-grid">
-            <label>模糊 <b>{{ targetConfig.blur }}px</b><input v-model.number="targetConfig.blur" type="range" min="0" max="20" /></label>
-            <label>亮度 <b>{{ targetConfig.brightness }}%</b><input v-model.number="targetConfig.brightness" type="range" min="50" max="130" /></label>
-            <label>遮罩 <b>{{ targetConfig.overlay }}%</b><input v-model.number="targetConfig.overlay" type="range" min="0" max="70" /></label>
-            <label>透明度 <b>{{ targetConfig.opacity }}%</b><input v-model.number="targetConfig.opacity" type="range" min="20" max="100" /></label>
-            <label>显示位置<select v-model="targetConfig.position"><option value="center center">居中</option><option value="center top">顶部</option><option value="center bottom">底部</option><option value="left center">靠左</option><option value="right center">靠右</option></select></label>
-            <label>图片适应<select v-model="targetConfig.fit"><option value="auto">智能适应（推荐）</option><option value="cover">始终铺满</option><option value="contain">始终完整显示</option></select></label>
+            <label>模糊 <b>{{ targetConfig.blur }}px</b><input v-model.number="targetConfig.blur" type="range" min="0" max="20" :disabled="busy" /></label>
+            <label>亮度 <b>{{ targetConfig.brightness }}%</b><input v-model.number="targetConfig.brightness" type="range" min="50" max="130" :disabled="busy" /></label>
+            <label>遮罩 <b>{{ targetConfig.overlay }}%</b><input v-model.number="targetConfig.overlay" type="range" min="0" max="70" :disabled="busy" /></label>
+            <label>透明度 <b>{{ targetConfig.opacity }}%</b><input v-model.number="targetConfig.opacity" type="range" min="20" max="100" :disabled="busy" /></label>
+            <label>显示位置<select v-model="targetConfig.position" :disabled="busy"><option value="center center">居中</option><option value="center top">顶部</option><option value="center bottom">底部</option><option value="left center">靠左</option><option value="right center">靠右</option></select></label>
+            <label>图片适应<select v-model="targetConfig.fit" :disabled="busy"><option value="auto">智能适应（推荐）</option><option value="cover">始终铺满</option><option value="contain">始终完整显示</option></select></label>
           </div>
         </template>
 
         <div class="wallpaper-actions">
-          <button class="btn btn-warning" @click="resetAllWallpapers">🖼 一键恢复全部壁纸</button>
+          <button type="button" class="btn btn-warning" :disabled="busy" @click="resetAllWallpapers">🖼 一键恢复全部壁纸</button>
           <span class="action-hint">仅重置壁纸图片与设置，不影响主题色、励志语等其他个性化</span>
-          <button class="btn btn-danger" @click="resetAllAppearance">🔄 一键恢复所有个性化</button>
+          <button type="button" class="btn btn-danger" :disabled="busy" @click="resetAllAppearance">🔄 一键恢复所有个性化</button>
           <span class="action-hint">重置壁纸、主题色、励志语、首页排序、页面皮肤和滑动操作等所有个性化设置</span>
         </div>
 
-        <div class="color-row"><label><input v-model="autoWallpaperColor" type="checkbox" /> 使用壁纸自动取色</label><span class="color-swatch" :style="{ background: wallpaperAccent }"></span><input v-model="wallpaperAccent" type="color" aria-label="壁纸主题色" /></div>
+        <div class="color-row"><label><input v-model="autoWallpaperColor" type="checkbox" :disabled="busy" /> 使用壁纸自动取色</label><span class="color-swatch" :style="{ background: wallpaperAccent }"></span><input v-model="wallpaperAccent" type="color" aria-label="壁纸主题色" :disabled="busy" /></div>
         <p class="privacy-note">图片会先在本机压缩，再保存到当前设备；账号同步不会上传图片。需要迁移壁纸时，请在数据管理的完整备份中选择携带图片。</p>
       </section>
-    </div>
+    </TabsContent>
 
-    <section v-else-if="tab === 'quotes'" class="quotes-editor" role="tabpanel" aria-labelledby="appearance-tab-quotes">
+    <TabsContent value="quotes" class="quotes-editor appearance-panel" tabindex="0" :aria-busy="busy || undefined" :inert="busy">
       <label class="enable-row"><input v-model="appearance.showQuote" type="checkbox" /> 在“今天”页显示个性化文字</label>
       <label>励志语（每行一条，最多 50 条）<textarea v-model="quoteDraft" rows="9" placeholder="今天也要漂亮通关。"></textarea></label>
       <div class="quote-row"><label>显示方式<select v-model="appearance.quoteMode"><option value="daily">每天轮换</option><option value="random">每次打开随机</option><option value="fixed">固定一条</option></select></label><label v-if="appearance.quoteMode === 'fixed'">固定显示<select v-model.number="appearance.fixedQuoteIndex"><option v-for="(quote, index) in appearance.quotes" :key="index" :value="index">{{ quote }}</option></select></label></div>
       <label>个人签名<input v-model="appearance.signature" maxlength="40" placeholder="例如：保持好奇，慢慢变强" /></label>
       <ActionButton kind="frequent" :action="quoteSaves.save" :show-error="false" success-label="已保存">保存文字</ActionButton>
-    </section>
+    </TabsContent>
 
-    <section v-else-if="tab === 'layout'" class="layout-editor" role="tabpanel" aria-labelledby="appearance-tab-layout">
+    <TabsContent value="layout" class="layout-editor appearance-panel" tabindex="0" :aria-busy="busy || undefined" :inert="busy">
       <div><h4>今天页模块</h4><p>拖动右侧手柄排序；隐藏模块不会删除数据，随时可以恢复。</p></div>
       <div class="module-sort">
         <div v-for="module in appearance.homeModules" :key="module.id" class="module-row" :class="{ dragging: draggingModuleId === module.id }">
@@ -476,65 +429,16 @@ const previewStyle = computed(() => ({
         </div>
         <button type="button" class="btn module-reset" @click="resetHomeModuleOrder">恢复默认顺序</button>
       </div>
-    </section>
+    </TabsContent>
 
-    <section v-else-if="tab === 'swipe'" class="swipe-editor" role="tabpanel" aria-labelledby="appearance-tab-swipe">
-      <div class="swipe-intro"><h4>手机左右滑动</h4><p>滑过约三分之一张卡片才会执行，删除还会再次确认；电脑端原有点击操作不变。</p></div>
-
-      <div class="swipe-category">
-        <div class="swipe-category-header">
-          <span class="swipe-category-icon">✅</span>
-          <div>
-            <b>待办</b>
-            <span>对单条待办生效</span>
-          </div>
-        </div>
-        <div class="swipe-direction-row">
-          <SwipeActionSelector
-            title="向左滑"
-            v-model="appearance.swipeActions.tasks.left"
-            :options="SWIPE_OPTIONS"
-            :color="'success'"
-          />
-          <SwipeActionSelector
-            title="向右滑"
-            v-model="appearance.swipeActions.tasks.right"
-            :options="SWIPE_OPTIONS"
-            :color="'primary'"
-          />
-        </div>
-      </div>
-
-      <div class="swipe-category">
-        <div class="swipe-category-header">
-          <span class="swipe-category-icon">☑️</span>
-          <div>
-            <b>清单</b>
-            <span>对清单中的单个项目生效</span>
-          </div>
-        </div>
-        <div class="swipe-direction-row">
-          <SwipeActionSelector
-            title="向左滑"
-            v-model="appearance.swipeActions.lists.left"
-            :options="SWIPE_OPTIONS"
-            :color="'success'"
-          />
-          <SwipeActionSelector
-            title="向右滑"
-            v-model="appearance.swipeActions.lists.right"
-            :options="SWIPE_OPTIONS"
-            :color="'primary'"
-          />
-        </div>
-      </div>
-
-      <p class="privacy-note">默认设置：向左滑完成，向右滑编辑。选择“无操作”可以关闭某个方向。</p>
-    </section>
-    <section v-else class="navigation-settings-panel" role="tabpanel" aria-labelledby="appearance-tab-navigation">
+    <AppearanceSwipeSettings v-model="appearance.swipeActions" :busy="busy" />
+    <TabsContent value="navigation" class="navigation-settings-panel appearance-panel" tabindex="0" :aria-busy="busy || undefined" :inert="busy">
       <h4>编辑导航</h4><p>整理手机底栏和电脑侧栏，调整页面顺序、分组与常用入口。</p>
       <button type="button" class="btn btn-primary" @click="emit('edit-navigation')">打开导航编辑器</button>
-    </section>
+    </TabsContent>
+        </CardContent>
+      </Card>
+    </Tabs>
 
     <!-- 成功用 role="status"（礼貌播报），失败才用 role="alert"（立即打断）。
          两者都在同一行且都是 v-if，所以刻意把角色写清楚，别让脚本/后人再加错。 -->
@@ -932,67 +836,6 @@ const previewStyle = computed(() => ({
   background:var(--primary-soft)}
 .skin-options label span {
   font-size:var(--fs-20)}
-.swipe-editor {
-  flex-direction:column;
-  gap:16px;
-  display:flex}
-.swipe-intro h4 {
-  margin:0 0 4px}
-.swipe-intro p {
-  color:var(--muted);
-  margin:0;
-  font-size:var(--fs-12)}
-.swipe-category {
-  border:1px solid var(--border);
-  background:var(--bg);
-  border-radius:var(--radius-10);
-  flex-direction:column;
-  gap:8px;
-  padding:12px;
-  display:flex}
-.swipe-category-header {
-  align-items:center;
-  gap:10px;
-  display:flex}
-.swipe-category-icon {
-  font-size:var(--fs-20)}
-.swipe-category-header b {
-  display:block}
-.swipe-category-header span {
-  color:var(--muted);
-  font-size:var(--fs-12);
-  display:block}
-.swipe-direction-row {
-  grid-template-columns:1fr 1fr;
-  gap:12px;
-  display:grid}
-.swipe-action-card {
-  border:1px solid var(--border);
-  background:var(--card);
-  border-radius:var(--radius-8);
-  flex-direction:column;
-  gap:8px;
-  padding:12px;
-  display:flex}
-.swipe-action-title {
-  color:var(--text);
-  font-size:var(--fs-13);
-  font-weight:var(--fw-600)}
-.swipe-action-select-wrap {
-  align-items:center;
-  display:flex}
-.swipe-action-select {
-  background:var(--bg);
-  color:var(--text);
-  cursor:pointer;
-  transition:border-color var(--dur-fast) var(--ease-standard);
-  border:2px solid #0000;
-  border-radius:var(--radius-6);
-  flex:1;
-  padding:8px 10px;
-  font-weight:var(--fw-600)}
-.swipe-action-select:hover {
-  border-color:var(--border)}
 .privacy-note {
   color:var(--muted);
   text-align:center;
@@ -1015,8 +858,6 @@ const previewStyle = computed(() => ({
   grid-template-columns:22px 1fr auto 30px 30px}
 .wallpaper-preview {
   min-height:180px}
-.swipe-direction-row {
-  grid-template-columns:1fr}
 .theme-grid {
   grid-template-columns:repeat(3,1fr)}
 .upload-row {
@@ -1110,5 +951,88 @@ const previewStyle = computed(() => ({
 .schedule-style small {
   color:var(--muted);
   font-size:var(--fs-12)}
+
+.appearance-tabs {
+  display:grid;
+  width:100%;
+  height:auto;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:6px;
+  margin:0 0 12px;
+  padding:6px;
+  border:1px solid var(--border);
+  background:var(--bg-tint);
+}
+.appearance-tabs :deep([data-slot="tabs-trigger"]) {
+  display:flex;
+  flex:initial;
+  min-width:0;
+  min-height:44px;
+  border:1px solid transparent;
+  color:var(--ink-soft);
+  font-size:var(--fs-12);
+  line-height:1.35;
+  text-align:center;
+  cursor:pointer;
+  transition:color var(--dur-fast) var(--ease-standard), background var(--dur-fast) var(--ease-standard), border-color var(--dur-fast) var(--ease-standard);
+}
+.appearance-tabs :deep([data-slot="tabs-trigger"]:hover:not([data-state="active"])) {
+  border-color:var(--border);
+  color:var(--text);
+  background:var(--card);
+}
+.appearance-tabs :deep([data-slot="tabs-trigger"][data-state="active"]) {
+  border-color:color-mix(in srgb, var(--primary) 24%, var(--border));
+  color:var(--primary);
+  background:var(--primary-soft);
+  box-shadow:none;
+}
+.appearance-tabs :deep([data-slot="tabs-trigger"]:focus-visible) {
+  outline:var(--focus-width) solid var(--focus-solid);
+  outline-offset:var(--focus-offset);
+}
+.appearance-panel-card { gap:0; padding:0; border-color:var(--border); border-radius:var(--radius-12); background:var(--card); box-shadow:var(--shadow-sm); }
+.appearance-panel-heading {
+  display:flex;
+  flex-direction:column;
+  align-items:flex-start;
+  gap:5px;
+  padding:16px 16px 0;
+}
+.appearance-panel-eyebrow {
+  color:var(--primary);
+  font-size:var(--fs-11);
+  font-weight:var(--fw-700);
+}
+.appearance-panel-heading :deep([data-slot="card-title"]) {
+  margin:0;
+  color:var(--text);
+  font-size:var(--fs-17);
+  font-weight:var(--fw-750);
+}
+.appearance-panel-heading :deep([data-slot="card-description"]) {
+  margin:0;
+  color:var(--muted);
+  font-size:var(--fs-12);
+  line-height:1.55;
+}
+.appearance-panel-content { display:grid; gap:0; padding:14px 16px 16px; }
+.appearance-panel {
+  min-width:0;
+  padding:0;
+  border:0;
+  border-radius:0;
+  background:transparent;
+}
+.appearance-panel:focus-visible {
+  outline:var(--focus-width) solid var(--focus-solid);
+  outline-offset:var(--focus-offset);
+}
+@media (max-width:520px) {
+  .appearance-tabs { grid-template-columns:repeat(2,minmax(0,1fr)); }
+  .appearance-panel-content { padding:12px; }
+  .appearance-panel-heading { padding:14px 12px 0; }
+  .appearance-panel-heading :deep([data-slot="card-title"]) { font-size:var(--fs-16); }
+}
 
 </style>

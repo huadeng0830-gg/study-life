@@ -29,8 +29,8 @@ function confirmSignOut() {
     </div>
     <p v-if="warning" class="account-session-warning">{{ warning }}</p>
     <div class="account-session-buttons">
-      <button type="button" class="btn" :disabled="busy" @click="scope = 'local'">退出当前设备</button>
-      <button type="button" class="btn btn-ghost" :disabled="busy" @click="scope = 'global'">退出所有设备</button>
+      <button type="button" class="btn btn-danger" :disabled="busy" @click="scope = 'local'">退出当前设备</button>
+      <button type="button" class="btn btn-danger" :disabled="busy" @click="scope = 'global'">退出所有设备</button>
     </div>
     <ConfirmDialog v-if="scope" :open="Boolean(scope)" :title="scope === 'global' ? '退出所有设备？' : '退出当前设备？'" :message="message" confirm-label="退出并清除本机数据" @close="scope = ''" @confirm="confirmSignOut" />
   </section>
@@ -42,7 +42,7 @@ function confirmSignOut() {
 .account-session-heading > div { min-width: 0; }
 .account-session h3 { margin: 0 0 6px; font-size: var(--fs-16); }
 .account-session p { margin: 0; color: var(--muted); font-size: var(--fs-13); line-height: 1.6; }
-.account-session .account-session-warning { padding: 10px 12px; border-radius: var(--radius-8); background: var(--bg); color: var(--warning); }
+.account-session .account-session-warning { padding:10px 12px; border:1px solid color-mix(in srgb, var(--warning) 28%, var(--border)); border-radius:var(--radius-8); background:color-mix(in srgb, var(--warning) 7%, var(--card)); color:var(--warning); }
 .account-session-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
 .account-session .btn { min-height: 44px; }
 .account-session-heading .btn { flex-shrink: 0; }

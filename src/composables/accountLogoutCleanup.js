@@ -1,8 +1,14 @@
 import { setAccountDataOwner } from './accountSyncIdentity.js'
-import { clearAccountLocalData } from './accountLocalData.js'
+import { clearAccountLocalData, withAccountDataLock } from './accountLocalData.js'
 import { clearStoredDataByPrefix } from './store/index.js'
 
 export async function clearSignedOutAccountData() {
-  setAccountDataOwner('')
-  await Promise.all([clearAccountLocalData(), clearStoredDataByPrefix('sl_')])
+  return withAccountDataLock(async (assertLock) => {
+    assertLock()
+    await clearAccountLocalData()
+    assertLock()
+    await clearStoredDataByPrefix('sl_')
+    assertLock()
+    setAccountDataOwner('')
+  })
 }

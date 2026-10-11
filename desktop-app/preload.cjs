@@ -15,5 +15,6 @@ contextBridge.exposeInMainWorld('studyLifeDesktop', Object.freeze({
   checkForUpdates: () => ipcRenderer.invoke('study-life:update-check'),
   downloadUpdate: () => ipcRenderer.invoke('study-life:update-download'),
   installUpdate: () => ipcRenderer.invoke('study-life:update-install'),
+  cancelUpdate: () => ipcRenderer.invoke('study-life:update-cancel'),
   onUpdateState: subscribeToUpdateState,
 }))

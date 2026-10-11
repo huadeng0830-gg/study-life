@@ -17,7 +17,7 @@ import { accountSyncPreparationError, accountSyncPreparing, setAccountDataOwner 
 import { accountConflictKey, accountSyncConflicts, accountSyncError, accountSyncStatus } from '../src/composables/accountSyncState.js'
 import { ACCOUNT_SYNC_COMMIT_KEY, readAccountLocalValues, recoverAccountSyncCommit, runAccountSync, startAccountSync, stopAccountSync } from '../src/composables/accountSyncEngine.js'
 import { buildSyncManifest } from '../src/composables/syncMetadata.js'
-import { restoreStoredValues, useStoredRef } from '../src/composables/store/cloudAccess.js'
+import { flushStoredWrites, restoreStoredValues, useStoredRef } from '../src/composables/store/cloudAccess.js'
 const user = { id: 'fictional-account-a', email: 'student@example.test' }
 let remote
 let remoteRevision
@@ -59,6 +59,7 @@ afterEach(async () => {
   const { setAccountSyncMode } = await import('../src/composables/accountSyncMode.js')
   setAccountSyncMode('account')
   await stopAccountSync()
+  flushStoredWrites()
   accountUser.value = null
   setAccountDataOwner('')
   vi.restoreAllMocks()
@@ -106,8 +107,10 @@ describe('按账号自动同步与内容保护', () => {
     expect(remote.values.sl_tasks.map(item => item.id)).toEqual(['before-logout'])
     await stopAccountSync()
     fake.snapshots.clear()
+    expect(flushStoredWrites().ok).toBe(true)
     setAccountDataOwner('')
     await restoreStoredValues(accountDefaultValues(), { markChanged: false })
+    expect(flushStoredWrites().ok).toBe(true)
     expect(tasks().value).toEqual([])
     setAccountDataOwner(user.id)
     await startAccountSync(user.id)

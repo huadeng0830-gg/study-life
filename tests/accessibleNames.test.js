@@ -19,9 +19,11 @@ function buttonTags(rawHtml) {
   const tags = []
   let index = 0
   for (;;) {
-    const open = html.indexOf('<button', index)
-    if (open === -1) break
-    let cursor = open + '<button'.length
+    const candidates = [html.indexOf('<button', index), html.indexOf('<Button', index)].filter((value) => value !== -1)
+    if (!candidates.length) break
+    const open = Math.min(...candidates)
+    const tagName = html.startsWith('<Button', open) ? 'Button' : 'button'
+    let cursor = open + tagName.length + 1
     let quote = ''
     while (cursor < html.length) {
       const char = html[cursor]
@@ -35,7 +37,7 @@ function buttonTags(rawHtml) {
       cursor += 1
     }
     const openEnd = cursor + 1
-    const close = html.indexOf('</button>', openEnd)
+    const close = html.indexOf(`</${tagName}>`, openEnd)
     const innerEnd = close === -1 ? openEnd : close
     tags.push({ open: html.slice(open, openEnd), inner: html.slice(openEnd, innerEnd) })
     index = innerEnd
@@ -117,8 +119,8 @@ describe('只念得出数字的控件要补上单位或日期', () => {
   })
 
   it('周次标签不是按钮（没有动作的元素不该占 Tab 停靠点）', () => {
-    const html = stripComments(source('src/views/ScheduleView.vue'))
-    expect(html).toMatch(/<span class="wn"/)
-    expect(html).not.toMatch(/<button[^>]*class="wn"/)
+    const html = stripComments(source('src/components/schedule/ScheduleGrid.vue'))
+    expect(html).toMatch(/<span[^>]*class="c-week"/)
+    expect(html).not.toMatch(/<(?:button|Button)[^>]*class="[^"]*\bc-week\b/)
   })
 })

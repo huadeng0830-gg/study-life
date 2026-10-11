@@ -1,12 +1,17 @@
 <script setup>
 import { computed, nextTick, ref } from 'vue'
+import { Badge } from '../ui/badge'
+import { Button } from '../ui/button'
+import { Card } from '../ui/card'
 import { timeConfig, currentTimes, currentCampusId, currentSeasonId, periodLabelById } from '../../composables/store/timeConfig.js'
 import { weekLabel, isSessionException } from '../../composables/store/schedule.js'
 import { useScheduleGrid } from '../../composables/schedule/useScheduleGrid.js'
+import { appNow, appToday, getAppTime } from '../../composables/timeContext.js'
 
 const props = defineProps({
   courses: { type: Array, required: true },
   viewWeek: { type: Number, required: true },
+  maxWeek: { type: Number, required: true },
   mobileView: { type: String, required: true },
   mobileDay: { type: Number, required: true },
   currentWeek: { type: Number, required: true },
@@ -14,9 +19,13 @@ const props = defineProps({
   focusedCourseId: { type: [String, Number], default: '' },
   appearance: { type: Object, required: true },
   courseProgress: { type: Object, default: () => ({}) },
+  searchQuery: { type: String, default: '' },
+  weekMeetingCount: { type: Number, default: 0 },
+  searchResultCount: { type: Number, default: 0 },
 })
 
-const emit = defineEmits(['open-add', 'open-edit', 'week-change', 'mobile-day-change', 'open-adjustments'])
+const emit = defineEmits(['open-add', 'open-edit', 'week-change', 'mobile-day-change', 'open-adjustments', 'clear-search'])
+const hasSearchQuery = computed(() => Boolean(props.searchQuery.trim()))
 const todayIdx = computed(() => props.currentDayIndex)
 const activeCampus = computed(() => timeConfig.value.campuses.find((campus) => campus.id === currentCampusId()))
 const activeSeason = computed(() => timeConfig.value.seasons.find((season) => season.id === currentSeasonId()))
@@ -108,6 +117,54 @@ function coursePeriodText(course) {
   return course.start === course.end ? start : `${start}至${end}`
 }
 
+function timeToMinutes(value) {
+  const match = String(value ?? '').match(/^(\d{1,2}):(\d{2})/)
+  return match ? Number(match[1]) * 60 + Number(match[2]) : null
+}
+
+const mobileDayFocus = computed(() => {
+  if (mobileDate.value !== appToday.value || hasSearchQuery.value) return null
+  const now = timeToMinutes(getAppTime(appNow.value))
+  if (now === null) return null
+  const sessions = mobileCourses.value.map((course) => {
+    const startIndex = periodIndexMap.value.get(course.start) ?? -1
+    const endIndex = periodIndexMap.value.get(course.end) ?? -1
+    const start = timesForSchedule.value[startIndex]?.start
+    const end = timesForSchedule.value[endIndex]?.end
+    return { course, start, end, startMinute: timeToMinutes(start), endMinute: timeToMinutes(end) }
+  }).filter((item) => item.startMinute !== null && item.endMinute !== null)
+
+  const current = sessions.find((item) => now >= item.startMinute && now < item.endMinute)
+  if (current) {
+    const endTime = courseTimeRange(current.course).split(' - ')[1]
+    return {
+      kind: 'current',
+      title: '正在上课',
+      course: current.course,
+      detail: endTime ? `预计 ${endTime} 下课` : '课程正在进行',
+      status: '进行中',
+    }
+  }
+
+  const next = sessions.find((item) => item.startMinute > now)
+  if (next) {
+    const remaining = next.startMinute - now
+    const wait = remaining >= 60
+      ? `还有 ${Math.floor(remaining / 60)} 小时${remaining % 60 ? ` ${remaining % 60} 分钟` : ''}`
+      : `还有 ${remaining} 分钟`
+    return {
+      kind: 'upcoming',
+      title: '下一节',
+      course: next.course,
+      detail: `${next.start} 开始 · ${wait}`,
+      status: '即将开始',
+    }
+  }
+
+  if (!sessions.length) return null
+  return { kind: 'finished', title: '今日课程已结束', course: null, detail: `今天共安排 ${sessions.length} 节课程`, status: '已结束' }
+})
+
 function openAdd(day, period) {
   emit('open-add', day, period)
 }
@@ -122,6 +179,11 @@ function openEdit(course) {
 
 function viewWeekText(week) {
   return week < 1 ? '开学前' : `第 ${week} 周`
+}
+
+function formatDayDate(date) {
+  const [, month, day] = String(date ?? '').split('-')
+  return month && day ? `${Number(month)}/${Number(day)}` : ''
 }
 
 /* ---------- 桌面网格的 roving tabindex（第四十一轮） ----------
@@ -201,19 +263,31 @@ async function onCellKeydown(event, day, periodIndex) {
 <template>
   <div class="page">
     <!-- Mobile Day View -->
-    <section v-if="mobileView === 'day'" class="card mobile-day-view" :class="`skin-${appearance.scheduleSkin}`">
+    <Card v-if="mobileView === 'day'" class="card mobile-day-view" role="region" aria-label="单日课程安排" :class="`skin-${appearance.scheduleSkin}`">
       <div class="mobile-day-head">
-        <button class="day-nav" :disabled="mobileDay === 0" aria-label="前一天" @click="emit('mobile-day-change', -1)">‹</button>
+        <Button variant="outline" size="icon" class="day-nav" :disabled="mobileDay === 0 && viewWeek <= 0" aria-label="前一天" @click="emit('mobile-day-change', -1)"><span aria-hidden="true">‹</span></Button>
         <div>
           <strong>{{ mobileDayLabel }}</strong>
           <span v-if="mobileDay === todayIdx && viewWeek === currentWeek" class="mobile-today-mark">今天</span>
+          <span class="mobile-day-count">{{ mobileCourses.length }} 门课程</span>
           <button v-if="viewExceptions[mobileDay]?.length" type="button" class="exception-tag mobile-exception-tag" :class="exceptionTone(viewExceptions[mobileDay])" :aria-label="`管理 ${mobileDate} 的课程调整：${exceptionLabel(viewExceptions[mobileDay])}`" @click="emit('open-adjustments', mobileDate)">{{ exceptionLabel(viewExceptions[mobileDay]) }}</button>
         </div>
-        <button class="day-nav" :disabled="mobileDay === 6" aria-label="后一天" @click="emit('mobile-day-change', 1)">›</button>
+        <Button variant="outline" size="icon" class="day-nav" :disabled="mobileDay === 6 && viewWeek >= maxWeek" aria-label="后一天" @click="emit('mobile-day-change', 1)"><span aria-hidden="true">›</span></Button>
+      </div>
+      <div v-if="mobileDayFocus" class="day-focus" :class="`is-${mobileDayFocus.kind}`" role="status">
+        <span class="day-focus-copy">
+          <strong>{{ mobileDayFocus.title }}<template v-if="mobileDayFocus.course"> · {{ mobileDayFocus.course.name }}</template></strong>
+          <small>{{ mobileDayFocus.detail }}</small>
+        </span>
+        <Badge :variant="mobileDayFocus.kind === 'current' ? 'default' : 'secondary'" class="day-focus-status">{{ mobileDayFocus.status }}</Badge>
       </div>
       <div v-if="!mobileCourses.length" class="mobile-day-empty">
-        <span>今天没有课程</span>
-        <button class="btn btn-ghost" @click="openAdd(mobileDay, timeConfig.periods[0]?.id)">添加课程</button>
+        <div>
+          <strong>{{ hasSearchQuery ? (searchResultCount ? '这一天没有匹配课程' : '全学期没有找到匹配安排') : mobileDay === todayIdx && viewWeek === currentWeek ? '今天没有课程' : '这一天没有课程' }}</strong>
+          <span>{{ hasSearchQuery ? (searchResultCount ? `全学期找到 ${searchResultCount} 条安排，可在上方结果中选择日期。` : '试试课程名、教师名或教室名。') : '可以在这个时间段快速添加课程' }}</span>
+        </div>
+        <Button v-if="hasSearchQuery" variant="outline" class="btn btn-ghost" @click="emit('clear-search')">清除搜索</Button>
+        <Button v-else variant="outline" class="btn btn-ghost" @click="openAdd(mobileDay, timeConfig.periods[0]?.id)">添加课程</Button>
       </div>
       <div v-else class="mobile-course-list">
         <button
@@ -229,16 +303,21 @@ async function onCellKeydown(event, day, periodIndex) {
           @click="openEdit(course)"
         >
           <span class="mobile-course-time">{{ courseTimeRange(course) || coursePeriodText(course) }}</span>
-          <span class="mobile-course-main"><b>{{ course.name }}<span v-if="course.sessionMakeup" class="makeup-badge">补课</span></b><small>{{ course.room || '未设置地点' }}<template v-if="course.teacher"> · {{ course.teacher }}</template></small><span v-if="courseProgress[course.id]?.pending" class="course-study-badge" :class="{ urgent: courseProgress[course.id]?.overdue }">{{ courseProgress[course.id].overdue ? `${courseProgress[course.id].overdue} 项逾期` : `${courseProgress[course.id].pending} 项待办` }}</span></span>
+          <span class="mobile-course-main"><b>{{ course.name }}<Badge v-if="course.sessionMakeup" variant="outline" class="makeup-badge">补课</Badge></b><small>{{ course.room || '未设置地点' }}<template v-if="course.teacher"> · {{ course.teacher }}</template></small><span v-if="courseProgress[course.id]?.pending" class="course-study-badge" :class="{ urgent: courseProgress[course.id]?.overdue }">{{ courseProgress[course.id].overdue ? `${courseProgress[course.id].overdue} 项逾期` : `${courseProgress[course.id].pending} 项待办` }}</span></span>
           <span class="mobile-course-arrow">›</span>
         </button>
       </div>
-    </section>
+    </Card>
 
     <!-- Desktop Week View -->
-    <div v-else class="card timetable-wrap" :class="`skin-${appearance.scheduleSkin}`">
+    <Card v-else class="card timetable-wrap" role="region" aria-label="整周课程表" :class="`skin-${appearance.scheduleSkin}`">
       <div v-if="conflictIds.size > 0" class="warn-banner">
           ⚠️ {{ viewWeekText(viewWeek) }}有 {{ conflictCount }} 组课程时间冲突（红框标出），请检查周次设置
+      </div>
+      <div v-if="hasSearchQuery && !weekMeetingCount" class="schedule-search-empty" role="status">
+        <span v-if="searchResultCount">本周没有找到“{{ searchQuery }}”相关课程；全学期找到 {{ searchResultCount }} 条安排，可在上方结果中选择日期。</span>
+        <span v-else>全学期没有找到“{{ searchQuery }}”相关课程安排。</span>
+        <button type="button" class="search-empty-clear" @click="emit('clear-search')">清除搜索</button>
       </div>
 
       <div class="timetable" ref="gridEl" role="group" aria-label="课程表网格：方向键在格子间移动，回车或空格按这一格添加课程">
@@ -247,9 +326,11 @@ async function onCellKeydown(event, day, periodIndex) {
           v-for="(d, i) in DAYS"
           :key="d"
           class="tt-head"
-          :class="{ today: i === todayIdx && viewWeek === currentWeek }"
+          :class="{ today: i === todayIdx && viewWeek === currentWeek, selected: i === mobileDay && mobileView === 'week' }"
         >
-          {{ d }}<span v-if="i === todayIdx && viewWeek === currentWeek" class="today-tag">今天</span><button v-if="viewExceptions[i]?.length" type="button" class="exception-tag" :class="exceptionTone(viewExceptions[i])" :aria-label="`管理 ${viewDates[i]} 的课程调整：${exceptionLabel(viewExceptions[i])}`" @click="emit('open-adjustments', viewDates[i])">{{ exceptionLabel(viewExceptions[i]) }}</button>
+          <span class="tt-head-title">{{ d }}<span v-if="i === todayIdx && viewWeek === currentWeek" class="today-tag">今天</span></span>
+          <span class="tt-date">{{ formatDayDate(viewDates[i]) }}</span>
+          <button v-if="viewExceptions[i]?.length" type="button" class="exception-tag" :class="exceptionTone(viewExceptions[i])" :aria-label="`管理 ${viewDates[i]} 的课程调整：${exceptionLabel(viewExceptions[i])}`" @click="emit('open-adjustments', viewDates[i])">{{ exceptionLabel(viewExceptions[i]) }}</button>
         </div>
 
         <template v-for="(row, ri) in timeConfig.periods" :key="row.id">
@@ -302,13 +383,13 @@ async function onCellKeydown(event, day, periodIndex) {
           @click="openEdit(c)"
         >
           <span class="c-name">{{ c.name }}</span>
-          <span v-if="c.sessionMakeup" class="makeup-badge">补课 · {{ coursePeriodText(c) }}</span>
+          <Badge v-if="c.sessionMakeup" variant="outline" class="makeup-badge">补课 · {{ coursePeriodText(c) }}</Badge>
           <span v-if="courseProgress[c.id]?.pending" class="course-study-badge" :class="{ urgent: courseProgress[c.id]?.overdue }">{{ courseProgress[c.id].overdue ? `${courseProgress[c.id].overdue} 项逾期` : `${courseProgress[c.id].pending} 项待办` }}</span>
           <span class="c-week">{{ c.sessionMakeup ? '仅此日期' : weekLabel(c) }}</span>
           <span v-if="c.room" class="c-sub">@{{ c.room }}</span>
         </div>
       </div>
-    </div>
+    </Card>
 
     <p class="tip">
       💡 正在查看：{{ activeCampus?.name || '' }} ·
@@ -347,8 +428,27 @@ async function onCellKeydown(event, day, periodIndex) {
 .mobile-day-head strong { font-size: var(--fs-16); }
 .mobile-day-head small { width: 100%; color: var(--danger); font-size: var(--fs-11); }
 .mobile-today-mark { padding: 2px 7px; color: var(--primary); font-size: var(--fs-10); font-weight: var(--fw-800); border-radius: var(--radius-pill); background: var(--primary-soft); }
+.mobile-day-count { color: var(--muted); font-size: var(--fs-11); font-variant-numeric: tabular-nums; }
 .day-nav { display: grid; place-items: center; width: 44px; height: 44px; color: var(--primary); font-size: var(--fs-25); border: 1px solid var(--border); border-radius: var(--radius-10); background: var(--card); }
 .day-nav:disabled { color: var(--ink-faint); opacity: .45; }
+.day-focus {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--primary);
+  border-radius: var(--radius-9);
+  background: var(--bg-tint);
+}
+.day-focus.is-upcoming { border-left-color: var(--warning); }
+.day-focus.is-finished { border-left-color: var(--border-strong); }
+.day-focus-copy { display: grid; gap: 3px; min-width: 0; }
+.day-focus-copy strong { overflow: hidden; color: var(--text); font-size: var(--fs-12); text-overflow: ellipsis; white-space: nowrap; }
+.day-focus-copy small { color: var(--muted); font-size: var(--fs-11); }
+.day-focus-status { flex: none; }
 .mobile-course-list { display: flex; flex-direction: column; gap: 8px; padding-top: 12px; }
 .mobile-course-row {
   position: relative;
@@ -370,12 +470,18 @@ async function onCellKeydown(event, day, periodIndex) {
 .mobile-course-main { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 .mobile-course-main b { overflow: hidden; font-size: var(--fs-14); line-height: 1.35; }
 .mobile-course-main small { overflow: hidden; color: var(--ink-soft); font-size: var(--fs-11); text-overflow: ellipsis; white-space: nowrap; }
-.makeup-badge { display: inline-block; margin-left: 5px; color: var(--success); font-size: var(--fs-10); font-weight: var(--fw-600); line-height: 1.5; }
+.makeup-badge { display: inline-flex; margin-left: 5px; padding: 1px 5px; color: var(--success); border-color: color-mix(in srgb, var(--success) 26%, var(--border)); background: color-mix(in srgb, var(--success) 8%, var(--card)); font-size: var(--fs-10); font-weight: var(--fw-600); line-height: 1.5; }
 .course > .makeup-badge { margin-left: 0; }
 .mobile-course-arrow { color: var(--ink-faint); font-size: var(--fs-24); text-align: center; }
 .mobile-day-empty { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 24px 4px 6px; color: var(--ink-soft); font-size: var(--fs-13); }
+.mobile-day-empty > div { display: grid; gap: 4px; }
+.mobile-day-empty strong { color: var(--text); font-size: var(--fs-13); }
+.mobile-day-empty span { color: var(--muted); font-size: var(--fs-11); line-height: 1.5; }
+.mobile-day-empty .btn { flex: none; }
 
 .timetable-wrap { overflow-x: auto; padding: 16px; }
+.schedule-search-empty { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 12px; margin-bottom: 12px; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-9); background: var(--bg-tint); color: var(--ink-soft); font-size: var(--fs-12); }
+.search-empty-clear { min-height: 32px; padding: 4px 8px; color: var(--primary); border: 0; border-radius: var(--radius-6); background: var(--primary-soft); font-size: var(--fs-11); font-weight: var(--fw-700); }
 .timetable {
   display: grid;
   grid-template-columns: 84px repeat(7, minmax(96px, 1fr));
@@ -385,14 +491,23 @@ async function onCellKeydown(event, day, periodIndex) {
 .corner { grid-column: 1; grid-row: 1; }
 .tt-head {
   grid-row: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  min-height: 56px;
   text-align: center;
-  padding: 8px 0;
+  padding: 6px 3px;
   font-weight: var(--fw-600);
   color: var(--muted);
   border-radius: var(--radius-8);
 }
+.tt-head-title { display: flex; align-items: center; justify-content: center; gap: 4px; }
+.tt-date { color: var(--ink-faint); font-size: var(--fs-10); font-weight: var(--fw-500); font-variant-numeric: tabular-nums; }
 .tt-head.today { background: var(--primary-soft); color: var(--primary); }
-.today-tag { margin-left: 4px; font-size: var(--fs-11); background: var(--primary); color: var(--on-primary, #fff); padding: 1px 6px; border-radius: var(--radius-pill); vertical-align: 2px; }
+.tt-head.selected:not(.today) { background: var(--bg-tint); box-shadow: inset 0 -2px 0 var(--primary); }
+.today-tag { font-size: var(--fs-10); background: var(--primary); color: var(--on-primary, #fff); padding: 1px 6px; border-radius: var(--radius-pill); vertical-align: 2px; }
 .exception-tag { display: block; width: fit-content; max-width: 100%; margin: 3px auto 0; padding: 3px 6px; color: var(--danger); font-size: var(--fs-10); font-weight: var(--fw-800); border: 1px solid transparent; border-radius: var(--radius-5); background: var(--danger-soft); cursor: pointer; }
 .exception-tag:hover { border-color: currentColor; }
 .mobile-exception-tag { min-height: 36px; }

@@ -64,4 +64,45 @@ describe('Windows 桌面版更新桥接', () => {
     expect(api.downloadUpdate).toHaveBeenCalledOnce()
     expect(api.installUpdate).toHaveBeenCalledOnce()
   })
+
+  it('两处面板共享一个订阅，全部关闭再打开后从主进程恢复真实状态', async () => {
+    const unsubscribe = vi.fn()
+    let listener
+    const api = { isDesktop: true, onUpdateState: vi.fn((callback) => { listener = callback; return unsubscribe }),
+      getUpdateState: vi.fn(async () => ({ stage: 'downloading', currentVersion: '1.0.3', percent: 12, revision: 1, taskPending: true })) }
+    window.studyLifeDesktop = api
+    const update = await import('../src/composables/desktopAppUpdate.js')
+    const stopFirst = update.subscribeToDesktopUpdateState()
+    const stopSecond = update.subscribeToDesktopUpdateState()
+    await Promise.resolve()
+    expect(api.onUpdateState).toHaveBeenCalledTimes(1)
+    stopFirst()
+    listener({ stage: 'downloading', currentVersion: '1.0.3', percent: 40, revision: 2, taskPending: true })
+    expect(unsubscribe).not.toHaveBeenCalled()
+    stopSecond()
+    api.getUpdateState.mockResolvedValue({ stage: 'ready', currentVersion: '1.0.3', percent: 100, revision: 3 })
+    const stopThird = update.subscribeToDesktopUpdateState()
+    await Promise.resolve()
+    expect(update.desktopUpdateState.value).toMatchObject({ stage: 'ready', percent: 100 })
+    stopThird()
+  })
+
+  it('命令结束时的旧快照不能覆盖请求期间收到的新版推送', async () => {
+    let listener, finishSnapshot
+    const api = { isDesktop: true, onUpdateState: (callback) => { listener = callback; return () => {} },
+      getUpdateState: vi.fn().mockResolvedValueOnce({ stage: 'idle', currentVersion: '1.0.3' })
+        .mockImplementation(() => new Promise((resolve) => { finishSnapshot = resolve })),
+      checkForUpdates: vi.fn(async () => true) }
+    window.studyLifeDesktop = api
+    const update = await import('../src/composables/desktopAppUpdate.js')
+    const stop = update.subscribeToDesktopUpdateState()
+    await Promise.resolve()
+    const check = update.checkDesktopAppUpdate()
+    await Promise.resolve()
+    listener({ stage: 'downloading', currentVersion: '1.0.3', percent: 23, taskPending: true })
+    finishSnapshot({ stage: 'latest', currentVersion: '1.0.3' })
+    await check
+    expect(update.desktopUpdateState.value).toMatchObject({ stage: 'downloading', percent: 23 })
+    stop()
+  })
 })

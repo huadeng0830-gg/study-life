@@ -13,6 +13,13 @@ const definitions = [
 ]
 
 describe('首页模块顺序规则', () => {
+  it('重复导入的模块只保留第一次的顺序和显示设置，不修改输入', () => {
+    const saved = [{ id: 'focus', visible: false }, { id: 'focus', visible: true }, { id: 'tasks', visible: true }]
+    expect(normalizeHomeModuleOrder(saved, definitions)).toEqual([
+      { id: 'focus', visible: false }, { id: 'tasks', visible: true }, { id: 'next', visible: true },
+    ])
+    expect(saved).toHaveLength(3)
+  })
   it('保留已存顺序和可见状态，丢弃过时模块并追加新增项', () => {
     expect(normalizeHomeModuleOrder([
       { id: 'focus', visible: false },

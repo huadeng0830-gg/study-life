@@ -48,12 +48,14 @@ import { openTags, readTemplate, walkVueFiles } from './helpers/vueTemplate.js'
 
 const srcDir = resolve(import.meta.dirname, '..', 'src')
 
-const FOCUSABLE_TAGS = new Set(['button', 'a', 'input', 'select', 'textarea'])
+// shadcn-vue <Button> renders a native button and preserves aria attributes.
+const FOCUSABLE_TAGS = new Set(['button', 'Button', 'a', 'input', 'select', 'textarea'])
 const CLICK = /@click(?:\.[\w-]+)*\s*=\s*"([^"]*)"/
 // 原地翻转的唯一签名：`X = … !X …`。两侧必须是同一个标识符——
 // `showFilters = !filtersActive` 这种「赋成另一个东西的取反」不算翻转，会正确放行。
 const IN_PLACE_TOGGLE = /\b([A-Za-z_$][\w$]*)\s*=\s*[^"]*!\s*\1\b/
 const HAS_EXPANDED = /(^|\s):?aria-expanded\s*=/
+const HAS_PRESSED = /(^|\s):?aria-pressed\s*=/
 
 /** 返回 [{ tag, action, attrs }]：模板里「原地翻转但没说状态」的控件。 */
 export function findTogglesMissingExpanded(template) {
@@ -63,13 +65,15 @@ export function findTogglesMissingExpanded(template) {
     const click = attrs.match(CLICK)
     if (!click) continue
     if (!IN_PLACE_TOGGLE.test(` ${click[1]} `)) continue
-    if (HAS_EXPANDED.test(attrs)) continue
+    // A view-mode toggle announces its selected state with aria-pressed; disclosures
+    // use aria-expanded. Accept either state attribute for this broad flip signature.
+    if (HAS_EXPANDED.test(attrs) || HAS_PRESSED.test(attrs)) continue
     offenders.push({ tag, action: click[1].trim(), attrs: attrs.replace(/\s+/g, ' ').trim() })
   }
   return offenders
 }
 
-/** 判据扫到的所有原地翻转控件（不论有没有 aria-expanded），用于规模自证。 */
+/** 判据扫到的所有原地翻转控件，用于规模与状态播报自证。 */
 export function findAllInPlaceToggles(template) {
   const found = []
   for (const { tag, attrs } of openTags(template)) {
@@ -77,7 +81,7 @@ export function findAllInPlaceToggles(template) {
     const click = attrs.match(CLICK)
     if (!click) continue
     if (!IN_PLACE_TOGGLE.test(` ${click[1]} `)) continue
-    found.push({ tag, action: click[1].trim(), expanded: HAS_EXPANDED.test(attrs) })
+    found.push({ tag, action: click[1].trim(), announced: HAS_EXPANDED.test(attrs) || HAS_PRESSED.test(attrs) })
   }
   return found
 }
@@ -95,10 +99,16 @@ describe('findTogglesMissingExpanded 的判定力', () => {
     expect(findTogglesMissingExpanded('<button @click.stop="expanded = !expanded">展开</button>')).toHaveLength(1)
   })
 
+  it('抓得住：shadcn Button 同样承载原地展开状态', () => {
+    expect(findTogglesMissingExpanded('<Button @click="show = !show">设置</Button>')).toHaveLength(1)
+    expect(findTogglesMissingExpanded('<Button @click="show = !show" :aria-expanded="show">设置</Button>')).toEqual([])
+  })
+
   it('放行：已经说了状态', () => {
     expect(findTogglesMissingExpanded('<button @click="showHistory = !showHistory" :aria-expanded="showHistory">历史</button>')).toEqual([])
     // 静态属性也算说了
     expect(findTogglesMissingExpanded('<button @click="x = !x" aria-expanded="false">x</button>')).toEqual([])
+    expect(findTogglesMissingExpanded('<Button @click="selected = !selected" :aria-pressed="selected">模式</Button>')).toEqual([])
   })
 
   it('放行：打开弹窗 / 关闭弹窗不是原地翻转，不该用 aria-expanded', () => {
@@ -131,8 +141,8 @@ describe('findTogglesMissingExpanded 的判定力', () => {
   })
 
   it('自证：判据确实认得出「有没有说状态」这两种情况', () => {
-    expect(findAllInPlaceToggles('<button @click="a = !a">x</button>').map((t) => t.expanded)).toEqual([false])
-    expect(findAllInPlaceToggles('<button :aria-expanded="a" @click="a = !a">x</button>').map((t) => t.expanded)).toEqual([true])
+    expect(findAllInPlaceToggles('<button @click="a = !a">x</button>').map((t) => t.announced)).toEqual([false])
+    expect(findAllInPlaceToggles('<button :aria-expanded="a" @click="a = !a">x</button>').map((t) => t.announced)).toEqual([true])
   })
 })
 
@@ -141,14 +151,14 @@ describe('findTogglesMissingExpanded 的判定力', () => {
 /**
  * 例外清单：判据用的是「`@click` 表达式字符串里的 `!标识符`」，所以理论上存在
  * **语义不是展开收起**却被判据命中的写法。目前一条都没有——清空是刻意的：
- * 13 处原地翻转全部是真正的展开/收起，都该有 `aria-expanded`。
+ * 展开/收起应使用 `aria-expanded`；切换当前模式的按钮可用 `aria-pressed`。
  *
  * 清单带自我淘汰机制（见下面第二条断言）：某一项不再被扫到时测试会失败，
  * 也就是说清单不会随着代码变化悄悄烂掉，必须有人来删掉过期条目。
  */
 const EXEMPT = new Map([])
 
-describe('全仓原地翻转控件都有 aria-expanded', () => {
+describe('全仓原地翻转控件都播报当前状态', () => {
   const files = walkVueFiles(srcDir)
   const scanned = files.map((file) => ({ file, template: readTemplate(file), toggles: [] }))
   for (const entry of scanned) entry.toggles = findAllInPlaceToggles(entry.template)
@@ -178,16 +188,16 @@ describe('全仓原地翻转控件都有 aria-expanded', () => {
     expect(files.length).toBeGreaterThan(45)
     // 【这个下限只是"证明扫描器没空转"，不是覆盖率指标】
     // 这只是防止扫描器空转的下限；页面拆分后控件会随模板移动，真实覆盖由上面的逐项断言保证。
-    // 真正的覆盖面由上面那条"每个原地翻转控件都有 aria-expanded"逐个断言，
+    // 真正的覆盖面由上面那条"每个原地翻转控件都播报状态"逐个断言，
     // 这个下限只是防止有人把 findAllInPlaceToggles 写坏成永远返回 0。
     expect(allToggles.length).toBeGreaterThanOrEqual(8)
-    // 绝大多数翻转控件都在 button 上（aria-expanded 的正确落点）。
+    // 绝大多数翻转控件都在原生 button 上（状态属性的正确落点）。
     // 旧同步控件下线后实测 8 个原地翻转控件，且都由 button 承载。
     expect(allToggles.filter((t) => t.tag === 'button').length).toBeGreaterThanOrEqual(8)
   })
 
   it('已经说状态的占绝大多数，说明这条守卫守的是一个真实存在的约定', () => {
-    const withExpanded = allToggles.filter((t) => t.expanded).length
-    expect(withExpanded).toBe(allToggles.length)
+    const withAnnouncedState = allToggles.filter((t) => t.announced).length
+    expect(withAnnouncedState).toBe(allToggles.length)
   })
 })

@@ -31,14 +31,13 @@ import { hasPersistedAccountSession, initializeAccountAuth } from './composables
 import { accountSyncStatus, accountSyncError } from './composables/accountSyncState.js'
 import { localSafeMode } from './composables/localSafeMode.js'
 import { persistenceState, dismissPersistenceNotice } from './composables/store/core.js'
-import { backupReminderTitle, needsBackup } from './composables/backupReminder.js'
+import PersistenceErrorAlert from './components/PersistenceErrorAlert.vue'
+import { backupReminderTitle, needsBackup, useBackupNotice } from './composables/backupReminder.js'
 import { attachFloatingSlot, createFloatingSlot, detachFloatingSlot, useFloatingOffset } from './composables/floatingStack.js'
 import { announce, announceAlert, clearAnnouncement, liveAlert, liveMessage } from './composables/liveRegion.js'
 import { openSearch, searchOpen } from './composables/globalSearch.js'
 import { desktopShortcutRoutes } from './router/navigation.js'
-
 retireLegacySyncState()
-
 const UpdateNotes = defineAsyncComponent(() => import('./components/UpdateNotes.vue'))
 const QuickRecordPanel = defineAsyncComponent(() => import('./components/QuickRecordPanel.vue'))
 
@@ -55,7 +54,7 @@ let appUnmounted = false
 const showReleaseNotes = ref(false)
 const showQuickRecord = ref(false)
 const quickRecordMounted = ref(false)
-const showBackupNudge = ref(false)
+const { showBackupNudge, visibleBackupNudge } = useBackupNotice()
 let releaseTimer = 0
 let quickRecordToastTimer = 0
 let persistenceRecoveryTimer = 0
@@ -124,9 +123,9 @@ const accountSyncNotice = computed(() => {
 const alertSlots = computed(() => {
   let slot = 0
   return Object.fromEntries([
-    ['safeMode', localSafeMode.value], ['persistenceError', persistenceState.value.status === 'error'],
+    ['safeMode', localSafeMode.value], ['persistenceError', ['error', 'conflict'].includes(persistenceState.value.status)],
     ['persistenceRecovered', persistenceState.value.status === 'recovered'],
-    ['accountSync', Boolean(accountSyncNotice.value)], ['backupNudge', showBackupNudge.value],
+    ['accountSync', Boolean(accountSyncNotice.value)], ['backupNudge', visibleBackupNudge.value],
   ].map(([key, on]) => [key, on ? slot++ : -1]))
 })
 const alertCount = computed(() => Object.values(alertSlots.value).filter((slot) => slot >= 0).length)
@@ -193,18 +192,18 @@ watch(() => Boolean(localSafeMode.value), (open) => {
 })
 watch(() => persistenceState.value.status, (status) => {
   // 提示内容里的持久化报错信息是动态的，播报必须带上它，否则听觉信息少于视觉信息。
-  if (status === 'error') announceAlertOnce(`${PERSISTENCE_ERROR_TITLE}：${persistenceState.value.message}`)
+  if (status === 'error' || status === 'conflict') announceAlertOnce(`${PERSISTENCE_ERROR_TITLE}：${persistenceState.value.message}`)
   else if (status === 'recovered') announceOnce(PERSISTENCE_RECOVERED_TEXT)
 })
 watch(accountSyncNoticeText, (text) => {
   if (text) announceOnce(text)
 })
-watch(() => Boolean(showBackupNudge.value), (open) => {
+watch(() => Boolean(visibleBackupNudge.value), (open) => {
   if (open) announceOnce(`${backupReminderTitle.value}：${BACKUP_NUDGE_NOTICE.body}`)
 })
 
 /* ---------- 氛围与情绪引擎（模块 A） ---------- */
-const { festiveToday, atmosphereKey, isAnniversary, decorParticles, decorStyle } = useFestiveAtmosphere()
+const { festiveToday, isAnniversary, decorParticles, decorStyle } = useFestiveAtmosphere()
 
 /* ---------- 全局快速记录：仅通过明确入口打开，不遮挡页面正文 ---------- */
 const quickRecordContext = computed(() => {
@@ -246,19 +245,6 @@ function viewQuickRecordEntity() {
     ? focusLocation(path, entity.entityId, { section: 'bill' })
     : focusLocation(path, entity.entityId)
   router.push(target)
-}
-
-async function exportCurrentData() {
-  try {
-    const { downloadEmergencyBackup } = await import('./composables/emergencyExport.js')
-    downloadEmergencyBackup()
-  } catch (error) {
-    // 此前这里是空 catch：动态 import 失败会被完全吞掉，用户点了「导出数据」
-    // 却什么都不会发生，也没有任何提示 —— 应急导出恰恰是最不能静默失败的场景
-    // （它通常是用户发现数据异常后的最后手段）。
-    console.error('[export] 应急导出失败', error)
-    announceAlertOnce('应急导出失败：数据文件没能生成。若浏览器处于无痕或禁用了下载，请换一个普通窗口再试。')
-  }
 }
 
 function openDataManager() {
@@ -413,7 +399,10 @@ function t(key) {
     <span v-if="isAnniversary" class="atmo-halo" />
     <i v-for="particle in decorParticles" :key="particle.id" :style="decorStyle(particle)" />
   </div>
-  <div class="layout" :data-atmosphere="atmosphereKey">
+  <!-- 这里原先还有 `:data-atmosphere="atmosphereKey"`：全仓没有任何一条 CSS 或脚本读它，
+       是个写出去就没人看的死钩子（同 tests/styleHooks.test.js 抓的那一类）。
+       当天的氛围已经由上面的 [data-festive] 精确分叉，不再需要第二份标记。 -->
+  <div class="layout">
     <!-- 跳到主内容（WCAG 2.4.1 绕过区块）。侧边栏有十几个导航项，键盘用户每换一页
          都得先 Tab 穿过它们才能到正文；这是纯键盘用户最常用的第一颗「按键」。
          平时视觉隐藏（见 <style> 里的 .skip-to-content），按 Tab 第一个聚焦时才浮现，
@@ -486,12 +475,7 @@ function t(key) {
         <span>{{ SAFE_MODE_NOTICE.body }}</span>
         <button type="button" class="text-button" @click="openDataManager">打开数据管理</button>
       </div>
-      <div v-if="persistenceState.status === 'error'" key="persistence-error" class="global-persistence-alert" :style="{ '--alert-slot': `${alertSlots.persistenceError}` }">
-        <b>{{ PERSISTENCE_ERROR_TITLE }}</b>
-        <span>{{ persistenceState.message }}</span>
-        <ActionButton tone="neutral" type="button" class="btn btn-sm" kind="important" feedback="external" :show-error="false" :action="() => exportCurrentData()">导出当前数据</ActionButton>
-        <button type="button" class="global-error-close tap-target" aria-label="关闭本机保存提示" @click="dismissPersistenceNotice">×</button>
-      </div>
+      <PersistenceErrorAlert v-if="persistenceState.status === 'error' || persistenceState.status === 'conflict'" key="persistence-error" :message="persistenceState.message" :alert-slot="alertSlots.persistenceError" @dismiss="dismissPersistenceNotice" @announce="announceAlertOnce" />
       <div v-if="persistenceState.status === 'recovered'" key="persistence-recovered" class="global-persistence-alert recovered" :style="{ '--alert-slot': `${alertSlots.persistenceRecovered}` }">{{ PERSISTENCE_RECOVERED_TEXT }}</div>
       <div v-if="accountSyncNotice" key="account-sync" class="global-sync-alert" :style="{ '--alert-slot': `${alertSlots.accountSync}` }">
         <b>{{ accountSyncNotice.title }}</b>
@@ -507,7 +491,7 @@ function t(key) {
         </ActionButton>
         <button type="button" class="text-button" @click="openDataManager">打开数据管理</button>
       </div>
-      <div v-if="showBackupNudge" key="backup-nudge" class="global-persistence-alert" :style="{ '--alert-slot': `${alertSlots.backupNudge}` }">
+      <div v-if="visibleBackupNudge" key="backup-nudge" class="global-persistence-alert" :style="{ '--alert-slot': `${alertSlots.backupNudge}` }">
         <b>{{ backupReminderTitle }}</b>
         <span>{{ BACKUP_NUDGE_NOTICE.body }}</span>
         <button type="button" class="text-button" @click="openDataManager">去备份</button>
@@ -592,7 +576,7 @@ function t(key) {
    tests/scopedChildReachability.test.js 与第三十九轮报告；删除前后用 @vue/compiler-sfc
    编译成 CSS 文本逐字 diff 过，差异只有这些选择器。
    这些样式在 components/Sidebar.vue 自己的 scoped 样式块里都有等价副本，需要改请改那边。 */
-@media (max-width:900px) {
+@media (max-width: 900px), (pointer: coarse) and (max-height: 520px) {
   .sidebar,.sidebar.collapsed {
   width:100%;
   height:auto;
@@ -848,7 +832,7 @@ to {
   max-width:1080px;
   padding:30px max(36px, env(safe-area-inset-right, 0px)) 44px max(36px, env(safe-area-inset-left, 0px))}
 }
-@media (max-width:900px) {
+@media (max-width: 900px), (pointer: coarse) and (max-height: 520px) {
   .layout {
   flex-direction:column}
 .content {
@@ -867,7 +851,7 @@ to {
   --alert-count:1;
   --alert-lane:54px;
   height:calc(var(--alert-lane) * var(--alert-count) + 8px * (var(--alert-count) - 1))}
-@media (max-width:900px) { .global-alert-reserve { --alert-lane:72px; } }
+@media (max-width: 900px), (pointer: coarse) and (max-height: 520px) { .global-alert-reserve { --alert-lane:72px; } }
 @media (max-width:760px) { .global-alert-reserve { --alert-lane:124px; } }
 .quick-record-toast {
   left:50%;
@@ -908,7 +892,7 @@ to {
   opacity:0;
   /* 水平居中已由 .global-alert-stack 的 align-items:center 承担，进场位移只剩纵向那 8px。 */
   transform:translateY(-8px)}
-@media (max-width:900px) {
+@media (max-width: 900px), (pointer: coarse) and (max-height: 520px) {
   .quick-record-toast {
   bottom:calc(86px + env(safe-area-inset-bottom) + var(--stack-offset,0px))}
 }
@@ -927,7 +911,7 @@ to {
   display:flex;
   position:fixed;
   transform:translate(-50%)}
-@media (max-width:900px) {
+@media (max-width: 900px), (pointer: coarse) and (max-height: 520px) {
   .global-error-toast {
   bottom:calc(86px + env(safe-area-inset-bottom) + var(--stack-offset,0px))}
 }

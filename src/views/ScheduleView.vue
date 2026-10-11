@@ -1,5 +1,11 @@
 <script setup>
 import { defineAsyncComponent, ref, computed, onBeforeUnmount, onDeactivated } from 'vue'
+import { Badge } from '../components/ui/badge'
+import { Button } from '../components/ui/button'
+import { Card } from '../components/ui/card'
+import { Calendar } from '../components/ui/calendar'
+import { Popover, PopoverContent, PopoverDescription, PopoverHeader, PopoverTitle, PopoverTrigger } from '../components/ui/popover'
+import { ToggleGroup, ToggleGroupItem } from '../components/ui/toggle-group'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import { useDomainCommands } from '../composables/domain/commands.js'
 import { useCourseTemplateCommands } from '../composables/courseTemplates.js'
@@ -15,9 +21,10 @@ import {
   upsertScheduleException,
   removeScheduleException,
 } from '../composables/store/schedule.js'
-import { appToday, currentDayIndex, currentWeek as appCurrentWeek } from '../composables/timeContext.js'
+import { appToday } from '../composables/timeContext.js'
 import { isArchived } from '../composables/domain/state.js'
-import QuickRecordPanel from '../components/QuickRecordPanel.vue'
+import { useScheduleWorkspace } from '../composables/scheduleWorkspace.js'
+import { useScheduleDialogMounts } from '../composables/scheduleDialogMounts.js'
 import ScheduleGrid from '../components/schedule/ScheduleGrid.vue'
 import ScheduleNote from '../components/schedule/ScheduleNote.vue'
 import Toast from '../components/Toast.vue'
@@ -31,16 +38,16 @@ import { useScheduleFocusRoute } from '../composables/scheduleFocusRoute.js'
 import LearningNavigation from '../components/learning/LearningNavigation.vue'
 import { buildCourseProgress } from '../composables/courseProgress.js'
 
-// 弹窗一律按需加载：仅“查看课程表”不再下载作息设置、批量录入等大体量模块，
-// 打开课程表更快，内存占用更小（这些弹窗只有在真正点开时才会加载）。
-const CourseEditorModal = defineAsyncComponent(() => import('../components/schedule/CourseEditorModal.vue'))
-const CourseManagerModal = defineAsyncComponent(() => import('../components/schedule/CourseManagerModal.vue'))
-const BatchImportModal = defineAsyncComponent(() => import('../components/schedule/BatchImportModal.vue'))
-const ImageCropModal = defineAsyncComponent(() => import('../components/schedule/ImageCropModal.vue'))
-const ImportConflictModal = defineAsyncComponent(() => import('../components/schedule/ImportConflictModal.vue'))
-const ExceptionsModal = defineAsyncComponent(() => import('../components/schedule/ExceptionsModal.vue'))
-const SemesterModal = defineAsyncComponent(() => import('../components/schedule/SemesterModal.vue'))
-const TimeSettingsModal = defineAsyncComponent(() => import('../components/schedule/TimeSettingsModal.vue'))
+// 弹窗在首次打开时挂载并加载，之后保留实例以维持关闭动画与草稿。
+const QuickRecordPanel = defineAsyncComponent(() => loadDialog(() => import('../components/QuickRecordPanel.vue')))
+const CourseEditorModal = defineAsyncComponent(() => loadDialog(() => import('../components/schedule/CourseEditorModal.vue')))
+const CourseManagerModal = defineAsyncComponent(() => loadDialog(() => import('../components/schedule/CourseManagerModal.vue')))
+const BatchImportModal = defineAsyncComponent(() => loadDialog(() => import('../components/schedule/BatchImportModal.vue')))
+const ImageCropModal = defineAsyncComponent(() => loadDialog(() => import('../components/schedule/ImageCropModal.vue')))
+const ImportConflictModal = defineAsyncComponent(() => loadDialog(() => import('../components/schedule/ImportConflictModal.vue')))
+const ExceptionsModal = defineAsyncComponent(() => loadDialog(() => import('../components/schedule/ExceptionsModal.vue')))
+const SemesterModal = defineAsyncComponent(() => loadDialog(() => import('../components/schedule/SemesterModal.vue')))
+const TimeSettingsModal = defineAsyncComponent(() => loadDialog(() => import('../components/schedule/TimeSettingsModal.vue')))
 const StudyPlanner = defineAsyncComponent(() => import('../components/learning/StudyPlanner.vue'))
 
 const domain = useDomainCommands()
@@ -50,8 +57,6 @@ const courseProfiles = computed(() => buildCourseProgress({ courses: courses.val
 const courseProgress = computed(() => Object.fromEntries(courseProfiles.value.map((item) => [String(item.course.id), { pending: item.pendingTasks.length, overdue: item.overdueCount } ])))
 const learningPendingCount = computed(() => courseProfiles.value.filter((item) => !item.archived).reduce((sum, item) => sum + item.pendingTasks.length, 0))
 const editingProfile = computed(() => courseProfiles.value.find((item) => String(item.course.id) === String(editingId.value)))
-const showArchivedCourses = ref(false)
-const visibleCourses = computed(() => showArchivedCourses.value ? courses.value : courses.value.filter((course) => !isArchived(course)))
 const courseTemplateCommands = useCourseTemplateCommands()
 const { templates: courseTemplates } = courseTemplateCommands
 const toast = ref({ open: false, message: '', type: 'info', actionLabel: '', undoFn: null, viewFn: null, duration: 3200 })
@@ -78,11 +83,14 @@ const showScheduleSettings = ref(false)
 const timeSettingsRef = ref(null)
 const showSemester = ref(false)
 const showExceptions = ref(false)
-const clampViewWeek = (week) => Math.min(Math.max(week, 0), MAX_WEEK)
-const viewWeek = ref(clampViewWeek(appCurrentWeek.value))
-const mobileView = ref(typeof window !== 'undefined' && window.matchMedia('(max-width: 1024px)').matches ? 'day' : 'week')
-const mobileDay = ref(currentDayIndex.value)
-const todayIdx = currentDayIndex
+const {
+  showArchivedCourses, visibleCourses, courseQuery, normalizedCourseQuery, filteredCourses,
+  clampViewWeek, viewWeek, mobileView, mobileDay, todayIdx, calendarOpen,
+  selectedCalendarDate, calendarMinDate, calendarMaxDate, curWeek, weekMeetings,
+  searchOccurrences, searchCourseCount, selectedScheduleDate, weekCourseCount,
+  weekTeachingDayCount, weekDateRange, showReturnToday, returnToToday, goWeek,
+  goToScheduleDate, formatSearchDate, setMobileView, shiftMobileDay,
+} = useScheduleWorkspace({ courses })
 
 /* ---- 业务块拆分：状态与函数都在各自的 composable 里，这里只做依赖注入 ---- */
 const campusSeason = useScheduleCampusSeason({ courses, courseTemplates })
@@ -145,6 +153,13 @@ const {
   importExcel, recognizeCroppedImage, retryBatchOCR, continueBatchResults,
 } = ocrImport
 
+const { mounted: mountedDialogs, load: loadDialog } = useScheduleDialogMounts({
+  editor: () => showForm.value, manager: () => showCourseManager.value,
+  batch: () => showBatch.value, crop: () => showImageCropper.value,
+  conflict: () => showImportConflict.value, exceptions: () => showExceptions.value,
+  semester: () => showSemester.value, time: () => showTimeEditor.value,
+})
+
 function stopBackgroundWork() {
   // KeepAlive 离开页面不会卸载组件；此时主动取消 OCR，避免它继续占用新页面的 CPU。
   timeSettingsRef.value?.stopBackgroundWork()
@@ -154,12 +169,6 @@ function stopBackgroundWork() {
 onDeactivated(stopBackgroundWork)
 onBeforeUnmount(stopBackgroundWork)
 
-const curWeek = computed(() => clampViewWeek(appCurrentWeek.value))
-
-function goWeek(delta) {
-  const next = viewWeek.value + delta
-  if (next >= 0 && next <= MAX_WEEK) viewWeek.value = next
-}
 
 function saveSemester(value) {
   if (!value) return
@@ -172,10 +181,6 @@ function semesterPreview() {
   return weekOf(appToday.value)
 }
 
-function shiftMobileDay(delta) {
-  const next = mobileDay.value + delta
-  if (next >= 0 && next <= 6) mobileDay.value = next
-}
 
 const sortedExceptions = computed(() =>
   scheduleExceptions.value.filter((item) => item?.date).slice().sort((a, b) => a.date.localeCompare(b.date)),
@@ -244,112 +249,185 @@ function confirmDeleteCourse() {
 
 <template>
   <div class="page schedule-page">
-    <div class="head">
-      <h1 class="page-title">课程表</h1>
-      <div class="head-btns">
-        <button class="btn btn-ghost" :aria-expanded="showArchivedCourses" @click="showArchivedCourses = !showArchivedCourses">{{ showArchivedCourses ? '返回当前课程' : '历史课程' }}</button>
-        <button class="btn btn-ghost" :aria-expanded="showScheduleSettings" @click="showScheduleSettings = !showScheduleSettings">{{ showScheduleSettings ? '收起设置' : '更多设置' }}</button>
+    <header class="schedule-heading">
+      <div class="schedule-title-copy">
+        <p class="schedule-eyebrow">学习安排</p>
+        <div class="schedule-title-line">
+          <h1 class="page-title">课程表</h1>
+          <Badge v-if="showArchivedCourses" variant="secondary" class="archive-badge">历史课程</Badge>
+        </div>
+        <p class="schedule-subtitle" aria-live="polite">
+          <strong>{{ viewWeek < 1 ? '开学前' : `第 ${viewWeek} 周` }}</strong>
+          <span>{{ weekDateRange }}</span>
+          <span aria-hidden="true">·</span>
+          <span>{{ weekCourseCount }} 门课程，{{ weekTeachingDayCount }} 个上课日</span>
+        </p>
       </div>
-    </div>
+      <div class="head-btns">
+        <Button variant="outline" size="sm" class="btn btn-ghost" :aria-pressed="showArchivedCourses" @click="showArchivedCourses = !showArchivedCourses">{{ showArchivedCourses ? '返回当前课程' : '历史课程' }}</Button>
+        <Button variant="outline" size="sm" class="btn btn-ghost" :aria-expanded="showScheduleSettings" aria-controls="schedule-settings" @click="showScheduleSettings = !showScheduleSettings">{{ showScheduleSettings ? '收起设置' : '课表设置' }}</Button>
+      </div>
+    </header>
 
     <LearningNavigation current="schedule" />
 
-    <section v-if="showScheduleSettings" class="schedule-settings" aria-label="课程表设置">
-      <div><h2>课程</h2><button class="btn btn-ghost" @click="openCourseManager">☷ 批量管理</button><button class="btn btn-ghost" @click="openBatchShift">⇩ 导入课程表</button></div>
-      <div><h2>时间与日期</h2><button class="btn btn-ghost" @click="showSemester = true">📅 学期</button><button class="btn btn-ghost" @click="openTimeSettings">🕐 作息与节次</button></div>
-      <div><h2>显示</h2><button class="btn btn-ghost" @click="mobileView = mobileView === 'day' ? 'week' : 'day'">{{ mobileView === 'day' ? '切换整周视图' : '切换单日视图' }}</button></div>
-    </section>
+    <Card v-if="showScheduleSettings" id="schedule-settings" class="schedule-settings panel" role="region" aria-label="课程表设置">
+      <div class="settings-heading">
+        <h2>课表设置</h2>
+        <p>管理课程、学期时间和课表显示方式</p>
+      </div>
+      <div class="settings-group">
+        <h3>课程</h3>
+        <div class="settings-actions">
+          <Button variant="outline" size="sm" class="btn btn-ghost" @click="openCourseManager">批量管理</Button>
+          <Button variant="outline" size="sm" class="btn btn-ghost" @click="openBatchShift">导入课程表</Button>
+        </div>
+      </div>
+      <div class="settings-group">
+        <h3>学期与作息</h3>
+        <div class="settings-actions">
+          <Button variant="outline" size="sm" class="btn btn-ghost" @click="showSemester = true">学期起始日</Button>
+          <Button variant="outline" size="sm" class="btn btn-ghost" @click="openTimeSettings">作息与节次</Button>
+        </div>
+        <div v-if="showCampusSwitcher" class="settings-choice">
+          <span class="seg-label">校区</span>
+          <div class="seg" role="group" aria-label="选择校区">
+            <button v-for="campus in timeConfig.campuses" :key="campus.id" :class="{ on: settingsSchedule.campusId === campus.id }" :aria-pressed="settingsSchedule.campusId === campus.id" @click="selectScheduleCampus(campus.id)">{{ campus.name }}</button>
+          </div>
+        </div>
+        <div v-if="showSeasonSwitcher" class="settings-choice">
+          <span class="seg-label">作息方案</span>
+          <div class="seg" role="group" aria-label="选择作息方案">
+            <button :class="{ on: timeConfig.autoSeason && currentAutoStatus.available }" :aria-pressed="timeConfig.autoSeason && currentAutoStatus.available" :disabled="!currentAutoStatus.available" :title="currentAutoStatus.available ? '根据当前日期自动选择' : '完善生效日期并解决冲突后可用'" @click="enableAutoSeason">自动</button>
+            <button v-for="season in seasonsForCurrentCampus" :key="season.id" :class="{ on: !timeConfig.autoSeason && settingsSchedule.seasonId === season.id }" :aria-pressed="!timeConfig.autoSeason && settingsSchedule.seasonId === season.id" @click="timeConfig.autoSeason = false; timeConfig.currentSeason = season.id">{{ season.name }}</button>
+          </div>
+        </div>
+      </div>
+      <div class="settings-group">
+        <h3>外观</h3>
+        <div class="settings-choice">
+          <span class="seg-label">课表样式</span>
+          <div class="seg" role="group" aria-label="选择课表样式">
+            <button :class="{ on: appearance.scheduleSkin === 'classic' }" :aria-pressed="appearance.scheduleSkin === 'classic'" @click="appearance.scheduleSkin = 'classic'">经典</button>
+            <button :class="{ on: appearance.scheduleSkin === 'notebook' }" :aria-pressed="appearance.scheduleSkin === 'notebook'" @click="appearance.scheduleSkin = 'notebook'">笔记</button>
+            <button :class="{ on: appearance.scheduleSkin === 'timeline' }" :aria-pressed="appearance.scheduleSkin === 'timeline'" @click="appearance.scheduleSkin = 'timeline'">极简</button>
+          </div>
+        </div>
+      </div>
+      <p v-if="autoModeInfo" class="auto-mode-hint" :class="autoModeInfo.mode" role="status">
+        <template v-if="autoModeInfo.mode === 'auto'">{{ autoModeInfo.text }}<small>{{ autoModeInfo.hint }}</small></template>
+        <template v-else-if="autoModeInfo.mode === 'unavailable'">{{ autoModeInfo.text }}<small>{{ autoModeInfo.hint }}</small></template>
+        <template v-else>{{ autoModeInfo.text }}<small>{{ autoModeInfo.hint }}</small></template>
+      </p>
+    </Card>
 
-    <div class="toolbar">
-      <div class="seg-group skin-switcher">
-        <span class="seg-label">皮肤</span>
-        <div class="seg">
-          <button :class="{ on: appearance.scheduleSkin === 'classic' }" @click="appearance.scheduleSkin = 'classic'">经典</button>
-          <button :class="{ on: appearance.scheduleSkin === 'notebook' }" @click="appearance.scheduleSkin = 'notebook'">笔记</button>
-          <button :class="{ on: appearance.scheduleSkin === 'timeline' }" @click="appearance.scheduleSkin = 'timeline'">极简</button>
+    <Card class="schedule-toolbar panel" role="region" aria-label="课程表导航与操作">
+      <div class="schedule-toolbar-main">
+        <div class="week-navigation">
+          <span class="toolbar-label">查看周次</span>
+          <div class="week-control" role="group" aria-label="切换周次">
+            <Button type="button" variant="outline" size="icon" class="week-step tap-target" aria-label="上一周" :disabled="viewWeek <= 0" @click="goWeek(-1)"><span aria-hidden="true">‹</span></Button>
+            <Popover v-model:open="calendarOpen">
+              <PopoverTrigger as-child>
+                <Button type="button" variant="ghost" class="week-current date-jump-button" aria-label="选择日期并跳转到对应周次">
+                  <span class="date-jump-copy">
+                    <strong>{{ viewWeek < 1 ? '开学前' : `第 ${viewWeek} 周` }}</strong>
+                    <span>{{ weekDateRange }}</span>
+                  </span>
+                  <svg class="date-jump-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4.5" width="18" height="17" rx="2"/><path d="M16 2.5v4M8 2.5v4M3 10h18M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01"/></svg>
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent align="center" :side-offset="8" class="schedule-date-popover">
+                <PopoverHeader class="schedule-date-heading">
+                  <PopoverTitle>跳转到日期</PopoverTitle>
+                  <PopoverDescription>选择日期后显示所在周次和星期</PopoverDescription>
+                </PopoverHeader>
+                <Calendar
+                  :model-value="selectedCalendarDate"
+                  :placeholder="selectedCalendarDate"
+                  :default-placeholder="selectedCalendarDate"
+                  :min-value="calendarMinDate"
+                  :max-value="calendarMaxDate"
+                  locale="zh-CN"
+                  class="schedule-date-calendar"
+                  @update:model-value="goToScheduleDate"
+                />
+              </PopoverContent>
+            </Popover>
+            <Button type="button" variant="outline" size="icon" class="week-step tap-target" aria-label="下一周" :disabled="viewWeek >= MAX_WEEK" @click="goWeek(1)"><span aria-hidden="true">›</span></Button>
+          </div>
+          <Button v-if="showReturnToday" type="button" variant="outline" class="today-button" @click="returnToToday">回到今天</Button>
+        </div>
+
+        <div class="schedule-toolbar-actions">
+          <div class="seg-group mobile-view-switcher">
+            <span class="sr-only">视图</span>
+            <ToggleGroup
+              type="single"
+              variant="outline"
+              size="sm"
+              class="schedule-view-toggle"
+              :model-value="mobileView"
+              aria-label="选择课表视图"
+              @update:model-value="setMobileView"
+            >
+              <ToggleGroupItem value="day">单日</ToggleGroupItem>
+              <ToggleGroupItem value="week">整周</ToggleGroupItem>
+            </ToggleGroup>
+          </div>
+          <Button variant="outline" class="btn btn-ghost" title="放假、调课与补课" @click="openExceptionManager">课程调整</Button>
+          <Button class="btn btn-primary add-course-button" @click="openAdd()"><span aria-hidden="true">＋</span>添加课程</Button>
         </div>
       </div>
-      <div v-if="showCampusSwitcher" class="seg-group schedule-campus">
-        <span class="seg-label">校区</span>
-        <div class="seg">
-          <button
-            v-for="campus in timeConfig.campuses"
-            :key="campus.id"
-            :class="{ on: settingsSchedule.campusId === campus.id }"
-            @click="selectScheduleCampus(campus.id)"
-          >
-            {{ campus.name }}
-          </button>
+
+      <div class="schedule-toolbar-bottom">
+        <div class="schedule-search" role="search" aria-label="搜索课程">
+          <label class="sr-only" for="schedule-course-search">搜索课程、教师或教室</label>
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.8" cy="10.8" r="6.8"/><path d="m16 16 4.5 4.5"/></svg>
+          <input id="schedule-course-search" v-model="courseQuery" type="search" placeholder="搜索课程、教师或教室" autocomplete="off" />
+          <button v-if="normalizedCourseQuery" type="button" class="search-clear" aria-label="清除课程搜索" @click="courseQuery = ''">清除</button>
         </div>
+        <p class="schedule-summary" aria-live="polite">
+          <template v-if="normalizedCourseQuery">全学期找到 <strong>{{ searchCourseCount }}</strong> 门课程 · <strong>{{ searchOccurrences.length }}</strong> 条安排</template>
+          <template v-else>该周 <strong>{{ weekCourseCount }}</strong> 门课程 · <strong>{{ weekTeachingDayCount }}</strong> 个上课日</template>
+        </p>
       </div>
-      <div v-if="showSeasonSwitcher" class="seg-group schedule-season">
-        <span class="seg-label">作息</span>
-        <div class="seg">
-          <button
-            :class="{ on: timeConfig.autoSeason && currentAutoStatus.available }"
-            :disabled="!currentAutoStatus.available"
-            :title="currentAutoStatus.available ? '根据当前日期自动选择' : '完善生效日期并解决冲突后可用'"
-            @click="enableAutoSeason"
-          >
-            自动
-          </button>
-          <button
-            v-for="season in seasonsForCurrentCampus"
-            :key="season.id"
-            :class="{ on: !timeConfig.autoSeason && settingsSchedule.seasonId === season.id }"
-            @click="timeConfig.autoSeason = false; timeConfig.currentSeason = season.id"
-          >
-            {{ season.name }}
-          </button>
+    </Card>
+
+    <section v-if="normalizedCourseQuery" class="schedule-search-results panel" role="region" aria-label="全学期课程搜索结果">
+      <header class="schedule-search-results-head">
+        <div>
+          <h2>全学期搜索结果</h2>
+          <p>点击一条安排，跳转到对应周和日期</p>
         </div>
-      </div>
-      <div class="seg-group">
-        <span class="seg-label">周次</span>
-        <!-- 翻周按钮内部只有「‹」「›」，读屏会把它念成符号，方向信息完全丢失，所以用
-             aria-label 说清是上一周还是下一周；符号本身保持可见，不需要 aria-hidden。
-             .seg button 的命中区在手机上偏小，一并标记 tap-target 由粗指针样式放大。 -->
-        <div class="seg">
-          <button class="tap-target" aria-label="上一周" :disabled="viewWeek <= 0" @click="goWeek(-1)">‹</button>
-          <!-- 周次本身不是一个动作，只是把「现在在第几周」显示在两个翻周按钮中间。
-               它原来写成一个 button 元素，于是变成一个按下去什么都不会发生的 Tab
-               停靠点，读屏也会念「第 5 周 按钮」暗示可以点。这里改成非交互的 span：
-               它不该出现在 Tab 顺序里，也不该被当成控件。 -->
-          <span class="wn" :class="{ thisweek: viewWeek === curWeek }" aria-live="polite">
-            {{ viewWeek < 1 ? '开学前' : `第 ${viewWeek} 周` }}
+        <p class="schedule-search-results-count">找到 <strong>{{ searchCourseCount }}</strong> 门课程、<strong>{{ searchOccurrences.length }}</strong> 条安排</p>
+      </header>
+      <div v-if="searchOccurrences.length" class="schedule-search-results-list">
+        <button
+          v-for="item in searchOccurrences"
+          :key="item.id"
+          type="button"
+          class="schedule-search-result"
+          :aria-current="item.date === selectedScheduleDate ? 'date' : undefined"
+          @click="goToScheduleDate(item.date)"
+        >
+          <span class="schedule-search-result-course">
+            <strong>{{ item.course.name || '未命名课程' }}</strong>
+            <small>{{ [item.course.teacher, item.course.room].filter(Boolean).join(' · ') || '未填写教师和教室' }}</small>
           </span>
-          <button class="tap-target" aria-label="下一周" :disabled="viewWeek >= MAX_WEEK" @click="goWeek(1)">›</button>
-        </div>
-        <button v-if="viewWeek !== curWeek" class="btn btn-ghost" @click="viewWeek = curWeek">
-          回到本周
+          <span class="schedule-search-result-date">第 {{ item.week }} 周 · {{ DAYS[item.day] }} · {{ formatSearchDate(item.date) }}</span>
+          <span class="schedule-search-result-arrow" aria-hidden="true">→</span>
         </button>
       </div>
-
-      <div class="seg-group mobile-view-switcher">
-        <span class="seg-label">视图</span>
-        <div class="seg">
-          <button :class="{ on: mobileView === 'day' }" @click="mobileView = 'day'">单日</button>
-          <button :class="{ on: mobileView === 'week' }" @click="mobileView = 'week'">整周</button>
-        </div>
-      </div>
-
-      <!-- 自动/手动作息模式提示（仅在多作息季时出现） -->
-      <p v-if="autoModeInfo" class="auto-mode-hint" :class="autoModeInfo.mode">
-        <template v-if="autoModeInfo.mode === 'auto'">⏱ {{ autoModeInfo.text }}<small>{{ autoModeInfo.hint }}</small></template>
-        <template v-else-if="autoModeInfo.mode === 'unavailable'">⚠ {{ autoModeInfo.text }}<small>{{ autoModeInfo.hint }}</small></template>
-        <template v-else>✋ {{ autoModeInfo.text }}<small>{{ autoModeInfo.hint }}</small></template>
-      </p>
-
-      <div class="add-actions">
-        <button class="btn btn-ghost" title="放假、调课与补课" @click="openExceptionManager">🗓 课程调整</button>
-        <button class="btn btn-primary" @click="openAdd()">＋ 添加课程</button>
-      </div>
-    </div>
+      <p v-else class="schedule-search-results-empty">没有找到符合条件的课程安排，试试课程名、教师名或教室名。</p>
+    </section>
 
     <p v-if="focusMessage" class="notice-success" role="status">{{ focusMessage }}</p>
 
     <ScheduleGrid
-      :courses="visibleCourses"
+      :courses="filteredCourses"
       :view-week="viewWeek"
+      :max-week="MAX_WEEK"
       :mobile-view="mobileView"
       :mobile-day="mobileDay"
       :current-week="curWeek"
@@ -357,20 +435,24 @@ function confirmDeleteCourse() {
       :focused-course-id="focusedCourseId"
       :appearance="appearance"
       :course-progress="courseProgress"
+      :search-query="courseQuery"
+      :week-meeting-count="weekMeetings.length"
+      :search-result-count="searchOccurrences.length"
       @open-add="openAdd"
       @open-edit="openEdit"
       @mobile-day-change="shiftMobileDay"
       @open-adjustments="openExceptionManager"
+      @clear-search="courseQuery = ''"
     />
 
-    <section v-if="!showArchivedCourses" class="learning-plan-section panel" aria-label="课表学习联动">
+    <Card v-if="!showArchivedCourses" class="learning-plan-section panel" role="region" aria-label="课表学习联动">
       <button type="button" class="learning-plan-toggle" :aria-expanded="showLearningPlan" aria-controls="schedule-learning-plan" @click="showLearningPlan = !showLearningPlan"><span><b>学习安排</b><small>{{ learningPendingCount ? `${learningPendingCount} 项课程待办，利用课表空档继续推进` : '把课程待办、复习和专注接到课表上' }}</small></span><span>{{ showLearningPlan ? '收起 ↑' : '展开 →' }}</span></button>
       <div v-if="showLearningPlan" id="schedule-learning-plan" class="learning-plan-content"><StudyPlanner /></div>
-    </section>
+    </Card>
 
     <ScheduleNote />
 
-    <CourseEditorModal
+    <CourseEditorModal v-if="mountedDialogs.editor"
       :open="showForm"
       :editing-id="editingId"
       :form="form"
@@ -447,7 +529,7 @@ function confirmDeleteCourse() {
       @confirm="confirmWholeScheduleReplacement"
     />
 
-    <CourseManagerModal
+    <CourseManagerModal v-if="mountedDialogs.manager"
       :open="showCourseManager"
       :courses="visibleCourses"
       :templates="courseTemplates"
@@ -467,7 +549,7 @@ function confirmDeleteCourse() {
       @delete-template="deleteCourseTemplate"
     />
 
-    <BatchImportModal
+    <BatchImportModal v-if="mountedDialogs.batch"
       :show="showBatch"
       :text="batchText"
       :rows="batchRows"
@@ -500,9 +582,9 @@ function confirmDeleteCourse() {
       @finish-import="finishBatchImport"
     />
 
-    <ImageCropModal :show="showImageCropper" :file="cropImageFile" @close="showImageCropper = false; cropImageFile = null" @confirm="recognizeCroppedImage" />
+    <ImageCropModal v-if="mountedDialogs.crop" :show="showImageCropper" :file="cropImageFile" @close="showImageCropper = false; cropImageFile = null" @confirm="recognizeCroppedImage" />
 
-    <ImportConflictModal
+    <ImportConflictModal v-if="mountedDialogs.conflict"
       :show="showImportConflict"
       :draft="importDraft"
       :summary="importSummary"
@@ -518,7 +600,7 @@ function confirmDeleteCourse() {
       @replace-all="commitWholeScheduleReplacement"
     />
 
-<ExceptionsModal
+<ExceptionsModal v-if="mountedDialogs.exceptions"
       :show="showExceptions"
       :exceptions="sortedExceptions"
       :days="DAYS"
@@ -530,7 +612,7 @@ function confirmDeleteCourse() {
       @remove="removeException"
     />
 
-    <SemesterModal
+    <SemesterModal v-if="mountedDialogs.semester"
       :show="showSemester"
       :start-date="semester.start"
       :preview-week="semesterPreview()"
@@ -538,7 +620,7 @@ function confirmDeleteCourse() {
       @save="saveSemester"
     />
 
-    <TimeSettingsModal
+    <TimeSettingsModal v-if="mountedDialogs.time"
       ref="timeSettingsRef"
       :show="showTimeEditor"
       :course-count-by-period-id="courseCountByPeriodId"
@@ -620,11 +702,6 @@ function confirmDeleteCourse() {
 .schedule-settings .btn {
   padding:7px 10px;
   font-size:var(--fs-12)}
-.toolbar {
-  flex-wrap:wrap;
-  align-items:center;
-  gap:16px;
-  display:flex}
 .seg-group {
   align-items:center;
   gap:8px;
@@ -656,23 +733,6 @@ function confirmDeleteCourse() {
   background:var(--primary);
   color:var(--on-primary,#fff);
   font-weight:var(--fw-600)}
-.seg .wn {
-  min-width:84px;
-  color:var(--text);
-  border-radius:var(--radius-8);
-  flex:none;
-  place-items:center;
-  padding:7px 14px;
-  font-size:var(--fs-14);
-  font-weight:var(--fw-700);
-  display:grid}
-.seg .wn.thisweek {
-  color:var(--primary)}
-.add-actions {
-  gap:8px;
-  min-width:0;
-  margin-left:auto;
-  display:flex}
 .exception-tag.makeup {
   color:var(--primary);
   background:var(--primary-soft)}
@@ -700,20 +760,8 @@ function confirmDeleteCourse() {
   color:var(--warning)}
 .mobile-view-switcher {
   display:flex}
-@media (min-width:901px) {
-  .schedule-page>.toolbar {
-  border:1px solid var(--border);
-  background:var(--card);
-  border-radius:var(--radius-12);
-  gap:12px;
-  padding:12px 14px}
-.schedule-page>.toolbar .seg-group {
-  gap:7px}
-.schedule-page>.toolbar .seg button {
-  padding:7px 11px}
-}
 @media (max-width:760px) {
-  .skin-switcher,.schedule-campus,.schedule-season {
+  .skin-switcher {
   display:none}
 .schedule-settings {
   grid-template-columns:1fr;
@@ -733,26 +781,12 @@ function confirmDeleteCourse() {
   min-height:44px;
   padding-inline-start:12px;
   padding-inline-end:12px}
-.toolbar {
-  align-items:flex-start;
-  gap:12px}
 .seg-group {
   flex-direction:row;
   align-items:center;
   gap:5px;
   max-width:100%}
 .mobile-view-switcher .seg-label { display:none; }
-.toolbar .seg {
-  max-width:calc(100vw - 40px)}
-.add-actions {
-  width:100%;
-  margin-left:0}
-.add-actions .btn {
-  text-overflow:ellipsis;
-  white-space:nowrap;
-  flex:1;
-  min-width:0;
-  overflow:hidden}
 .manager-head,.clear-row {
   flex-direction:column;
   align-items:flex-start}
@@ -770,6 +804,252 @@ function confirmDeleteCourse() {
   width:auto}
 .mobile-view-switcher .seg,.mobile-view-switcher .seg button {
   flex:1}
+}
+
+/* 课表页沿用全站颜色、圆角、焦点与动效令牌，并把导航、操作和设置分成清晰的组合区。 */
+.schedule-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 2px 0;
+}
+.schedule-title-copy { display: grid; gap: 5px; min-width: 0; }
+.schedule-eyebrow {
+  color: var(--primary);
+  font-size: var(--fs-11);
+  font-weight: var(--fw-800);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.schedule-title-line { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; }
+.schedule-title-line .page-title { line-height: 1.2; }
+.archive-badge {
+  padding: 4px 9px;
+  border-radius: var(--radius-pill);
+  background: var(--primary-soft);
+  color: var(--primary);
+  font-size: var(--fs-11);
+  font-weight: var(--fw-700);
+}
+.schedule-subtitle {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+  color: var(--muted);
+  font-size: var(--fs-13);
+  line-height: 1.5;
+}
+.schedule-subtitle strong { color: var(--text); font-weight: var(--fw-700); }
+.head-btns { align-items: center; flex-wrap: wrap; }
+.schedule-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-14);
+  background: var(--card);
+  box-shadow: var(--shadow-sm);
+}
+.schedule-toolbar-main,
+.schedule-toolbar-actions,
+.week-navigation,
+.week-control,
+.schedule-toolbar-bottom {
+  display: flex;
+  align-items: center;
+}
+.schedule-toolbar-main { justify-content: space-between; gap: 18px; }
+.week-navigation { flex-wrap: wrap; gap: 10px; min-width: 0; }
+.toolbar-label { color: var(--muted); font-size: var(--fs-12); font-weight: var(--fw-600); }
+.week-control { gap: 4px; }
+.week-step {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-10);
+  background: var(--card);
+  font-size: var(--fs-22);
+  line-height: 1;
+  transition: background var(--dur-fast) var(--ease-standard), border-color var(--dur-fast) var(--ease-standard);
+}
+.week-step:hover:not(:disabled) { border-color: var(--border-strong); background: var(--bg-tint); }
+.week-current { display: grid; min-width: 126px; gap: 2px; padding: 3px 8px; text-align: center; }
+.week-current strong { color: var(--text); font-size: var(--fs-14); font-weight: var(--fw-750); }
+.week-current span { color: var(--muted); font-size: var(--fs-11); font-variant-numeric: tabular-nums; }
+.date-jump-button {
+  grid-template-columns: minmax(0, 1fr) auto;
+  min-height: 42px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-9);
+  background: transparent;
+  cursor: pointer;
+}
+.date-jump-button:hover { background: var(--bg-tint); }
+.date-jump-copy { display: grid; gap: 2px; min-width: 0; }
+.date-jump-icon { width: 16px; height: 16px; color: var(--primary); }
+.schedule-date-heading { padding: 4px 8px 0; }
+.schedule-date-heading [data-slot="popover-title"] { color: var(--text); font-size: var(--fs-13); font-weight: var(--fw-700); }
+.schedule-date-heading [data-slot="popover-description"] { color: var(--muted); font-size: var(--fs-11); }
+.schedule-date-calendar { padding: 6px; }
+.schedule-view-toggle {
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-10);
+  background: var(--card);
+}
+.schedule-view-toggle [data-slot="toggle-group-item"] {
+  min-height: 36px;
+  padding: 6px 12px;
+  border: 0;
+  border-radius: var(--radius-8);
+  color: var(--muted);
+}
+.schedule-view-toggle [data-state="on"] { background: var(--primary); color: var(--on-primary); }
+.schedule-view-toggle [data-state="on"]:hover { background: var(--primary-hover); color: var(--on-primary); }
+.today-button {
+  min-height: 36px;
+  padding: 6px 11px;
+  color: var(--primary);
+  border: 1px solid color-mix(in srgb, var(--primary) 24%, var(--border));
+  border-radius: var(--radius-8);
+  background: var(--primary-soft);
+  font-size: var(--fs-12);
+  font-weight: var(--fw-700);
+}
+.schedule-toolbar-actions { flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.schedule-toolbar-actions .seg { padding: 3px; }
+.schedule-toolbar-actions .seg button { min-height: 36px; padding: 6px 12px; }
+.schedule-toolbar-actions .btn { min-height: 40px; padding: 8px 12px; }
+.add-course-button { white-space: nowrap; }
+.add-course-button span { margin-right: 3px; font-size: var(--fs-18); vertical-align: -1px; }
+.schedule-toolbar-bottom {
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.schedule-search {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: min(100%, 350px);
+  min-height: 42px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-9);
+  background: var(--bg-tint);
+  transition: border-color var(--dur-fast) var(--ease-standard), box-shadow var(--dur-fast) var(--ease-standard);
+}
+.schedule-search:focus-within { border-color: var(--primary); box-shadow: 0 0 0 3px var(--focus-ring); }
+.schedule-search svg { flex: none; width: 18px; height: 18px; fill: none; stroke: var(--muted); stroke-width: 1.8; stroke-linecap: round; }
+.schedule-search input {
+  width: 100%;
+  min-width: 0;
+  padding: 8px 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  font-size: var(--fs-13);
+}
+.schedule-search input:focus { border: 0; box-shadow: none; }
+.schedule-search input::placeholder { color: var(--ink-faint); }
+.search-clear { flex: none; padding: 4px 5px; color: var(--primary); border: 0; background: transparent; font-size: var(--fs-11); font-weight: var(--fw-700); }
+.schedule-summary { color: var(--muted); font-size: var(--fs-12); font-variant-numeric: tabular-nums; }
+.schedule-summary strong { color: var(--text); font-weight: var(--fw-700); }
+.schedule-search-results {
+  display: grid;
+  gap: 10px;
+  padding: 13px 15px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-14);
+  background: var(--card);
+  box-shadow: var(--shadow-sm);
+}
+.schedule-search-results-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px 14px; }
+.schedule-search-results-head h2 { color: var(--text); font-size: var(--fs-13); font-weight: var(--fw-750); }
+.schedule-search-results-head > div p,
+.schedule-search-results-count { color: var(--muted); font-size: var(--fs-11); }
+.schedule-search-results-count strong { color: var(--text); font-weight: var(--fw-700); }
+.schedule-search-results-list { display: grid; max-height: min(360px, 48vh); overflow: auto; border: 1px solid var(--border); border-radius: var(--radius-10); }
+.schedule-search-result { display: grid; grid-template-columns: minmax(0, 1fr) auto 18px; align-items: center; gap: 12px; min-height: 52px; padding: 8px 11px; color: var(--text); border: 0; border-bottom: 1px solid var(--border); background: var(--card); text-align: left; cursor: pointer; transition: background var(--dur-fast) var(--ease-standard); }
+.schedule-search-result:last-child { border-bottom: 0; }
+.schedule-search-result:hover,
+.schedule-search-result[aria-current="date"] { background: var(--primary-soft); }
+.schedule-search-result-course { display: grid; gap: 3px; min-width: 0; }
+.schedule-search-result-course strong { overflow: hidden; color: var(--text); font-size: var(--fs-12); text-overflow: ellipsis; white-space: nowrap; }
+.schedule-search-result-course small { overflow: hidden; color: var(--muted); font-size: var(--fs-10); text-overflow: ellipsis; white-space: nowrap; }
+.schedule-search-result-date { color: var(--ink-soft); font-size: var(--fs-11); white-space: nowrap; }
+.schedule-search-result-arrow { color: var(--primary); font-size: var(--fs-16); text-align: right; }
+.schedule-search-results-empty { padding: 12px; color: var(--muted); border: 1px dashed var(--border); border-radius: var(--radius-10); font-size: var(--fs-12); }
+.schedule-settings {
+  grid-template-columns: minmax(0, .8fr) minmax(0, 1.4fr) minmax(0, 1fr);
+  align-items: start;
+  gap: 16px;
+  padding: 16px;
+  background: var(--card);
+  box-shadow: var(--shadow-sm);
+}
+.schedule-settings > div { display: flex; flex-direction: column; align-items: flex-start; gap: 9px; }
+.settings-heading { grid-column: 1 / -1; padding-bottom: 2px; }
+.settings-heading h2 { color: var(--text); font-size: var(--fs-15); font-weight: var(--fw-750); }
+.settings-heading p { color: var(--muted); font-size: var(--fs-12); }
+.schedule-settings .settings-group h3 { color: var(--ink-soft); font-size: var(--fs-11); font-weight: var(--fw-700); }
+.schedule-settings .settings-actions,
+.schedule-settings .settings-choice { display: flex; flex-direction: row; align-items: center; flex-wrap: wrap; gap: 7px; }
+.schedule-settings .settings-actions .btn { min-height: 38px; padding: 7px 11px; font-size: var(--fs-12); }
+.schedule-settings .settings-choice .seg-label { flex: none; font-size: var(--fs-11); }
+.schedule-settings .settings-choice .seg button { min-height: 34px; padding: 6px 10px; font-size: var(--fs-12); }
+.schedule-settings .auto-mode-hint { grid-column: 1 / -1; margin: 0; padding: 9px 11px; border-radius: var(--radius-8); background: var(--bg-tint); }
+.schedule-settings .auto-mode-hint small { color: var(--ink-soft); }
+
+@media (max-width: 900px) {
+  .schedule-settings { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .schedule-settings .settings-heading,
+  .schedule-settings .auto-mode-hint { grid-column: 1 / -1; }
+  .schedule-toolbar-main { align-items: flex-start; }
+  .schedule-toolbar-actions { gap: 6px; }
+}
+
+@media (max-width: 760px) {
+  .schedule-heading { flex-direction: column; align-items: stretch; gap: 10px; }
+  .head-btns { width: 100%; max-width: none; flex-wrap: wrap; padding: 0; overflow: visible; }
+  .schedule-toolbar-main { flex-direction: column; gap: 12px; }
+  .week-navigation { width: 100%; justify-content: space-between; }
+  .schedule-toolbar-actions { width: 100%; justify-content: flex-start; }
+  .schedule-toolbar-actions .mobile-view-switcher { margin-right: auto; }
+  .schedule-toolbar-bottom { align-items: stretch; }
+  .schedule-search { width: 100%; }
+  .schedule-summary { width: 100%; }
+  .schedule-search-result { grid-template-columns: minmax(0, 1fr) auto; gap: 5px 8px; }
+  .schedule-search-result-date { grid-column: 1; grid-row: 2; }
+  .schedule-search-result-arrow { grid-column: 2; grid-row: 1 / span 2; }
+  .schedule-settings { grid-template-columns: 1fr; gap: 12px; }
+  .schedule-settings .settings-heading,
+  .schedule-settings .auto-mode-hint { grid-column: auto; }
+}
+
+@media (max-width: 520px) {
+  .schedule-toolbar { padding: 12px; }
+  .schedule-toolbar-main { gap: 10px; }
+  .toolbar-label { display: none; }
+  .week-navigation { gap: 6px; }
+  .week-control { flex: 1; justify-content: center; }
+  .week-current { min-width: 104px; }
+  .week-step { width: 38px; height: 38px; }
+  .schedule-toolbar-actions { gap: 6px; }
+  .schedule-toolbar-actions .btn { padding-inline: 9px; }
+  .schedule-toolbar-actions .add-course-button { flex: 1; }
+  .schedule-summary { font-size: var(--fs-11); }
+  .schedule-subtitle { gap: 5px; font-size: var(--fs-12); }
 }
 
 </style>

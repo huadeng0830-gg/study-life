@@ -89,4 +89,8 @@ function preset(days, hours, minutes) {
 .shift-change small { color: var(--ink-faint); }
 .shift-change strong { font-weight: 500; }
 .shift-body > button { justify-self: start; }
+@media (max-width: 900px), (pointer: coarse) and (max-height: 520px) {
+  .time-shift button, .shift-check { min-height: 44px; }
+  .time-shift button { min-width: 44px; }
+}
 </style>

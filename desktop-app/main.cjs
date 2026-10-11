@@ -4,7 +4,8 @@ const { app, BrowserWindow, dialog, ipcMain, Menu, net, protocol, session, shell
 const fs = require('node:fs')
 const path = require('node:path')
 const { pathToFileURL } = require('node:url')
-const { createUpdaterController } = require('./updaterController.cjs')
+const { createUpdaterController, classifyError } = require('./updaterController.cjs')
+const { createVerifiedNsisUpdaterClass } = require('./verifiedNsisUpdater.cjs')
 const { routeWindowsCachePaths } = require('./cachePaths.cjs')
 
 const APP_SCHEME = 'app'
@@ -149,12 +150,38 @@ async function readUpdatePublisherConfiguration() {
 async function initializeDesktopUpdater() {
   if (!app.isPackaged || !isWindows) return false
   try {
-    const { autoUpdater } = require('electron-updater')
+    const { NsisUpdater } = require('electron-updater')
+    const VerifiedNsisUpdater = createVerifiedNsisUpdaterClass(NsisUpdater)
+    const autoUpdater = new VerifiedNsisUpdater()
+    autoUpdater.disableWebInstaller = true
+    const { CancellationToken } = require('builder-util-runtime')
     const hasPublisherConfiguration = await readUpdatePublisherConfiguration()
+    const pendingPath = path.join(app.getPath('userData'), 'update-pending.json')
+    let pendingInstall = null
+    try {
+      const value = JSON.parse(fs.readFileSync(pendingPath, 'utf8'))
+      if (Number.isFinite(value.savedAt) && Date.now() - value.savedAt < 86400000) pendingInstall = value
+    } catch (error) {
+      if (error.code !== 'ENOENT') console.warn('[desktop:update] PENDING_RECORD_READ_FAILED')
+    }
+    autoUpdater.logger = {
+      info: () => {}, debug: () => {},
+      warn: (error) => console.warn('[desktop:update]', classifyError(error).code),
+      error: (error) => console.error('[desktop:update]', classifyError(error).code),
+    }
     updaterController = createUpdaterController({
       autoUpdater,
       currentVersion: app.getVersion(),
       publish: publishUpdateState,
+      createCancellationToken: () => new CancellationToken(),
+      installVerifiedUpdate: (options) => autoUpdater.quitAndInstall(true, true, options),
+      pendingInstall,
+      savePendingInstall: (value) => {
+        fs.mkdirSync(path.dirname(pendingPath), { recursive: true })
+        fs.writeFileSync(`${pendingPath}.tmp`, JSON.stringify(value), 'utf8')
+        fs.renameSync(`${pendingPath}.tmp`, pendingPath)
+      },
+      clearPendingInstall: () => { if (fs.existsSync(pendingPath)) fs.unlinkSync(pendingPath) },
       enabled: hasPublisherConfiguration,
       disabledStage: hasPublisherConfiguration ? undefined : 'unavailable',
       disabledMessage: '此安装包缺少 Windows 发布者签名配置，自动更新已停用。请安装正式签名版本。',
@@ -184,6 +211,10 @@ ipcMain.handle('study-life:update-download', async (event) => {
 ipcMain.handle('study-life:update-install', (event) => {
   if (!isTrustedUpdateSender(event)) throw new Error('Untrusted update request')
   return updaterController ? updaterController.install() : false
+})
+ipcMain.handle('study-life:update-cancel', (event) => {
+  if (!isTrustedUpdateSender(event)) throw new Error('Untrusted update request')
+  return updaterController ? updaterController.cancel() : false
 })
 
 function safeExternalUrl(value) {

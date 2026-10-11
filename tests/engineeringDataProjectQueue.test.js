@@ -6,8 +6,9 @@ const projectRequest = vi.hoisted(() => vi.fn())
 vi.mock('../src/services/projects.js', () => ({ projectRequest }))
 vi.mock('../src/composables/accountAuth.js', () => ({ accountUser: ref(null) }))
 vi.mock('../src/composables/dataVault.js', () => ({
+  clearPendingRecoveryDraft: vi.fn(async () => true), savePendingRecoveryDraft: vi.fn(async () => true),
   mirrorLocalValue: vi.fn(), mirrorLocalValues: vi.fn(),
-  clearDataVault: vi.fn(), setMirrorErrorHandler: vi.fn(), setMirrorTimingHandler: vi.fn(),
+  clearDataVault: vi.fn(), setMirrorErrorHandler: vi.fn(), setMirrorSuccessHandler: vi.fn(), setMirrorTimingHandler: vi.fn(),
 }))
 
 let bridge

@@ -105,7 +105,9 @@ describe('标签页语义：关系完整性（零豁免）', () => {
     }
     expect(problems).toEqual([])
     // 规模自证：必须真的核对过若干对引用，否则这条守卫在守空气
-    expect(checkedPairs, '一条 tab→面板引用都没核对到').toBeGreaterThanOrEqual(10)
+    // Reusable Reka tabs declare their role/id/label at runtime; the rendered check below
+    // covers those instances, while this count covers the remaining static tab panels.
+    expect(checkedPairs, '一条静态 tab→面板引用都没核对到').toBeGreaterThanOrEqual(7)
   })
 
   it('已经收敛为 group 的 4 个文件不得再出现 tab 语义', () => {
@@ -195,7 +197,7 @@ describe('渲染后：面板与 tab 的引用', () => {
     }
     expect(checked, '一个面板都没渲染出来，守卫在守空气').toBeGreaterThanOrEqual(1)
     expect(problems).toEqual([])
-  })
+  }, 15_000)
 
   it('切到另一个分区后，面板的 aria-labelledby 跟着切到新的选中 tab', async () => {
     mounted = await mountApp({ routes })

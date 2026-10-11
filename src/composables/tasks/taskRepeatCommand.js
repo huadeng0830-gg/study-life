@@ -1,5 +1,5 @@
 import { createNextRepeatingTask, nextRepeatDueDate, normalizeTaskRepeat, repeatsTask } from '../taskRecurrence.js'
-import { taskRepeatBase, taskTimePlanError, timeClockExists } from './taskTimePlan.ts'
+import { taskRepeatBase, taskTimePlanError, timeClockExists } from './taskTimePlan'
 
 function anchorDay(value) {
   const day = Number(value)

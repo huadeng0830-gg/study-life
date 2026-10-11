@@ -1,8 +1,16 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-const fake = vi.hoisted(() => ({ records: new Map(), values: {}, failWrites: false, restore: vi.fn() }))
+const fake = vi.hoisted(() => ({ records: new Map(), values: {}, failWrites: false, drafts: [], restore: vi.fn() }))
 vi.mock('../src/composables/store/cloudAccess.js', () => ({ restoreStoredValues: (...args) => fake.restore(...args) }))
-import { accountDefaultValues, clearRetiredNotesFromAccountRecord, mergeRetiredQuickNotes, prepareAccountLocalData, recoverAccountDataSwitch } from '../src/composables/accountLocalData.js'
+vi.mock('../src/composables/dataVault.js', async original => ({
+  ...await original(),
+  getPendingRecoveryDrafts: async ownerId => fake.drafts.filter(draft => draft.ownerId === ownerId),
+  clearPendingRecoveryDraft: async (ownerId, key, token) => {
+    fake.drafts = fake.drafts.filter(draft => draft.ownerId !== ownerId || draft.key !== key || draft.token !== token)
+    return true
+  },
+}))
+import { accountDefaultValues, clearRetiredNotesFromAccountRecord, mergeRetiredQuickNotes, prepareAccountLocalData, recoverAccountDataSwitch, withAccountDataLock } from '../src/composables/accountLocalData.js'
 import { ACCOUNT_SWITCH_MARKER_KEY, readAccountDataOwner, setAccountDataOwner } from '../src/composables/accountSyncIdentity.js'
 function fakeIndexedDB() {
   let initialized = false
@@ -26,6 +34,7 @@ function fakeIndexedDB() {
 }
 beforeEach(() => {
   localStorage.clear(); setAccountDataOwner(''); fake.records.clear(); fake.failWrites = false
+  fake.drafts = []
   fake.values = accountDefaultValues(); fake.values.sl_tasks = [{ id: 'private-a', title: '虚构账号 A 的记录' }]
   fake.restore.mockReset(); fake.restore.mockImplementation(async values => { fake.values = structuredClone(values) })
   vi.stubGlobal('indexedDB', fakeIndexedDB())
@@ -126,5 +135,55 @@ describe('本机账号切换隔离和持久化保护', () => {
       .rejects.toThrow('其他页面')
     expect(readAccountDataOwner()).toBe('fictional-a')
     expect(fake.restore).not.toHaveBeenCalled()
+  })
+  it('返回账号 A 时只在快照基线未变的情况下恢复隔离的最新草稿', async () => {
+    setAccountDataOwner('fictional-a')
+    await prepareAccountLocalData('fictional-b', () => fake.values)
+    fake.values.sl_tasks = [{ id: 'private-b', title: '虚构账号 B 的记录' }]
+    fake.drafts.push({ ownerId: 'fictional-a', key: 'sl_tasks', token: 'draft-a',
+      previousKnown: true, previousRaw: JSON.stringify(fake.records.get('fictional-a').values.sl_tasks),
+      raw: JSON.stringify([{ id: 'private-a-latest', title: '虚构账号 A 的未保存记录' }]) })
+
+    await prepareAccountLocalData('fictional-a', () => fake.values)
+
+    expect(fake.values.sl_tasks).toEqual([{ id: 'private-a-latest', title: '虚构账号 A 的未保存记录' }])
+    expect(fake.records.get('fictional-b').values.sl_tasks).toEqual([{ id: 'private-b', title: '虚构账号 B 的记录' }])
+    expect(fake.drafts).toEqual([])
+  })
+  it('返回账号 A 时快照基线已变化则保留草稿并拒绝静默合并', async () => {
+    setAccountDataOwner('fictional-a')
+    await prepareAccountLocalData('fictional-b', () => fake.values)
+    fake.values.sl_tasks = [{ id: 'private-b', title: '虚构账号 B 的记录' }]
+    const savedA = fake.records.get('fictional-a')
+    fake.records.set('fictional-a', { ...savedA, values: { ...savedA.values, sl_tasks: [{ id: 'a-newer-device' }] } })
+    fake.drafts.push({ ownerId: 'fictional-a', key: 'sl_tasks', token: 'draft-a', previousKnown: true,
+      previousRaw: JSON.stringify([{ id: 'private-a' }]), raw: JSON.stringify([{ id: 'private-a-latest' }]) })
+
+    await expect(prepareAccountLocalData('fictional-a', () => fake.values)).rejects.toThrow('存在冲突')
+
+    expect(fake.values.sl_tasks).toEqual([{ id: 'private-b', title: '虚构账号 B 的记录' }])
+    expect(fake.drafts).toHaveLength(1)
+    expect(readAccountDataOwner()).toBe('fictional-b')
+  })
+  it('恢复与账号切换共用 Web Lock，第二个标签页不会同时进入数据临界区', async () => {
+    let held = false
+    let release
+    let entered
+    const enteredPromise = new Promise((resolve) => { entered = resolve })
+    const firstOperation = new Promise((resolve) => { release = resolve })
+    const request = vi.fn(async (_name, _options, action) => {
+      if (held) return action(null)
+      held = true
+      try { return await action({}) } finally { held = false }
+    })
+    Object.defineProperty(navigator, 'locks', { configurable: true, value: { request } })
+    const first = withAccountDataLock(async () => { entered(); await firstOperation })
+    await enteredPromise
+
+    await expect(withAccountDataLock(async () => 'unsafe'))
+      .rejects.toThrow('其他页面正在处理账号数据')
+    release()
+    await first
+    expect(request).toHaveBeenCalledTimes(2)
   })
 })

@@ -137,6 +137,15 @@ export function declaredEvents(source) {
   for (const m of code.matchAll(/defineEmits\(\s*\[([\s\S]*?)\]/g)) {
     for (const name of collectQuoted(m[1])) declared.add(name)
   }
+  // Vue 3.3+ also permits the payload contract to be declared as a type literal:
+  // defineEmits<{ close: []; complete: [result: Result] }>(). Keep this scanner
+  // aligned with that supported form instead of forcing components to drop types.
+  for (const m of code.matchAll(/defineEmits\s*<([\s\S]*?)>\s*\(/g)) {
+    const body = m[1].replace(/^\s*\{/, '')
+    for (const event of body.matchAll(/^\s*([A-Za-z_$][\w$]*)\s*:/gm)) declared.add(event[1])
+    // Overload form: defineEmits<{ (event: 'close'): void }>().
+    for (const event of m[1].matchAll(/\bevent\s*:\s*['"]([^'"]+)['"]/g)) declared.add(event[1])
+  }
   for (const m of code.matchAll(/\bemits\s*:\s*\[([\s\S]*?)\]/g)) {
     for (const name of collectQuoted(m[1])) declared.add(name)
   }
@@ -183,6 +192,14 @@ describe('组件事件契约：emit 出去的名字必须登记过', () => {
     `
     expect([...usedEvents(mutated)]).toEqual(['update:showQuickRecord'])
     expect(declaredEvents(mutated).has('update:showQuickRecord')).toBe(false)
+  })
+
+  it('识别带 payload 类型的 defineEmits 声明', () => {
+    const typed = `const emit = defineEmits<{
+      close: []
+      complete: [result: { source: string; count: number }]
+    }>()`
+    expect([...declaredEvents(typed)]).toEqual(['close', 'complete'])
   })
 
   it('注释里的 emit 不算数（假的调用不能把判据带红）', () => {

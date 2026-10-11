@@ -2,6 +2,7 @@
 import EmptyState from '../../components/EmptyState.vue'
 import VirtualList from '../../components/VirtualList.vue'
 import SwipeActionItem from '../../components/SwipeActionItem.vue'
+import { Button } from '../../components/ui/button'
 import LedgerBudgetCard from './LedgerBudgetCard.vue'
 import { catInfo } from '../../composables/ledger.js'
 import { dayLabel, moneyWithCurrency } from '../../utils/formatters.js'
@@ -61,6 +62,7 @@ defineEmits([
   'open-fx-settings',
   'open-budget-settings',
   'open-quick',
+  'open-import',
   'open-category-manager',
   'use-frequent',
   'toggle-filters',
@@ -137,7 +139,10 @@ const moneyHero = moneyRow
 
   <section class="ledger-quick-entry" aria-label="快速记账">
     <div><b>刚刚发生了什么？</b><small>金额 + 内容就能记下，分类和账户会沿用默认值</small></div>
-    <button class="btn btn-primary" type="button" @click="$emit('open-quick')">＋ 记一笔</button>
+    <div class="ledger-quick-entry-actions">
+      <Button class="ledger-entry-button" type="button" @click="$emit('open-quick')">＋ 记一笔</Button>
+      <Button class="ledger-entry-button" type="button" variant="outline" @click="$emit('open-import')">导入账单</Button>
+    </div>
   </section>
 
   <!-- 待处理：固定账单临近（无则整块隐藏） -->
@@ -457,19 +462,24 @@ const moneyHero = moneyRow
   gap:14px;
   padding:12px 14px;
   display:flex}
-.ledger-quick-entry div {
+.ledger-quick-entry > div:not(.ledger-quick-entry-actions) {
   flex-direction:column;
   gap:2px;
   min-width:0;
   display:flex}
+.ledger-quick-entry-actions {
+  align-items:center;
+  flex:none;
+  gap:8px;
+  display:flex}
+.ledger-entry-button {
+  flex:none;
+  min-height:42px}
 .ledger-quick-entry b {
   font-size:var(--fs-13)}
 .ledger-quick-entry small {
   color:var(--ink-soft);
   font-size:var(--fs-11)}
-.ledger-quick-entry .btn {
-  flex:none;
-  min-height:42px}
 .pending-list {
   flex-direction:column;
   gap:8px;
@@ -729,7 +739,11 @@ const moneyHero = moneyRow
   flex-direction:column;
   align-items:flex-start;
   gap:9px}
-.ledger-quick-entry .btn {
+.ledger-quick-entry-actions {
+  width:100%;
+  flex-direction:column;
+  align-items:stretch}
+.ledger-entry-button {
   width:100%}
 .search-row .btn-sm {
   padding:8px 12px}

@@ -103,7 +103,7 @@ function updateKeyboardVisibility() {
     viewportBaselineHeight = Math.max(screenHeight, window.innerHeight || 0, viewportHeight)
   }
   const threshold = Math.max(120, viewportBaselineHeight * 0.18)
-  mobileKeyboardOpen.value = window.matchMedia('(max-width: 900px)').matches
+  mobileKeyboardOpen.value = window.matchMedia('(max-width: 900px), (pointer: coarse) and (max-height: 520px)').matches
     && Boolean(editable)
     && viewportBaselineHeight - viewportHeight > threshold
 }
@@ -406,9 +406,9 @@ function openMobileTool(key) {
        所以要在抽屉打开期间把根节点整体抬到 .task-pill 之上（见样式块里的层叠说明）。 -->
   <aside class="sidebar" :class="{ collapsed, 'drawer-open': showMobileMore, 'keyboard-open': mobileKeyboardOpen }">
     <div class="brand">
-      <span class="brand-mark">UP</span>
+      <span class="brand-mark" aria-hidden="true">三</span>
       <span class="brand-copy">
-        <strong>控制台</strong>
+        <strong>三两事</strong>
         <small>STUDY &amp; LIFE</small>
       </span>
     </div>
@@ -623,9 +623,9 @@ function openMobileTool(key) {
   height: 38px;
   flex: 0 0 38px;
   color: #fff;
-  font-size: var(--fs-11);
+  font-size: var(--fs-20);
   font-weight: var(--fw-900);
-  letter-spacing: 0.06em;
+  letter-spacing: 0;
   border-radius: var(--radius-12) var(--radius-4) var(--radius-12) var(--radius-4);
   background: linear-gradient(145deg, var(--brand-grad-a), var(--brand-grad-b));
   box-shadow: 0 8px 18px rgba(69, 111, 232, 0.22);
@@ -781,19 +781,17 @@ function openMobileTool(key) {
 }
 .sidebar-action-row {
   display: flex;
+  flex-direction: column;
   align-items: stretch;
-  gap: 6px;
-}
-.sidebar-action-row .appearance-item {
-  flex: 1;
+  gap: 4px;
 }
 .quick-add-button {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 4px;
-  flex: 0 0 64px;
-  width: 64px;
+  flex: 0 0 auto;
+  width: 100%;
   min-height: 40px;
   border: 1px solid var(--border);
   border-radius: var(--radius-10);
@@ -818,12 +816,15 @@ function openMobileTool(key) {
 .quick-add-button.active .quick-add-symbol {
   transform: rotate(45deg);
 }
+.sidebar.collapsed .quick-add-button { width: 40px; }
+.sidebar.collapsed .quick-add-label { display: none; }
 .sidebar.collapsed .sidebar-action-row {
   flex-direction: column;
   align-items: center;
 }
 .theme-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
@@ -836,10 +837,7 @@ function openMobileTool(key) {
   font-weight: var(--fw-800);
   letter-spacing: 0.08em;
 }
-.theme-dots {
-  display: flex;
-  gap: 7px;
-}
+.theme-dots { display: flex; flex-wrap: wrap; gap: 7px; }
 .theme-dot {
   width: 18px;
   height: 18px;
@@ -865,7 +863,7 @@ function openMobileTool(key) {
   justify-items: center;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 900px), (pointer: coarse) and (max-height: 520px) {
   .sidebar,
   .sidebar.collapsed {
     position: fixed;
@@ -924,7 +922,7 @@ function openMobileTool(key) {
   }
   .mobile-nav-item > span { height: 22px; font-size: var(--fs-20); line-height: 22px; }
   .mobile-nav-item small,
-  .mobile-more-item small { overflow: hidden; max-width: 100%; font-size: var(--fs-11); line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
+  .mobile-more-item small { max-width: 100%; font-size: var(--fs-11); line-height: 1.3; overflow-wrap: anywhere; white-space: normal; }
   .mobile-nav-item.active { color: var(--primary); font-weight: var(--fw-800); background: var(--primary-soft); }
   .capture-trigger { color: var(--primary); font-weight: var(--fw-750); }
   .capture-trigger > span { width: 28px; border-radius: var(--radius-8); background: var(--primary-soft); }
@@ -1005,7 +1003,7 @@ function openMobileTool(key) {
   .mobile-nav { grid-template-columns: repeat(var(--mobile-nav-count, 5), minmax(0, 1fr)); gap: 0; }
 }
 
-@media (min-width: 901px) {
+@media (min-width: 901px) and (min-height: 521px), (min-width: 901px) and (pointer: fine) {
   .mobile-nav,
   .mobile-more-sheet,
   .mobile-more-backdrop { display: none; }

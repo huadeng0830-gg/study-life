@@ -1,4 +1,5 @@
 import vue from '@vitejs/plugin-vue'
+import tailwindcss from '@tailwindcss/vite'
 import { env } from 'node:process'
 import { defineConfig, loadEnv } from 'vite'
 import { getSupabaseConfig } from './src/services/supabase.js'
@@ -39,11 +40,14 @@ export default defineConfig(({ mode }) => {
     // 浏览器回归测试的临时配置和数据库会被独占，开发服务器无需监视它们。
     watch: { ignored: ['**/.vitest-tmp/**', '**/.playwright-cli/**'] },
   },
-  resolve: desktopBuild ? {
+  resolve: {
     alias: {
-      'virtual:pwa-register': fileURLToPath(new URL('./desktop/pwa-register-shim.js', import.meta.url)),
+      '@': fileURLToPath(new URL('./src', import.meta.url)),
+      ...(desktopBuild ? {
+        'virtual:pwa-register': fileURLToPath(new URL('./desktop/pwa-register-shim.js', import.meta.url)),
+      } : {}),
     },
-  } : undefined,
+  },
   define: {
     'globalThis.__STUDY_LIFE_RELEASE__': JSON.stringify(appRelease),
   },
@@ -68,13 +72,17 @@ export default defineConfig(({ mode }) => {
     {
       // 输出纯文本版本号，供应用更新检查与服务器版本比对（绕过一切缓存）。
       name: 'emit-release-version',
+      transformIndexHtml() {
+        return [{ tag: 'meta', attrs: { name: 'study-life-release', content: appRelease }, injectTo: 'head' }]
+      },
       generateBundle() {
         this.emitFile({ type: 'asset', fileName: 'version.txt', source: appRelease })
       },
     },
     vue(),
+    tailwindcss(),
     ...(desktopBuild ? [] : [VitePWA({
-      registerType: 'autoUpdate',
+      registerType: 'prompt',
       injectRegister: false,
       // 图标只在安装 PWA 时读取，不占用页面切换缓存带宽。
       includeManifestIcons: false,
@@ -128,7 +136,7 @@ export default defineConfig(({ mode }) => {
         ],
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
         navigateFallbackDenylist: [/^\/desktop-auth-return(?:\/|$)/],
-        skipWaiting: true,
+        skipWaiting: false,
         clientsClaim: true,
         // Remove old Workbox cache buckets so obsolete release chunks do not accumulate.
         cleanupOutdatedCaches: true,
