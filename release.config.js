@@ -7,6 +7,15 @@
 // 3. 更早的版本逐条下移，最多保留 3 个版本，超出即删除。
 export const RELEASE_UPDATES = Object.freeze([
   {
+    version: '2026年10月11日-版本2',
+    signature: 'aee4defa00',
+    notes: [
+      '日程时间刻度改为首尾相接的循环滚轮，分钟精确到每一分钟，已有时间原样落位',
+      '去掉滚轮上下淡出遮罩，并修复刻度列宽、滚动与时间选择问题',
+      '调整桌面侧栏与今天页层级，优化内容区留白、快捷入口和中文字体',
+    ],
+  },
+  {
     version: '2026年10月11日-版本1',
     signature: 'aee2384ace',
     notes: [
@@ -37,23 +46,13 @@ export const RELEASE_UPDATES = Object.freeze([
       '有新版时绕过慢速 Service Worker 检查并同步资源',
     ],
   },
-  {
-    version: '2026年10月10日-版本6',
-    signature: '996b432f90',
-    notes: [
-      '优化待办筛选、排序与批量改期，并修复重要日期的边界计算',
-      '统一课程表、重要日期、账本与设置界面的主题组件',
-      '补齐导入错误、加载反馈、表单标签与屏幕阅读器状态',
-      '修复重要日期与备份提醒样式，并让课表搜索覆盖全学期、支持跳转到具体日期',
-    ],
-  },
 ])
 
 // 对用户展示、version.txt 和更新检测统一使用此版本号；后续同日发布只递增“版本”序号。
 export const RELEASE_VERSION = RELEASE_UPDATES[0].version
 
 // 与第一条签名保持一致，交给 vite.config.js 校验源码一致性。
-export const RELEASE_SOURCE_SIGNATURE = 'aee2384ace'
+export const RELEASE_SOURCE_SIGNATURE = 'aee4defa00'
 
 // 兼容旧引用：当前版本的更新说明。
 export const RELEASE_NOTES = RELEASE_UPDATES[0].notes

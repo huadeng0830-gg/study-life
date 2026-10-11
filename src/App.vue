@@ -549,22 +549,22 @@ function t(key) {
    （dist/assets 的编译 CSS，去掉 scope 属性后反压缩）整体重建，**原有注释在重建中丢失**。
    第三十八轮已按 scope 归属清掉其中属于别组件的同值副本。新增规则时请照常写注释。 */
 .sidebar {
-  background:var(--card);
-  border-right:1px solid var(--border);
+  background:#183a35;
+  border-right:1px solid #2c5048;
   z-index:20;
-  width:220px;
+  width:242px;
   height:100vh;
   height: 100dvh;
   transition:width var(--dur-base) var(--ease-standard), flex-basis var(--dur-base) var(--ease-standard);
   flex-direction:column;
-  flex:0 0 220px;
+  flex:0 0 242px;
   padding:20px 14px;
   display:flex;
   position:sticky;
   top:0}
 .sidebar.collapsed {
-  flex-basis:72px;
-  width:72px}
+  flex-basis:76px;
+  width:76px}
 /* 第三十九轮：这里原先还有 25 条引用 **Sidebar.vue 内部节点** 类的规则（.brand / .brand-mark /
    .nav / .nav-item / .data-item / .icon / .backup-dot / .collapse-btn / .footer / .kbd-hint /
    .sidebar-foot / .sidebar-action-row / .quick-add-button / .quick-add-symbol / .theme-row /
@@ -580,6 +580,7 @@ function t(key) {
   .sidebar,.sidebar.collapsed {
   width:100%;
   height:auto;
+  background:var(--card);
   /* 安全区：index.html 用了 viewport-fit=cover，刘海与手势条会压到内容上，
      所以所有贴边横条都要把 env(safe-area-inset-*) 加进内边距或定位里（下面还有多处同样处理）。 */
   padding:6px max(10px, env(safe-area-inset-right)) calc(6px + env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
@@ -685,11 +686,11 @@ to {
   flex:1;
   width:100%;
   min-width:0;
-  max-width:1280px;
+  max-width:1440px;
   margin:0 auto;
   /* 横向也要让开刘海/灵动岛：index.html 是 viewport-fit=cover，横屏时左右会顶边。
      max(…, env(safe-area-inset-*)) 在无安全区时退回原固定值，桌面不受影响。 */
-  padding:32px max(40px, env(safe-area-inset-right, 0px)) 48px max(40px, env(safe-area-inset-left, 0px))}
+  padding:32px clamp(32px, 4vw, 60px) 52px clamp(32px, 4vw, 60px)}
 .desktop-toolbar { display:none; }
 .desktop-search-trigger,
 .desktop-record-trigger {
@@ -750,9 +751,12 @@ to {
     display:flex;
     align-items:center;
     gap:12px;
-    margin:0 0 14px;
-    padding:8px 0;
+    margin:0 0 20px;
+    padding:10px 0 13px;
     background:var(--bg)}
+  .desktop-search-trigger,
+  .desktop-record-trigger { border-radius:var(--radius-9); }
+  .desktop-search-trigger { border-color:var(--border-strong); }
   .desktop-search-trigger { width:min(340px, 48%); }
   .desktop-record-trigger { gap:7px; padding-inline:10px; }
 }
@@ -827,10 +831,10 @@ to {
 
 .content-mid {
   max-width:1220px;
-  padding:30px max(36px, env(safe-area-inset-right, 0px)) 46px max(36px, env(safe-area-inset-left, 0px))}
+  padding:30px clamp(28px, 3.5vw, 52px) 46px clamp(28px, 3.5vw, 52px)}
 .content-narrow {
   max-width:1080px;
-  padding:30px max(36px, env(safe-area-inset-right, 0px)) 44px max(36px, env(safe-area-inset-left, 0px))}
+  padding:30px clamp(26px, 3vw, 44px) 44px clamp(26px, 3vw, 44px)}
 }
 @media (max-width: 900px), (pointer: coarse) and (max-height: 520px) {
   .layout {

@@ -158,6 +158,26 @@ describe('WheelPicker', () => {
     expect(selected).toEqual([15])
   })
 
+  it('不循环时滚到底停在末刻度，不会滚进空白', async () => {
+    const selected = []
+    mount(() => h(WheelPicker, {
+      values: buildWheelValues(0, 23),
+      modelValue: 0,
+      itemHeight: 44,
+      'onUpdate:modelValue': (value) => selected.push(value),
+    }))
+    await nextTick()
+    const column = document.querySelector('.wheel-column')
+    const scrollTo = vi.fn()
+    column.scrollTo = scrollTo
+    vi.useFakeTimers()
+    column.scrollTop = 99999
+    column.dispatchEvent(new Event('scroll'))
+    vi.advanceTimersByTime(140)
+    expect(selected).toEqual([23])
+    expect(scrollTo).toHaveBeenCalledWith({ top: 23 * 44, behavior: 'smooth' })
+  })
+
   it('方向键可以逐格调整，Home/End 直达首尾', async () => {
     // 受控组件：父级必须把回传值写回 modelValue，方向键才能连续生效
     const selected = []
@@ -188,14 +208,71 @@ describe('WheelPicker', () => {
 })
 
 describe('TimeWheelSheet', () => {
-  it('打开时把已有时间吸附到分钟刻度上', async () => {
+  it('分钟精确到每一分，00-59 连续可选，已有值原样落位', async () => {
     mount(() => h(TimeWheelSheet, { open: true, modelValue: '14:33' }))
     await nextTick()
     await nextTick()
-    // 33 分不是 5 的倍数，滚轮只能停在 35，预览必须与之一致
-    expect(document.querySelector('.time-wheel-preview').textContent.trim()).toBe('14:35')
+    // 分钟列是 0-59 每分钟一格，不是 5 分钟一格，所以 33 分原样停住
+    expect(document.querySelector('.time-wheel-preview').textContent.trim()).toBe('14:33')
     const selected = [...document.querySelectorAll('.wheel-item.on')].map((item) => item.textContent.trim())
-    expect(selected).toEqual(['14', '35'])
+    expect(selected).toEqual(['14', '33'])
+  })
+
+  it('两列都是从 0 铺到上限的一整条连续刻度，并首尾各留一圈', async () => {
+    mount(() => h(TimeWheelSheet, { open: true, modelValue: '09:20' }))
+    await nextTick()
+    await nextTick()
+    const columns = [...document.querySelectorAll('.wheel-column')]
+    const labels = columns.map((column) =>
+      [...column.querySelectorAll('.wheel-item')].map((item) => Number(item.textContent.trim())))
+    // 一圈之内：小时 0→23，分钟 0→59，中间不跳格
+    expect(labels[0].slice(0, 24)).toEqual(buildWheelValues(0, 23, 1))
+    expect(labels[1].slice(0, 60)).toEqual(buildWheelValues(0, 59, 1))
+    // 后面是同一份刻度的重复，才可能一直拨下去而不撞到硬边界
+    expect(labels[0].length % 24).toBe(0)
+    expect(labels[1].length % 60).toBe(0)
+    expect(labels[0].length / 24).toBeGreaterThanOrEqual(3)
+    expect(labels[1].length / 60).toBeGreaterThanOrEqual(3)
+    // 只有中间那圈是真选项，其余几圈是循环备份，读屏应当忽略
+    expect(columns[0].querySelectorAll('[role="option"]').length).toBe(24)
+    expect(columns[1].querySelectorAll('[role="option"]').length).toBe(60)
+  })
+
+  it('刻度首尾相接：00 往回拨是 23，再往前跨过接缝回到 00，两端都卡不住', async () => {
+    mount(() => h(TimeWheelSheet, { open: true, modelValue: '00:00' }))
+    await nextTick()
+    await nextTick()
+    vi.useFakeTimers()
+    const columns = [...document.querySelectorAll('.wheel-column')]
+    const scrollTo = vi.fn()
+    columns[0].scrollTo = scrollTo
+    const preview = () => document.querySelector('.time-wheel-preview').textContent.trim()
+    const step = 44
+    // 循环模式把 00 放在中间那圈，两边都留了余量，所以起点不是 0
+    const start = columns[0].scrollTop
+    expect(start).toBeGreaterThan(0)
+    const wrapTo = async (top) => {
+      columns[0].scrollTop = top
+      columns[0].dispatchEvent(new Event('scroll'))
+      vi.advanceTimersByTime(140)
+      await nextTick()
+      return preview()
+    }
+    // 接缝往回：00 的上一个刻度是 23
+    expect(await wrapTo(start - step)).toBe('23:00')
+    // 接缝往前：第 24 格回到 00
+    expect(await wrapTo(start + 24 * step)).toBe('00:00')
+    // 再往前一格是 01 —— 可以一直朝同一个方向拨
+    expect(await wrapTo(start + 25 * step)).toBe('01:00')
+    // 每轮结束都把落点搬回中间那圈：位移是整圈的整数倍，画面逐像素不变
+    const recenters = scrollTo.mock.calls
+      .map(([options]) => options)
+      .filter((options) => options?.behavior === 'auto')
+    expect(recenters.length).toBeGreaterThan(0)
+    for (const { top } of recenters) {
+      expect(top).toBeGreaterThanOrEqual(start)
+      expect(top).toBeLessThanOrEqual(start + 23 * step)
+    }
   })
 
   it('留空时给出 09:00 作为默认起点', async () => {

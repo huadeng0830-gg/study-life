@@ -409,7 +409,7 @@ function openMobileTool(key) {
       <span class="brand-mark" aria-hidden="true">三</span>
       <span class="brand-copy">
         <strong>三两事</strong>
-        <small>STUDY &amp; LIFE</small>
+        <small>学习与生活</small>
       </span>
     </div>
 
@@ -592,10 +592,10 @@ function openMobileTool(key) {
 
 <style scoped>
 .sidebar {
-  width: 220px;
-  flex: 0 0 220px;
-  background: var(--card);
-  border-right: 1px solid var(--border);
+  width: 242px;
+  flex: 0 0 242px;
+  background: #183a35;
+  border-right: 1px solid #2c5048;
   padding: 20px 14px;
   display: flex;
   flex-direction: column;
@@ -607,8 +607,8 @@ function openMobileTool(key) {
   transition: width var(--dur-base) var(--ease-standard), flex-basis var(--dur-base) var(--ease-standard);
 }
 .sidebar.collapsed {
-  width: 72px;
-  flex-basis: 72px;
+  width: 76px;
+  flex-basis: 76px;
 }
 .brand {
   display: flex;
@@ -873,6 +873,7 @@ function openMobileTool(key) {
     bottom: 0;
     width: 100%;
     height: auto;
+    background: var(--card);
     padding: 6px max(10px, env(safe-area-inset-right))
       calc(6px + env(safe-area-inset-bottom))
       max(10px, env(safe-area-inset-left));
@@ -1013,5 +1014,95 @@ function openMobileTool(key) {
   .sidebar-search-action,
   .sidebar .quick-add-button { display: none; }
   .sidebar-action-row { gap: 0; }
+}
+
+/* Desktop navigation uses a single deep-green rail so the page canvas can stay quiet. */
+@media (min-width: 901px) {
+  .sidebar {
+    color: #eaf2ee;
+    background: #183a35;
+    border-right-color: #2c5048;
+    padding: 22px 14px 16px;
+  }
+
+  .brand {
+    padding: 3px 7px 20px;
+    margin-bottom: 5px;
+    border-bottom: 1px solid rgba(225, 239, 232, 0.12);
+  }
+
+  .brand-mark {
+    color: #183a35;
+    background: #d5ebdd;
+    box-shadow: none;
+    border-radius: 11px 4px 11px 4px;
+  }
+
+  .brand-copy strong { color: #f3f8f5; letter-spacing: -0.02em; }
+  .brand-copy small { color: #a9c2b8; letter-spacing: 0.1em; }
+  .nav { gap: 17px; }
+  .nav-group { gap: 4px; }
+  .nav-group-title,
+  .tools-title { color: #a9c2b8; font-weight: var(--fw-600); letter-spacing: 0.04em; }
+  .nav-group-chevron { color: #91ada2; }
+  .nav-group-items { gap: 3px; }
+  .nav-item {
+    min-height: 41px;
+    color: #c8d8d1;
+    border-radius: var(--radius-8);
+    transition: background var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard);
+  }
+  .nav-item:hover { color: #fff; background: rgba(235, 247, 241, 0.09); }
+  .nav-item.active {
+    color: #fff;
+    background: rgba(235, 247, 241, 0.12);
+    font-weight: var(--fw-700);
+  }
+  .nav-item.active::before {
+    position: absolute;
+    top: 9px;
+    bottom: 9px;
+    left: 4px;
+    width: 3px;
+    border-radius: var(--radius-pill);
+    background: #b3dfc1;
+    content: '';
+  }
+  .sidebar-foot { border-top-color: rgba(225, 239, 232, 0.14); }
+  .sidebar .footer { color: #a9c2b8; border-top-color: rgba(225, 239, 232, 0.14); }
+  .collapse-btn {
+    color: #c8d8d1;
+    border-color: rgba(225, 239, 232, 0.2);
+    background: rgba(235, 247, 241, 0.06);
+  }
+  .collapse-btn:hover { color: #fff; background: rgba(235, 247, 241, 0.12); }
+  .quick-add-button {
+    color: #183a35;
+    border-color: #d5ebdd;
+    background: #d5ebdd;
+  }
+  .quick-add-button:hover,
+  .quick-add-button.active {
+    color: var(--on-primary, #fff);
+    border-color: var(--primary);
+    background: var(--primary);
+  }
+  .theme-label { color: #a9c2b8; }
+  .theme-dot { border-color: #183a35; box-shadow: 0 0 0 1px rgba(225, 239, 232, 0.32); }
+  .theme-dot.on { box-shadow: 0 0 0 2px #b3dfc1; }
+}
+
+@media (min-width: 901px) and (prefers-color-scheme: dark) {
+  :root[data-theme='dark'] .sidebar { background: #102b26; border-right-color: #294941; }
+  :root[data-theme='dark'] .brand-mark { color: #102b26; }
+  :root[data-theme='dark'] .quick-add-button { color: #102b26; border-color: #d5ebdd; background: #d5ebdd; }
+}
+
+@media (max-width: 900px), (pointer: coarse) and (max-height: 520px) {
+  .sidebar {
+    color: var(--text);
+    background: var(--card);
+    box-shadow: 0 -8px 24px rgba(24, 58, 48, 0.08);
+  }
 }
 </style>

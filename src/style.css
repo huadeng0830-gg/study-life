@@ -3,10 +3,10 @@
 
 :root {
   color-scheme: light;
-  --bg: #f5f7fb;
-  --card: #ffffff;
-  --text: #172033;
-  --muted: #667085;
+  --bg: #f1f5f2;
+  --card: #fbfdfb;
+  --text: #1d312d;
+  --muted: #596a64;
   /* 主色按 WCAG AA 对比度校准；复核见 scripts/audit-contrast.mjs。 */
   --primary: #3d63d8;
   --primary-hover: #3151b8;
@@ -19,18 +19,18 @@
   /* 主色与危险色按钮的前景色；深色模式会调整主色前景。 */
   --on-primary: #ffffff;
   --on-danger: #ffffff;
-  --border: #e3e8f2;
+  --border: #d9e3dd;
   --brand-grad-a: #3d63d8;
   --brand-grad-b: #7855dc;
-  --shadow-sm: 0 1px 2px rgba(22, 34, 64, 0.04);
-  --shadow-md: 0 8px 24px rgba(35, 52, 93, 0.08);
+  --shadow-sm: 0 1px 2px rgba(24, 58, 48, 0.045);
+  --shadow-md: 0 12px 30px rgba(24, 58, 48, 0.075);
 
   /* V2 semantic tokens used by shared components and public styles. */
-  --border-strong: #d3dbea;
-  --ink-soft: #55607a;
-  --ink-faint: #626d84;
+  --border-strong: #cbd8d1;
+  --ink-soft: #42564f;
+  --ink-faint: #596b64;
   --ink: var(--text);
-  --bg-tint: #f9fafd;
+  --bg-tint: #e9f0ec;
   /* Type, weight, and radius scales shared by the component styles. */
   --radius-2: 2px;
   --radius-3: 3px;
@@ -102,7 +102,7 @@
 
   /* Foundation contract. Legacy numeric tokens remain compatible; new shared
      components consume these roles instead of inventing their own scales. */
-  --font-sans: 'Microsoft YaHei', 'PingFang SC', system-ui, -apple-system, sans-serif;
+  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
   --line-body: 1.6;
   --line-heading: 1.4;
   --space-1: var(--spacing);
@@ -121,7 +121,7 @@
   --icon-size: 16px;
   --shadow-overlay: 0 12px 32px color-mix(in srgb, var(--text) 12%, transparent);
 
-  --focus-ring: rgba(61, 99, 216, 0.28);
+  --focus-ring: rgba(61, 99, 216, 0.24);
 
   /* Shared motion durations and curves; JS counterparts live in motion.js. */
   --dur-instant: 90ms;
@@ -967,4 +967,16 @@ summary:focus:not(:focus-visible) {
 
 @page {
   margin: 12mm;
+}
+
+/* Shared workbench surfaces: quieter edges let the content carry the hierarchy. */
+.card {
+  border-color: var(--border);
+  box-shadow: 0 1px 2px rgba(24, 58, 48, 0.035);
+}
+
+@media (min-width: 901px) {
+  .desktop-toolbar {
+    border-bottom: 1px solid color-mix(in srgb, var(--border) 76%, transparent);
+  }
 }

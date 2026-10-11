@@ -9,14 +9,24 @@ import { buildWheelValues, formatTimeValue, parseTimeValue, wheelIndexForValue, 
  *
  * 用 Modal 的 sheet 模式承载，因此滚动锁、焦点陷阱、Esc、下拖收回
  * 全部复用既有实现，不需要另写一套浮层。
+ *
+ * 两列都交给 WheelPicker 的循环模式：小时 0→23、分钟 0→59 都是每格不间断的
+ * 一整条刻度，而且首尾相接（23 之后回到 0、59 之后回到 0），可以一直朝一个
+ * 方向拨下去，不会在两端被卡住。分钟刻度是 1 分钟一格，已有时间能原样落位。
+ *
+ * 两档高度按面板本身的内容量选：预览 + 双列滚轮（5 行 × 44px = 220px）+ 提示
+ * 大约是 348px，再加上抽屉的头和底部按钮共 163px，整块要 511px 才放得下。
+ * 原来的摘要档 0.5 在 844px 高的手机上只有 422px，底部那行刻度会被切成半截，
+ * 看上去就是"乱"的；0.64 起手就能完整显示，0.82 的展开档则保证矮屏
+ * （如 667px 高）展开后也能看到整块面板，而不是仍然差十几像素。
  */
 
 const props = defineProps({
   open: Boolean,
   title: { type: String, default: '选择时间' },
   modelValue: { type: String, default: '' },
-  // 分钟刻度，默认 5 分钟一格
-  minuteStep: { type: Number, default: 5 },
+  // 分钟刻度，默认 1 分钟一格（00→59 连续可选）
+  minuteStep: { type: Number, default: 1 },
   // 允许清空（例如日程的结束时间可以留空）
   clearable: Boolean,
 })
@@ -59,21 +69,21 @@ function clear() {
 </script>
 
 <template>
-  <Modal :open="open" :title="title" medium sheet :sheet-detents="[0.5, 0.74]" @close="emit('close')">
+  <Modal :open="open" :title="title" medium sheet :sheet-detents="[0.64, 0.82]" @close="emit('close')">
     <div class="time-wheel">
       <p class="time-wheel-preview" role="status" aria-live="polite">{{ preview }}</p>
       <div class="time-wheel-row">
         <div class="time-wheel-column">
-          <WheelPicker v-model="hour" :values="hourValues" label="小时" :format="pad" />
+          <WheelPicker v-model="hour" :values="hourValues" label="小时" :format="pad" cyclic />
           <span class="time-wheel-unit">时</span>
         </div>
         <span class="time-wheel-colon" aria-hidden="true">:</span>
         <div class="time-wheel-column">
-          <WheelPicker v-model="minute" :values="minuteValues" label="分钟" :format="pad" />
+          <WheelPicker v-model="minute" :values="minuteValues" label="分钟" :format="pad" cyclic />
           <span class="time-wheel-unit">分</span>
         </div>
       </div>
-      <p class="time-wheel-hint">上下拨动选择，松手后自动对齐到整格；也可以用方向键。</p>
+      <p class="time-wheel-hint">上下拨动选择，松手自动对齐；刻度首尾相接，可以一直拨。</p>
     </div>
 
     <template #foot>

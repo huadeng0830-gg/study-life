@@ -388,7 +388,7 @@ function countdownLabel(item) {
               </template>
               <template v-else><span class="next-empty-line">今天暂时没有紧接着要处理的事项。</span><strong class="next-title is-muted">可以自由安排时间</strong></template>
             </div>
-            <Button v-if="nextUp.kind !== 'none'" class="next-action whitespace-normal" @click="openNext">{{ nextUp.kind === 'course' ? '查看课程表' : nextUp.kind === 'task' ? '处理待办' : nextUp.kind === 'event' ? '查看日程' : '查看详情' }} →</Button>
+            <Button v-if="nextUp.kind !== 'none'" class="next-action whitespace-normal" @click="openNext">{{ nextUp.kind === 'course' ? '查看课程表' : nextUp.kind === 'task' ? '处理待办' : nextUp.kind === 'event' ? '查看日程' : '查看详情' }}</Button>
             <Button v-else as-child class="next-action whitespace-normal"><RouterLink to="/tasks?new=1">＋ 新建待办</RouterLink></Button>
           </section>
           <TodayAgenda :courses="courses" :events="events" :today="todayKey()" :now="now" />
@@ -411,7 +411,7 @@ function countdownLabel(item) {
         />
 
         <section v-else-if="id === 'week'" class="week-progress panel" aria-label="本周进展">
-          <div class="panel-head"><div><h2>本周进展</h2><span class="panel-subtitle">{{ pulse.suggestion }}</span></div><router-link class="panel-link" to="/review">查看回顾 →</router-link></div>
+          <div class="panel-head"><div><h2>本周进展</h2><span class="panel-subtitle">{{ pulse.suggestion }}</span></div><router-link class="panel-link" to="/review">查看回顾</router-link></div>
           <p>{{ pulse.done }} 项完成 · 专注 {{ pulse.minutes ? `${pulse.minutes} 分钟` : '暂无记录' }}</p>
           <div v-if="todayCourses.length" class="today-course-checkins" aria-label="今日课程反馈">
             <div v-for="course in todayCourses" :key="course.id" class="today-course-checkin">
@@ -424,7 +424,7 @@ function countdownLabel(item) {
         </section>
 
         <section v-else-if="id === 'finance'" class="week-finance panel" aria-label="本周收支">
-          <div class="panel-head"><div><h2>本周收支</h2><span class="panel-subtitle">按本周账本记录汇总</span></div><router-link class="panel-link" to="/bills">打开账本 →</router-link></div>
+          <div class="panel-head"><div><h2>本周收支</h2><span class="panel-subtitle">按本周账本记录汇总</span></div><router-link class="panel-link" to="/bills">打开账本</router-link></div>
           <div class="week-finance-stats">
             <div><small>支出</small><b>{{ moneyWithCurrency(weeklyFinance.expenseTotal, ledgerCurrency) }}</b></div>
             <div><small>收入</small><b>{{ moneyWithCurrency(weeklyFinance.incomeTotal, ledgerCurrency) }}</b></div>
@@ -440,7 +440,7 @@ function countdownLabel(item) {
         <SocialCalendarEvents v-if="canShowSocialCalendar && shouldLoadSocialCalendar" scope="today" />
       </div>
 
-      <section v-if="unscheduledCount" class="compact-link-row"><span>待安排 <b>{{ unscheduledCount }}</b></span><small>还没有日期的事项</small><router-link to="/tasks">去安排 →</router-link></section>
+      <section v-if="unscheduledCount" class="compact-link-row"><span>待安排 <b>{{ unscheduledCount }}</b></span><small>还没有日期的事项</small><router-link to="/tasks">去安排</router-link></section>
 
       <section class="today-mood-lower mood-strip" aria-label="今日心情">
         <div class="mood-toolbar">
@@ -996,6 +996,92 @@ function countdownLabel(item) {
 .today-page>.home-productivity {
   grid-template-columns:repeat(auto-fit,minmax(min(100%,430px),1fr));
   margin:0}
+}
+
+/* The next event is the one strong surface on the home page; the agenda below it stays calm. */
+.today-page-head {
+  align-items: flex-start;
+  border-bottom: 0;
+  padding-bottom: 2px;
+}
+.greeting {
+  font-size: clamp(25px, 2.35vw, 32px);
+  font-weight: var(--fw-750);
+  letter-spacing: -0.035em;
+  line-height: 1.22;
+}
+.today-context { gap: 7px; margin-top: 10px; }
+.today-context-date { margin-right: 4px; font-variant-numeric: tabular-nums; }
+.today-context-chip {
+  border-color: transparent;
+  border-radius: var(--radius-5);
+  background: var(--bg-tint);
+  padding: 4px 8px;
+}
+.next-panel {
+  position: relative;
+  overflow: hidden;
+  color: #f2f7f4;
+  border: 0;
+  border-radius: var(--radius-12);
+  background: #183a35;
+  box-shadow: none;
+  gap: 22px;
+  padding: 24px 26px 24px 30px;
+}
+.next-panel::before {
+  position: absolute;
+  top: 21px;
+  bottom: 21px;
+  left: 0;
+  width: 4px;
+  border-radius: 0 var(--radius-pill) var(--radius-pill) 0;
+  background: #d79b3e;
+  content: '';
+}
+.next-main { gap: 6px; }
+.next-label {
+  color: #b9d8ca;
+  font-size: var(--fs-12);
+  font-weight: var(--fw-650);
+  letter-spacing: 0.04em;
+}
+.next-title { color: #f6faf8; font-size: clamp(20px, 2vw, 26px); line-height: 1.35; }
+.next-meta,
+.next-empty-line { color: #c4d8cf; }
+.next-title.is-muted { color: #f6faf8; font-size: var(--fs-18); }
+.next-state,
+.next-state.live {
+  color: #183a35;
+  border: 1px solid transparent;
+  background: #d5ebdd;
+}
+.next-action,
+.next-action:hover {
+  color: #183a35;
+  border: 1px solid #d5ebdd;
+  border-radius: var(--radius-8);
+  background: #f2f7f4;
+  font-size: var(--fs-13);
+  font-weight: var(--fw-700);
+}
+.next-action:hover { background: #d5ebdd; }
+.today-page > .panel {
+  border-color: var(--border);
+  border-radius: var(--radius-12);
+  background: var(--card);
+  box-shadow: none;
+}
+.today-page > .today-mood-lower {
+  border: 0;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+  padding: 10px 0 2px;
+}
+@media (max-width: 900px), (pointer: coarse) and (max-height: 520px) {
+  .next-panel { padding: 19px 18px 19px 22px; }
+  .next-panel::before { top: 18px; bottom: 18px; }
 }
 
 </style>
