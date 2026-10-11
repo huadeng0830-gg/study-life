@@ -1,6 +1,6 @@
 # 最终独立质量验收报告
 
-验收日期：2026-10-11（Asia/Shanghai）。对象：`D:/study-life/study-life` 的最终 P1 修复工作区。**本轮结论：两个 P1 已完成代码级修复，组合门禁、默认回归集、Web/桌面前端构建均通过。** 全站完整交互、真实云账号/RLS、独立设备和 Electron 安装包仍未验收；这些边界不因部署或构建通过而视为已验证。
+验收日期：2026-10-11（Asia/Shanghai）。对象：`D:/study-life/study-life` 的最终 P1 修复与生产发布提交。**本轮结论：两个 P1 已完成代码级修复，组合门禁、默认回归集、Web/桌面前端构建均通过，Cloudflare Pages 生产部署成功。** 全站完整交互、真实云账号/RLS、独立设备和 Electron 安装包仍未验收；这些边界不因部署或构建通过而视为已验证。
 
 逐项状态见 [COVERAGE_MATRIX.md](COVERAGE_MATRIX.md)。旧报告的“通过”只适用于各自写明的范围。测试使用隔离档案和合成业务记录；没有对生产业务数据执行恢复或写入。
 
@@ -20,6 +20,10 @@
 | `npm run build:desktop` | exit 0 | Electron 模式前端产物成功；未制作/启动/签名验证 Electron 安装包 |
 | `npm run supabase:verify-config -- production`、`npm run supabase:verify-bundle -- dist production`、`npm run pages:verify-config` | 全部 exit 0；bundle 扫描 154 个 JS 资源 | 公开配置与产物密钥边界检查；不代表真实登录、RLS 或线上写入端到端验证 |
 | 发布说明 | `check:release-readme` 通过；源码签名 `aee2384ace`，Web 版本 `2026年10月11日-版本1`，桌面版本 `1.0.20` | 没有递增应用版本或修改数据 schema |
+| `npm run deploy:production` | **exit 0**；Cloudflare Pages production deployment `78696c41-c9e0-444e-aa02-eacb210bea92` success；上传 144 文件（69 个复用） | 对应干净 `main` 提交 `9fd61c2`。`study-life.pages.dev` 及该部署 URL 的 `/version.txt` 与首页 HTTP 200，版本号匹配 |
+| 部署后 `node scripts/audit/release-integrity.mjs https://study-life.pages.dev` | **GREEN**：入口引用 16、SW 预缓存 204、扫描 JS 150、闭包资源 200、资源探测 204；缺失 0、失败 0 | 通过 `NODE_OPTIONS=--use-env-proxy` 使用当前代理，纯 GET/HEAD 资源检查 |
+| `node scripts/audit/first-visit.mjs https://study-life.pages.dev 16` | **GREEN**：390×844、导航 1 次、reload 0、console/exception/network errors 均 0，应用已挂载 | 临时 Chrome profile，未登录、不写生产业务数据 |
+| `node scripts/audit/iphone-boot.mjs https://study-life.pages.dev 14` | **GREEN**：390×844，删除 `requestIdleCallback`、将时间固定为 20 点；应用挂载，无占位、错误页、异常或 console error | 模拟浏览器 API/视口，不等同于真机 Safari |
 
 测试运行时出现 Node 对未配置 `--localstorage-file` 的实验性 localStorage 警告；Vitest 最终汇总为全通过，没有失败项。Windows 默认 Temp 曾在测试收集前触发文件 rename `EPERM`；将 `TEMP/TMP/TMPDIR` 指向工作区 `.tmp` 后，组合门禁与原始探针均实际运行并通过。另一次通过 `npm test -- --maxWorkers=1` 传入重复 worker 选项的命令在 Vitest 参数解析阶段退出、未执行测试；随后用 `npx vitest run --maxWorkers=1` 完成独立探针复跑。以上运行环境/命令错误均未计作产品测试通过。
 
@@ -67,7 +71,7 @@
 
 没有发现可由本轮清单差分确认的功能入口删除。既有退役 `/notes` 重定向及 410 接口仍保留兼容。不能由定义相同推断全部逻辑无回归；两个新复现正说明现有通过测试存在覆盖缺口。
 
-## 2. 初次专项测试结果（历史快照；最终续验见 0H）
+## 2. 初次专项测试结果（历史快照；最终续验及生产部署见 0H）
 
 环境：Windows、Node 26.10.0、npm 11.19.1，仓库锁定依赖；浏览器 Chrome 154.0.8037.98。主要日志目录为 `D:/study-life/.tmp/final-qa-20261011`，不进入公开发布资源。最终独立命令结果见 [final/checks.json](../../../.tmp/final-qa-20261011/final/checks.json)。
 
