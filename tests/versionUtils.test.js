@@ -3,8 +3,10 @@ import {
   buildReleaseEntry,
   formatDateKey,
   MAX_RELEASE_ENTRIES,
+  nextSemverVersion,
   nextVersion,
   replaceCurrentNotes,
+  replaceCurrentReleaseEntry,
   trimReleaseUpdates,
   validateReleaseNotes,
 } from '../scripts/version-utils.mjs'
@@ -26,6 +28,14 @@ describe('version-utils', () => {
 
   it('没有历史条目时从版本1 开始', () => {
     expect(nextVersion([], new Date(2026, 7, 29))).toBe('2026年08月29日-版本1')
+  })
+
+  it('SemVer PATCH、MINOR、MAJOR 按规范递增并拒绝无效类型', () => {
+    expect(nextSemverVersion('1.2.3', 'patch')).toBe('1.2.4')
+    expect(nextSemverVersion('1.2.3', 'minor')).toBe('1.3.0')
+    expect(nextSemverVersion('1.2.3', 'major')).toBe('2.0.0')
+    expect(nextSemverVersion('1.2.3-rc.2', 'patch')).toBe('1.2.3')
+    expect(() => nextSemverVersion('v1.2', 'patch')).toThrow(/无效的 SemVer/)
   })
 
   it('buildReleaseEntry 生成可用的条目文本并转义引号', () => {
@@ -168,5 +178,42 @@ describe('replaceCurrentNotes', () => {
     expect(replaceCurrentNotes('完全不是 release.config.js 的内容', ['说明够长了'])).toBeNull()
     expect(replaceCurrentNotes('export const RELEASE_UPDATES = Object.freeze([\n  {\n    version: 1,\n  },\n])', ['说明够长了'])).toBeNull()
     expect(replaceCurrentNotes('', ['说明够长了'])).toBeNull()
+  })
+})
+
+describe('replaceCurrentReleaseEntry', () => {
+  it('修订当前版本说明和分类时保留其他版本条目', () => {
+    const config = [
+      "export const RELEASE_UPDATES = Object.freeze([",
+      '  {',
+      "    version: '1.0.1',",
+      "    summary: '旧摘要足够长',",
+      '    changes: {',
+      '      features: [],',
+      '      improvements: [],',
+      '      fixes: [],',
+      '      security: [],',
+      '      breaking: [],',
+      '    },',
+      '    notes: [',
+      "      '旧说明足够长，可以通过校验',",
+      '    ],',
+      '  },',
+      '  {',
+      "    version: '1.0.0',",
+      "    notes: [ '历史内容保持不变' ],",
+      '  },',
+      '])',
+    ].join('\n')
+    const amended = replaceCurrentReleaseEntry(config, {
+      summary: '新摘要说明此版本的主要价值',
+      notes: ['新增一个可靠的更新日志摘要'],
+      changes: { features: ['新增稳定版更新清单'], improvements: [], fixes: [], security: [], breaking: [] },
+    })
+    expect(amended).toContain("summary: '新摘要说明此版本的主要价值'")
+    expect(amended).toContain("'新增一个可靠的更新日志摘要'")
+    expect(amended).toContain("'新增稳定版更新清单'")
+    expect(amended).toContain("version: '1.0.0'")
+    expect(amended).toContain('历史内容保持不变')
   })
 })

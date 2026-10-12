@@ -1,5 +1,9 @@
 # Project Agent Instructions
 
+## 默认发布范围
+
+- 版本与更新工作默认只处理 Web/PWA。除非用户在当前会话明确要求，否则不要构建、打包或发布 Windows/Electron/Tauri 桌面版本，也不要为桌面版单独打标签。
+
 ## GitHub 发布、隐私与数据安全规则
 
 这是强制规则，不是建议。凡涉及 `git add`、`git commit`、`git push`、GitHub 发布、Release、打包或开源整理，都必须先完成本节检查。

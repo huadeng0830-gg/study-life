@@ -1,7 +1,8 @@
 import { RELEASE_NOTES as CURRENT_NOTES, RELEASE_UPDATES } from '../../release.config.js'
+import { APP_RELEASE, APP_LEGACY_RELEASE } from './versionInfo.js'
 
-// 由构建阶段根据实际发布源码自动注入，不再依赖人工或 Agent 记得修改版本号。
-export const APP_RELEASE = globalThis.__STUDY_LIFE_RELEASE__ || 'development'
+export { APP_RELEASE }
+export const LEGACY_APP_RELEASE = APP_LEGACY_RELEASE
 
 // 当前版本的更新说明。
 export const RELEASE_NOTES = Object.freeze([...CURRENT_NOTES])
@@ -11,6 +12,15 @@ export const MAX_SHOWN_RELEASE_UPDATES = 3
 export const RELEASE_UPDATE_GROUPS = Object.freeze(
   RELEASE_UPDATES.slice(0, MAX_SHOWN_RELEASE_UPDATES).map((group) => ({
     version: group.signature === RELEASE_UPDATES[0].signature ? APP_RELEASE : group.version ?? group.signature,
+    legacyVersion: group.legacyVersion || (group.signature === RELEASE_UPDATES[0].signature ? APP_LEGACY_RELEASE : group.version || ''),
+    channel: group.channel || 'stable',
+    title: group.title || `版本 ${group.version || APP_RELEASE}`,
+    summary: group.summary || group.notes?.[0] || '',
+    changes: Object.freeze(Object.fromEntries(['features', 'improvements', 'fixes', 'security', 'breaking'].map((kind) => [
+      kind, Object.freeze(Array.isArray(group.changes?.[kind]) ? [...group.changes[kind]] : []),
+    ]))),
+    publishedAt: group.publishedAt || null,
+    releaseUrl: 'https://github.com/huadeng0830-gg/study-life/releases',
     isCurrent: group === RELEASE_UPDATES[0],
     notes: Object.freeze([...group.notes]),
   }))

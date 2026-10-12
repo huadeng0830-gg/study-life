@@ -18,6 +18,12 @@
 /version.txt
   Cache-Control: no-cache, no-store, must-revalidate
 
+/release.json
+  Cache-Control: no-cache, no-store, must-revalidate
+
+/release-history.json
+  Cache-Control: no-cache, no-store, must-revalidate
+
 /assets/*
   Cache-Control: public, max-age=31536000, immutable
 

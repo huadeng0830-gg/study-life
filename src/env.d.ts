@@ -1,9 +1,23 @@
 /// <reference types="vite/client" />
 
-declare const __STUDY_LIFE_RELEASE__: string
+declare var __STUDY_LIFE_RELEASE__: string
+declare var __STUDY_LIFE_BUILD_INFO__: {
+  buildId: string
+  commitId: string
+  sourceSignature: string
+  schemaVersion: number
+  domainSchemaVersion: number
+}
 
 interface Window {
   __STUDY_LIFE_RELEASE__?: string
+  __STUDY_LIFE_BUILD_INFO__?: {
+    buildId: string
+    commitId: string
+    sourceSignature: string
+    schemaVersion: number
+    domainSchemaVersion: number
+  }
 }
 
 interface DesktopUpdateSnapshot {
@@ -39,5 +53,6 @@ interface Window {
     installUpdate?: () => Promise<boolean>
     cancelUpdate?: () => Promise<boolean>
     onUpdateState?: (listener: (state: DesktopUpdateSnapshot) => void) => () => void
+    getReleaseHistory?: () => Promise<unknown>
   }
 }

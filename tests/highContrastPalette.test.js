@@ -110,7 +110,7 @@ describe('高对比度在跟随系统主题下真的生效', () => {
     expect(root().dataset.theme).toBe('light')
     expect(inlineVar('--border')).toBe('#8b97ae')
     expect(inlineVar('--muted')).toBe('#3d4759')
-    expect(inlineVar('--bg-tint')).toBe('#eef1f7')
+    expect(inlineVar('--bg-tint')).toBe('#e8ecf3')
   })
 
   it('系统级 prefers-contrast: more 也要生效（应用内开关不用打开）', async () => {

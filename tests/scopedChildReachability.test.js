@@ -588,7 +588,7 @@ describe('活规则不许被一起删掉（清理的边界）', () => {
 
   it('侧边栏那段删掉的写法没有被"顺手"删到别的组件身上', () => {
     // 反面对照：Sidebar.vue 自己的样式块里必须有等价规则——否则这次删除就是丢样式而不是去死规则。
-    const sidebarCss = scopedBlocksOf(readFileSync(join(srcDir, 'components', 'Sidebar.vue'), 'utf8')).join('\n')
+    const sidebarCss = readFileSync(join(srcDir, 'components', 'Sidebar.css'), 'utf8')
     for (const selector of ['.brand-mark', '.nav-item', '.sidebar-foot', '.quick-add-button', '.theme-dot', '.mobile-more-sheet']) {
       expect(sidebarCss, `Sidebar.vue 里没有 ${selector} 的等价规则，App.vue 那边不该删`).toContain(selector)
     }

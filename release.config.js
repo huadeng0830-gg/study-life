@@ -1,11 +1,29 @@
-// 每次发布必须同时更新说明和源码签名。
-// vite.config.js 会校验签名；业务源码变了但这里没更新时，构建会直接失败。
-//
-// 发布流程：
-// 1. 修改业务源码后构建，构建错误会提示新的源码签名；
-// 2. 把新签名和“年-月-日-v序号”版本写入 RELEASE_UPDATES 第一条，并在 notes 里写清本次更新内容；
-// 3. 更早的版本逐条下移，最多保留 3 个版本，超出即删除。
+// 正式版本使用 SemVer；旧网页客户端所需的日期式标识由 release:bump 单独维护。
+// 发布时运行 npm run release:bump -- --type patch|minor|major 并填写分类更新说明。
+// 脚本会同步两个 package 版本、发布历史、README 和源码签名；生产构建会校验它们。
+// RELEASE_UPDATES 仅保留最近 3 条内置说明，完整的简短发布历史保存在 release-history.json。
 export const RELEASE_UPDATES = Object.freeze([
+  {
+    version: '1.1.0',
+    legacyVersion: '2026年10月12日-版本1',
+    channel: 'stable',
+    summary: '以 SemVer 统一网页与 Windows 客户端版本，并建立可验证的更新流程',
+    signature: 'b8b80fd873',
+    changes: {
+      features: [],
+      improvements: [],
+      fixes: [
+      '改进浅色高对比配色、键盘焦点反馈和首页操作按钮的主题对比度',
+      '调整全局表面与打印样式顺序，确保两类规则正确生效',
+      ],
+      security: [],
+      breaking: [],
+    },
+    notes: [
+      '改进浅色高对比配色、键盘焦点反馈和首页操作按钮的主题对比度',
+      '调整全局表面与打印样式顺序，确保两类规则正确生效',
+    ],
+  },
   {
     version: '2026年10月11日-版本2',
     signature: 'aee4defa00',
@@ -38,21 +56,16 @@ export const RELEASE_UPDATES = Object.freeze([
       '补充 P1 数据安全回归测试，覆盖跨账号恢复、未保存草稿和异步版本顺序。',
     ],
   },
-  {
-    version: '2026年10月10日-版本7',
-    signature: '5323a14021',
-    notes: [
-      '修复手机端更新检查超时，先核对服务器版本',
-      '有新版时绕过慢速 Service Worker 检查并同步资源',
-    ],
-  },
 ])
 
-// 对用户展示、version.txt 和更新检测统一使用此版本号；后续同日发布只递增“版本”序号。
-export const RELEASE_VERSION = RELEASE_UPDATES[0].version
+// SemVer 是面向用户和发布的正式版本。日期式标识只用于旧网页客户端的升级兼容。
+export const APP_VERSION = '1.1.0'
+export const RELEASE_VERSION = APP_VERSION
+export const RELEASE_CHANNEL = 'stable'
+export const LEGACY_RELEASE_VERSION = RELEASE_UPDATES[0].legacyVersion || RELEASE_UPDATES[0].version
 
 // 与第一条签名保持一致，交给 vite.config.js 校验源码一致性。
-export const RELEASE_SOURCE_SIGNATURE = 'aee4defa00'
+export const RELEASE_SOURCE_SIGNATURE = 'b8b80fd873'
 
 // 兼容旧引用：当前版本的更新说明。
 export const RELEASE_NOTES = RELEASE_UPDATES[0].notes

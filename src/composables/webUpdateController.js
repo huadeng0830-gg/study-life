@@ -1,15 +1,19 @@
 import { reactive } from 'vue'
-import { compareRelease, safeUpdateError, updateError } from './updateProtocol.js'
+import { collectReleaseChanges, compareRelease, safeUpdateError, updateError,
+  validateReleaseHistory, validateReleaseManifest } from './updateProtocol.js'
 
 export const WEB_UPDATE_STAGES = Object.freeze(['idle', 'checking', 'latest', 'available', 'downloading',
-  'ready', 'installing', 'verifying', 'manual-reload', 'completed', 'warning', 'error'])
+  'ready', 'installing', 'verifying', 'manual-reload', 'completed', 'blocked', 'warning', 'error'])
 export const PENDING_WEB_UPDATE_KEY = 'study_life_pending_update_v1'
 
-export function createWebUpdateController({ currentVersion, navigatorRef = navigator, windowRef = window,
-  fetchFn = (...args) => fetch(...args), storage, now = () => Date.now(),
+/** @param {any} [options] */
+export function createWebUpdateController({ currentVersion, currentSourceSignature = '', currentBuildId = 'development',
+  legacyCurrentVersion = '', channel = 'stable', navigatorRef = navigator, windowRef = window,
+  fetchFn = (input, init) => fetch(input, init), storage, now = () => Date.now(),
   reload = () => windowRef.location.reload(), progress = null, checkTimeoutMs = 8000,
   downloadTimeoutMs = 30000, takeoverTimeoutMs = 6000 } = {}) {
-  const state = reactive({ stage: 'idle', currentVersion, availableVersion: '', message: '',
+  /** @type {any} */
+  const state = reactive({ stage: 'idle', currentVersion, currentBuildId, availableVersion: '', message: '', releaseManifest: null, updateReleases: [],
     lastCheckedAt: 0, lastAttemptAt: 0, lastCheckOutcome: '', startedAt: 0, finishedAt: 0,
     phaseStartedAt: 0, taskId: 0, revision: 0, taskPending: false, error: null,
     percent: null, timings: [], log: [] })
@@ -32,14 +36,33 @@ export function createWebUpdateController({ currentVersion, navigatorRef = navig
   let takeoverTimer = 0
   let applying = false
   let disposed = false
+  /** @type {(worker: ServiceWorker) => void} */
   let notifyWorkerFound = () => {}
+  let workerUpdateAllowed = false
+  const BroadcastChannelCtor = windowRef.BroadcastChannel || globalThis.BroadcastChannel
+  let updateChannel = null
+  let activeProbeId = ''
+  let peerResponded = false
+  const tabId = `${now()}-${Math.random().toString(36).slice(2, 10)}`
+  try {
+    if (typeof BroadcastChannelCtor === 'function') {
+      updateChannel = new BroadcastChannelCtor('study-life-update-coordination-v1')
+      updateChannel.addEventListener('message', (event) => {
+        const data = event?.data
+        if (!data || typeof data !== 'object' || data.sender === tabId) return
+        if (data.type === 'apply-probe' && typeof data.id === 'string')
+          updateChannel?.postMessage({ type: 'apply-response', id: data.id, sender: tabId })
+        else if (data.type === 'apply-response' && data.id === activeProbeId) peerResponded = true
+      })
+    }
+  } catch { updateChannel = null }
 
   function log(code) {
     if (disposed) return
     state.log.push({ at: now(), stage: state.stage, code })
     state.log = state.log.slice(-40)
   }
-  function transition(stage, message, patch = {}) {
+  function transition(stage, message, patch = {}, { silentProgress = false } = {}) {
     if (disposed) return
     if (state.stage !== stage) {
       if (state.phaseStartedAt && ['checking', 'downloading', 'installing', 'verifying'].includes(state.stage))
@@ -51,7 +74,7 @@ export function createWebUpdateController({ currentVersion, navigatorRef = navig
     }
     Object.assign(state, { message, revision: state.revision + 1 }, patch)
     if (!state.taskPending) state.finishedAt = now()
-    if (progress?.state.status === 'running') {
+    if (!silentProgress && progress?.state.status === 'running') {
       const step = { checking: 'check', downloading: 'download', ready: 'prepare', installing: 'apply', verifying: 'apply' }[stage]
       if (step) progress.setStep(step, 'running', message)
       else if (stage === 'error' || stage === 'warning') progress.fail(null, message)
@@ -66,9 +89,11 @@ export function createWebUpdateController({ currentVersion, navigatorRef = navig
     return false
   }
   function begin() {
+    const previouslyVerifiedRelease = Boolean(state.releaseManifest && state.availableVersion === state.releaseManifest.version)
     windowRef.clearTimeout(reloadTimer)
     windowRef.clearTimeout(takeoverTimer)
     applying = false
+    workerUpdateAllowed = previouslyVerifiedRelease
     generation += 1
     Object.assign(state, { taskId: state.taskId + 1, startedAt: now(), finishedAt: 0, error: null, timings: [], log: [] })
     progress?.start({ title: '应用更新', steps: [
@@ -93,19 +118,39 @@ export function createWebUpdateController({ currentVersion, navigatorRef = navig
       })(), ms)
     } finally { abort.abort() }
   }
+  async function requestJson(path, ms) {
+    const text = await requestText(path, ms)
+    try { return JSON.parse(text) }
+    catch { throw updateError('SOURCE_INVALID', '发布信息格式无效，请稍后重试。') }
+  }
   async function readRelease() {
     const start = now()
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
-        const release = await requestText('/version.txt', Math.min(3800, Math.max(1, checkTimeoutMs - (now() - start))))
-        if (compareRelease(release, currentVersion) === null) throw updateError('SOURCE_INVALID', '服务器版本信息格式异常，请稍后重试。')
+        const raw = await requestJson('/release.json', Math.min(3800, Math.max(1, checkTimeoutMs - (now() - start))))
+        const manifest = validateReleaseManifest(raw, { channel })
+        if (!manifest) throw updateError('SOURCE_INVALID', '服务器版本信息格式异常，请稍后重试。')
+        if (manifest.version === currentVersion && currentSourceSignature && manifest.sourceSignature !== currentSourceSignature)
+          throw updateError('SOURCE_CHANGED', '同一正式版本的构建内容不一致，已阻止刷新。请等待维护者发布修正版。')
         log('VERSION_RECEIVED')
-        return release
+        return manifest
       } catch (error) {
         if (attempt || !['TIMEOUT', 'NETWORK'].includes(safeUpdateError(error).code)) throw error
         log('NETWORK_RETRY')
         await new Promise((resolve) => windowRef.setTimeout(resolve, 250))
       }
+    }
+    throw updateError('SOURCE_INVALID', '无法读取可信发布信息，请稍后重试。')
+  }
+  async function readReleaseHistory() {
+    try {
+      const raw = await requestJson('/release-history.json', Math.min(3500, checkTimeoutMs))
+      const history = validateReleaseHistory(raw, { channel })
+      if (!history) throw updateError('SOURCE_INVALID', '版本历史格式无效。')
+      return history
+    } catch {
+      log('HISTORY_UNAVAILABLE')
+      return []
     }
   }
   async function originLock(action) {
@@ -115,12 +160,24 @@ export function createWebUpdateController({ currentVersion, navigatorRef = navig
       return action()
     })
   }
+  async function ensureSingleUpdateTab() {
+    if (!updateChannel) return
+    activeProbeId = `${tabId}:${now()}:${Math.random().toString(36).slice(2, 8)}`
+    peerResponded = false
+    try { updateChannel.postMessage({ type: 'apply-probe', id: activeProbeId, sender: tabId }) }
+    catch { updateChannel.close(); updateChannel = null; activeProbeId = ''; return }
+    await new Promise((resolve) => windowRef.setTimeout(resolve, 400))
+    const foundPeer = peerResponded
+    activeProbeId = ''
+    if (foundPeer) throw updateError('OTHER_TASK', '检测到另一个已打开的应用窗口。请先保存并关闭其他窗口，再应用更新。', 'apply')
+  }
   function workerTimedOut() {
     resolveWorker?.('timeout')
     fail(updateError('SW_TIMEOUT', '资源下载仍未结束。可以继续使用应用，或继续等待下载。', 'wait'), true)
   }
   function observeWorker(worker) {
     if (!worker || disposed) return null
+    if (!checkPromise && !applyPromise && state.stage === 'error' && state.error) return null
     // An initial offline-cache install is not an application upgrade.
     if (!navigatorRef.serviceWorker?.controller && !registration?.active && !state.availableVersion) return null
     if (observedWorker === worker) return workerPromise
@@ -131,12 +188,18 @@ export function createWebUpdateController({ currentVersion, navigatorRef = navig
     workerPromise = new Promise((resolve) => { resolveWorker = resolve })
     workerListener = () => {
       if (disposed || observedWorker !== worker) return
+      if (state.stage === 'error' && state.error) return
       if (worker.state === 'installing') {
         transition('downloading', '正在下载新的离线资源，浏览器未提供可计算的下载大小。', { taskPending: true, error: null })
       } else if (worker.state === 'installed') {
         windowRef.clearTimeout(downloadTimer)
-        transition('ready', '新版离线资源已准备，重新加载后启用。', { taskPending: false, error: null })
         resolveWorker?.('installed')
+        if (!workerUpdateAllowed) {
+          transition('warning', '浏览器已下载离线资源，需先核对可信版本信息后才能启用。',
+            { taskPending: false, error: null }, { silentProgress: true })
+          return
+        }
+        transition('ready', '新版离线资源已准备，重新加载后启用。', { taskPending: false, error: null })
       } else if (worker.state === 'activating') {
         transition('installing', '正在启用新资源，等待浏览器切换控制权。', { taskPending: true })
       } else if (worker.state === 'activated') {
@@ -145,7 +208,10 @@ export function createWebUpdateController({ currentVersion, navigatorRef = navig
         resolveWorker?.('activated')
       } else if (worker.state === 'redundant') {
         windowRef.clearTimeout(downloadTimer)
-        fail(updateError('SW_DOWNLOAD', '新资源下载或安装失败，当前版本仍可使用，请重试。'))
+        if (!workerUpdateAllowed) {
+          transition('warning', '浏览器未完成离线资源下载，当前应用仍可使用。核对版本后可重试。',
+            { taskPending: false, error: null }, { silentProgress: true })
+        } else fail(updateError('SW_DOWNLOAD', '新资源下载或安装失败，当前版本仍可使用，请重试。'))
         resolveWorker?.('redundant')
       }
     }
@@ -195,46 +261,58 @@ export function createWebUpdateController({ currentVersion, navigatorRef = navig
     transition('checking', '正在核对发布版本…', { taskPending: true })
     let deadline
     const found = new Promise((resolve) => { notifyWorkerFound = (worker) => resolve({ kind: 'worker', worker }) })
-    const release = readRelease().then((version) => ({ kind: 'release', version }), (error) => ({ kind: 'release-error', error }))
+    const release = readRelease().then((manifest) => ({ kind: 'release', manifest }), (error) => ({ kind: 'release-error', error }))
     // Subscribe before awaiting metadata. Neither response blocks the other.
-    const registered = getRegistration().then((value) => {
+    void getRegistration().then((value) => {
       if (value && !value.installing && !value.waiting) void updateWorker(value).catch(() => {})
       return value
-    })
+    }).catch(() => log('SW_CHECK_ERROR'))
     try {
       const timeout = new Promise((resolve) => {
         deadline = windowRef.setTimeout(() => resolve({ kind: 'timeout' }), checkTimeoutMs)
       })
       let result = await Promise.race([found, release, timeout])
       if (disposed || id !== generation) return false
-      if (result.kind === 'release-error') {
-        const value = await registered
-        if (!value) return fail(result.error)
-        const error = result.error
-        // Safari may emit updatefound after update() resolves.
-        const updated = updateWorker(value).then(() => new Promise((resolve) => {
-          windowRef.setTimeout(() => resolve({ kind: 'release-error', error }), 800)
-        }), () => ({ kind: 'release-error', error }))
-        result = await Promise.race([found, updated, timeout])
-      }
       if (result.kind === 'worker') {
-        const outcome = await observeWorker(result.worker)
-        if (id !== generation || disposed) return false
-        if (outcome === 'redundant' || outcome === 'timeout') return false
-        state.lastCheckedAt = now()
-        state.lastCheckOutcome = '新版本资源已准备'
-        return true
+        void observeWorker(result.worker)
+        result = await Promise.race([release, timeout])
       }
       if (result.kind === 'timeout') return fail(updateError('TIMEOUT', '更新服务响应较慢，请稍后重试。'))
       if (result.kind === 'release-error') return fail(result.error)
-      const comparison = compareRelease(result.version, currentVersion)
+      if (disposed || id !== generation) return false
+      const manifest = result.manifest
+      const comparison = compareRelease(manifest.version, currentVersion)
+      if (comparison === null) return fail(updateError('SOURCE_INVALID', '当前版本与服务器版本不兼容，已保留现有应用。'))
       state.lastCheckedAt = now()
       if (comparison < 0) return fail(updateError('SOURCE_ROLLBACK', '服务器发布版本早于当前版本，已保留当前应用。'))
-      if (comparison > 0) state.availableVersion = result.version
-      if (['downloading', 'ready', 'installing', 'error'].includes(state.stage)) return state.stage !== 'error'
+      state.releaseManifest = manifest
+      state.availableVersion = comparison === 0 ? '' : manifest.version
+      state.updateReleases = []
+      if (comparison > 0 && manifest.minimumSupportedVersion && compareRelease(currentVersion, manifest.minimumSupportedVersion) < 0) {
+        workerUpdateAllowed = true
+        transition('blocked', `此版本至少需要 ${manifest.minimumSupportedVersion}，请应用更新后继续使用。`,
+          { availableVersion: manifest.version, taskPending: false, error: null })
+        return true
+      }
+      if (comparison > 0) {
+        workerUpdateAllowed = true
+        const history = await readReleaseHistory()
+        if (disposed || id !== generation) return false
+        const updates = collectReleaseChanges(history, currentVersion, manifest.version, channel)
+        state.updateReleases = updates.length ? updates : [{
+          version: manifest.version, channel: manifest.channel, title: manifest.title, summary: manifest.summary,
+          publishedAt: manifest.publishedAt, changes: manifest.changes, notes: manifest.notes,
+        }]
+      }
       state.lastCheckOutcome = comparison === 0 ? '已是最新版本' : '检测到新版本'
-      transition(comparison === 0 ? 'latest' : 'available', comparison === 0 ? '已是最新版本' : `发现新版本 ${result.version}。`,
-        { availableVersion: comparison === 0 ? '' : result.version, taskPending: false, error: null })
+      if (comparison === 0) {
+        transition('latest', '当前版本已是最新版本。', { availableVersion: '', taskPending: false, error: null })
+      } else if (observedWorker && ['installing', 'installed', 'activating'].includes(observedWorker.state)) {
+        if (observedWorker.state === 'installed') transition('ready', '新版离线资源已准备，重新加载后启用。', { taskPending: false, error: null })
+        else transition('downloading', '正在下载新的离线资源，浏览器未提供可计算的下载大小。', { taskPending: true, error: null })
+      } else {
+        transition('available', `发现新版本 ${manifest.version}。`, { taskPending: false, error: null })
+      }
       return true
     } finally {
       windowRef.clearTimeout(deadline)
@@ -244,7 +322,8 @@ export function createWebUpdateController({ currentVersion, navigatorRef = navig
   function check(showResult = true) {
     if (disposed) return Promise.resolve(false)
     if (checkPromise) return checkPromise
-    if (applyPromise || state.taskPending || ['ready', 'manual-reload'].includes(state.stage)) return Promise.resolve(false)
+    const validatingDownloadedWorker = state.stage === 'downloading' && Boolean(observedWorker)
+    if (applyPromise || (state.taskPending && !validatingDownloadedWorker) || ['ready', 'manual-reload'].includes(state.stage)) return Promise.resolve(false)
     if (!showResult && state.error?.code === 'VERSION_VERIFY') return Promise.resolve(false)
     if (!showResult && lastSilentCheckAt && now() - lastSilentCheckAt < 600000) return Promise.resolve(false)
     lastSilentCheckAt = now()
@@ -252,8 +331,10 @@ export function createWebUpdateController({ currentVersion, navigatorRef = navig
     checkPromise = originLock(() => performCheck(id)).catch((error) => fail(error)).finally(() => { checkPromise = null })
     return checkPromise
   }
-  function savePending(version) {
-    const pending = { fromVersion: currentVersion, toVersion: version, startedAt: state.startedAt, savedAt: now(), timings: [...state.timings] }
+  function savePending(manifest, action = 'update') {
+    const pending = { fromVersion: currentVersion, toVersion: manifest.version,
+      expectedBuildId: manifest.buildId, expectedSourceSignature: manifest.sourceSignature,
+      action, startedAt: state.startedAt, savedAt: now(), timings: [...state.timings] }
     try { storage.setItem(PENDING_WEB_UPDATE_KEY, JSON.stringify(pending)) }
     catch { throw updateError('STORAGE', '无法记录更新验证状态，请允许会话存储后重试。', 'apply') }
   }
@@ -280,12 +361,37 @@ export function createWebUpdateController({ currentVersion, navigatorRef = navig
     scheduleReload()
   }
   navigatorRef.serviceWorker?.addEventListener('controllerchange', takeover)
-  async function preflightEntry(version) {
+  async function preflightEntry(manifest) {
     transition('downloading', '正在获取并核对新版本入口…', { taskPending: true })
     const html = await requestText('/index.html', checkTimeoutMs)
     const document = new DOMParser().parseFromString(html, 'text/html')
-    if (document.querySelector('meta[name="study-life-release"]')?.getAttribute('content') !== version)
+    const meta = (name) => document.querySelector(`meta[name="${name}"]`)?.getAttribute('content') || ''
+    if (meta('study-life-app-version') !== manifest.version || meta('study-life-build-id') !== manifest.buildId ||
+      meta('study-life-source-signature') !== manifest.sourceSignature ||
+      (manifest.legacyVersion && meta('study-life-release') !== manifest.legacyVersion))
       throw updateError('SOURCE_INVALID', '发布版本与入口资源不一致，请稍后重试。')
+    const documentUrl = windowRef.location?.href || 'https://localhost/'
+    const origin = new URL(documentUrl).origin
+    const liveManifest = validateReleaseManifest(await requestJson('/release.json', checkTimeoutMs), { channel })
+    if (!liveManifest || liveManifest.version !== manifest.version || liveManifest.buildId !== manifest.buildId ||
+      liveManifest.sourceSignature !== manifest.sourceSignature)
+      throw updateError('SOURCE_CHANGED', '检查期间发布内容发生变化，请重新检查后再更新。', 'check')
+    const entryAssets = [...document.querySelectorAll('script[src],link[rel="stylesheet"][href]')]
+      .map((element) => /** @type {HTMLScriptElement | HTMLLinkElement} */ (element).src ||
+        /** @type {HTMLScriptElement | HTMLLinkElement} */ (element).href).filter(Boolean)
+    const preflightStartedAt = now()
+    for (const asset of entryAssets) {
+      const url = new URL(asset, documentUrl)
+      if (url.origin !== origin) throw updateError('SOURCE_INVALID', '应用入口包含不可信的资源地址，已阻止刷新。')
+      const remainingMs = Math.max(1, checkTimeoutMs - (now() - preflightStartedAt))
+      const abort = new AbortController()
+      let response
+      try {
+        response = await bounded(fetchFn(url.href, { cache: 'no-store', method: 'GET', signal: abort.signal }), remainingMs)
+      } finally { abort.abort() }
+      if (!response?.ok) throw updateError('SOURCE_HTTP', '新版本入口资源尚未完整部署，请稍后重试。')
+      await response.body?.cancel?.().catch(() => {})
+    }
     log('ENTRY_VERIFIED')
   }
   function deferRecoveryForWorker(value) {
@@ -299,17 +405,27 @@ export function createWebUpdateController({ currentVersion, navigatorRef = navig
   }
   async function performApply(repair, manualReload) {
     if (navigatorRef.onLine === false) return fail(updateError('OFFLINE', '当前没有网络，联网后再应用更新。', 'apply'))
-    const version = await readRelease()
-    if (compareRelease(version, currentVersion) < 0) throw updateError('SOURCE_ROLLBACK', '服务器版本较旧，已保留当前应用。')
-    if (!repair && state.availableVersion && state.availableVersion !== version && observedWorker)
+    const manifest = await readRelease()
+    const comparison = compareRelease(manifest.version, currentVersion)
+    if (comparison === null) throw updateError('SOURCE_INVALID', '当前版本与服务器版本不兼容，已保留现有应用。')
+    if (comparison < 0) throw updateError('SOURCE_ROLLBACK', '服务器版本较旧，已保留当前应用。')
+    if (comparison === 0 && currentSourceSignature && manifest.sourceSignature !== currentSourceSignature)
+      throw updateError('SOURCE_CHANGED', '同一正式版本的构建内容不一致，已阻止刷新。')
+    if (!repair && state.availableVersion && state.availableVersion !== manifest.version && observedWorker)
       throw updateError('SOURCE_CHANGED', '发布版本在下载后发生变化，请重新获取资源后再应用。', 'repair')
-    state.availableVersion = version
+    if (!repair && state.releaseManifest && (state.releaseManifest.buildId !== manifest.buildId ||
+      state.releaseManifest.sourceSignature !== manifest.sourceSignature))
+      throw updateError('SOURCE_CHANGED', '检查期间发布构建发生变化，请重新检查后再应用。', 'check')
+    state.availableVersion = comparison > 0 ? manifest.version : ''
+    state.releaseManifest = manifest
+    workerUpdateAllowed = true
     const value = await getRegistration()
+    if (deferRecoveryForWorker(value)) return false
+    await ensureSingleUpdateTab()
+    await preflightEntry(manifest)
+    if (deferRecoveryForWorker(value)) return false
     if (repair || manualReload || !value) {
-      if (deferRecoveryForWorker(value)) return false
-      await preflightEntry(version)
-      if (deferRecoveryForWorker(value)) return false
-      savePending(version)
+      savePending(manifest, repair ? 'repair' : 'update')
       if (repair) {
         transition('installing', '正在重建当前应用的离线资源缓存…', { taskPending: true })
         if (value) {
@@ -346,7 +462,7 @@ export function createWebUpdateController({ currentVersion, navigatorRef = navig
       const outcome = await observeWorker(worker)
       if (outcome === 'redundant' || outcome === 'timeout') return false
     }
-    savePending(version)
+    savePending(manifest, 'update')
     applying = true
     transition('installing', '正在启用新版本资源…', { taskPending: true, error: null })
     if (worker.state === 'activated') { scheduleReload(); return true }
@@ -392,12 +508,24 @@ export function createWebUpdateController({ currentVersion, navigatorRef = navig
       const saved = JSON.parse(storage.getItem(PENDING_WEB_UPDATE_KEY) || 'null')
       if (!saved || typeof saved.toVersion !== 'string' || !Number.isFinite(Number(saved.savedAt)) || now() - Number(saved.savedAt) > 86400000) return
       storage.removeItem(PENDING_WEB_UPDATE_KEY)
-      if (compareRelease(saved.toVersion, currentVersion) === null) return
-      if (compareRelease(currentVersion, saved.toVersion) >= 0) {
-        transition('completed', `更新成功，已验证运行版本 ${currentVersion}。`, { availableVersion: '', taskPending: false })
+      const versionComparison = compareRelease(currentVersion, saved.toVersion)
+      const legacyComparison = compareRelease(legacyCurrentVersion, saved.toVersion)
+      const hasExpectedBuild = Object.prototype.hasOwnProperty.call(saved, 'expectedBuildId') ||
+        Object.prototype.hasOwnProperty.call(saved, 'expectedSourceSignature')
+      const buildIdentityMatches = !hasExpectedBuild || (
+        typeof saved.expectedBuildId === 'string' && saved.expectedBuildId === currentBuildId &&
+        typeof saved.expectedSourceSignature === 'string' && saved.expectedSourceSignature === currentSourceSignature)
+      const targetWasSuperseded = versionComparison !== null && versionComparison > 0
+      const versionReached = versionComparison !== null ? versionComparison >= 0 : legacyComparison !== null && legacyComparison >= 0
+      const verified = versionReached && (!hasExpectedBuild || targetWasSuperseded || buildIdentityMatches)
+      if (versionComparison === null && legacyComparison === null) return
+      if (verified) {
+        transition('completed', saved.action === 'repair'
+          ? `应用资源已恢复，当前运行版本 ${currentVersion}。`
+          : `更新成功，已验证运行版本 ${currentVersion}。`, { availableVersion: '', taskPending: false })
         log('RUNNING_VERSION_VERIFIED')
         lastSilentCheckAt = now()
-      } else fail(updateError('VERSION_VERIFY', '重新加载后仍在运行旧版本。当前数据已保留，请修复更新缓存。', 'repair'))
+      } else fail(updateError('VERSION_VERIFY', '重新加载后的版本或构建与目标更新不一致。当前数据已保留，请检查网络后重试或修复更新缓存。', 'repair'))
     } catch { fail(updateError('STORAGE', '无法读取更新验证记录，可以重新检查版本。')) }
   }
   try { if (storage === undefined) storage = windowRef.sessionStorage }
@@ -413,6 +541,7 @@ export function createWebUpdateController({ currentVersion, navigatorRef = navig
       registration?.removeEventListener('updatefound', registrationListener)
       observedWorker?.removeEventListener('statechange', workerListener)
       navigatorRef.serviceWorker?.removeEventListener('controllerchange', takeover)
+      updateChannel?.close()
       progress?.dispose()
     } }
 }

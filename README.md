@@ -9,11 +9,10 @@
 [🌐 在线体验](https://study-life.pages.dev/) · [📦 GitHub](https://github.com/huadeng0830-gg/study-life)
 
 <!-- RELEASE_STATUS:START -->
-> **当前源码版本**：网页 / PWA `2026年10月11日-版本2` · Windows 桌面版 `1.0.21`
+> **当前源码版本**：网页 / PWA `1.1.0` · Windows 桌面版 `1.1.0`
 > **最近更新**：
-> - 日程时间刻度改为首尾相接的循环滚轮，分钟精确到每一分钟，已有时间原样落位
-> - 去掉滚轮上下淡出遮罩，并修复刻度列宽、滚动与时间选择问题
-> - 调整桌面侧栏与今天页层级，优化内容区留白、快捷入口和中文字体
+> - 改进浅色高对比配色、键盘焦点反馈和首页操作按钮的主题对比度
+> - 调整全局表面与打印样式顺序，确保两类规则正确生效
 > [下载已发布的 Windows 安装包与版本说明](https://github.com/huadeng0830-gg/study-life/releases/latest)
 <!-- RELEASE_STATUS:END -->
 
@@ -162,11 +161,28 @@ npm run desktop:dir       # 生成未安装目录包供预览
 npm run desktop:installer # 生成 NSIS 安装程序并校验应用内更新配置
 ```
 
-### 发布桌面更新
+### 统一版本与更新发布
 
-每次新版本先运行 `npm run release:bump -- --notes "更新说明一|更新说明二"`。脚本会递增网页日期版本和 Windows 桌面 SemVer patch，更新源码签名，并同步本 README 中的版本号与最近更新内容。完成 `npm run check`、提交并推送到 `main` 后，为桌面版本创建同名标签（例如 `v1.0.5`）并推送；GitHub Actions 会在 Windows runner 上重跑质量检查，构建并验证 NSIS 安装包，再将安装包、`.blockmap` 和 `latest.yml` 一次发布到同一个 GitHub Release；任一发布文件缺失都会让工作流失败。用户可在桌面版“设置 → 应用更新”内检查、下载并安装新版本。
+正式版本使用 SemVer，唯一版本值写在 `release.config.js`，发布脚本会同步根目录与 Electron 的 `package.json` 和 lock 文件。网页清单 `/release.json` 还包含 Build ID、Commit ID、源码签名、数据结构版本、兼容要求与更新日志；`/version.txt` 暂时保留日期式标识，让已部署的旧 Web/PWA 客户端仍能发现新版本。发布清单和历史使用禁止缓存的响应头。
 
-标签必须与 `desktop-app/package.json` 中的版本完全一致。发布流水线只在收到 `v*` 标签时运行，日常网页部署仍走 Cloudflare Pages；本地构建使用 `--publish never`，不会意外创建公开发行版。README 版本区块由发布脚本维护，`npm run check` 会阻止版本说明漏同步。
+发布新版本时按改动选择类型，并把日志放进对应分类：
+
+```powershell
+# 兼容性修复
+npm run release:bump -- --type patch --fixes "修复更新检查超时并提供安全重试"
+
+# 向后兼容的新功能
+npm run release:bump -- --type minor --features "增加跨版本更新内容汇总"
+
+# 不兼容的产品或数据变化
+npm run release:bump -- --type major --breaking "调整公开数据格式；按迁移说明导出并转换旧数据"
+```
+
+多个同类说明可用 `|` 分隔，也可以使用 `--improvements`、`--security`、`--summary`。只有稳定版发布源已接通，Beta、Alpha 和 RC 尚未配置独立发布清单。若当前版本尚未发布，只修改它的说明和分类可用 `--amend-notes`；已经发布的版本不要重写或复用版本号，应创建更高的修复版本。
+
+每次准备发布都执行 `npm run check` 和 `npm run build`，再检查 `dist/release.json`、`dist/release-history.json`、版本号和构建资源。生产 Web 部署仍由 Cloudflare Pages 负责；`npm run deploy:production` 有干净工作区及 `origin/main` 检查，需在变更审查并提交后由授权人员执行。此脚本只部署 Web/PWA，不创建 GitHub Release。
+
+Windows 桌面发布使用现有 GitHub Actions：在版本检查通过、代码签名凭据可用并完成发布审查后，推送与 `desktop-app/package.json` 完全一致的 `vX.Y.Z` 标签，工作流会构建并校验安装包、签名和更新元数据。没有签名凭据时停止桌面发布，不得关闭签名检查。发布失败后修正问题并递增版本发布补丁；网页回退与客户端数据迁移是两件事，代码回退不能撤销已完成的数据迁移。
 
 ## 🛠 技术栈
 
@@ -245,9 +261,9 @@ npm run audit:contrast    # 6 套调色板 × 144 组配色 → WCAG AA
 npm run deploy:production # 构建并发布 Cloudflare Pages
 ```
 
-> **发布业务或桌面源码的新版本时必须跑 `npm run release:bump -- --notes "说明|说明"`**，
-> 否则生产构建会因源码签名不匹配而失败。发布脚本会把说明和签名一起写好，递增桌面版本并更新 README；
-> 对当前版本只修正文案时用 `--amend-notes`，它不会递增桌面版本或创建新发行版。
+> **准备发布业务或桌面源码的新版本时必须跑 `npm run release:bump -- --type patch|minor|major ...`**，
+> 否则生产构建会因源码签名不匹配而失败。发布脚本会同步 SemVer、旧 Web/PWA 兼容标识、结构化历史、源码签名和 README；
+> 只可对尚未发布的当前版本使用 `--amend-notes` 修订说明。
 > 详见 `release.config.js` 顶部注释。
 
 ## ☁️ 部署到 Cloudflare Pages

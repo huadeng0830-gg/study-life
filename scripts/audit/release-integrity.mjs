@@ -30,6 +30,7 @@
 //   stderr 是给人看的进度与结论摘要。管道里只拿 stdout 即可。
 
 import process from 'node:process'
+import { validateReleaseHistory, validateReleaseManifest } from '../../src/composables/updateProtocol.js'
 
 const DEFAULT_BASE = 'https://study-life.pages.dev'
 const MAX_CONCURRENCY = 6
@@ -77,7 +78,8 @@ async function fetchText(target, { attempts = 2 } = {}) {
       const res = await fetch(url, { redirect: 'follow', cache: 'no-store' })
       const body = res.status === 200 ? await res.text() : ''
       if (res.status !== 200) await res.body?.cancel().catch(() => {})
-      return { url, status: res.status, body, finalUrl: res.url }
+      return { url, status: res.status, body, finalUrl: res.url,
+        cacheControl: res.headers?.get?.('cache-control') || '' }
     } catch (error) {
       lastError = error
     }
@@ -140,6 +142,46 @@ const versionRes = await fetchText('/version.txt')
 const version = versionRes.status === 200 ? versionRes.body.trim() : null
 if (versionRes.status !== 200) failures.push({ kind: 'version-not-200', detail: `version.txt 返回 ${versionRes.status}` })
 log(`站点版本：${version ?? '(读不到 version.txt)'}`)
+
+const releaseRes = await fetchText('/release.json')
+let releaseManifest = null
+if (releaseRes.status !== 200) failures.push({ kind: 'release-manifest-not-200', detail: `release.json 返回 ${releaseRes.status}` })
+else {
+  try { releaseManifest = validateReleaseManifest(JSON.parse(releaseRes.body)) }
+  catch { releaseManifest = null }
+  if (!releaseManifest) failures.push({ kind: 'release-manifest-invalid', detail: 'release.json 格式、SemVer、渠道或签名字段无效' })
+  if (releaseRes.cacheControl && !/no-store/i.test(releaseRes.cacheControl))
+    failures.push({ kind: 'release-manifest-cacheable', detail: `release.json 未禁止缓存：${releaseRes.cacheControl}` })
+  if (releaseManifest && version && releaseManifest.legacyVersion !== version)
+    failures.push({ kind: 'legacy-version-mismatch', detail: 'release.json 与 version.txt 的兼容标识不一致' })
+  try {
+    if (new URL(releaseRes.finalUrl).origin !== new URL(base).origin)
+      failures.push({ kind: 'release-manifest-cross-origin', detail: 'release.json 被重定向到其他来源' })
+  } catch { failures.push({ kind: 'release-manifest-url-invalid', detail: 'release.json 最终地址无效' }) }
+}
+const historyRes = await fetchText('/release-history.json')
+let releaseHistory = null
+if (historyRes.status !== 200) failures.push({ kind: 'release-history-not-200', detail: `release-history.json 返回 ${historyRes.status}` })
+else {
+  try { releaseHistory = validateReleaseHistory(JSON.parse(historyRes.body)) }
+  catch { releaseHistory = null }
+  if (!releaseHistory?.length) failures.push({ kind: 'release-history-invalid', detail: 'release-history.json 为空或结构无效' })
+  if (historyRes.cacheControl && !/no-store/i.test(historyRes.cacheControl))
+    failures.push({ kind: 'release-history-cacheable', detail: `release-history.json 未禁止缓存：${historyRes.cacheControl}` })
+  if (releaseManifest && !releaseHistory?.some((entry) => entry.version === releaseManifest.version && entry.channel === releaseManifest.channel))
+    failures.push({ kind: 'release-history-missing-current', detail: '发布历史缺少当前清单对应的版本' })
+}
+
+function indexMeta(name) {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  const match = new RegExp(`<meta\\s+name=["']${escaped}["']\\s+content=["']([^"']*)["']`, 'i').exec(html.body)
+  return match?.[1] || ''
+}
+if (releaseManifest && (indexMeta('study-life-app-version') !== releaseManifest.version ||
+  indexMeta('study-life-build-id') !== releaseManifest.buildId ||
+  indexMeta('study-life-source-signature') !== releaseManifest.sourceSignature ||
+  indexMeta('study-life-release') !== releaseManifest.legacyVersion))
+  failures.push({ kind: 'release-entry-mismatch', detail: 'index.html 的版本元数据与 release.json 不一致' })
 
 // 1a) index.html 直接引用的资源：src/href 属性 + 内联脚本里出现的 assets/*
 const indexReferenced = new Set()
@@ -315,6 +357,8 @@ const report = {
   tool: 'release-integrity',
   base,
   version,
+  appVersion: releaseManifest?.version || null,
+  buildId: releaseManifest?.buildId || null,
   counts: {
     indexReferenced: indexReferenced.size,
     precacheEntries: precacheEntries.length,

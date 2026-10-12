@@ -2,12 +2,18 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createWebUpdateController, PENDING_WEB_UPDATE_KEY } from '../src/composables/webUpdateController.js'
 import { compareRelease } from '../src/composables/updateProtocol.js'
+import { CURRENT_TEST_VERSION as current, NEXT_TEST_VERSION as latest, TEST_BUILD_ID, TEST_SOURCE_SIGNATURE,
+  makeReleaseManifest, releaseFetchResponse } from './helpers/releaseFixtures.js'
 
-const current = '2026年10月10日-版本7'
-const latest = '2026年10月10日-版本8'
 let controllers = []
 function deferred() { let resolve; const promise = new Promise((done) => { resolve = done }); return { resolve, promise } }
+async function applyAndSettle(controller, repair = false) {
+  const result = controller.apply(repair)
+  await vi.advanceTimersByTimeAsync(450)
+  return result
+}
 function fixture({ release = latest, fetchFn, worker = null, offline = false, noWorker = false } = {}) {
+  const manifest = makeReleaseManifest(release)
   const registration = new EventTarget()
   registration.scope = 'https://fixture.invalid/'
   registration.update = vi.fn(async () => {})
@@ -19,10 +25,10 @@ function fixture({ release = latest, fetchFn, worker = null, offline = false, no
   serviceWorker.controller = { state: 'activated' }
   serviceWorker.getRegistration = vi.fn(async () => registration)
   const navigatorRef = { onLine: !offline, serviceWorker: noWorker ? null : serviceWorker }
-  const fetchMock = fetchFn || vi.fn(async (path) => ({ ok: true, text: async () => path.startsWith('/index.html')
-    ? `<html><head><meta name="study-life-release" content="${release}"></head></html>` : release }))
+  const fetchMock = fetchFn || vi.fn(async (path) => releaseFetchResponse(path, manifest))
   const reload = vi.fn()
-  const controller = createWebUpdateController({ currentVersion: current, navigatorRef, fetchFn: fetchMock, reload })
+  const controller = createWebUpdateController({ currentVersion: current, currentSourceSignature: TEST_SOURCE_SIGNATURE,
+    currentBuildId: TEST_BUILD_ID, navigatorRef, fetchFn: fetchMock, reload })
   controllers.push(controller)
   return { controller, registration, serviceWorker, fetchMock, reload }
 }
@@ -37,7 +43,7 @@ describe('网页更新的操作、事件和实际版本验证', () => {
     const second = controller.check(true)
     expect(first).toBe(second)
     expect(controller.state.stage).toBe('checking')
-    gate.resolve({ ok: true, text: async () => current })
+    gate.resolve(releaseFetchResponse('/release.json', makeReleaseManifest(current)))
     await expect(first).resolves.toBe(true)
     expect(fetchMock).toHaveBeenCalledTimes(1)
     expect(controller.state).toMatchObject({ stage: 'latest', taskPending: false })
@@ -53,7 +59,7 @@ describe('网页更新的操作、事件和实际版本验证', () => {
 
   it('网络失败只退避重试一次；JSON / HTML 错误页不能当版本安装', async () => {
     const fetchMock = vi.fn().mockRejectedValueOnce(new Error('fictional network error'))
-      .mockResolvedValue({ ok: true, text: async () => current })
+      .mockImplementation(async (path) => releaseFetchResponse(path, makeReleaseManifest(current)))
     const { controller } = fixture({ fetchFn: fetchMock, noWorker: true })
     const result = controller.check()
     await vi.advanceTimersByTimeAsync(250)
@@ -96,8 +102,7 @@ describe('网页更新的操作、事件和实际版本验证', () => {
     expect(registration.update).toHaveBeenCalledTimes(1)
     worker.state = 'installed'
     worker.dispatchEvent(new Event('statechange'))
-    expect(controller.state).toMatchObject({ stage: 'ready', taskPending: false })
-    await expect(controller.check()).resolves.toBe(false)
+    expect(controller.state).toMatchObject({ stage: 'warning', taskPending: false })
   })
 
   it('浏览器自行发现新 Worker 时重新计算任务耗时，不计入之前的空闲时间', async () => {
@@ -125,6 +130,7 @@ describe('网页更新的操作、事件和实际版本验证', () => {
     expect(worker.postMessage).not.toHaveBeenCalled()
     const firstApply = controller.apply()
     expect(controller.apply()).toBe(firstApply)
+    await vi.advanceTimersByTimeAsync(450)
     await firstApply
     expect(worker.postMessage).toHaveBeenCalledTimes(1)
     worker.state = 'activated'
@@ -135,7 +141,8 @@ describe('网页更新的操作、事件和实际版本验证', () => {
     expect(reload).toHaveBeenCalledTimes(1)
     expect(controller.state.stage).toBe('verifying')
     controller.dispose()
-    const verified = createWebUpdateController({ currentVersion: latest, navigatorRef: {}, reload: vi.fn() })
+    const verified = createWebUpdateController({ currentVersion: latest, currentSourceSignature: TEST_SOURCE_SIGNATURE,
+      currentBuildId: TEST_BUILD_ID, navigatorRef: {}, reload: vi.fn() })
     controllers.push(verified)
     expect(verified.state).toMatchObject({ stage: 'completed', currentVersion: latest, availableVersion: '' })
     expect(sessionStorage.getItem(PENDING_WEB_UPDATE_KEY)).toBeNull()
@@ -146,7 +153,7 @@ describe('网页更新的操作、事件和实际版本验证', () => {
     const worker = new EventTarget()
     worker.state = 'installing'
     registration.installing = worker
-    await expect(controller.apply(true)).resolves.toBe(false)
+    await expect(applyAndSettle(controller, true)).resolves.toBe(false)
     expect(registration.unregister).not.toHaveBeenCalled()
     expect(reload).not.toHaveBeenCalled()
     expect(fetchMock.mock.calls.some(([url]) => url.startsWith('/index.html'))).toBe(false)
@@ -157,17 +164,51 @@ describe('网页更新的操作、事件和实际版本验证', () => {
     expect(controller.state).toMatchObject({ stage: 'ready', taskPending: false })
   })
 
+  it('应用前通过 BroadcastChannel 检测其他标签页并阻止影响其数据的重载', async () => {
+    const peers = new Set()
+    class TestChannel {
+      listeners = new Set()
+      constructor() { peers.add(this) }
+      addEventListener(type, listener) { if (type === 'message') this.listeners.add(listener) }
+      postMessage(data) {
+        for (const peer of peers) if (peer !== this)
+          for (const listener of peer.listeners) listener({ data })
+      }
+      close() { peers.delete(this) }
+    }
+    const windowRef = {
+      BroadcastChannel: TestChannel,
+      setTimeout: window.setTimeout.bind(window),
+      clearTimeout: window.clearTimeout.bind(window),
+      sessionStorage,
+      location: window.location,
+      caches: window.caches,
+    }
+    const fetchFn = vi.fn(async (path) => releaseFetchResponse(path, makeReleaseManifest(latest)))
+    const first = createWebUpdateController({ currentVersion: current, currentSourceSignature: TEST_SOURCE_SIGNATURE,
+      navigatorRef: { onLine: true }, windowRef, fetchFn, reload: vi.fn() })
+    const second = createWebUpdateController({ currentVersion: current, currentSourceSignature: TEST_SOURCE_SIGNATURE,
+      navigatorRef: { onLine: true }, windowRef: { ...windowRef }, fetchFn, reload: vi.fn() })
+    controllers.push(first, second)
+    const applying = first.apply()
+    await vi.advanceTimersByTimeAsync(450)
+    await expect(applying).resolves.toBe(false)
+    expect(first.state).toMatchObject({ stage: 'warning', error: { code: 'OTHER_TASK' } })
+    expect(fetchFn.mock.calls.some(([url]) => String(url).startsWith('/index.html'))).toBe(false)
+  })
+
   it('核对修复入口期间出现新 Worker，也不删除正在接收的资源', async () => {
     const entry = deferred()
-    const fetchFn = vi.fn(async (url) => url.startsWith('/index.html') ? entry.promise : { ok: true, text: async () => latest })
+    const fetchFn = vi.fn(async (url) => url.startsWith('/index.html') ? entry.promise : releaseFetchResponse(url, makeReleaseManifest(latest)))
     const { controller, registration, reload } = fixture({ fetchFn })
     const repair = controller.apply(true)
+    await vi.advanceTimersByTimeAsync(450)
     await vi.advanceTimersByTimeAsync(0)
     const worker = new EventTarget()
     worker.state = 'installing'
     registration.installing = worker
     registration.dispatchEvent(new Event('updatefound'))
-    entry.resolve({ ok: true, text: async () => `<meta name="study-life-release" content="${latest}">` })
+    entry.resolve(releaseFetchResponse('/index.html', makeReleaseManifest(latest)))
     await expect(repair).resolves.toBe(false)
     expect(registration.unregister).not.toHaveBeenCalled()
     expect(reload).not.toHaveBeenCalled()
@@ -184,32 +225,57 @@ describe('网页更新的操作、事件和实际版本验证', () => {
     expect(controller.state.stage).toBe('error')
   })
 
+  it.each([
+    ['构建编号', { currentBuildId: 'different-build', currentSourceSignature: TEST_SOURCE_SIGNATURE }],
+    ['源码签名', { currentBuildId: TEST_BUILD_ID, currentSourceSignature: 'fedcba9876543210' }],
+  ])('运行版本相同但%s不符时不宣告更新成功', (_label, identity) => {
+    sessionStorage.setItem(PENDING_WEB_UPDATE_KEY, JSON.stringify({ fromVersion: current, toVersion: latest,
+      expectedBuildId: TEST_BUILD_ID, expectedSourceSignature: TEST_SOURCE_SIGNATURE, savedAt: Date.now() }))
+    const controller = createWebUpdateController({ currentVersion: latest, currentBuildId: identity.currentBuildId,
+      currentSourceSignature: identity.currentSourceSignature, navigatorRef: {}, reload: vi.fn() })
+    controllers.push(controller)
+    expect(controller.state).toMatchObject({ stage: 'error', error: { code: 'VERSION_VERIFY' } })
+    expect(controller.state.error.message).toContain('版本或构建')
+    expect(sessionStorage.getItem(PENDING_WEB_UPDATE_KEY)).toBeNull()
+  })
+
+  it('目标版本发布期间被更新版本取代时允许验证更高的实际版本', () => {
+    sessionStorage.setItem(PENDING_WEB_UPDATE_KEY, JSON.stringify({ fromVersion: current, toVersion: latest,
+      expectedBuildId: TEST_BUILD_ID, expectedSourceSignature: TEST_SOURCE_SIGNATURE, savedAt: Date.now() }))
+    const newerVersion = `${latest.slice(0, latest.lastIndexOf('.') + 1)}${Number(latest.slice(latest.lastIndexOf('.') + 1)) + 1}`
+    const controller = createWebUpdateController({ currentVersion: newerVersion, currentBuildId: 'newer-build',
+      currentSourceSignature: 'fedcba9876543210', navigatorRef: {}, reload: vi.fn() })
+    controllers.push(controller)
+    expect(controller.state).toMatchObject({ stage: 'completed', currentVersion: newerVersion })
+    expect(sessionStorage.getItem(PENDING_WEB_UPDATE_KEY)).toBeNull()
+  })
+
   it('等待接管超时给手动出口，不永久加载或误报成功', async () => {
     const worker = new EventTarget()
     worker.state = 'installed'
     worker.postMessage = vi.fn()
     const { controller } = fixture({ worker })
     await controller.check()
-    await controller.apply()
+    await applyAndSettle(controller)
     await vi.advanceTimersByTimeAsync(6000)
     expect(controller.state).toMatchObject({ stage: 'manual-reload', taskPending: false })
   })
 
   it('重载抛错后的旧定时器不能覆盖后来开始的检查', async () => {
     const gate = deferred()
-    const fetchFn = vi.fn(async (path) => ({ ok: true, text: async () => path.startsWith('/index.html')
-      ? `<meta name="study-life-release" content="${latest}">` : latest }))
+    const fetchFn = vi.fn(async (path) => releaseFetchResponse(path, makeReleaseManifest(latest)))
     const reload = vi.fn(() => { throw new Error('navigation rejected') })
-    const controller = createWebUpdateController({ currentVersion: current, navigatorRef: {}, fetchFn, reload })
+    const controller = createWebUpdateController({ currentVersion: current, currentSourceSignature: TEST_SOURCE_SIGNATURE,
+      currentBuildId: TEST_BUILD_ID, navigatorRef: {}, fetchFn, reload })
     controllers.push(controller)
-    await controller.apply()
+    await applyAndSettle(controller)
     expect(controller.state.error.code).toBe('RELOAD_TIMEOUT')
     await vi.advanceTimersByTimeAsync(5000)
     fetchFn.mockImplementation(() => gate.promise)
     const check = controller.check()
     await vi.advanceTimersByTimeAsync(1000)
     expect(controller.state).toMatchObject({ stage: 'checking', taskPending: true, taskId: 2 })
-    gate.resolve({ ok: true, text: async () => current })
+    gate.resolve(releaseFetchResponse('/release.json', makeReleaseManifest(current)))
     await expect(check).resolves.toBe(true)
   })
 
@@ -221,14 +287,14 @@ describe('网页更新的操作、事件和实际版本验证', () => {
       registration.update.mockRejectedValue(new DOMException('registration gone', 'InvalidStateError'))
       return true
     })
-    await controller.apply(true)
+    await applyAndSettle(controller, true)
     await vi.advanceTimersByTimeAsync(6000)
     expect(controller.state.stage).toBe('manual-reload')
-    await expect(controller.apply()).resolves.toBe(true)
+    await expect(applyAndSettle(controller)).resolves.toBe(true)
     expect(reload).toHaveBeenCalledTimes(2)
     expect(registration.update).not.toHaveBeenCalled()
     await vi.advanceTimersByTimeAsync(6000)
-    await expect(controller.apply(true)).resolves.toBe(true)
+    await expect(applyAndSettle(controller, true)).resolves.toBe(true)
     expect(registration.unregister).toHaveBeenCalledTimes(1)
     expect(reload).toHaveBeenCalledTimes(3)
   })
@@ -237,17 +303,18 @@ describe('网页更新的操作、事件和实际版本验证', () => {
     const windowRef = { setTimeout, clearTimeout, get sessionStorage() { throw new DOMException('denied', 'SecurityError') } }
     const reload = vi.fn()
     const controller = createWebUpdateController({ currentVersion: current, windowRef, navigatorRef: {},
-      fetchFn: async () => ({ ok: true, text: async () => latest }), reload })
+      fetchFn: async (path) => releaseFetchResponse(path, makeReleaseManifest(latest)), reload })
     controllers.push(controller)
     expect(controller.state).toMatchObject({ stage: 'error', taskPending: false, error: { code: 'STORAGE' } })
-    await expect(controller.apply()).resolves.toBe(false)
+    await expect(applyAndSettle(controller)).resolves.toBe(false)
     expect(reload).not.toHaveBeenCalled()
   })
 
   it('恢复前入口版本不一致时不注销 Worker、不删除缓存', async () => {
-    const { controller, registration } = fixture({ fetchFn: vi.fn(async (path) => ({ ok: true,
-      text: async () => path.startsWith('/index.html') ? '<html>outdated entry</html>' : latest })) })
-    await expect(controller.apply(true)).resolves.toBe(false)
+    const { controller, registration } = fixture({ fetchFn: vi.fn(async (path) => path.startsWith('/index.html')
+      ? { ok: true, text: async () => '<html>outdated entry</html>' }
+      : releaseFetchResponse(path, makeReleaseManifest(latest))) })
+    await expect(applyAndSettle(controller, true)).resolves.toBe(false)
     expect(registration.unregister).not.toHaveBeenCalled()
     expect(controller.state.error.code).toBe('SOURCE_INVALID')
     expect(controller.state.currentVersion).toBe(current)
@@ -263,7 +330,7 @@ describe('网页更新的操作、事件和实际版本验证', () => {
     } })
     try {
       const { controller, registration } = fixture()
-      await expect(controller.apply(true)).resolves.toBe(true)
+      await expect(applyAndSettle(controller, true)).resolves.toBe(true)
       expect(registration.unregister).toHaveBeenCalledTimes(1)
       expect(deleteCache.mock.calls.map(([key]) => key)).toEqual(['study-life-lazy-assets', 'workbox-precache-v2-https://fixture.invalid/'])
     } finally { Object.defineProperty(window, 'caches', { configurable: true, value: previousCaches }) }
@@ -274,15 +341,17 @@ describe('网页更新的操作、事件和实际版本验证', () => {
     const { controller } = fixture({ fetchFn: vi.fn(() => gate.promise) })
     const check = controller.check()
     controller.dispose()
-    gate.resolve({ ok: true, text: async () => latest })
+    gate.resolve(releaseFetchResponse('/release.json', makeReleaseManifest(latest)))
     await expect(check).resolves.toBe(false)
     expect(controller.state.stage).toBe('checking')
   })
 
-  it('日期版本正确排序，禁止回退或非法日期', async () => {
+  it('SemVer 正确处理预发布优先级，并禁止回退或非法版本', async () => {
     expect(compareRelease('2026年10月10日-版本10', '2026年10月10日-版本9')).toBe(1)
     expect(compareRelease('2026年02月30日-版本1', current)).toBeNull()
-    const { controller } = fixture({ release: '2026年10月09日-版本99' })
+    expect(compareRelease('1.2.0-rc.2', '1.2.0-rc.1')).toBe(1)
+    expect(compareRelease('1.2.0', '1.2.0-rc.9')).toBe(1)
+    const { controller } = fixture({ release: '0.9.9' })
     await expect(controller.check()).resolves.toBe(false)
     expect(controller.state.error.code).toBe('SOURCE_ROLLBACK')
   })

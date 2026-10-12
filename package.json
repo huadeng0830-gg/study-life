@@ -1,14 +1,14 @@
 {
   "name": "study-life",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.1.0",
   "type": "module",
   "engines": {
     "node": ">=22"
   },
   "scripts": {
     "dev": "vite",
-    "build": "vite build --configLoader native",
+    "build": "vite build --configLoader native && node scripts/check-release-build.mjs dist",
     "preview": "vite preview",
     "preview:host": "vite preview --host",
     "lint": "eslint .",
@@ -26,7 +26,7 @@
     "audit:reload-loop": "node scripts/audit/reload-loop.mjs dist",
     "audit:iphone-boot": "node scripts/audit/iphone-boot.mjs https://study-life.pages.dev",
     "deploy:production": "node scripts/deploy-production.mjs",
-    "build:desktop": "vite build --configLoader native --mode desktop",
+    "build:desktop": "vite build --configLoader native --mode desktop && node scripts/check-release-build.mjs dist-desktop",
     "desktop:install-deps": "npm ci --prefix desktop-app",
     "desktop:dev": "npm run desktop:install-deps && npm run build:desktop && electron .",
     "desktop:dir": "npm run desktop:install-deps && npm run build:desktop && electron-builder --config electron-builder.yml --dir --win --x64 --publish never",
@@ -46,6 +46,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "reka-ui": "2.10.5",
+    "semver": "6.3.1",
     "tailwind-merge": "^3.7.0",
     "tesseract.js": "^7.0.0",
     "vue": "3.5.43",

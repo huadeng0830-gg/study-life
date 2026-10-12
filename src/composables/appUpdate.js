@@ -1,11 +1,15 @@
 import { registerSW } from 'virtual:pwa-register'
-import { computed, toRef } from 'vue'
+import { computed, toRef, watch } from 'vue'
 import { APP_RELEASE } from './releaseNotes.js'
+import { APP_CHANNEL, APP_LEGACY_RELEASE, BUILD_ID, SOURCE_SIGNATURE } from './versionInfo.js'
 import { useTaskProgress } from './taskProgress.js'
 import { createWebUpdateController, WEB_UPDATE_STAGES } from './webUpdateController.js'
+import { updatePreferences } from './updatePreferences.js'
+import { checkDesktopAppUpdate, desktopUpdateState, isDesktopApp } from './desktopAppUpdate.js'
 
 export const appUpdateProgress = useTaskProgress()
-const controller = createWebUpdateController({ currentVersion: APP_RELEASE, progress: appUpdateProgress })
+const controller = createWebUpdateController({ currentVersion: APP_RELEASE, currentSourceSignature: SOURCE_SIGNATURE,
+  currentBuildId: BUILD_ID, legacyCurrentVersion: APP_LEGACY_RELEASE, channel: APP_CHANNEL, progress: appUpdateProgress })
 export const webUpdateState = controller.state
 export const UPDATE_STAGES = WEB_UPDATE_STAGES
 export const updateStage = toRef(webUpdateState, 'stage')
@@ -56,20 +60,38 @@ export function createControllerTakeoverMonitor(serviceWorker, { timeoutMs = 600
     }, dispose() { clearTimer(timer); serviceWorker?.removeEventListener('controllerchange', handle) } }
 }
 
-const desktop = Boolean(window.studyLifeDesktop?.isDesktop)
+const desktop = isDesktopApp
+let lastDesktopSilentCheckAt = 0
 if (!desktop) registerSW({ immediate: true,
   onRegisteredSW: (_url, registration) => controller.observeRegistration(registration),
   // The plugin must never navigate independently of version verification.
   onNeedReload: () => {},
   onNeedRefresh: () => {},
 })
-function silentCheck() { if (!desktop) void checkForAppUpdate(false) }
+function silentCheck() {
+  if (!updatePreferences.autoCheck) return
+  if (desktop) {
+    if (lastDesktopSilentCheckAt && Date.now() - lastDesktopSilentCheckAt < 600000) return
+    lastDesktopSilentCheckAt = Date.now()
+    void checkDesktopAppUpdate()
+  }
+  else void checkForAppUpdate(false)
+}
 function visibilityCheck() { if (document.visibilityState === 'visible') silentCheck() }
 window.addEventListener('focus', silentCheck)
 window.addEventListener('online', silentCheck)
 document.addEventListener('visibilitychange', visibilityCheck)
+const stopPreferenceWatch = watch(() => updatePreferences.autoCheck, (enabled) => {
+  if (enabled) silentCheck()
+})
 const startupTimer = window.setTimeout(silentCheck, 2000)
 const periodicTimer = window.setInterval(silentCheck, 30 * 60 * 1000)
+const publishReminder = (state) => window.dispatchEvent(new CustomEvent('study-life:update-reminder', {
+  detail: { stage: state.stage, version: state.availableVersion || '' },
+}))
+const stopWebReminderWatch = watch(() => [webUpdateState.stage, webUpdateState.availableVersion], () => publishReminder(webUpdateState), { immediate: true })
+const stopDesktopReminderWatch = watch(() => [desktopUpdateState.value.stage, desktopUpdateState.value.availableVersion],
+  () => publishReminder(desktopUpdateState.value), { immediate: true })
 if (import.meta.hot) import.meta.hot.dispose(() => {
   controller.dispose()
   window.clearTimeout(startupTimer)
@@ -77,4 +99,7 @@ if (import.meta.hot) import.meta.hot.dispose(() => {
   window.removeEventListener('focus', silentCheck)
   window.removeEventListener('online', silentCheck)
   document.removeEventListener('visibilitychange', visibilityCheck)
+  stopPreferenceWatch()
+  stopWebReminderWatch()
+  stopDesktopReminderWatch()
 })

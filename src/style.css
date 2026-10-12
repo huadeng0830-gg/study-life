@@ -121,7 +121,7 @@
   --icon-size: 16px;
   --shadow-overlay: 0 12px 32px color-mix(in srgb, var(--text) 12%, transparent);
 
-  --focus-ring: rgba(61, 99, 216, 0.24);
+  --focus-ring: rgba(61, 99, 216, 0.28);
 
   /* Shared motion durations and curves; JS counterparts live in motion.js. */
   --dur-instant: 90ms;
@@ -496,7 +496,7 @@ summary:focus:not(:focus-visible) {
     --ink-soft: #333d54;
     --ink-faint: #3f4a62;
     --muted: #3d4759;
-    --bg-tint: #eef1f7;
+    --bg-tint: #e8ecf3;
     --focus-ring: rgba(43, 91, 215, 0.34);
   }
   :root[data-theme='dark']:not([data-contrast='normal']) {
@@ -519,7 +519,7 @@ summary:focus:not(:focus-visible) {
   --ink-soft: #333d54;
   --ink-faint: #3f4a62;
   --muted: #3d4759;
-  --bg-tint: #eef1f7;
+  --bg-tint: #e8ecf3;
   --focus-ring: rgba(43, 91, 215, 0.34);
 }
 
@@ -840,6 +840,8 @@ summary:focus:not(:focus-visible) {
   100% { outline-offset: 3px; outline-color: transparent; }
 }
 
+
+
 /* ---------- 打印：只留正文（第三十三轮） ----------
    课程表、账单、待办是会被真的打印出来的东西。此前全仓没有任何打印样式，
    按 Ctrl+P 会把深色侧栏、悬浮的任务中心、装饰粒子与提示层一起印上，
@@ -967,16 +969,4 @@ summary:focus:not(:focus-visible) {
 
 @page {
   margin: 12mm;
-}
-
-/* Shared workbench surfaces: quieter edges let the content carry the hierarchy. */
-.card {
-  border-color: var(--border);
-  box-shadow: 0 1px 2px rgba(24, 58, 48, 0.035);
-}
-
-@media (min-width: 901px) {
-  .desktop-toolbar {
-    border-bottom: 1px solid color-mix(in srgb, var(--border) 76%, transparent);
-  }
 }

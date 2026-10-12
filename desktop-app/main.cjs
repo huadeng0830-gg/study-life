@@ -11,6 +11,7 @@ const { routeWindowsCachePaths } = require('./cachePaths.cjs')
 const APP_SCHEME = 'app'
 const APP_HOST = 'study-life'
 const APP_ORIGIN = APP_SCHEME + '://' + APP_HOST
+const RELEASE_HISTORY_URL = 'https://study-life.pages.dev/release-history.json'
 const INSTALL_ROOT_MARKER = 'study-life.install-root'
 const isWindows = process.platform === 'win32'
 let updaterController = null
@@ -216,6 +217,24 @@ ipcMain.handle('study-life:update-cancel', (event) => {
   if (!isTrustedUpdateSender(event)) throw new Error('Untrusted update request')
   return updaterController ? updaterController.cancel() : false
 })
+ipcMain.handle('study-life:release-history', async (event) => {
+  if (!isTrustedUpdateSender(event)) throw new Error('Untrusted update request')
+  try {
+    const response = await net.fetch(RELEASE_HISTORY_URL, {
+      cache: 'no-store',
+      headers: { accept: 'application/json' },
+      signal: AbortSignal.timeout(5000),
+    })
+    if (!response.ok || !response.headers.get('content-type')?.toLowerCase().includes('application/json')) return null
+    const body = await response.text()
+    if (Buffer.byteLength(body, 'utf8') > 512 * 1024) return null
+    const value = JSON.parse(body)
+    return Array.isArray(value) ? value : null
+  } catch (error) {
+    console.warn('[desktop:update] RELEASE_HISTORY_UNAVAILABLE', classifyError(error).code)
+    return null
+  }
+})
 
 function safeExternalUrl(value) {
   try {
@@ -369,12 +388,8 @@ function reportWindowCreationFailure(error, { quit = false } = {}) {
 
 if (gotLock) {
   app.whenReady().then(async () => {
+    await initializeDesktopUpdater().catch((error) => console.error('[desktop] updater initialization failed', error))
     await createMainWindow()
-    void initializeDesktopUpdater().then((updaterReady) => {
-      if (!updaterReady) return
-      const timer = setTimeout(() => void updaterController?.check(), 4000)
-      timer.unref?.()
-    }).catch((error) => console.error('[desktop] updater initialization failed', error))
   }).catch((error) => {
     reportWindowCreationFailure(error, { quit: true })
   })

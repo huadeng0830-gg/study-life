@@ -32,7 +32,7 @@
 import { createApp, h, nextTick, ref, Teleport } from 'vue'
 import { afterEach, describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import Modal from '../src/components/Modal.vue'
 import {
   OVERLAY_BASE_Z_INDEX,
@@ -58,13 +58,12 @@ function cssOf(rel) {
   const raw = readSource(rel)
   if (!rel.endsWith('.vue')) return stripCssComments(raw)
   let out = ''
-  let at = raw.indexOf('<style')
-  while (at >= 0) {
-    const open = raw.indexOf('>', at)
-    const close = raw.indexOf('</style>', open)
-    if (open < 0 || close < 0) break
-    out += `${stripCssComments(raw.slice(open + 1, close))}\n`
-    at = raw.indexOf('<style', close)
+  const pattern = /<style\b([^>]*)>([\s\S]*?)<\/style>/g
+  let match
+  while ((match = pattern.exec(raw))) {
+    const src = /\bsrc=["']([^"']+)["']/i.exec(match[1])?.[1]
+    const css = src ? readSource(join(dirname(rel), src)) : match[2]
+    out += `${stripCssComments(css)}\n`
   }
   return out
 }

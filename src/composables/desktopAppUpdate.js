@@ -1,5 +1,5 @@
 import { ref } from 'vue'
-import { safeUpdateError, updateError } from './updateProtocol.js'
+import { safeUpdateError, updateError, validateReleaseHistory } from './updateProtocol.js'
 
 const STAGES = new Set(['idle', 'checking', 'latest', 'available', 'downloading', 'ready',
   'installing', 'verifying', 'completed', 'cancelled', 'error', 'unavailable'])
@@ -112,4 +112,11 @@ export const installDesktopAppUpdate = () => invoke('install', 'installUpdate', 
 export async function cancelDesktopAppUpdate() {
   try { return Boolean(await desktopApi()?.cancelUpdate?.()) }
   catch { bridgeFailure('download'); return false }
+}
+
+export async function loadDesktopReleaseHistory() {
+  try {
+    const value = await desktopApi()?.getReleaseHistory?.()
+    return validateReleaseHistory(value, { channel: 'stable' })
+  } catch { return null }
 }

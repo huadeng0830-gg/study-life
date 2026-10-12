@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { makeReleaseFetcher, NEXT_TEST_VERSION } from './helpers/releaseFixtures.js'
 
 vi.mock('virtual:pwa-register', () => ({ registerSW: vi.fn(() => vi.fn()) }))
 
@@ -58,7 +59,7 @@ describe('应用更新检查延迟', () => {
     Object.defineProperty(navigator, 'serviceWorker', { configurable: true, value: serviceWorker })
 
     const { APP_RELEASE } = await import('../src/composables/releaseNotes.js')
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true, text: async () => APP_RELEASE })
+    const fetchMock = vi.fn(makeReleaseFetcher(APP_RELEASE))
     vi.stubGlobal('fetch', fetchMock)
 
     const { checkForAppUpdate } = await import('../src/composables/appUpdate.js')
@@ -117,14 +118,15 @@ describe('应用更新检查延迟', () => {
     vi.resetModules()
     const updateGate = deferred()
     const registration = setupRegistration(() => updateGate.promise)
-    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})))
-    const { checkForAppUpdate, updateChecking } = await import('../src/composables/appUpdate.js')
+    vi.stubGlobal('fetch', vi.fn(makeReleaseFetcher(NEXT_TEST_VERSION)))
+    const { checkForAppUpdate, updateChecking, updateStage, webUpdateState } = await import('../src/composables/appUpdate.js')
     const check = checkForAppUpdate()
     await vi.advanceTimersByTimeAsync(0)
-    installWorker(registration)
+    installWorker(registration, 'installing')
     await vi.advanceTimersByTimeAsync(0)
     expect(updateChecking.value).toBe(false)
-    await expect(check).resolves.toBe(false)
+    await expect(check).resolves.toBe(true)
+    expect(webUpdateState).toMatchObject({ stage: 'downloading', availableVersion: NEXT_TEST_VERSION })
     updateGate.resolve()
   })
 
@@ -139,6 +141,7 @@ describe('应用更新检查延迟', () => {
     installWorker(registration)
     await vi.advanceTimersByTimeAsync(0)
     expect(updateChecking.value).toBe(false)
+    await vi.advanceTimersByTimeAsync(8000)
     await expect(check).resolves.toBe(false)
   })
 
@@ -155,7 +158,7 @@ describe('应用更新检查延迟', () => {
       })
     })
     registration.waiting = worker
-    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})))
+    vi.stubGlobal('fetch', vi.fn(makeReleaseFetcher(NEXT_TEST_VERSION)))
     const { checkForAppUpdate, updateStage } = await import('../src/composables/appUpdate.js')
     const check = checkForAppUpdate()
     await vi.advanceTimersByTimeAsync(0)
@@ -171,7 +174,7 @@ describe('应用更新检查延迟', () => {
     const updateGate = deferred()
     const registration = setupRegistration(() => updateGate.promise)
     const { APP_RELEASE } = await import('../src/composables/releaseNotes.js')
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, text: async () => APP_RELEASE }))
+    vi.stubGlobal('fetch', vi.fn(makeReleaseFetcher(APP_RELEASE)))
     const { checkForAppUpdate, updateChecking, updateStage } = await import('../src/composables/appUpdate.js')
     const check = checkForAppUpdate()
     await vi.advanceTimersByTimeAsync(8000)
@@ -193,7 +196,7 @@ describe('应用更新检查延迟', () => {
     navigator.serviceWorker.controller = null
     installWorker(registration, 'installing')
     const { APP_RELEASE } = await import('../src/composables/releaseNotes.js')
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, text: async () => APP_RELEASE }))
+    vi.stubGlobal('fetch', vi.fn(makeReleaseFetcher(APP_RELEASE)))
     const { checkForAppUpdate, updateChecking, updateStage, needsManualReload } = await import('../src/composables/appUpdate.js')
     const check = checkForAppUpdate()
     await vi.advanceTimersByTimeAsync(0)
@@ -219,7 +222,7 @@ describe('应用更新检查延迟', () => {
       })
     })
     registration.waiting = worker
-    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})))
+    vi.stubGlobal('fetch', vi.fn(makeReleaseFetcher(NEXT_TEST_VERSION)))
     const { checkForAppUpdate, updateChecking, updateStage, needsManualReload, appUpdateProgress } = await import('../src/composables/appUpdate.js')
     const check = checkForAppUpdate()
     await vi.advanceTimersByTimeAsync(0)

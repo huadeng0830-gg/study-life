@@ -13,7 +13,7 @@ vi.mock('vite', async (importOriginal) => {
 })
 
 import configFactory from '../vite.config.js'
-import { RELEASE_VERSION } from '../release.config.js'
+import { APP_VERSION, LEGACY_RELEASE_VERSION } from '../release.config.js'
 
 beforeAll(() => {
   fixture.directory = mkdtempSync(join(tmpdir(), 'study-life-config-release-'))
@@ -25,17 +25,22 @@ afterAll(() => {
   rmSync(fixture.directory, { recursive: true, force: true })
 })
 
-describe('release configuration environment override', () => {
-  it('uses the configured release for both app comparisons and version.txt', () => {
+describe('release configuration source of truth', () => {
+  it('ignores the VITE version override and emits the legacy bridge plus structured manifest', () => {
     const config = configFactory({ mode: 'production' })
-    expect(config.define['globalThis.__STUDY_LIFE_RELEASE__']).toBe(JSON.stringify('fictional-emergency-release'))
+    expect(config.define['globalThis.__STUDY_LIFE_RELEASE__']).toBe(JSON.stringify(APP_VERSION))
+    expect(JSON.parse(config.define['globalThis.__STUDY_LIFE_BUILD_INFO__']).sourceSignature).toMatch(/^[a-f0-9]{10}$/)
     const emitFile = vi.fn()
     config.plugins.find((plugin) => plugin.name === 'emit-release-version').generateBundle.call({ emitFile })
-    expect(emitFile).toHaveBeenCalledWith({ type: 'asset', fileName: 'version.txt', source: 'fictional-emergency-release' })
+    expect(emitFile).toHaveBeenCalledWith({ type: 'asset', fileName: 'version.txt', source: LEGACY_RELEASE_VERSION })
+    const manifest = JSON.parse(emitFile.mock.calls.find(([asset]) => asset.fileName === 'release.json')[0].source)
+    expect(manifest).toMatchObject({ version: APP_VERSION, channel: 'stable', updateAction: 'refresh' })
+    expect(manifest.sourceSignature).toMatch(/^[a-f0-9]{10}$/)
+    expect(emitFile.mock.calls.some(([asset]) => asset.fileName === 'release-history.json')).toBe(true)
   })
 
-  it('keeps the declared release when no environment override is present', () => {
+  it('keeps the declared release in development mode', () => {
     const config = configFactory({ mode: 'development' })
-    expect(config.define['globalThis.__STUDY_LIFE_RELEASE__']).toBe(JSON.stringify(RELEASE_VERSION))
+    expect(config.define['globalThis.__STUDY_LIFE_RELEASE__']).toBe(JSON.stringify(APP_VERSION))
   })
 })

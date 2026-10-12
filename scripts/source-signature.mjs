@@ -7,7 +7,10 @@ import { fileURLToPath } from 'node:url'
 
 export const PROJECT_ROOT = fileURLToPath(new URL('../', import.meta.url))
 
-export const RELEASE_INPUTS = ['src', 'functions', 'public', 'desktop', 'desktop-app', 'index.html', 'package.json', 'package-lock.json', 'vite.config.js', 'electron-builder.yml', 'release.config.js', 'wrangler.jsonc']
+export const RELEASE_INPUTS = ['src', 'functions', 'public', 'desktop', 'desktop-app', 'index.html', 'package.json', 'package-lock.json',
+  'vite.config.js', 'electron-builder.yml', 'electron-builder.release.yml', 'release.config.js', 'release-history.json', 'wrangler.jsonc',
+  'scripts/source-signature.mjs', 'scripts/release-manifest.mjs', 'scripts/version-utils.mjs', 'scripts/bump-release.mjs',
+  'scripts/check-release-build.mjs']
 
 export function collectReleaseFiles(target) {
   if (!existsSync(target)) return []

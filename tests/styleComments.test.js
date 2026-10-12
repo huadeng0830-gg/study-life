@@ -102,10 +102,18 @@ describe('样式注释棘轮（§4 第 22 条）', () => {
     text: readFileSync(file, 'utf8'),
     isSfc: file.endsWith('.vue'),
   }))
+  const styleSource = (entry) => {
+    if (!entry.isSfc) return { text: entry.text, isSfc: false }
+    const src = /<style\b[^>]*\bsrc=["']([^"']+)["'][^>]*>/i.exec(stripHtmlComments(entry.text))?.[1]
+    if (!src) return { text: entry.text, isSfc: true }
+    const file = join(srcDir, dirname(entry.file), src)
+    return { text: readFileSync(file, 'utf8'), isSfc: false }
+  }
   const countOf = (name) => {
     const entry = files.find((f) => f.file === name)
     expect(entry, `${name} 不存在了`).toBeTruthy()
-    return countCssComments(entry.text, entry.isSfc)
+    const style = styleSource(entry)
+    return countCssComments(style.text, style.isSfc)
   }
 
   it('第三十七轮受损的 6 个文件都还留着注释（只准多、不准少）', () => {
@@ -130,7 +138,8 @@ describe('样式注释棘轮（§4 第 22 条）', () => {
     const missing = []
     for (const name of Object.keys(DAMAGED_FILES)) {
       const entry = files.find((f) => f.file === name)
-      const head = (styleBlocks(entry.text)[0] ?? '').slice(0, 500)
+      const style = styleSource(entry)
+      const head = (style.isSfc ? (styleBlocks(style.text)[0] ?? '') : style.text).slice(0, 500)
       if (!/\/\*[\s\S]*\*\//.test(head) || !/(丢失|重建)/.test(head)) missing.push(name)
     }
     expect(

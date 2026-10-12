@@ -2,6 +2,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { EventEmitter } from 'node:events'
 import updaterModule from '../desktop-app/updaterController.cjs'
+import { makeReleaseFetcher } from './helpers/releaseFixtures.js'
 
 vi.mock('virtual:pwa-register', () => ({ registerSW: vi.fn(() => vi.fn()) }))
 
@@ -56,7 +57,7 @@ describe('更新协调的实际竞态回归', () => {
     vi.resetModules()
     setupWeb()
     const { APP_RELEASE } = await import('../src/composables/releaseNotes.js')
-    const fetchMock = vi.fn(async () => ({ ok: true, text: async () => APP_RELEASE }))
+    const fetchMock = vi.fn(makeReleaseFetcher(APP_RELEASE))
     vi.stubGlobal('fetch', fetchMock)
     const update = await import('../src/composables/appUpdate.js')
     await update.checkForAppUpdate(false)

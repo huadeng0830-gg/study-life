@@ -1,5 +1,7 @@
+import semver from 'semver'
+
 // 版本号的纯函数：被 scripts/bump-release.mjs 使用，并有单元测试覆盖。
-// 版本格式沿用既有约定：YYYY年MM月DD日-版本N，同日发布递增序号。
+// 日期式标识仅供已经部署的旧 Web/PWA 客户端兼容；正式版本使用 SemVer。
 
 /**
  * 一条版本说明的最短长度。
@@ -24,6 +26,19 @@ export function nextVersion(entries, now = new Date()) {
   const today = formatDateKey(now)
   if (match && match[1] === today) return `${today}-版本${Number(match[2]) + 1}`
   return `${today}-版本1`
+}
+
+export function nextSemverVersion(version, type = 'patch') {
+  const current = semver.valid(String(version ?? ''), { loose: false })
+  if (!current) throw new Error(`无效的 SemVer 版本号：${JSON.stringify(version)}`)
+  if (!['patch', 'minor', 'major'].includes(type)) throw new Error(`不支持的发布类型：${String(type)}`)
+  const next = semver.inc(current, type)
+  if (!next) throw new Error(`无法递增版本号：${current}`)
+  return next
+}
+
+export function isSemver(value) {
+  return typeof value === 'string' && semver.valid(value, { loose: false }) === value
 }
 
 /**
@@ -58,8 +73,14 @@ export function noteLines(notes) {
 }
 
 // 构造一条新的 RELEASE_UPDATES 条目文本（signature 留空，写入前由脚本填入）。
-export function buildReleaseEntry(version, notes) {
-  return `  {\n    version: '${String(version).replace(/'/g, "\\'")}',\n    signature: '',\n    notes: [\n${noteLines(notes)}\n    ],\n  },\n`
+export function buildReleaseEntry(version, notes, { legacyVersion = '', channel = 'stable', summary = '', changes = {} } = {}) {
+  const kinds = ['features', 'improvements', 'fixes', 'security', 'breaking']
+  const changeLines = kinds.map((kind) => {
+    const items = Array.isArray(changes?.[kind]) ? changes[kind] : []
+    return `      ${kind}: [${items.length ? `\n${noteLines(items)}\n      ` : ''}],`
+  }).join('\n')
+  const safe = (value) => String(value ?? '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/[\r\n]/g, ' ')
+  return `  {\n    version: '${safe(version)}',\n    legacyVersion: '${safe(legacyVersion)}',\n    channel: '${safe(channel)}',\n    summary: '${safe(summary || notes?.[0] || '')}',\n    signature: '',\n    changes: {\n${changeLines}\n    },\n    notes: [\n${noteLines(notes)}\n    ],\n  },\n`
 }
 
 /** 更新弹窗最多展示的历史条数；与 release.config.js 头注释、releaseNotes.js 的 MAX_SHOWN 对齐。 */
@@ -143,4 +164,40 @@ export function replaceCurrentNotes(content, notes) {
   if (blockEnd === -1) return null
   const replaced = `${entry.slice(0, blockStart)}notes: [\n${noteLines(notes)}\n    ]${entry.slice(blockEnd + '\n    ]'.length)}`
   return applyEol(lf.slice(0, entryStart) + replaced + lf.slice(entryEnd), eol)
+}
+
+/** Update the unpublished top release entry's notes, categories, and summary in place. */
+export function replaceCurrentReleaseEntry(content, { notes, changes, summary } = {}) {
+  const { lf, eol } = normalizeForStructure(content)
+  const header = 'RELEASE_UPDATES = Object.freeze([\n'
+  const headerAt = lf.indexOf(header)
+  if (headerAt === -1) return null
+  const entryStart = headerAt + header.length
+  const entryEnd = lf.indexOf('\n  },\n', entryStart)
+  if (entryEnd === -1) return null
+  let entry = lf.slice(entryStart, entryEnd)
+  const escape = (value) => String(value ?? '').replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/[\r\n]/g, ' ')
+  if (Array.isArray(notes)) {
+    const blockStart = entry.indexOf('notes: [')
+    const blockEnd = entry.indexOf('\n    ]', blockStart)
+    if (blockStart === -1 || blockEnd === -1) return null
+    entry = `${entry.slice(0, blockStart)}notes: [\n${noteLines(notes)}\n    ]${entry.slice(blockEnd + '\n    ]'.length)}`
+  }
+  if (changes) {
+    const kinds = ['features', 'improvements', 'fixes', 'security', 'breaking']
+    const blockStart = entry.indexOf('changes: {')
+    const blockEnd = entry.indexOf('\n    },', blockStart)
+    if (blockStart === -1 || blockEnd === -1) return null
+    const block = `changes: {\n${kinds.map((kind) => {
+      const items = Array.isArray(changes[kind]) ? changes[kind] : []
+      return `      ${kind}: [${items.length ? `\n${noteLines(items)}\n      ` : ''}],`
+    }).join('\n')}\n    }`
+    entry = `${entry.slice(0, blockStart)}${block}${entry.slice(blockEnd + '\n    }'.length)}`
+  }
+  if (typeof summary === 'string' && summary.trim()) {
+    const pattern = /summary: '[^']*'/
+    if (!pattern.test(entry)) return null
+    entry = entry.replace(pattern, `summary: '${escape(summary.trim())}'`)
+  }
+  return applyEol(lf.slice(0, entryStart) + entry + lf.slice(entryEnd), eol)
 }

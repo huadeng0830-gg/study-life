@@ -1,17 +1,27 @@
 import vue from '@vitejs/plugin-vue'
 import tailwindcss from '@tailwindcss/vite'
 import { env } from 'node:process'
+import { execFileSync } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 import { defineConfig, loadEnv } from 'vite'
 import { getSupabaseConfig } from './src/services/supabase.js'
 import { fileURLToPath } from 'node:url'
 import { VitePWA } from 'vite-plugin-pwa'
-import { RELEASE_SOURCE_SIGNATURE, RELEASE_VERSION } from './release.config.js'
+import { APP_VERSION, LEGACY_RELEASE_VERSION, RELEASE_CHANNEL, RELEASE_NOTES, RELEASE_SOURCE_SIGNATURE, RELEASE_UPDATES } from './release.config.js'
+import { ACCOUNT_SYNC_DATA_SCHEMA_VERSION } from './src/composables/accountSyncSchema.js'
+import { DOMAIN_SCHEMA_VERSION } from './src/composables/domain/migrations.js'
+import { createReleaseManifest } from './scripts/release-manifest.mjs'
 import { computeSourceSignature } from './scripts/source-signature.mjs'
 
 // 相同源码永远得到相同版本；任何 Agent 修改发布源码后都会自动得到新版本。
 // 签名计算集中在 scripts/source-signature.mjs，与 scripts/bump-release.mjs 共用，
 // 保证 build 校验和“更新签名/说明”脚本看到的是同一套逻辑。
 const sourceSignature = computeSourceSignature()
+const rootPackage = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8'))
+const desktopPackage = JSON.parse(readFileSync(new URL('./desktop-app/package.json', import.meta.url), 'utf8'))
+if (rootPackage.version !== APP_VERSION || desktopPackage.version !== APP_VERSION) {
+  throw new Error(`正式版本来源不一致：release.config.js=${APP_VERSION}，package.json=${rootPackage.version}，desktop-app=${desktopPackage.version}。请运行 npm run release:bump。`)
+}
 // 开发与测试期间允许逐步修改；正式 build 必须通过说明一致性检查。
 if (env.NODE_ENV === 'production' && RELEASE_SOURCE_SIGNATURE !== sourceSignature) {
   throw new Error(
@@ -23,17 +33,33 @@ if (env.NODE_ENV === 'production' && RELEASE_SOURCE_SIGNATURE !== sourceSignatur
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
   const desktopBuild = mode === 'desktop'
-  const accountEnv = loadEnv(mode, '.', ['VITE_SUPABASE_', 'VITE_APP_RELEASE'])
+  const accountEnv = loadEnv(mode, '.', ['VITE_SUPABASE_'])
   if ((accountEnv.VITE_SUPABASE_URL || accountEnv.VITE_SUPABASE_PUBLISHABLE_KEY) && !getSupabaseConfig(accountEnv)) {
     throw new Error('Supabase 账号配置不完整或密钥不安全：请使用有效项目 URL 与 publishable / anon key，禁止使用 secret / service_role key。')
   }
-  // 【必须走 loadEnv，不能读 process.env】
-  // 原来这里用的是 `env.VITE_APP_RELEASE`（node:process.env）。于是同一条配置里
-  // VITE_SUPABASE_* 被 loadEnv 正常读到、VITE_APP_RELEASE 却被静默忽略 ——
-  // 在 .env.local 里改版本号不会有任何报错，只会让 version.txt 仍然是
-  // RELEASE_VERSION，客户端一比对就永远显示「已是最新版本」，
-  // 也就是**这个开关根本没法用来救急**。下面第 26 行才是对的写法。
-  const appRelease = accountEnv.VITE_APP_RELEASE?.trim() || RELEASE_VERSION
+  // 版本号只能来自 release.config.js。环境变量覆盖会让界面、清单和桌面包分叉。
+  const appRelease = APP_VERSION
+  let commitId = env.CF_PAGES_COMMIT_SHA || env.GITHUB_SHA || ''
+  if (!commitId) {
+    try { commitId = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim() }
+    catch { commitId = 'unknown' }
+  }
+  commitId = /^[a-f0-9]{7,40}$/i.test(commitId) ? commitId.toLowerCase() : 'unknown'
+  const deploymentUrl = env.CF_PAGES_URL
+  const deploymentId = deploymentUrl ? (() => {
+    try { return new URL(deploymentUrl).hostname.toLowerCase() } catch { return '' }
+  })() : ''
+  const buildId = deploymentId || (env.GITHUB_RUN_ID
+    ? `gh-${env.GITHUB_RUN_ID}-${env.GITHUB_RUN_ATTEMPT || '1'}`
+    : `${commitId.slice(0, 12)}-${sourceSignature}`)
+  const buildInfo = Object.freeze({ buildId, commitId, sourceSignature,
+    schemaVersion: ACCOUNT_SYNC_DATA_SCHEMA_VERSION, domainSchemaVersion: DOMAIN_SCHEMA_VERSION })
+  const releaseHistory = JSON.parse(readFileSync(new URL('./release-history.json', import.meta.url), 'utf8'))
+  const releaseManifest = createReleaseManifest({ appVersion: APP_VERSION, legacyVersion: LEGACY_RELEASE_VERSION,
+    channel: RELEASE_CHANNEL, release: RELEASE_UPDATES[0], releaseNotes: RELEASE_NOTES, releaseHistory,
+    buildInfo, schemaVersion: ACCOUNT_SYNC_DATA_SCHEMA_VERSION,
+    compatibility: { accountSyncSchemaVersion: ACCOUNT_SYNC_DATA_SCHEMA_VERSION, domainSchemaVersion: DOMAIN_SCHEMA_VERSION },
+    releaseUrl: 'https://github.com/huadeng0830-gg/study-life/releases' })
   return {
   base: desktopBuild ? './' : '/',
   server: {
@@ -50,6 +76,7 @@ export default defineConfig(({ mode }) => {
   },
   define: {
     'globalThis.__STUDY_LIFE_RELEASE__': JSON.stringify(appRelease),
+    'globalThis.__STUDY_LIFE_BUILD_INFO__': JSON.stringify(buildInfo),
   },
   build: {
     outDir: desktopBuild ? 'dist-desktop' : 'dist',
@@ -73,10 +100,19 @@ export default defineConfig(({ mode }) => {
       // 输出纯文本版本号，供应用更新检查与服务器版本比对（绕过一切缓存）。
       name: 'emit-release-version',
       transformIndexHtml() {
-        return [{ tag: 'meta', attrs: { name: 'study-life-release', content: appRelease }, injectTo: 'head' }]
+        return [
+          { tag: 'meta', attrs: { name: 'study-life-release', content: LEGACY_RELEASE_VERSION }, injectTo: 'head' },
+          { tag: 'meta', attrs: { name: 'study-life-app-version', content: appRelease }, injectTo: 'head' },
+          { tag: 'meta', attrs: { name: 'study-life-build-id', content: buildInfo.buildId }, injectTo: 'head' },
+          { tag: 'meta', attrs: { name: 'study-life-commit-id', content: buildInfo.commitId }, injectTo: 'head' },
+          { tag: 'meta', attrs: { name: 'study-life-source-signature', content: sourceSignature }, injectTo: 'head' },
+        ]
       },
       generateBundle() {
-        this.emitFile({ type: 'asset', fileName: 'version.txt', source: appRelease })
+        // Keep the old date-like endpoint until deployed Web/PWA clients have migrated.
+        this.emitFile({ type: 'asset', fileName: 'version.txt', source: LEGACY_RELEASE_VERSION })
+        this.emitFile({ type: 'asset', fileName: 'release.json', source: `${JSON.stringify(releaseManifest, null, 2)}\n` })
+        this.emitFile({ type: 'asset', fileName: 'release-history.json', source: `${JSON.stringify(releaseHistory, null, 2)}\n` })
       },
     },
     vue(),

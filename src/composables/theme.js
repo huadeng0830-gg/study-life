@@ -107,7 +107,7 @@ const CONTRAST_DELTAS = {
     inkSoft: '#333d54',
     inkFaint: '#3f4a62',
     muted: '#3d4759',
-    bgTint: '#eef1f7',
+    bgTint: '#e8ecf3',
   },
   dark: {
     border: '#64749a',

@@ -1,0 +1,11 @@
+/* Shared workbench surfaces: quieter edges let the content carry the hierarchy. */
+.card {
+  border-color: var(--border);
+  box-shadow: 0 1px 2px rgba(24, 58, 48, 0.035);
+}
+
+@media (min-width: 901px) {
+  .desktop-toolbar {
+    border-bottom: 1px solid color-mix(in srgb, var(--border) 76%, transparent);
+  }
+}

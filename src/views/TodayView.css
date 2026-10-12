@@ -1,0 +1,610 @@
+
+.social-calendar-anchor { min-height: 1px; }
+/* 第三十七轮说明：本样式块曾因一次删除器 bug 被破坏，内容由删除前的构建产物
+   （dist/assets 的编译 CSS，去掉 scope 属性后反压缩）整体重建，**原有注释在重建中丢失**。
+   第三十八轮已按 scope 归属清掉其中属于别组件的同值副本。新增规则时请照常写注释。 */
+/* 第三十九轮（TodayView 分片）：这里原先还有选择器引用 **FocusPanel.vue /
+   MemoryView.vue 内部节点** 上的类，已按 tests/scopedChildReachability.test.js 的
+   判据清除。剩下的引用分两组：
+     MemoryView  .memory/.memory-bar/.memory-actions/.memory-message/.story/.story-title/
+                 .story-stats/.stat-cell/.story-list（11 个选择器）
+     FocusPanel  .focus-flash/.focus-active,.focus-rest,.focus-completed,.focus-idle/.focus-goal-label/
+                 .focus-goal-row/.goal-input/.pick-todo-btn,.unlink-btn/.recent-row/.recent-chip/
+                 .focus-clock/.focus-target/.focus-type-tag/.focus-state-line/.focus-actions/
+                 .time-chips/.time-chip/.start-btn/.link-hint/.focus-done-mark/.focus-done-time/
+                 .focus-done-actions/.focus-done-hint/.focus-rest-row/.rest-btn/.todo-picker/
+                 .todo-option/.empty-line/.custom-time/.custom-hint,.early-hint/.custom-error/
+                 .modal-actions（46 个选择器）
+   根因同 App.vue 那一批：第三十七轮把入口分片的编译产物搬回宿主文件时带上了 TodayView 的作用域
+   属性，而 Vue 的 scoped CSS 只会把父作用域属性落在子组件的**根节点**上——「TodayView 的作用域 +
+   只存在于子组件内部节点的类」永远匹配不到元素。删除前后用 @vue/compiler-sfc 编译成 CSS 文本
+   逐条 diff 过：消失的正好是上面这些选择器，新增 0 条、改动 0 条。这些样式在两个子组件自己的
+   scoped 样式块里都有等价副本，需要改请改那边。
+   随之清空的两处 @media (max-width:520px)（原只含 .memory*、.focus-actions .btn）
+   整块删除；.todo-picker 规则体里的 vh/dvh 孪生注释随规则一起消失（FocusPanel.vue 里仍有那条
+   规则与孪生，全仓 dvh 计数不受影响）。
+   **故意保留**：`.bill-*` / `.add-btn` 等规则不属本轮——它们引用的组件
+   （TaskCenter 等）TodayView 并没有 import，不在上面两个配对里。 */
+.focus-panel {
+  grid-template-columns:minmax(0,1fr);
+  gap:10px;
+  display:grid}
+
+/* 字号 clamp(30px,3vw,38px) 的最小值是 30px —— 这是**可证明的大字下界**（≥24px），
+   所以对比度只需按 3:1 判；scripts/audit-contrast.mjs 的 largeTextThreshold 认这个下界。
+   不要把 clamp 改成 min()：min 的值只会更小，下界就不再成立。 */
+/* ↑ 这条 clamp 注释描述的是**已删除**的 .focus-clock 规则（它引用的类只在 FocusPanel.vue 的
+   内部节点上，编译后永远匹配不到元素）；注释本身留着不改（注释棘轮只准多），等价样式在
+   components/FocusPanel.vue 自己的 scoped 样式块里。 */
+.page {
+  flex-direction:column;
+  gap:16px;
+  display:flex}
+.page-head {
+  justify-content:space-between;
+  align-items:center;
+  gap:14px;
+  display:flex}
+.today-page-head {
+  align-items:flex-end;
+  margin-bottom:2px;
+  padding-bottom:14px;
+  border-bottom:1px solid var(--border)}
+.today-page-head .head-copy { min-width:0; }
+/* 节日叙事（节日名 · 祝福语）。与 .page-desc 同一行距节奏，但用主色以便一眼看见。 */
+.festive-narrative {
+  display:flex;
+  flex-wrap:wrap;
+  align-items:flex-start;
+  gap:6px;
+  width:fit-content;
+  max-width:100%;
+  color:var(--ink-soft);
+  margin-top:10px;
+  padding:8px 11px;
+  border-left:3px solid var(--atmosphere-accent,var(--primary));
+  border-radius:0 var(--radius-8) var(--radius-8) 0;
+  background:color-mix(in srgb,var(--atmosphere-accent,var(--primary)) 8%,var(--card));
+  font-size:var(--fs-12-5);
+  line-height:1.5}
+.festive-narrative strong {
+  flex:0 1 auto;
+  color:var(--text);
+  font-weight:var(--fw-750);
+  overflow-wrap:anywhere}
+.festive-narrative-mark {
+  flex:0 0 auto;
+  color:var(--atmosphere-accent,var(--primary))}
+.festive-narrative > span:last-child {
+  min-width:0;
+  overflow-wrap:anywhere}
+.greeting {
+  letter-spacing:-.01em;
+  color:var(--text);
+  font-size:max(22px,min(2.5vw,30px));
+  font-weight:var(--fw-850);
+  line-height:1.2}
+.page-desc {
+  color:var(--ink-soft);
+  margin-top:5px;
+  font-size:var(--fs-12-5)}
+.today-context {
+  display:flex;
+  flex-wrap:wrap;
+  align-items:center;
+  gap:6px;
+  margin-top:8px}
+.today-context-date {
+  color:var(--text);
+  font-size:var(--fs-12-5);
+  font-weight:var(--fw-700)}
+.today-context-chip {
+  color:var(--ink-soft);
+  border:1px solid var(--border);
+  border-radius:var(--radius-pill);
+  background:var(--card);
+  padding:3px 8px;
+  font-size:var(--fs-11-5);
+  line-height:1.4}
+
+.head-actions {
+  flex-wrap:wrap;
+  align-items:center;
+  gap:8px;
+  display:flex}
+.replay-btn {
+  white-space:nowrap;
+  flex:none;
+  min-height:40px;
+  padding:9px 13px;
+  font-size:var(--fs-13)}
+.mood-strip {
+  border:1px solid var(--border);
+  border-radius:var(--card-radius);
+  background:var(--card);
+  flex-wrap:wrap;
+  align-items:center;
+  gap:10px;
+  padding:12px 16px;
+  display:flex}
+.mood-label {
+  color:var(--ink-soft);
+  white-space:nowrap;
+  font-size:var(--fs-12-5);
+  font-weight:var(--fw-700)}
+.mood-options {
+  flex-wrap:wrap;
+  gap:4px;
+  display:flex}
+.mood-btn {
+  width:40px;
+  height:40px;
+  transition:background var(--dur-fast) var(--ease-standard), border-color var(--dur-fast) var(--ease-standard), transform var(--dur-fast) var(--ease-standard);
+  background:0 0;
+  border:1px solid #0000;
+  border-radius:var(--radius-10);
+  place-items:center;
+  font-size:var(--fs-20);
+  display:grid}
+.mood-btn:hover {
+  background:var(--bg-tint)}
+.mood-btn.on {
+  border-color:var(--primary);
+  background:var(--primary-soft);
+  transform:scale(1.05)}
+.mood-note {
+  flex:1;
+  min-width:160px;
+  padding:8px 10px}
+.mood-hint {
+  color:var(--ink-faint);
+  font-size:var(--fs-12)}
+
+.next-panel {
+  border-radius:var(--card-radius);
+  background:linear-gradient(120deg, var(--primary-soft), var(--card) 72%);
+  box-shadow:var(--shadow-sm);
+  border:1px solid color-mix(in srgb, var(--primary) 22%, var(--border));
+  justify-content:space-between;
+  align-items:center;
+  gap:14px;
+  padding:18px 22px;
+  display:flex}
+.next-main {
+  flex-direction:column;
+  gap:4px;
+  min-width:0;
+  display:flex}
+.next-label {
+  color:var(--primary);
+  letter-spacing:.14em;
+  font-size:var(--fs-10-5);
+  font-weight:var(--fw-850)}
+.next-title {
+  letter-spacing:-.01em;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  font-size:max(16px,min(2vw,20px));
+  overflow:hidden}
+.next-meta {
+  color:var(--ink-soft);
+  font-size:var(--fs-12-5)}
+.next-empty-line {
+  color:var(--ink-soft);
+  font-size:var(--fs-12);
+  font-weight:var(--fw-600)}
+.next-title.is-muted {
+  color:var(--ink-soft);
+  font-size:var(--fs-15);
+  font-weight:var(--fw-650)}
+.next-state {
+  color:var(--primary);
+  background:var(--card);
+  border:1px solid var(--border);
+  border-radius:var(--radius-pill);
+  align-self:flex-start;
+  padding:4px 9px;
+  font-size:var(--fs-11-5);
+  font-weight:var(--fw-750)}
+.next-state.live {
+  color:#fff;
+  /* 渐变的最浅一档必须让白字达 AA：原来 #456fe8 只有 4.48:1（11.5px/750 属正文，
+     门槛 4.5），差 0.02。三个通道各降一点到 #446de8 → 4.57:1，肉眼看不出来。
+     审计脚本里的 background-image 判据（§1.54）会守住这一条。 */
+  background:linear-gradient(135deg,#446de8,#7855dc);
+  border-color:#0000}
+.next-action {
+  display:inline-flex;
+  justify-content:center;
+  align-items:center;
+  min-height:42px;
+  color:var(--on-primary, #fff);
+  background:var(--primary);
+  border:1px solid var(--primary);
+  border-radius:var(--radius-8);
+  white-space:nowrap;
+  flex:none;
+  padding:0 13px;
+  font-size:var(--fs-12);
+  font-weight:var(--fw-750);
+  text-decoration:none;
+  transition:background var(--dur-fast) var(--ease-standard), border-color var(--dur-fast) var(--ease-standard), transform var(--dur-fast) var(--ease-standard)}
+.next-action:hover {
+  color:var(--on-primary, #fff);
+  background:var(--primary-hover);
+  border-color:var(--primary-hover);
+  text-decoration:none}
+
+.panel {
+  border:1px solid var(--border);
+  border-radius:var(--card-radius);
+  background:var(--card);
+  min-width:0;
+  padding:18px}
+.panel-head {
+  justify-content:space-between;
+  align-items:baseline;
+  gap:10px;
+  margin-bottom:10px;
+  display:flex}
+.panel-head h2 {
+  font-size:var(--fs-15-5)}
+.panel-link {
+  color:var(--primary);
+  white-space:nowrap;
+  font-size:var(--fs-12);
+  font-weight:var(--fw-700);
+  text-decoration:none}
+.panel-link:hover {
+  text-decoration:underline}
+.experience-message {
+  color:var(--primary);
+  border:1px solid color-mix(in srgb, var(--primary) 28%, var(--border));
+  background:color-mix(in srgb, var(--primary) 10%, var(--card));
+  border-radius:var(--radius-9);
+  padding:8px 12px;
+  font-size:var(--fs-12-5)}
+.panel-head>div {
+  min-width:0}
+.panel-subtitle {
+  color:var(--ink-faint);
+  margin-top:3px;
+  font-size:var(--fs-11-5);
+  font-weight:var(--fw-500);
+  display:block}
+.compact-link-row {
+  min-height:42px;
+  color:var(--text);
+  align-items:center;
+  gap:9px;
+  padding:0 4px;
+  font-size:var(--fs-13);
+  display:flex}
+.compact-link-row>span {
+  font-weight:var(--fw-750)}
+.compact-link-row>span b {
+  color:var(--primary)}
+.compact-link-row small {
+  color:var(--ink-faint);
+  font-size:var(--fs-11-5)}
+.compact-link-row a {
+  color:var(--primary);
+  white-space:nowrap;
+  margin-left:auto;
+  font-size:var(--fs-12);
+  font-weight:var(--fw-750);
+  text-decoration:none}
+.week-progress {
+  padding:16px 18px}
+.week-progress p {
+  color:var(--ink-soft);
+  font-size:var(--fs-12)}
+.today-course-checkins { display:grid; gap:8px; margin-top:10px; }
+.today-course-checkin { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+.today-course-checkin>div { display:flex; flex-wrap:wrap; gap:5px; }
+.today-course-checkin button { border:1px solid var(--border); border-radius:var(--radius-pill); background:var(--card); color:var(--ink-soft); padding:5px 9px; font-size:var(--fs-10-5); }
+.today-course-checkin button[aria-pressed='true'] { border-color:var(--primary); background:var(--primary-soft); color:var(--primary); }
+.week-finance-stats {
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:8px;
+  display:grid}
+.week-finance-stats>div {
+  background:var(--bg-tint);
+  border-radius:var(--radius-8);
+  flex-direction:column;
+  gap:4px;
+  min-width:0;
+  padding:10px;
+  display:flex}
+.week-finance-stats small {
+  color:var(--ink-faint);
+  font-size:var(--fs-10-5)}
+.week-finance-stats b {
+  overflow:hidden;
+  font-size:var(--fs-12-5);
+  font-variant-numeric:tabular-nums;
+  text-overflow:ellipsis;
+  white-space:nowrap}
+.week-finance-stats b.negative { color:var(--danger); }
+.week-finance-note { color:var(--ink-soft); margin-top:8px; font-size:var(--fs-11-5); }
+.today-mood-lower {
+  padding:3px 4px}
+.mood-toolbar {
+  align-items:center;
+  gap:9px;
+  width:100%;
+  min-width:0;
+  display:flex}
+.today-mood-lower .mood-options {
+  scrollbar-width:none;
+  flex-wrap:nowrap;
+  flex:auto;
+  gap:2px;
+  min-width:0;
+  display:flex;
+  overflow-x:auto}
+.today-mood-lower .mood-options::-webkit-scrollbar {
+  display:none}
+.today-mood-lower .mood-btn {
+  flex:0 0 32px;
+  width:32px;
+  height:32px;
+  font-size:var(--fs-17)}
+.today-mood-lower .mood-note {
+  flex:160px;
+  min-width:140px;
+  max-width:320px;
+  padding:7px 9px}
+
+.event-detail {
+  flex-direction:column;
+  gap:8px;
+  display:flex}
+.event-detail h3 {
+  font-size:var(--fs-18)}
+.event-detail p {
+  color:var(--ink-soft);
+  margin:0;
+  font-size:var(--fs-13)}
+.event-detail .event-detail-note {
+  color:var(--text);
+  white-space:pre-wrap;
+  border-top:1px solid var(--border);
+  padding-top:8px}
+.task-list {
+  flex-direction:column;
+  display:flex}
+.task-row {
+  border-top:1px solid var(--border);
+  align-items:center;
+  gap:11px;
+  min-height:52px;
+  display:flex}
+.task-row:first-child {
+  border-top:0}
+.task-priority {
+  color:var(--danger);
+  flex:none;
+  font-size:var(--fs-11);
+  font-style:normal;
+  font-weight:var(--fw-800)}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+.bill-list {
+  flex-direction:column;
+  display:flex}
+.bill-row {
+  min-height:44px;
+  color:inherit;
+  border-top:1px solid var(--border);
+  justify-content:space-between;
+  align-items:center;
+  gap:10px;
+  font-size:var(--fs-13);
+  text-decoration:none;
+  display:flex}
+.bill-row:first-child {
+  border-top:0}
+.bill-row:hover b {
+  color:var(--primary)}
+.bill-row span {
+  color:var(--ink-soft);
+  font-variant-numeric:tabular-nums;
+  flex:none;
+  font-size:var(--fs-12)}
+
+
+
+
+
+
+
+
+
+@media (max-width:760px) {
+.next-panel {
+  align-items:flex-start;
+  flex-direction:column;
+  padding:16px 18px}
+.next-action {
+  display:inline-flex}
+}
+@media (max-width: 900px), (pointer: coarse) and (max-height: 520px) {
+  .today-page-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 8px; }
+  .greeting { overflow-wrap: anywhere; line-height: 1.4; }
+  .next-panel { min-width: 0; max-width: 100%; align-items: stretch; flex-direction: column; padding: 16px; box-shadow: none; }
+  .next-main { width: 100%; }
+  .next-title { white-space: normal; overflow-wrap: anywhere; line-height: 1.5; }
+  .next-meta { overflow-wrap: anywhere; }
+  .next-action { min-height: 44px; width: 100%; white-space: normal; }
+}
+@media (max-width:520px) {
+  .page {
+  gap:12px}
+.page-head {
+  flex-direction:column;
+  align-items:flex-start}
+.add-btn {
+  text-align:center;
+  width:100%}
+.panel {
+  padding:15px 14px}
+.task-row {
+  min-height:56px}
+
+.compact-link-row {
+  flex-wrap:wrap;
+  gap:5px 8px;
+  padding-block-start:4px;
+  padding-block-end:4px}
+.compact-link-row small {
+  flex:1 0 100%;
+  padding-left:2px}
+.compact-link-row a {
+  margin-left:auto}
+.mood-toolbar {
+  grid-template-rows:auto auto auto;
+  grid-template-columns:minmax(0,1fr) auto;
+  gap:7px 8px;
+  display:grid}
+.today-mood-lower .mood-label {
+  grid-area:1/1;
+  align-self:center}
+
+.today-mood-lower .mood-options {
+  grid-area:2/1/auto/-1;
+  width:100%;
+  padding-bottom:1px}
+.today-mood-lower .mood-note {
+  grid-area:3/1/auto/-1;
+  width:100%;
+  max-width:none}
+}
+
+/* The app's sidebar consumes viewport width on desktop. Base this two-column
+   layout on the space the page actually receives, not the outer window. */
+.today-layout {
+  min-width:0;
+  container-name:today-layout;
+  container-type:inline-size}
+
+@container today-layout (min-width:850px) {
+  .today-page {
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  align-items:start;
+  gap:16px 18px;
+  display:grid}
+.today-page>.page-head,.today-page>.experience-message,.today-page>.home-productivity,.today-page>.next-panel,.today-page>.compact-link-row,.today-page>.today-mood-lower {
+  grid-column:1/-1}
+.today-page>.today-agenda {
+  grid-column:1/-1}
+.today-page>.focus-panel {
+  grid-column:1/-1;
+  justify-self:center;
+  width:min(100%,760px)}
+.today-page>.home-productivity {
+  grid-template-columns:repeat(auto-fit,minmax(min(100%,430px),1fr));
+  margin:0}
+}
+
+/* The next event is the one strong surface on the home page; the agenda below it stays calm. */
+.today-page-head {
+  align-items: flex-start;
+  border-bottom: 0;
+  padding-bottom: 2px;
+}
+.greeting {
+  font-size: clamp(25px, 2.35vw, 32px);
+  font-weight: var(--fw-750);
+  letter-spacing: -0.035em;
+  line-height: 1.22;
+}
+.today-context { gap: 7px; margin-top: 10px; }
+.today-context-date { margin-right: 4px; font-variant-numeric: tabular-nums; }
+.today-context-chip {
+  border-color: transparent;
+  border-radius: var(--radius-5);
+  background: var(--bg-tint);
+  padding: 4px 8px;
+}
+.next-panel {
+  position: relative;
+  overflow: hidden;
+  color: #f2f7f4;
+  border: 0;
+  border-radius: var(--radius-12);
+  background: #183a35;
+  box-shadow: none;
+  gap: 22px;
+  padding: 24px 26px 24px 30px;
+}
+.next-panel::before {
+  position: absolute;
+  top: 21px;
+  bottom: 21px;
+  left: 0;
+  width: 4px;
+  border-radius: 0 var(--radius-pill) var(--radius-pill) 0;
+  background: #d79b3e;
+  content: '';
+}
+.next-main { gap: 6px; }
+.next-label {
+  color: #b9d8ca;
+  font-size: var(--fs-12);
+  font-weight: var(--fw-650);
+  letter-spacing: 0.04em;
+}
+.next-title { color: #f6faf8; font-size: clamp(20px, 2vw, 26px); line-height: 1.35; }
+.next-meta,
+.next-empty-line { color: #c4d8cf; }
+.next-title.is-muted { color: #f6faf8; font-size: var(--fs-18); }
+.next-state,
+.next-state.live {
+  color: #183a35;
+  border: 1px solid transparent;
+  background: #d5ebdd;
+}
+.next-action,
+.next-action:hover {
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-8);
+  background: var(--bg-tint);
+  font-size: var(--fs-13);
+  font-weight: var(--fw-700);
+}
+.next-action:hover { background: color-mix(in srgb, var(--primary) 8%, var(--bg-tint)); }
+.today-page > .panel {
+  border-color: var(--border);
+  border-radius: var(--radius-12);
+  background: var(--card);
+  box-shadow: none;
+}
+.today-page > .today-mood-lower {
+  border: 0;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+  padding: 10px 0 2px;
+}
+@media (max-width: 900px), (pointer: coarse) and (max-height: 520px) {
+  .next-panel { padding: 19px 18px 19px 22px; }
+  .next-panel::before { top: 18px; bottom: 18px; }
+}

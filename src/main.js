@@ -1,6 +1,7 @@
 import { createApp } from 'vue'
 import { createRouter, createWebHashHistory } from 'vue-router'
 import './style.css'
+import './styles/workbench-surfaces.css'
 import { prepareAccountCallback } from './composables/accountAuth.js'
 import { initializeDataVault, redirectPreviewOrigin } from './composables/dataVault.js'
 // 高对比度开关在本机数据与账号提交恢复后加载，避免启动早期读取存储。
@@ -285,11 +286,9 @@ async function bootstrap({ skipGate = false } = {}) {
  * 单独成函数只是为了在 bootstrap 末尾统一兜异常；内部逻辑与之前一致。
  */
 function startOptionalWarmup() {
-  // 更新检查不再阻塞手机首屏；浏览器空闲后再注册更新服务。
-  if (!isDesktopShell) {
-    const startUpdater = () => void import('./composables/appUpdate.js')
-    whenIdle(startUpdater, { timeout: 5000, fallbackDelay: 5000, deferMs: 1200 })
-  }
+  // 更新检查不再阻塞首屏；浏览器空闲后注册 PWA，桌面端接入同一自动检查调度。
+  const startUpdater = () => void import('./composables/appUpdate.js')
+  whenIdle(startUpdater, { timeout: 5000, fallbackDelay: 5000, deferMs: 1200 })
 
   // 异步组件预加载：统一走 router/routePreload.js。
   //

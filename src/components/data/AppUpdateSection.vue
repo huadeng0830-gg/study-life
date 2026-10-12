@@ -1,12 +1,14 @@
 <script setup>
-import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { CheckIcon, CircleAlertIcon, CopyIcon, HistoryIcon, RefreshCwIcon } from '@lucide/vue'
 import { announce, announceAlert } from '../../composables/liveRegion.js'
 import { applyAppUpdate, checkForAppUpdate, forceRecoverToLatest, retryAppUpdate, webUpdateState } from '../../composables/appUpdate.js'
 import { cancelDesktopAppUpdate, checkDesktopAppUpdate, desktopUpdateState, downloadDesktopAppUpdate,
-  installDesktopAppUpdate, isDesktopApp, subscribeToDesktopUpdateState } from '../../composables/desktopAppUpdate.js'
+  installDesktopAppUpdate, isDesktopApp, loadDesktopReleaseHistory, subscribeToDesktopUpdateState } from '../../composables/desktopAppUpdate.js'
 import { getUpdatePresentation } from '../../composables/updatePresentation.js'
-import { formatUpdateDiagnostic } from '../../composables/updateProtocol.js'
+import { collectReleaseChanges, formatUpdateDiagnostic } from '../../composables/updateProtocol.js'
+import { APP_DOMAIN_SCHEMA_VERSION, APP_SCHEMA_VERSION, BUILD_ID, COMMIT_ID } from '../../composables/versionInfo.js'
+import { deferUpdateReminder, setUpdatePreference, updatePreferences } from '../../composables/updatePreferences.js'
 import { performanceMode } from '../../composables/performanceMode.js'
 import '../../styles/shadcn.css'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
@@ -21,6 +23,9 @@ const loadReleaseNotesBrowser = () => import('../ReleaseNotesBrowser.vue')
 const ReleaseNotesBrowser = defineAsyncComponent(loadReleaseNotesBrowser)
 const notesOpen = ref(false)
 const copyMessage = ref('')
+const preferencesMessage = ref('')
+const deferredMessage = ref('')
+const desktopReleaseChanges = ref([])
 const clock = ref(Date.now())
 let stopDesktop = () => {}
 let timer
@@ -29,13 +34,28 @@ onMounted(() => {
   timer = window.setInterval(() => { clock.value = Date.now() }, 1000)
 })
 onBeforeUnmount(() => { stopDesktop(); window.clearInterval(timer) })
+/** @type {import('vue').ComputedRef<any>} */
 const state = computed(() => isDesktopApp ? desktopUpdateState.value : webUpdateState)
 const ui = computed(() => getUpdatePresentation(state.value, isDesktopApp))
+const releaseChanges = computed(() => isDesktopApp ? desktopReleaseChanges.value : (state.value.updateReleases || []))
+const displayReleaseRecords = computed(() => {
+  if (releaseChanges.value.length) return releaseChanges.value
+  const manifest = state.value.releaseManifest
+  return manifest ? [{ version: manifest.version, title: manifest.title, summary: manifest.summary,
+    publishedAt: manifest.publishedAt, changes: manifest.changes, notes: manifest.notes, releaseUrl: manifest.releaseUrl }] : []
+})
 const statusClass = computed(() => cn('update-status', {
   'is-success': ui.value.tone === 'success', 'is-error': ui.value.tone === 'error',
   'is-warning': ui.value.tone === 'warning', 'is-info': ui.value.tone === 'info',
 }))
 const currentVersionLabel = computed(() => state.value.currentVersion || '正在读取版本…')
+const statusLabel = computed(() => {
+  if (state.value.stage !== 'idle') return ui.value.statusLabel
+  return updatePreferences.autoCheck ? '自动检查已开启' : '自动检查已关闭'
+})
+const defaultMessage = computed(() => updatePreferences.autoCheck
+  ? '启动或联网后自动检查，也可以手动检查。'
+  : '自动检查已关闭，可以随时手动检查。')
 const lastCheckedIso = computed(() => state.value.lastCheckedAt ? new Date(state.value.lastCheckedAt).toISOString() : undefined)
 const lastCheckText = computed(() => {
   if (!state.value.lastCheckedAt) return '尚未成功检查'
@@ -55,9 +75,18 @@ const downloadSize = computed(() => {
   return state.value.total ? `${bytes(state.value.transferred)} / ${bytes(state.value.total)}` : `已下载 ${bytes(state.value.transferred)}`
 })
 const diagnostic = computed(() => formatUpdateDiagnostic(isDesktopApp ? 'windows' : 'web', state.value))
-const sourceText = isDesktopApp ? '已安装客户端配置的正式发布通道，校验更新包与 Windows 发布者签名。' : `${window.location.origin}/version.txt`
+const sourceText = isDesktopApp ? '已安装客户端配置的正式发布通道，校验更新包哈希与 Windows 发布者签名。' : `${window.location.origin}/release.json（同源稳定版清单）`
 const steps = ['核对版本', '下载资源', isDesktopApp ? '重启安装' : '启用资源', '验证版本']
 const motionOptions = [{ value: 'auto', label: '自动' }, { value: 'on', label: '减少动画' }, { value: 'off', label: '完整效果' }]
+const releaseChangeKinds = [['features', '新功能'], ['improvements', '体验优化'], ['fixes', '问题修复'], ['security', '安全修复'], ['breaking', '兼容性变化']]
+let historyRequest = 0
+watch(() => [state.value.availableVersion, state.value.currentVersion], async ([targetVersion, currentVersion]) => {
+  const request = ++historyRequest
+  if (!isDesktopApp || !targetVersion || !currentVersion) { desktopReleaseChanges.value = []; return }
+  const history = await loadDesktopReleaseHistory()
+  if (request !== historyRequest) return
+  desktopReleaseChanges.value = collectReleaseChanges(history || [], currentVersion, targetVersion)
+}, { immediate: true })
 function primaryAction() {
   if (ui.value.disabled) return
   if (isDesktopApp) {
@@ -71,6 +100,14 @@ function primaryAction() {
   return checkForAppUpdate()
 }
 function checkAgain() { return isDesktopApp ? checkDesktopAppUpdate() : checkForAppUpdate() }
+function changePreference(key, event) {
+  const saved = setUpdatePreference(key, Boolean(event.target?.checked))
+  preferencesMessage.value = saved ? '偏好已保存到本机。' : '本机不允许写入设置；本次打开期间仍会按当前选择运行。'
+}
+function deferCurrentRelease() {
+  const saved = deferUpdateReminder(state.value.availableVersion)
+  deferredMessage.value = saved ? `已暂缓 ${state.value.availableVersion} 的提醒，可随时回来更新。` : '暂缓设置未能保存，请稍后重试。'
+}
 function warmReleaseNotes() { void loadReleaseNotesBrowser().catch(() => {}) }
 async function copyDiagnostic() {
   try {
@@ -96,7 +133,10 @@ async function copyDiagnostic() {
           <span class="version-caption">当前运行版本</span>
           <strong class="version-number">{{ currentVersionLabel }}</strong>
         </div>
-        <Badge variant="secondary">{{ isDesktopApp ? 'Windows' : '网页 / PWA' }}</Badge>
+        <div class="update-heading-badges">
+          <Badge variant="secondary">{{ isDesktopApp ? 'Windows' : '网页 / PWA' }}</Badge>
+          <Badge variant="outline">稳定版</Badge>
+        </div>
       </header>
       <div class="update-overview" role="status" aria-live="polite" aria-atomic="true">
         <span :class="cn('update-state-symbol', { 'is-success': ui.tone === 'success', 'is-error': ui.tone === 'error' })" aria-hidden="true">
@@ -106,8 +146,8 @@ async function copyDiagnostic() {
           <RefreshCwIcon v-else />
         </span>
         <div class="section-copy">
-          <strong :class="statusClass">{{ ui.statusLabel }}</strong>
-          <p class="update-detail">{{ state.message || '启动和联网时自动检查，也可以手动检查。' }}</p>
+          <strong :class="statusClass">{{ statusLabel }}</strong>
+          <p class="update-detail">{{ state.message || defaultMessage }}</p>
           <time class="update-last-check" :datetime="lastCheckedIso">{{ lastCheckText }}</time>
         </div>
       </div>
@@ -119,6 +159,25 @@ async function copyDiagnostic() {
         <AlertTitle>本次更新未完成</AlertTitle>
         <AlertDescription>{{ state.error.message }} 详细诊断可在下方展开查看。</AlertDescription>
       </Alert>
+      <details v-if="state.availableVersion && state.stage !== 'blocked' && (displayReleaseRecords.length || state.releaseNotes)" class="update-release-info">
+        <summary>查看 {{ currentVersionLabel }} 到 {{ state.availableVersion }} 的更新内容</summary>
+        <article v-for="release in displayReleaseRecords" :key="release.version" class="update-release-entry">
+          <h3>v{{ release.version }}</h3>
+          <p v-if="release.summary" class="update-release-summary">{{ release.summary }}</p>
+          <time v-if="release.publishedAt" class="update-last-check">{{ new Date(release.publishedAt).toLocaleDateString('zh-CN') }}</time>
+          <template v-if="releaseChangeKinds.some(([kind]) => release.changes?.[kind]?.length)">
+            <template v-for="([kind, label]) in releaseChangeKinds" :key="kind">
+              <section v-if="release.changes?.[kind]?.length" class="update-change-group">
+                <strong>{{ label }}</strong>
+                <ul><li v-for="(note, index) in release.changes[kind]" :key="`${kind}-${index}`">{{ note }}</li></ul>
+              </section>
+            </template>
+          </template>
+          <ul v-else-if="release.notes?.length"><li v-for="(note, index) in release.notes" :key="index">{{ note }}</li></ul>
+          <a v-if="release.releaseUrl" :href="release.releaseUrl" target="_blank" rel="noopener noreferrer">查看原始发布记录</a>
+        </article>
+        <p v-if="isDesktopApp && !displayReleaseRecords.length && state.releaseNotes" class="update-release-notes">{{ state.releaseNotes }}</p>
+      </details>
       <section v-if="ui.showProgress" class="update-progress" aria-label="更新进度">
         <ol class="update-phase-list">
           <li v-for="(step, index) in steps" :key="step"
@@ -146,12 +205,22 @@ async function copyDiagnostic() {
           </Button>
         </div>
         <Button v-if="isDesktopApp && state.canCancel" type="button" variant="ghost" @click="cancelDesktopAppUpdate">取消下载</Button>
+        <Button v-if="['available', 'ready'].includes(state.stage) && state.availableVersion" type="button" variant="ghost" @click="deferCurrentRelease">稍后提醒</Button>
         <p v-if="['ready', 'manual-reload'].includes(state.stage)" class="update-later-note">可以稍后处理，关闭此面板仍可继续使用当前版本。</p>
+        <p v-if="deferredMessage" role="status" class="update-copy-result">{{ deferredMessage }}</p>
       </div>
-      <details v-if="isDesktopApp && state.releaseNotes && state.availableVersion" class="update-release-info">
-        <summary>本次更新内容</summary>
-        <p v-if="state.releaseDate" class="update-last-check">发布时间：{{ new Date(state.releaseDate).toLocaleDateString('zh-CN') }}</p>
-        <p class="update-release-notes">{{ state.releaseNotes }}</p>
+      <details class="update-settings">
+        <summary>更新偏好</summary>
+        <label class="update-preference-row">
+          <input type="checkbox" :checked="updatePreferences.autoCheck" @change="changePreference('autoCheck', $event)">
+          <span><strong>自动检查更新</strong><small>启动、联网或重新打开应用时检查，最多每 10 分钟一次。</small></span>
+        </label>
+        <label class="update-preference-row">
+          <input type="checkbox" :checked="updatePreferences.showReminder" @change="changePreference('showReminder', $event)">
+          <span><strong>在导航中显示新版本提醒</strong><small>仅显示轻量标记，不会自动刷新正在使用的页面。</small></span>
+        </label>
+        <p class="update-motion-note">发布渠道：稳定版。偏好只保存在此设备，不同步账户数据。</p>
+        <p v-if="preferencesMessage" role="status" class="update-copy-result">{{ preferencesMessage }}</p>
       </details>
       <details class="update-motion-settings">
         <summary>动画效果</summary>
@@ -167,6 +236,13 @@ async function copyDiagnostic() {
         <summary>更新来源与诊断</summary>
         <div class="update-diagnostics-content">
           <p class="update-source">{{ sourceText }}</p>
+          <dl class="update-tech-info">
+            <dt>应用版本</dt><dd>{{ currentVersionLabel }}</dd>
+            <dt>构建标识</dt><dd>{{ BUILD_ID }}</dd>
+            <dt>代码提交</dt><dd>{{ COMMIT_ID }}</dd>
+            <dt>账号数据结构</dt><dd>{{ APP_SCHEMA_VERSION }}</dd>
+            <dt>本地数据结构</dt><dd>{{ APP_DOMAIN_SCHEMA_VERSION }}</dd>
+          </dl>
           <dl v-if="state.timings.length" class="update-timings">
             <template v-for="(item, index) in state.timings" :key="index">
               <dt>{{ { checking: '版本检查', downloading: '资源下载', installing: '安装 / 启用', verifying: '版本验证' }[item.stage] || item.stage }}</dt>
@@ -190,7 +266,7 @@ async function copyDiagnostic() {
               @pointerenter="warmReleaseNotes" @focus="warmReleaseNotes" @click="notesOpen = true">
         <HistoryIcon data-icon="inline-start" />查看更新记录
       </Button>
-      <span class="update-auto-note">{{ state.stage === 'unavailable' ? '更新服务未启用' : '自动检查已开启' }}</span>
+      <span class="update-auto-note">{{ state.stage === 'unavailable' ? '更新服务未启用' : updatePreferences.autoCheck ? '自动检查已开启' : '自动检查已关闭' }}</span>
     </CardFooter>
   </Card>
   <ReleaseNotesBrowser v-if="notesOpen" :open="notesOpen" @close="notesOpen = false" />
@@ -202,6 +278,7 @@ async function copyDiagnostic() {
 .update-card-content { display:flex; flex-direction:column; gap:18px; padding:20px; }
 .update-card-footer { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:0 20px 16px; }
 .update-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
+.update-heading-badges { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:6px; }
 .version-heading { display:flex; flex-direction:column; gap:5px; min-width:0; }
 .version-caption { color:var(--muted); font-size:var(--fs-12); }
 .version-number { color:var(--text); font-size:var(--fs-20); line-height:1.45; font-weight:var(--fw-750); overflow-wrap:anywhere; font-variant-numeric:tabular-nums; }
@@ -238,8 +315,23 @@ async function copyDiagnostic() {
 .update-progress-bar { height:6px; }
 .update-progress-meta { display:flex; flex-wrap:wrap; align-items:center; gap:8px; color:var(--muted); font-size:var(--fs-11); line-height:1.5; font-variant-numeric:tabular-nums; }
 .update-progress-meta > time { margin-left:auto; white-space:nowrap; }
-.update-diagnostics summary,.update-release-info summary,.update-motion-settings summary { display:flex; align-items:center; min-height:44px; color:var(--muted); font-size:var(--fs-12); cursor:pointer; list-style:revert; }
-.update-diagnostics summary:focus-visible,.update-release-info summary:focus-visible,.update-motion-settings summary:focus-visible { outline:2px solid var(--focus-solid); outline-offset:2px; border-radius:var(--radius-6); }
+.update-diagnostics summary,.update-release-info summary,.update-motion-settings summary,.update-settings summary { display:flex; align-items:center; min-height:44px; color:var(--muted); font-size:var(--fs-12); cursor:pointer; list-style:revert; }
+.update-diagnostics summary:focus-visible,.update-release-info summary:focus-visible,.update-motion-settings summary:focus-visible,.update-settings summary:focus-visible { outline:2px solid var(--focus-solid); outline-offset:2px; border-radius:var(--radius-6); }
+.update-release-entry { display:grid; gap:8px; padding-block:8px; }
+.update-release-entry + .update-release-entry { border-top:1px solid var(--border); }
+.update-release-entry h3 { margin:0; color:var(--text); font-size:var(--fs-12); }
+.update-release-summary { margin:0; color:var(--ink-soft); font-size:var(--fs-12); line-height:1.6; }
+.update-change-group { display:grid; gap:5px; }
+.update-change-group > strong { color:var(--muted); font-size:var(--fs-11); }
+.update-release-entry ul { display:flex; flex-direction:column; gap:6px; margin:0; padding-left:20px; color:var(--ink-soft); font-size:var(--fs-12); line-height:1.6; }
+.update-release-entry a { color:var(--primary); font-size:var(--fs-11); }
+.update-preference-row { display:flex; align-items:flex-start; gap:12px; min-height:48px; padding:8px 0; color:var(--ink-soft); cursor:pointer; }
+.update-preference-row input { flex:0 0 20px; width:20px; height:20px; margin:2px 0 0; accent-color:var(--primary); }
+.update-preference-row > span { display:flex; flex-direction:column; gap:3px; }
+.update-preference-row strong { color:var(--text); font-size:var(--fs-12); font-weight:var(--fw-650); }
+.update-preference-row small { color:var(--muted); font-size:var(--fs-11); line-height:1.5; }
+.update-tech-info { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1.4fr); gap:7px 12px; margin:0; color:var(--muted); font-size:var(--fs-11); }
+.update-tech-info dd { min-width:0; margin:0; color:var(--ink-soft); font-family:monospace; overflow-wrap:anywhere; }
 .update-motion-options { display:flex; flex-wrap:wrap; gap:8px; }
 .update-motion-note { margin:8px 0 0; color:var(--muted); font-size:var(--fs-11); line-height:1.6; }
 .update-diagnostics-content { display:flex; flex-direction:column; gap:12px; padding-top:6px; }

@@ -25,7 +25,7 @@ import { createApp, h, nextTick, ref } from 'vue'
 import { createRouter, createWebHashHistory } from 'vue-router'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
-import { dirname, resolve } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import Sidebar from '../src/components/Sidebar.vue'
 import Modal from '../src/components/Modal.vue'
@@ -44,6 +44,9 @@ function stripComments(text) {
 /** 取某个 .vue 的 `<style>` 块内容（已剥注释）。 */
 function styleBlockOf(rel) {
   const raw = readSource(rel)
+  const external = /<style\b([^>]*)>/i.exec(raw)
+  const src = external?.[1].match(/\bsrc=["']([^"']+)["']/i)?.[1]
+  if (src) return stripComments(readSource(join(dirname(rel), src)))
   const start = raw.indexOf('<style')
   const open = raw.indexOf('>', start)
   const end = raw.lastIndexOf('</style>')
