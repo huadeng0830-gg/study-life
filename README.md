@@ -9,14 +9,12 @@
 [🌐 在线体验](https://study-life.pages.dev/) · [📦 GitHub](https://github.com/huadeng0830-gg/study-life)
 
 <!-- RELEASE_STATUS:START -->
-> **当前源码版本**：网页 / PWA `1.1.0` · Windows 桌面版 `1.1.0`
+> **当前源码版本**：网页 / PWA `1.1.1` · Windows 桌面版 `1.1.1`
 > **最近更新**：
-> - 新增个人管理中心，集中查看本机数据、保存状态和账号同步事项
-> - 从桌面侧栏和手机更多入口进入，并直达现有业务管理页面
-> - 管理页适配现有移动端断点与标题层级规范
-> - 改进浅色高对比配色、键盘焦点反馈和首页操作按钮的主题对比度
-> - 调整全局表面与打印样式顺序，确保两类规则正确生效
-> - 修正首次读取数据时误显示为无待处理事项
+> - 新增仅限平台所有者访问的账号运维页，展示真实账号与协作服务状态
+> - 暂停与恢复账号必须填写原因并记录审计；暂停不会立即撤销未过期的访问令牌
+> - 修复 1.1.0 构建签名不一致导致网页端阻止刷新的问题，发布独立的 1.1.1 补丁版本
+> - 管理请求逐次验证 Supabase 会话和服务端所有者登记
 > [下载已发布的 Windows 安装包与版本说明](https://github.com/huadeng0830-gg/study-life/releases/latest)
 <!-- RELEASE_STATUS:END -->
 
@@ -291,9 +289,9 @@ npx wrangler pages deploy dist --project-name=study-life --branch=main
 
 ## 🗄 Supabase 服务端
 
-邮箱账号、自动同步、好友课表与齐行项目协作运行在独立的 Supabase 项目中。数据库结构按时间顺序保存在 `supabase/migrations/`；2026-10-10 生产数据库已应用全部 13 条迁移，包括协作日历与任务依赖约束、成果提交草稿版本校验。Edge Function `campus-social` 当前为 v4，JWT 验证保持开启，同时处理好友和项目操作。
+邮箱账号、自动同步、好友课表与齐行项目协作运行在独立的 Supabase 项目中。数据库结构按时间顺序保存在 `supabase/migrations/`；2026-10-13 生产数据库已应用 14 条迁移，包括协作日历与任务依赖约束、成果提交草稿版本校验和平台管理权限表。Edge Function `campus-social` 保持 JWT 验证，同时处理好友和项目操作；`platform-admin` 提供所有者限定的账号运维入口。
 
-项目协作的 15 张表均开启 RLS，并撤销 `anon` 与 `authenticated` 的表权限；浏览器只能携带登录 JWT 调用 Edge Function，由服务端检查成员角色后使用 `service_role` 访问数据库。成果文件放在私有 `qixing-deliverables` Storage bucket，最大 20 MiB。不要把 `service_role` 密钥写入网页变量、客户端代码或仓库。
+项目协作的 15 张表均开启 RLS，并撤销 `anon` 与 `authenticated` 的表权限；浏览器只能携带登录 JWT 调用 Edge Function，由服务端检查成员角色后使用 `service_role` 访问数据库。平台管理仅绑定一个已验证的所有者；后台可以读取认证邮箱和账号状态、暂停或恢复账号并记录原因，不提供个人同步快照或协作正文的读取入口。成果文件放在私有 `qixing-deliverables` Storage bucket，最大 20 MiB。不要把 `service_role` 密钥写入网页变量、客户端代码或仓库。
 
 首次使用 Supabase CLI 时，先准备有权访问目标项目的账号和数据库密码；`supabase/config.toml` 已保留函数 JWT 设置：
 
@@ -304,7 +302,9 @@ npx supabase db push
 npx supabase functions deploy campus-social --project-ref xyuwjmswqmxfwtyzakan
 ```
 
-发布顺序是先数据库迁移，再部署 `campus-social`，最后发布 Cloudflare Pages 前端。新的项目协作功能需已验证的邮箱账号和网络连接；开放普通邮箱注册前，还要配置 Supabase Site URL、Redirect URLs 与 SMTP。当前 Supabase Auth 仍提示泄露密码保护未开启；启用该设置需要在项目 Auth 密码安全设置中处理。
+发布顺序是先数据库迁移，再部署对应 Edge Function，最后发布 Cloudflare Pages 前端。新的项目协作功能需已验证的邮箱账号和网络连接；开放普通邮箱注册前，还要配置 Supabase Site URL、Redirect URLs 与自定义 SMTP。Supabase Auth 的泄露密码保护需要 Pro 或更高套餐；当前项目尚未完成该设置，正式开放注册前应在 Supabase Auth 密码安全设置中确认套餐并启用。
+
+平台运维访问、账号权限、操作审计和回退说明见 [`docs/platform-admin.md`](docs/platform-admin.md)。
 
 ## 🧪 发布自检（scripts/audit/）
 

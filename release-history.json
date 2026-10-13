@@ -1,5 +1,35 @@
 [
   {
+    "version": "1.1.1",
+    "legacyVersion": "2026年10月13日-版本1",
+    "channel": "stable",
+    "publishedAt": null,
+    "title": "三两事 1.1.1",
+    "summary": "修复网页更新并上线平台运维",
+    "changes": {
+      "features": [
+        "新增仅限平台所有者访问的账号运维页，展示真实账号与协作服务状态"
+      ],
+      "improvements": [
+        "暂停与恢复账号必须填写原因并记录审计；暂停不会立即撤销未过期的访问令牌"
+      ],
+      "fixes": [
+        "修复 1.1.0 构建签名不一致导致网页端阻止刷新的问题，发布独立的 1.1.1 补丁版本"
+      ],
+      "security": [
+        "管理请求逐次验证 Supabase 会话和服务端所有者登记"
+      ],
+      "breaking": []
+    },
+    "notes": [
+      "新增仅限平台所有者访问的账号运维页，展示真实账号与协作服务状态",
+      "暂停与恢复账号必须填写原因并记录审计；暂停不会立即撤销未过期的访问令牌",
+      "修复 1.1.0 构建签名不一致导致网页端阻止刷新的问题，发布独立的 1.1.1 补丁版本",
+      "管理请求逐次验证 Supabase 会话和服务端所有者登记"
+    ],
+    "releaseUrl": "https://github.com/huadeng0830-gg/study-life/releases"
+  },
+  {
     "version": "1.1.0",
     "legacyVersion": "2026年10月12日-版本1",
     "channel": "stable",

@@ -12,6 +12,7 @@ export const routeLoaders = Object.freeze({
   '/together': () => import('../views/TogetherView.vue'),
   '/projects': () => import('../views/ProjectsView.vue'),
   '/admin': () => import('../views/AdminCenterView.vue'),
+  '/platform-admin': () => import('../views/PlatformAdminView.vue'),
 })
 
 export function connectionAllowsPrefetch() {

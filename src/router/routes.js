@@ -28,6 +28,7 @@ export const ROUTE_COMPONENT_NAMES = Object.freeze({
   '/together': 'TogetherView',
   '/projects': 'ProjectsView',
   '/admin': 'AdminCenterView',
+  '/platform-admin': 'PlatformAdminView',
 })
 
 const RouteLoading = { setup: () => () => h(RouteFallback, { error: false }) }
@@ -77,5 +78,6 @@ export const routes = [
   { path: '/projects', name: 'projects', meta: { title: '齐行', navigation: { id: 'projects', icon: '🧩', groupId: 'qixing', groupLabel: '齐行', defaultDesktop: true } }, component: asyncRoute('/projects') },
   // 管理中心是本机数据与运行状态的入口，不进入可编辑的业务导航布局。
   { path: '/admin', name: 'admin-center', meta: { title: '管理中心' }, component: asyncRoute('/admin') },
+  { path: '/platform-admin', name: 'platform-admin', meta: { title: '平台运维' }, component: asyncRoute('/platform-admin') },
   { path: '/:pathMatch(.*)*', name: 'not-found', meta: { title: '页面不存在' }, component: NotFoundView },
 ]

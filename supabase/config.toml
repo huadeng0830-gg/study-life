@@ -2,3 +2,6 @@ project_id = "study-life"
 
 [functions.campus-social]
 verify_jwt = true
+
+[functions.platform-admin]
+verify_jwt = true

@@ -1,8 +1,8 @@
 <script setup>
-import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
+import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import DataOverview from '../components/data/DataOverview.vue'
-import { accountAvailable, accountOpen, accountReady } from '../composables/accountAuth.js'
+import { accountAvailable, accountOpen, accountReady, accountUser } from '../composables/accountAuth.js'
 import { accountSyncError, accountSyncLastSyncedAt, accountSyncStatus } from '../composables/accountSyncState.js'
 import { buildAdminCenterModel } from '../composables/adminCenterModel.js'
 import { backupReminderTitle, lastBackupAt, needsBackup } from '../composables/backupReminder.js'
@@ -12,13 +12,27 @@ import { localSafeMode } from '../composables/localSafeMode.js'
 import { persistenceState } from '../composables/store/core.js'
 import { flushStoredWrites } from '../composables/store/index.js'
 import { currentVersionInfo } from '../composables/versionInfo.js'
+import { platformAdminRequest } from '../services/platformAdmin.js'
 
 const DataManager = defineAsyncComponent(() => import('../components/DataManager.vue'))
 const showDataManager = ref(false)
 const inventory = shallowRef(null)
 const inventoryError = ref('')
 const refreshPending = ref(false)
+const hasPlatformAccess = ref(false)
 let refreshTimer = 0
+
+async function checkPlatformAccess() {
+  const userId = accountUser.value?.id
+  if (!accountAvailable.value || !accountReady.value || !userId) {
+    hasPlatformAccess.value = false
+    return
+  }
+  try {
+    const identity = await platformAdminRequest('identity')
+    hasPlatformAccess.value = accountUser.value?.id === userId && identity?.owner === true
+  } catch { hasPlatformAccess.value = false }
+}
 
 const statusModel = computed(() => buildAdminCenterModel({
   inventory: inventory.value,
@@ -96,10 +110,13 @@ function openAttentionAction(action) {
 
 onMounted(() => {
   refreshInventory()
+  void checkPlatformAccess()
   window.addEventListener('study-life:storage-updated', scheduleRefresh)
   window.addEventListener('storage', scheduleRefresh)
   window.addEventListener('pageshow', scheduleRefresh)
 })
+
+watch(() => [accountReady.value, accountUser.value?.id], () => { void checkPlatformAccess() })
 
 onBeforeUnmount(() => {
   window.clearTimeout(refreshTimer)
@@ -217,6 +234,7 @@ onBeforeUnmount(() => {
             <RouterLink to="/bills"><span class="admin-link-mark" aria-hidden="true">账</span><span>账本与固定账单</span><span aria-hidden="true">↗</span></RouterLink>
             <RouterLink to="/lists"><span class="admin-link-mark" aria-hidden="true">清</span><span>清单</span><span aria-hidden="true">↗</span></RouterLink>
             <RouterLink to="/review"><span class="admin-link-mark" aria-hidden="true">顾</span><span>周回顾</span><span aria-hidden="true">↗</span></RouterLink>
+            <RouterLink v-if="hasPlatformAccess" class="admin-platform-link" to="/platform-admin"><span class="admin-link-mark" aria-hidden="true">运</span><span>平台运维</span><span aria-hidden="true">↗</span></RouterLink>
           </nav>
         </section>
 
@@ -301,6 +319,7 @@ onBeforeUnmount(() => {
 .admin-quick-links { display:grid; }
 .admin-quick-links a { display:grid; grid-template-columns:34px minmax(0,1fr) auto; align-items:center; gap:10px; min-height:51px; border-top:1px solid var(--border); color:var(--text); font-size:var(--fs-12); font-weight:var(--fw-600); text-decoration:none; }
 .admin-quick-links a:hover { color:var(--primary); }
+.admin-quick-links .admin-platform-link { margin-top:6px; padding-top:6px; border-top:1px solid var(--border-strong); }
 .admin-quick-links a > span:last-child { color:var(--muted); font-size:var(--fs-14); }
 .admin-link-mark { width:30px; height:30px; flex-basis:30px; border-radius:var(--radius-8); font-size:var(--fs-11); }
 .admin-version { display:grid; gap:8px; padding:14px 17px; border:1px solid var(--border); border-radius:var(--radius-12); background:var(--bg-tint); }
