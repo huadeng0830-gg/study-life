@@ -38,6 +38,7 @@ export function useNavigationViewModel(currentRoute, accountLabel) {
         { key: 'quick-record', label: '快速记录设置', icon: '⚡' },
       ] },
       { id: 'account-tools', label: '账号、数据与系统', items: [], tools: [
+        { key: 'admin', label: '管理中心', icon: '⚙️' },
         { key: 'data', label: '数据管理', icon: '💾' },
       ] },
     ]

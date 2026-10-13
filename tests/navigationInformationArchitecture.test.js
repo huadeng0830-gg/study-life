@@ -2,6 +2,7 @@
 import { describe, expect, it } from 'vitest'
 import { routes } from '../src/router/routes.js'
 import { desktopNavigationGroups, desktopShortcutRoutes, navigationRegistry } from '../src/router/navigation.js'
+import { routeLoaders } from '../src/router/routePreload.js'
 import { DEFAULT_MOBILE_NAVIGATION, normalizeMobileNavigation } from '../src/composables/navigationPreferences.js'
 
 describe('导航信息架构', () => {
@@ -20,5 +21,14 @@ describe('导航信息架构', () => {
     expect(DEFAULT_MOBILE_NAVIGATION).toEqual(['today', 'tasks', 'schedule'])
     expect(normalizeMobileNavigation(['tasks', 'tasks', 'course', 'bills', 'events'])).toEqual(['tasks', 'course', 'bills'])
     expect(normalizeMobileNavigation(['tasks', 'course', 'bills', 'events', 'projects'])).toHaveLength(3)
+  })
+
+  it('注册可直达但不混入业务导航的管理中心懒加载路由', () => {
+    const adminRoute = routes.find((route) => route.path === '/admin')
+
+    expect(adminRoute).toMatchObject({ name: 'admin-center', meta: { title: '管理中心' } })
+    expect(adminRoute.meta.navigation).toBeUndefined()
+    expect(routeLoaders['/admin']).toBeTypeOf('function')
+    expect(navigationRegistry.some((item) => item.path === '/admin')).toBe(false)
   })
 })

@@ -1,6 +1,6 @@
 <script setup>
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { accountOpen, accountUser } from '../composables/accountAuth.js'
 import { autoWallpaperColor, THEMES, themeKey } from '../composables/theme.js'
 import { originFromEvent, revealChange } from '../composables/motion.js'
@@ -43,6 +43,7 @@ const loadFestiveSettings = () => import('./FestiveSettings.vue')
 const loadSearchPanel = () => import('./SearchPanel.vue')
 const AccountPanel = defineAsyncComponent(loadAccountPanel)
 const toolLoaders = Object.freeze({ account: loadAccountPanel, data: loadDataManager, update: loadVersionUpdate,
+  admin: () => import('../views/AdminCenterView.vue'),
   appearance: loadAppearanceSettings, navigation: loadNavigationSettings, focus: loadFocusSettings, festive: loadFestiveSettings, search: loadSearchPanel, capture: () => import('./QuickRecordPanel.vue') })
 const accountLabel = '我的账号'
 const DataManager = defineAsyncComponent(loadDataManager)
@@ -56,6 +57,7 @@ const FestiveSettings = defineAsyncComponent(loadFestiveSettings)
 const SearchPanel = defineAsyncComponent(loadSearchPanel)
 
 const currentRoute = useRoute()
+const router = useRouter()
 const { desktopGroups: navGroups, bottomItems: mobileBottomItems, mobileBarItems,
   moreHasCurrentPage: mobileMoreHasCurrentPage, moreGroups: mobileMoreGroups,
   toggleGroup: toggleNavigationGroup } = useNavigationViewModel(currentRoute, accountLabel)
@@ -406,6 +408,7 @@ function openMobileTool(key) {
   else if (key === 'festive') showFestiveSettings.value = true
   else if (key === 'quick-record') showQuickRecordSettings.value = true
   else if (key === 'data') openDataManager()
+  else if (key === 'admin') void router.push('/admin')
   else if (key === 'search') openSearch()
   else if (key === 'update') showVersionUpdate.value = true
 }
@@ -548,6 +551,10 @@ function openMobileTool(key) {
         <span class="icon" aria-hidden="true">🎉</span>
         <span class="nav-label">氛围与纪念日</span>
       </button>
+      <router-link to="/admin" class="nav-item data-item" exact-active-class="active" title="管理中心" @pointerenter="warmRoute('/admin')" @pointerdown="warmRoute('/admin')" @focus="warmRoute('/admin')">
+        <span class="icon" aria-hidden="true">⚙️</span>
+        <span class="nav-label">管理中心</span>
+      </router-link>
       <button type="button" class="nav-item data-item" @pointerenter="warmTool('data')" @focus="warmTool('data')" @click="openDataManager">
         <span class="icon">💾<i v-if="needsBackup" class="backup-dot"></i></span>
         <span class="nav-label">数据管理</span>

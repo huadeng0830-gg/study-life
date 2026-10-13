@@ -11,6 +11,7 @@ export const routeLoaders = Object.freeze({
   '/review': () => import('../views/WeeklyReviewView.vue'),
   '/together': () => import('../views/TogetherView.vue'),
   '/projects': () => import('../views/ProjectsView.vue'),
+  '/admin': () => import('../views/AdminCenterView.vue'),
 })
 
 export function connectionAllowsPrefetch() {

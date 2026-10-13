@@ -8,20 +8,30 @@ export const RELEASE_UPDATES = Object.freeze([
     legacyVersion: '2026年10月12日-版本1',
     channel: 'stable',
     summary: '以 SemVer 统一网页与 Windows 客户端版本，并建立可验证的更新流程',
-    signature: 'b8b80fd873',
+    signature: 'deed9b789a',
     changes: {
-      features: [],
-      improvements: [],
+      features: [
+      '新增个人管理中心，集中查看本机数据、保存状态和账号同步事项',
+      ],
+      improvements: [
+      '从桌面侧栏和手机更多入口进入，并直达现有业务管理页面',
+      '管理页适配现有移动端断点与标题层级规范',
+      ],
       fixes: [
       '改进浅色高对比配色、键盘焦点反馈和首页操作按钮的主题对比度',
       '调整全局表面与打印样式顺序，确保两类规则正确生效',
+      '修正首次读取数据时误显示为无待处理事项',
       ],
       security: [],
       breaking: [],
     },
     notes: [
+      '新增个人管理中心，集中查看本机数据、保存状态和账号同步事项',
+      '从桌面侧栏和手机更多入口进入，并直达现有业务管理页面',
+      '管理页适配现有移动端断点与标题层级规范',
       '改进浅色高对比配色、键盘焦点反馈和首页操作按钮的主题对比度',
       '调整全局表面与打印样式顺序，确保两类规则正确生效',
+      '修正首次读取数据时误显示为无待处理事项',
     ],
   },
   {
@@ -65,7 +75,7 @@ export const RELEASE_CHANNEL = 'stable'
 export const LEGACY_RELEASE_VERSION = RELEASE_UPDATES[0].legacyVersion || RELEASE_UPDATES[0].version
 
 // 与第一条签名保持一致，交给 vite.config.js 校验源码一致性。
-export const RELEASE_SOURCE_SIGNATURE = 'b8b80fd873'
+export const RELEASE_SOURCE_SIGNATURE = 'deed9b789a'
 
 // 兼容旧引用：当前版本的更新说明。
 export const RELEASE_NOTES = RELEASE_UPDATES[0].notes

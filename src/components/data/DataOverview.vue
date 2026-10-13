@@ -6,8 +6,9 @@ import { formatAppDate } from '../../composables/timeContext.js'
 import '../../styles/shadcn.css'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 
-const props = defineProps({ inventory: Object, error: String })
+const props = defineProps({ inventory: Object, error: String, headingLevel: { type: Number, default: 3 } })
 defineEmits(['refresh'])
+const headingTag = computed(() => ({ 2: 'h2', 3: 'h3', 4: 'h4' }[props.headingLevel] || 'h3'))
 const backupDate = computed(() => lastBackupAt.value ? formatAppDate(lastBackupAt.value, { withWeekday: false }) : '')
 const issueLabels = computed(() => [...new Set(props.inventory?.issues.map((issue) => issue.label) || [])].join('、'))
 </script>
@@ -16,7 +17,7 @@ const issueLabels = computed(() => [...new Set(props.inventory?.issues.map((issu
   <section class="data-overview" aria-label="本机数据概览">
     <Card class="data-overview-card">
       <CardHeader class="overview-heading">
-        <div class="overview-heading-copy"><CardTitle>本机数据概览</CardTitle><CardDescription>查看当前记录与备份状态，换设备前先留一份副本。</CardDescription></div>
+        <div class="overview-heading-copy"><CardTitle :as="headingTag">本机数据概览</CardTitle><CardDescription>查看当前记录与备份状态，换设备前先留一份副本。</CardDescription></div>
         <button type="button" class="btn btn-sm btn-ghost" @click="$emit('refresh')">刷新</button>
       </CardHeader>
       <CardContent class="overview-content">
