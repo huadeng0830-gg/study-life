@@ -4,6 +4,32 @@
 // RELEASE_UPDATES 仅保留最近 3 条内置说明，完整的简短发布历史保存在 release-history.json。
 export const RELEASE_UPDATES = Object.freeze([
   {
+    version: '1.1.2',
+    legacyVersion: '2026年10月13日-版本2',
+    channel: 'stable',
+    summary: '管理中心新增可复制的诊断信息，含版本、结构版本、分区计数与静默失败的作用域',
+    signature: '39f19577e3',
+    changes: {
+      features: [],
+      improvements: [
+      '管理中心新增可复制的诊断信息，含版本、结构版本、分区计数与静默失败的作用域',
+      ],
+      fixes: [
+      '本机写入失败时不再静默：管理中心会提示有多少项修改尚未保存，避免刷新后丢失',
+      '修正分区清单指向：专注记录不再跳到无关的周回顾页，无页面的分区改为显示实际归属',
+      '修正运行状态列表的无效 dl 结构，并去除同屏重复的刷新按钮与分区明细',
+      ],
+      security: [],
+      breaking: [],
+    },
+    notes: [
+      '管理中心新增可复制的诊断信息，含版本、结构版本、分区计数与静默失败的作用域',
+      '本机写入失败时不再静默：管理中心会提示有多少项修改尚未保存，避免刷新后丢失',
+      '修正分区清单指向：专注记录不再跳到无关的周回顾页，无页面的分区改为显示实际归属',
+      '修正运行状态列表的无效 dl 结构，并去除同屏重复的刷新按钮与分区明细',
+    ],
+  },
+  {
     version: '1.1.1',
     legacyVersion: '2026年10月13日-版本1',
     channel: 'stable',
@@ -62,25 +88,16 @@ export const RELEASE_UPDATES = Object.freeze([
       '修正首次读取数据时误显示为无待处理事项',
     ],
   },
-  {
-    version: '2026年10月11日-版本2',
-    signature: 'aee4defa00',
-    notes: [
-      '日程时间刻度改为首尾相接的循环滚轮，分钟精确到每一分钟，已有时间原样落位',
-      '去掉滚轮上下淡出遮罩，并修复刻度列宽、滚动与时间选择问题',
-      '调整桌面侧栏与今天页层级，优化内容区留白、快捷入口和中文字体',
-    ],
-  },
 ])
 
 // SemVer 是面向用户和发布的正式版本。日期式标识只用于旧网页客户端的升级兼容。
-export const APP_VERSION = '1.1.1'
+export const APP_VERSION = '1.1.2'
 export const RELEASE_VERSION = APP_VERSION
 export const RELEASE_CHANNEL = 'stable'
 export const LEGACY_RELEASE_VERSION = RELEASE_UPDATES[0].legacyVersion || RELEASE_UPDATES[0].version
 
 // 与第一条签名保持一致，交给 vite.config.js 校验源码一致性。
-export const RELEASE_SOURCE_SIGNATURE = '82c87c2078'
+export const RELEASE_SOURCE_SIGNATURE = '39f19577e3'
 
 // 兼容旧引用：当前版本的更新说明。
 export const RELEASE_NOTES = RELEASE_UPDATES[0].notes

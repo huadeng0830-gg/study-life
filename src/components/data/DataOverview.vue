@@ -6,7 +6,15 @@ import { formatAppDate } from '../../composables/timeContext.js'
 import '../../styles/shadcn.css'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 
-const props = defineProps({ inventory: Object, error: String, headingLevel: { type: Number, default: 3 } })
+const props = defineProps({
+  inventory: Object,
+  error: String,
+  headingLevel: { type: Number, default: 3 },
+  // 管理中心已经在下方列了完整的分区清单（还带跳转链接），概览里的分区明细就是重复。
+  // 这两个开关让宿主关掉重复的部分；默认都保持原样，数据管理页不受影响。
+  showRefresh: { type: Boolean, default: true },
+  showModuleDetails: { type: Boolean, default: true },
+})
 defineEmits(['refresh'])
 const headingTag = computed(() => ({ 2: 'h2', 3: 'h3', 4: 'h4' }[props.headingLevel] || 'h3'))
 const backupDate = computed(() => lastBackupAt.value ? formatAppDate(lastBackupAt.value, { withWeekday: false }) : '')
@@ -18,7 +26,7 @@ const issueLabels = computed(() => [...new Set(props.inventory?.issues.map((issu
     <Card class="data-overview-card">
       <CardHeader class="overview-heading">
         <div class="overview-heading-copy"><CardTitle :as="headingTag">本机数据概览</CardTitle><CardDescription>查看当前记录与备份状态，换设备前先留一份副本。</CardDescription></div>
-        <button type="button" class="btn btn-sm btn-ghost" @click="$emit('refresh')">刷新</button>
+        <button v-if="showRefresh" type="button" class="btn btn-sm btn-ghost" @click="$emit('refresh')">刷新</button>
       </CardHeader>
       <CardContent class="overview-content">
     <p v-if="error" class="overview-error" role="alert">{{ error }}</p>
@@ -29,7 +37,7 @@ const issueLabels = computed(() => [...new Set(props.inventory?.issues.map((issu
     </div>
     <p v-if="issueLabels" class="overview-error" role="alert">{{ issueLabels }}中有数据无法读取，统计未包含这些内容。导出时会保留原始数据并提示问题。</p>
     <p v-if="inventory?.usage.warning" class="overview-warning storage-warning" role="alert">本机文本存储已接近常见浏览器上限，建议先导出备份，再整理不需要的历史记录。</p>
-    <details v-if="inventory" class="inventory-details">
+    <details v-if="inventory && showModuleDetails" class="inventory-details">
       <summary>查看各分区的数据量</summary>
       <ul><li v-for="module in inventory.modules" :key="module.id"><div><b>{{ module.label }}</b><span>{{ module.hasIssue ? '部分数据无法读取' : module.detail || module.text }}</span></div><span class="module-size">{{ formatDataSize(module.bytes) }}</span></li></ul>
       <p>占用按本机文本估算；壁纸图片和恢复点另占空间。账号资料、项目协作与成果文件由账号保存，不包含在本机 JSON 备份中。</p>
