@@ -1,5 +1,8 @@
 <script setup>
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
+import CampusEmptyState from '../../components/campus/CampusEmptyState.vue'
+import CampusLoadingState from '../../components/campus/CampusLoadingState.vue'
+import CampusDirectoryFilter from '../../components/campus/CampusDirectoryFilter.vue'
 import CampusLifeLayout from '../../components/campus/CampusLifeLayout.vue'
 import CampusContentActions from '../../components/campus/CampusContentActions.vue'
 import CampusPrivateChat from '../../components/campus/CampusPrivateChat.vue'
@@ -7,6 +10,11 @@ import { useCampusLifePage } from '../../composables/campusLifePage.js'
 import { campusLifeMine, campusLostFound, decideLostFoundClaim, listLostFoundClaims, submitLostFoundClaim } from '../../services/campusLife.js'
 
 const page = useCampusLifePage()
+const query = ref('')
+const category = ref('')
+const filterOptions = [{ value: 'found', label: '我捡到了' }, { value: 'lost', label: '我丢了' }]
+const visible = computed(() => (page.data.value?.items || []).filter((item) => (!category.value || item.mode === category.value) && (!query.value.trim() || [item.title, item.description, item.approximate_location].filter(Boolean).join(' ').toLocaleLowerCase('zh-CN').includes(query.value.trim().toLocaleLowerCase('zh-CN')))))
+
 const claimTarget = ref('')
 const privateEvidence = ref('')
 const busyId = ref('')
@@ -24,6 +32,12 @@ const statusLabels = { pending_review: '待审核', open: '等待认领', claim_
 const typeLabels = { lost: '我丢了', found: '我捡到了' }
 const categoryLabels = { electronics: '电子设备', card: '校园卡', keys: '钥匙', documents: '证件 / 文件', clothing: '衣物', bag: '包袋', other: '其他' }
 function dateLabel(value) { return value ? String(value).slice(0, 10) : '日期未填写' }
+function openClaim(item) {
+  const same = claimTarget.value === item.id
+  claimTarget.value = same ? '' : item.id
+  // Private evidence must never carry over from a different item.
+  privateEvidence.value = ''
+}
 async function submitClaim(item) {
   busyId.value = item.id
   const result = await page.act(() => submitLostFoundClaim(item.id, privateEvidence.value), '认领申请已私密送达发布者。')
@@ -46,16 +60,17 @@ function openChat(targetType, targetId, recipientId, recipientName) {
     <template #default>
       <section class="campus-life-panel">
         <div class="campus-lost-heading"><div><h2>同校失物信息</h2><p>提交后由平台审核；认领时请提供没有公开展示的特征。</p></div><RouterLink class="btn btn-primary" to="/campus/publish?kind=lost">发布失物信息</RouterLink></div>
-        <p v-if="page.loading.value && !page.data.value" class="campus-life-state" role="status">正在读取失物信息…</p>
+        <CampusDirectoryFilter v-if="page.data.value" v-model:query="query" v-model:category="category" :options="filterOptions" :count="visible.length" placeholder="搜索物品名称、特征或地点" />
+        <CampusLoadingState v-if="page.loading.value && !page.data.value">正在读取失物信息…</CampusLoadingState>
         <p v-else-if="page.error.value" class="campus-life-inline-state error" role="alert">{{ page.error.value }} <button class="text-button" type="button" @click="refresh">重试</button></p>
-        <p v-else-if="!page.data.value?.items?.length" class="campus-life-state">当前没有公开的失物信息。涉及证件、钥匙或电子设备时，也可以优先联系学校公布的正式服务点。</p>
+        <CampusEmptyState v-else-if="!visible.length" :title="query || category ? '没有找到匹配内容' : '还没有公开的失物信息'" :description="query || category ? '换个关键词，或清除筛选看看。' : '丢了东西或捡到物品，都可以在这里留下线索。'" :action="query || category ? '' : '发布失物信息'" to="/campus/publish?kind=lost" />
         <div v-else class="campus-life-grid">
-          <article v-for="item in page.data.value.items" :key="item.id" class="campus-life-card">
+          <article v-for="item in visible" :key="item.id" class="campus-life-card">
             <div class="campus-life-meta"><span class="campus-life-tag">{{ typeLabels[item.mode] }}</span><span>{{ categoryLabels[item.category] }}</span><span>{{ statusLabels[item.status] }}</span></div>
             <h3>{{ item.title }}</h3><p>{{ item.description || '暂未补充公开描述。' }}</p><p class="campus-life-meta"><span>{{ item.approximate_location || '大致地点未填写' }}</span><span>{{ dateLabel(item.occurred_at) }}</span><span v-if="item.campus">{{ item.campus }}</span></p>
             <p v-if="item.category === 'card' || item.category === 'documents'" class="campus-life-inline-state">请不要在公开页面或私信中发送完整证件号码。</p>
             <CampusContentActions target-type="lost_found" :target-id="item.id" />
-            <button v-if="claimTarget !== item.id" class="btn btn-ghost" type="button" @click="claimTarget = item.id">申请认领</button>
+            <button v-if="claimTarget !== item.id" class="btn btn-ghost" type="button" @click="openClaim(item)">申请认领</button>
             <form v-if="claimTarget === item.id" class="campus-lost-claim-form" @submit.prevent="submitClaim(item)"><label>填写未公开的核验特征（至少 10 个字，仅发布者可见）<textarea v-model="privateEvidence" minlength="10" maxlength="1000" required placeholder="请描述物品上没有公开的标记、内容或其他特征。" /></label><div class="campus-life-actions"><button class="btn btn-primary" type="submit" :disabled="busyId === item.id">提交认领</button><button class="btn btn-ghost" type="button" @click="claimTarget = ''">取消</button></div></form>
           </article>
         </div>

@@ -19,20 +19,26 @@ const rowsByDefault = {
   campus_lost_found_claims: [],
   campus_events: [],
   campus_private_messages: [],
+  platform_admins: [],
   social_notifications: [],
 }
 const source = readFileSync(new URL('../supabase/functions/campus-life/index.ts', import.meta.url), 'utf8')
 const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
-const migration = readFileSync(new URL('../supabase/migrations/20261014150000_campus-life-domains.sql', import.meta.url), 'utf8')
+const migration = readFileSync(new URL('../supabase/migrations/20261014134335_campus_life_domains.sql', import.meta.url), 'utf8')
 
-function createEdge({ user = { id: actor, email_confirmed_at: '2026-10-01T00:00:00Z' }, tables = {}, notificationError = false } = {}) {
+function createEdge({ user = { id: actor, email_confirmed_at: '2026-10-01T00:00:00Z' }, tables = {}, notificationError = false, rpcResults = {} } = {}) {
   let handler
+  const appliedFilters = []
   const rows = Object.fromEntries(Object.entries({ ...rowsByDefault, ...tables }).map(([name, values]) => [name, values.map((item) => ({ ...item }))]))
   const admin = {
     auth: { getUser: vi.fn(async () => ({ data: { user }, error: null })) },
-    rpc: vi.fn(async (name) => name === 'campus_life_register_event'
-      ? ({ data: { eventId: '60000001-0000-4000-8000-000000000001', status: 'registered', existing: false, registeredAt: '2026-10-14T00:00:00.000Z' }, error: null })
-      : ({ data: true, error: null })),
+    rpc: vi.fn(async (name) => {
+      if (name in rpcResults) return { data: rpcResults[name], error: null }
+      if (name === 'campus_life_register_event') {
+        return { data: { eventId: '60000001-0000-4000-8000-000000000001', status: 'registered', existing: false, registeredAt: '2026-10-14T00:00:00.000Z' }, error: null }
+      }
+      return { data: true, error: null }
+    }),
     from: vi.fn((table) => {
       if (!(table in rows)) throw new Error(`Unexpected table: ${table}`)
       const filters = []
@@ -40,18 +46,30 @@ function createEdge({ user = { id: actor, email_confirmed_at: '2026-10-01T00:00:
       let operation = 'select'
       let input = null
       let single = false
+      let rowLimit = Infinity
+      const orders = []
       const query = {
         select(columns = '*') { selected = columns; return query },
-        eq(key, value) { filters.push((row) => row[key] === value); return query },
-        in(key, values) { filters.push((row) => values.includes(row[key])); return query },
-        is(key, value) { filters.push((row) => row[key] === value); return query },
-        order() { return query },
-        limit() { return query },
+        eq(key, value) { appliedFilters.push({ table, op: 'eq', key, value }); filters.push((row) => row[key] === value); return query },
+        in(key, values) { appliedFilters.push({ table, op: 'in', key, values: [...values] }); filters.push((row) => values.includes(row[key])); return query },
+        is(key, value) { appliedFilters.push({ table, op: 'is', key, value }); filters.push((row) => row[key] === value); return query },
+        gte(key, value) { filters.push((row) => row[key] >= value); return query },
+        or(expression) {
+          const pairs = [...expression.matchAll(/and\(sender_id\.eq\.([^,]+),recipient_id\.eq\.([^\)]+)\)/g)]
+          filters.push((row) => pairs.some((pair) => row.sender_id === pair[1] && row.recipient_id === pair[2]))
+          return query
+        },
+        order(key, { ascending = true } = {}) { orders.push({ key, ascending }); return query },
+        limit(value) { rowLimit = value; return query },
         maybeSingle() { single = true; return query },
         single() { single = true; return query },
         insert(value) { operation = 'insert'; input = value; return query },
         upsert(value) { operation = 'upsert'; input = value; return query },
+        update(value) { operation = 'update'; input = value; return query },
         then(resolve, reject) {
+          if (table === 'campus_course_reviews' && selected.split(',').includes('campus')) {
+            return Promise.resolve({ data: null, error: { code: '42703', message: 'column campus does not exist' } }).then(resolve, reject)
+          }
           let result
           if (operation === 'insert' || operation === 'upsert') {
             const values = Array.isArray(input) ? input : [input]
@@ -65,7 +83,14 @@ function createEdge({ user = { id: actor, email_confirmed_at: '2026-10-01T00:00:
             const projected = selected === '*' ? inserted : inserted.map((row) => Object.fromEntries(selected.split(',').map((key) => [key, row[key]])))
             result = single ? projected[0] : projected
           } else {
-            const found = rows[table].filter((row) => filters.every((matches) => matches(row)))
+            const found = rows[table].filter((row) => filters.every((matches) => matches(row))).sort((a, b) => {
+              for (const { key, ascending } of orders) {
+                const compared = String(a[key] ?? '').localeCompare(String(b[key] ?? ''))
+                if (compared) return ascending ? compared : -compared
+              }
+              return 0
+            }).slice(0, rowLimit)
+            if (operation === 'update') found.forEach((row) => Object.assign(row, input))
             const projected = selected === '*' ? found : found.map((row) => Object.fromEntries(selected.split(',').map((key) => [key, row[key]])))
             result = single ? (projected[0] || null) : projected
           }
@@ -85,7 +110,7 @@ function createEdge({ user = { id: actor, email_confirmed_at: '2026-10-01T00:00:
     },
     exports: {}, Date, URL, Request, Response, Headers, TextEncoder, TextDecoder, console, crypto,
   }, { filename: 'campus-life/index.ts' })
-  return { handler, admin, rows }
+  return { handler, admin, rows, appliedFilters }
 }
 
 async function call(handler, action, payload = {}) {
@@ -170,6 +195,56 @@ describe('campus-life Edge Function', () => {
     expect(rows.campus_private_messages[0]).toMatchObject({ sender_id: applicant, recipient_id: owner })
   })
 
+  it('returns the latest 100 private messages in chronological order', async () => {
+    const owner = '20000001-0000-4000-8000-000000000001'
+    const listingId = '10000001-0000-4000-8000-000000000001'
+    const messages = Array.from({ length: 105 }, (_, index) => ({
+      id: String(index).padStart(4, '0'), school: '虚构大学', target_type: 'market_listing', target_id: listingId,
+      sender_id: actor, recipient_id: owner, body: `消息 ${index}`, created_at: new Date(Date.UTC(2026, 9, 14, 0, index)).toISOString(),
+    }))
+    const { handler } = createEdge({ tables: {
+      campus_market_interests: [{ listing_id: listingId, buyer_id: actor, status: 'pending' }],
+      campus_private_messages: [...messages, { ...messages[104], id: '9999', recipient_id: '40000001-0000-4000-8000-000000000001', body: '另一段对话' }],
+    } })
+    const response = await call(handler, 'message_list', { targetType: 'market_listing', targetId: listingId, recipientId: owner })
+    const result = await response.json()
+    expect(response.status).toBe(200)
+    expect(result.data.messages.map((message) => message.body)).toEqual(messages.slice(5).map((message) => message.body))
+  })
+
+  it('allows a pending help applicant to contact the owner before accepting the task', async () => {
+    const owner = '20000001-0000-4000-8000-000000000001'
+    const taskId = '60000001-0000-4000-8000-000000000001'
+    const { handler, rows } = createEdge({ tables: {
+      campus_help_tasks: [{ id: taskId, owner_id: owner, school: '虚构大学', campus: '东区', status: 'open' }],
+      campus_help_applications: [{ task_id: taskId, applicant_id: actor, status: 'pending' }],
+    } })
+    const response = await call(handler, 'message_send', { targetType: 'help_task', targetId: taskId, recipientId: owner, body: '请确认一下交接时间。' })
+    expect(response.status).toBe(200)
+    expect(rows.campus_private_messages).toHaveLength(1)
+  })
+
+  it.each(['东区', '西区'])('resolves the course review campus through its assignment (%s)', async (campus) => {
+    const reviewId = '60000001-0000-4000-8000-000000000001'
+    const assignmentId = '70000001-0000-4000-8000-000000000001'
+    const { handler, rows } = createEdge({ tables: {
+      campus_course_reviews: [{ id: reviewId, assignment_id: assignmentId, school: '虚构大学', review_status: 'approved' }],
+      campus_teaching_assignments: [{ id: assignmentId, school: '虚构大学', campus, review_status: 'approved' }],
+      campus_content_reports: [],
+    } })
+    const response = await call(handler, 'content_report', { targetType: 'course_review', targetId: reviewId, reason: 'inaccurate' })
+    expect(response.status).toBe(campus === '东区' ? 200 : 404)
+    expect(rows.campus_content_reports).toHaveLength(campus === '东区' ? 1 : 0)
+  })
+
+  it('applies campus scope before the event row limit', async () => {
+    const foreignEvents = Array.from({ length: 100 }, (_, index) => ({ id: `west-${index}`, school: '虚构大学', campus: '西区', review_status: 'approved', status: 'published', starts_at: '2099-01-01T00:00:00Z', ends_at: '2099-01-02T00:00:00Z' }))
+    const { handler } = createEdge({ tables: { campus_events: [...foreignEvents, { ...foreignEvents[0], id: 'east', campus: '东区', starts_at: '2099-02-01T00:00:00Z' }] } })
+    const response = await call(handler, 'events_list')
+    expect(response.status).toBe(200)
+    expect((await response.json()).data.events.map((event) => event.id)).toEqual(['east'])
+  })
+
   it('allows an owner to resubmit rejected content through the revision-checked RPC', async () => {
     const { handler, admin } = createEdge()
     const response = await call(handler, 'content_resubmit', {
@@ -212,6 +287,58 @@ describe('campus-life Edge Function', () => {
 
     expect(rows.social_notifications).toHaveLength(1)
     expect(rows.social_notifications[0].dedupe_key).toContain(`campus-event-registration:${eventId}:${actor}:`)
+  })
+
+  it('asks for a school instead of reporting a malformed field when the profile has none', async () => {
+    const { handler, admin } = createEdge({ tables: { social_profiles: [{ user_id: actor, school: '', campus: '' }] } })
+    const response = await call(handler, 'market_list')
+
+    expect(response.status).toBe(409)
+    expect(await response.json()).toMatchObject({ code: 'profile_required' })
+    expect(admin.from).not.toHaveBeenCalledWith('campus_market_listings')
+  })
+
+  it('filters campus scope in the query so the row limit applies to visible rows', async () => {
+    const { handler, appliedFilters } = createEdge()
+    await call(handler, 'market_list')
+
+    // Every campus table stores campus as `not null default ''`, so '' plus the reader's own
+    // campus is exactly what campusScopeMatches accepts — and it must reach the database,
+    // otherwise the 100-row limit is spent on other campuses' rows before filtering.
+    for (const table of ['campus_market_listings']) {
+      const applied = appliedFilters.filter((entry) => entry.table === table && entry.op === 'in' && entry.key === 'campus')
+      expect(applied.length).toBeGreaterThan(0)
+      expect(applied[0].values).toEqual(expect.arrayContaining(['东区', '']))
+    }
+    expect(appliedFilters.some((entry) => entry.table === 'campus_market_listings' && entry.op === 'eq' && entry.key === 'school' && entry.value === '虚构大学')).toBe(true)
+  })
+
+  it('omits the campus filter when the reader has not chosen a campus', async () => {
+    const { handler, appliedFilters } = createEdge({
+      tables: { social_profiles: [{ user_id: actor, school: '虚构大学', campus: '' }] },
+    })
+    const response = await call(handler, 'market_list')
+
+    expect(response.status).toBe(200)
+    expect(appliedFilters.some((entry) => entry.op === 'in' && entry.key === 'campus')).toBe(false)
+  })
+
+  it('reports a failed moderation notification instead of claiming it was sent', async () => {
+    const owner = '20000001-0000-4000-8000-000000000001'
+    const { handler, rows } = createEdge({
+      notificationError: true,
+      tables: { platform_admins: [{ user_id: actor }] },
+      rpcResults: { campus_life_moderate_content: { id: '10000001-0000-4000-8000-000000000001', status: 'approved', ownerId: owner } },
+    })
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    const response = await call(handler, 'moderation_decide', {
+      targetType: 'market_listing', targetId: '10000001-0000-4000-8000-000000000001', decision: 'approve', revision: 1,
+    })
+    warn.mockRestore()
+
+    expect(response.status).toBe(200)
+    expect((await response.json()).data.notificationSent).toBe(false)
+    expect(rows.social_notifications).toHaveLength(0)
   })
 
   it('keeps legacy place rate limits, prevents direct client table access and uses transactional domain RPCs', () => {

@@ -1,5 +1,7 @@
 <script setup>
 import { onMounted, reactive, ref } from 'vue'
+import CampusEmptyState from '../../components/campus/CampusEmptyState.vue'
+import CampusLoadingState from '../../components/campus/CampusLoadingState.vue'
 import CampusLifeLayout from '../../components/campus/CampusLifeLayout.vue'
 import { useCampusLifePage } from '../../composables/campusLifePage.js'
 import { campusModerationQueue, decideCampusModeration, resolveCampusHelpDispute } from '../../services/campusLife.js'
@@ -64,9 +66,9 @@ async function resolveDispute(entry, taskStatus) {
     <template #default>
       <section class="campus-life-panel">
         <div class="campus-moderation-heading"><div><h2>待审核内容与举报</h2><p>审核通过后内容才进入公开列表。学生提交的校车纠错不会直接覆盖线路数据。</p></div><button class="btn btn-ghost" type="button" :disabled="page.loading.value" @click="refresh">{{ page.loading.value ? '读取中…' : '刷新' }}</button></div>
-        <p v-if="page.loading.value && !page.data.value" class="campus-life-state" role="status">正在读取审核队列…</p>
+        <CampusLoadingState v-if="page.loading.value && !page.data.value">正在读取审核队列…</CampusLoadingState>
         <p v-else-if="page.error.value" class="campus-life-inline-state error" role="alert">{{ page.error.value }} <button class="text-button" type="button" @click="refresh">重试</button></p>
-        <p v-else-if="!page.data.value?.items?.length" class="campus-life-state">当前审核队列为空。</p>
+        <CampusEmptyState v-else-if="!page.data.value?.items?.length" title="待审核内容已处理完" description="新的投稿和举报会出现在这里。" action="" to="" />
         <div v-else class="campus-moderation-list"><article v-for="entry in page.data.value.items" :key="itemKey(entry)" class="campus-moderation-item">
           <div class="campus-life-meta"><span class="campus-life-tag">{{ labels[entry.type] || '校园内容' }}</span><span>{{ entry.item.school || '学校未填写' }}<template v-if="entry.item.campus"> · {{ entry.item.campus }}</template></span><span>{{ String(entry.item.created_at || '').slice(0,10) }}</span></div>
           <h3>{{ titleOf(entry) }}</h3><p class="campus-moderation-detail">{{ detailOf(entry) }}</p>

@@ -4,6 +4,50 @@
 // RELEASE_UPDATES 仅保留最近 3 条内置说明，完整的简短发布历史保存在 release-history.json。
 export const RELEASE_UPDATES = Object.freeze([
   {
+    version: '1.2.3',
+    legacyVersion: '2026年10月14日-版本4',
+    channel: 'stable',
+    summary: '校园生活界面与发布体验优化',
+    signature: '1ba4275630',
+    changes: {
+      features: [],
+      improvements: [
+      '重整校园首页与功能导航，适配桌面侧栏和手机折叠菜单',
+      '统一校园列表卡片、空状态、加载反馈与关键词分类筛选',
+      '发布页按内容类型分组，完善表单层级、草稿提示及私信布局',
+      '校园首页合并重复入口，修正窄屏按钮挤压',
+      ],
+      fixes: [
+      '统一发布页对失效草稿类型不再整页崩溃',
+      '失物与互助的共用输入框切换目标时清空，避免私密核验特征或接单留言串到另一条内容',
+      '未填写学校时返回可执行的提示并在校园页给出填写入口',
+      '校车与指南等列表改为在查询里按校区过滤，避免行数上限被其他校区占满',
+      '课程评价列表补上学期并阻止重复提交',
+      '修正校车时刻表的重复计算',
+      '修复数字草稿恢复、账号切换时的异步回写与课程评价草稿残留',
+      '联系发送失败保留留言，校车到期线路不再列出计划班次',
+      '修复课程评价举报、待接单私信与长对话最新消息读取',
+      ],
+      security: [],
+      breaking: [],
+    },
+    notes: [
+      '重整校园首页与功能导航，适配桌面侧栏和手机折叠菜单',
+      '统一校园列表卡片、空状态、加载反馈与关键词分类筛选',
+      '发布页按内容类型分组，完善表单层级、草稿提示及私信布局',
+      '校园首页合并重复入口，修正窄屏按钮挤压',
+      '统一发布页对失效草稿类型不再整页崩溃',
+      '失物与互助的共用输入框切换目标时清空，避免私密核验特征或接单留言串到另一条内容',
+      '未填写学校时返回可执行的提示并在校园页给出填写入口',
+      '校车与指南等列表改为在查询里按校区过滤，避免行数上限被其他校区占满',
+      '课程评价列表补上学期并阻止重复提交',
+      '修正校车时刻表的重复计算',
+      '修复数字草稿恢复、账号切换时的异步回写与课程评价草稿残留',
+      '联系发送失败保留留言，校车到期线路不再列出计划班次',
+      '修复课程评价举报、待接单私信与长对话最新消息读取',
+    ],
+  },
+  {
     version: '1.2.2',
     legacyVersion: '2026年10月14日-版本3',
     channel: 'stable',
@@ -17,6 +61,7 @@ export const RELEASE_UPDATES = Object.freeze([
       improvements: [
       '学校校区范围筛选、版本化拒绝重提和事务状态流转',
       '可翻页审核队列及校车班次、课程关联审核详情',
+      '为地点和校园业务表补齐外键索引',
       ],
       fixes: [
       '修复投稿状态竞态、通知失败误报和班车投稿记录读取',
@@ -60,35 +105,16 @@ export const RELEASE_UPDATES = Object.freeze([
       '隔离本机到访隐私与公开评分，并为审核版本及分页补齐保护',
     ],
   },
-  {
-    version: '1.2.0',
-    legacyVersion: '2026年10月14日-版本1',
-    channel: 'stable',
-    summary: '新增调课通知应用、通知档案、只读提问、考试日历、去年今日、值日班务、数据体检和地点档案；支持可拒收的好友地点预设',
-    signature: '0bb6a85c02',
-    changes: {
-      features: [
-      '新增调课通知应用、通知档案、只读提问、考试日历、去年今日、值日班务、数据体检和地点档案；支持可拒收的好友地点预设',
-      ],
-      improvements: [],
-      fixes: [],
-      security: [],
-      breaking: [],
-    },
-    notes: [
-      '新增调课通知应用、通知档案、只读提问、考试日历、去年今日、值日班务、数据体检和地点档案；支持可拒收的好友地点预设',
-    ],
-  },
 ])
 
 // SemVer 是面向用户和发布的正式版本。日期式标识只用于旧网页客户端的升级兼容。
-export const APP_VERSION = '1.2.2'
+export const APP_VERSION = '1.2.3'
 export const RELEASE_VERSION = APP_VERSION
 export const RELEASE_CHANNEL = 'stable'
 export const LEGACY_RELEASE_VERSION = RELEASE_UPDATES[0].legacyVersion || RELEASE_UPDATES[0].version
 
 // 与第一条签名保持一致，交给 vite.config.js 校验源码一致性。
-export const RELEASE_SOURCE_SIGNATURE = '72add44ef7'
+export const RELEASE_SOURCE_SIGNATURE = '1ba4275630'
 
 // 兼容旧引用：当前版本的更新说明。
 export const RELEASE_NOTES = RELEASE_UPDATES[0].notes

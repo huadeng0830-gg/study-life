@@ -162,13 +162,26 @@ async function authenticate(request: Request) {
 async function scopeFor(userId: string) {
   const result = await admin.from('social_profiles').select('school,campus').eq('user_id', userId).maybeSingle()
   const profile = dataOrThrow(result)
-  const school = text(profile?.school, 100, '学校', true)
+  const school = text(profile?.school, 100, '学校')
+  // Match campus-social's requirePlaceSchool contract so an unset school reads as an
+  // actionable setup step instead of a malformed-field error.
+  if (!school) throw new ApiError('profile_required', '请先在个人资料中填写学校，再使用校园生活中心。', 409)
   const campus = text(profile?.campus, 100, '校区')
   return { school, campus }
 }
 
 function inScope(row: any, scope: { school: string; campus: string }) {
   return campusScopeMatches(row, scope)
+}
+
+/**
+ * Every campus table declares `campus text not null default ''`, so an empty campus is
+ * the only "school-wide" value campusScopeMatches treats as visible. Expressing that in the
+ * query keeps the row limit applied to rows the caller can actually see, instead of to a
+ * page that may be entirely other campuses' rows.
+ */
+function scopeQuery(query: any, scope: { school: string; campus: string }) {
+  return scope.campus ? query.in('campus', [scope.campus, '']) : query
 }
 
 async function notify(recipientId: string, actorId: string, kind: string, resourceId: string, dedupeKey?: string) {
@@ -203,7 +216,7 @@ async function enforceRateLimit(userId: string, category: string, limit: number,
 }
 
 async function queryRows(table: string, columns: string, scope: { school: string; campus: string }, statusField: string, status: string, orderBy = 'updated_at') {
-  const result = await admin.from(table).select(columns).eq('school', scope.school).eq(statusField, status)
+  const result = await scopeQuery(admin.from(table).select(columns).eq('school', scope.school).eq(statusField, status), scope)
     .order(orderBy, { ascending: false }).limit(100)
   return (dataOrThrow(result) || []).filter((row: any) => inScope(row, scope))
 }
@@ -252,17 +265,19 @@ async function listShuttles(scope: { school: string; campus: string }) {
 }
 
 async function listLostFound(scope: { school: string; campus: string }) {
-  const result = await admin.from('campus_lost_found_items')
+  const query = admin.from('campus_lost_found_items')
     .select('id,school,campus,mode,category,title,description,approximate_location,occurred_at,status,created_at,updated_at')
-    .eq('school', scope.school).in('status', ['open', 'claim_pending']).order('created_at', { ascending: false }).limit(100)
+    .eq('school', scope.school).in('status', ['open', 'claim_pending'])
+  const result = await scopeQuery(query, scope).order('created_at', { ascending: false }).limit(100)
   return (dataOrThrow(result) || []).filter((row: any) => inScope(row, scope))
 }
 
 async function listEvents(scope: { school: string; campus: string }, userId?: string) {
-  const result = await admin.from('campus_events')
+  const query = admin.from('campus_events')
     .select('id,school,campus,title,description,starts_at,ends_at,location,organizer,signup_url,capacity,source_url,status,created_at')
     .eq('school', scope.school).eq('review_status', 'approved').eq('status', 'published')
-    .gte('ends_at', new Date().toISOString()).order('starts_at').limit(100)
+    .gte('ends_at', new Date().toISOString())
+  const result = await scopeQuery(query, scope).order('starts_at').limit(100)
   const rows = (dataOrThrow(result) || []).filter((row: any) => inScope(row, scope))
   if (!rows.length) return []
   const counts = dataOrThrow(await admin.rpc('campus_life_event_counts', { p_actor_id: userId || null, p_event_ids: rows.map((row: any) => row.id) })) || {}
@@ -270,10 +285,12 @@ async function listEvents(scope: { school: string; campus: string }, userId?: st
 }
 
 async function listGuides(scope: { school: string; campus: string }) {
-  const result = await admin.from('campus_guides')
+  const query = admin.from('campus_guides')
     .select('id,school,campus,title,category,body,source_type,source_url,expires_on,updated_at')
-    .eq('school', scope.school).eq('review_status', 'approved').order('updated_at', { ascending: false }).limit(100)
-  return (dataOrThrow(result) || []).filter((row: any) => inScope(row, scope) && (!row.expires_on || row.expires_on >= new Date().toISOString().slice(0, 10)))
+    .eq('school', scope.school).eq('review_status', 'approved')
+  const result = await scopeQuery(query, scope).order('updated_at', { ascending: false }).limit(100)
+  const today = new Date().toISOString().slice(0, 10)
+  return (dataOrThrow(result) || []).filter((row: any) => inScope(row, scope) && (!row.expires_on || row.expires_on >= today))
 }
 
 async function getMine(userId: string, scope: { school: string; campus: string }) {
@@ -495,9 +512,18 @@ async function assertPublicTarget(targetType: string, targetId: string, scope: {
   }
   const config = configs[targetType]
   if (!config) throw new ApiError('invalid_input', '内容类型无效。')
-  const result = await admin.from(config.table).select(`id,school,campus,${config.statusField}${targetType === 'place' ? ',visibility,archived_at' : ''}`)
+  const scopeColumns = targetType === 'course_review' ? 'assignment_id' : 'campus'
+  const result = await admin.from(config.table).select(`id,school,${scopeColumns},${config.statusField}${targetType === 'place' ? ',visibility,archived_at' : ''}`)
     .eq('id', targetId).maybeSingle()
   const row = dataOrThrow(result)
+  if (row && targetType === 'course_review') {
+    const assignment = dataOrThrow(await admin.from('campus_teaching_assignments')
+      .select('id,school,campus,review_status').eq('id', row.assignment_id).maybeSingle())
+    if (!assignment || !inScope(assignment, scope) || assignment.review_status !== 'approved') {
+      throw new ApiError('not_found', '该课程评价当前不在可操作的公开范围内。', 404)
+    }
+    row.campus = assignment.campus
+  }
   if (!row || !inScope(row, scope) || !config.statuses.includes(row[config.statusField])
     || (targetType === 'place' && (row.visibility !== 'school' || row.archived_at))) {
     throw new ApiError('not_found', '该内容当前不在可操作的公开范围内。', 404)
@@ -679,7 +705,7 @@ async function messageParticipants(targetType: string, targetId: string, recipie
   if (!item || !inScope(item, scope)) throw new ApiError('not_found', '相关校园内容不可用。', 404)
   const activeTargetStatuses: Record<string, string[]> = {
     market_listing: ['active', 'reserved', 'sold'],
-    help_task: ['assigned', 'in_progress', 'awaiting_confirmation', 'completed', 'disputed'],
+    help_task: ['open', 'assigned', 'in_progress', 'awaiting_confirmation', 'completed', 'disputed'],
     lost_found: ['open', 'claim_pending', 'returned'],
   }
   if (!activeTargetStatuses[targetType].includes(item.status)) throw new ApiError('forbidden', '当前内容状态不再开放私信。', 403)
@@ -708,8 +734,8 @@ async function privateMessage(user: any, action: string, payload: any, scope: { 
   }
   const result = await admin.from('campus_private_messages').select('id,target_type,target_id,sender_id,recipient_id,body,created_at,read_at')
     .eq('school', scope.school).eq('target_type', targetType).eq('target_id', targetId)
-    .or(`and(sender_id.eq.${user.id},recipient_id.eq.${recipientId}),and(sender_id.eq.${recipientId},recipient_id.eq.${user.id})`).order('created_at').limit(100)
-  const messages = dataOrThrow(result) || []
+    .or(`and(sender_id.eq.${user.id},recipient_id.eq.${recipientId}),and(sender_id.eq.${recipientId},recipient_id.eq.${user.id})`).order('created_at', { ascending: false }).order('id', { ascending: false }).limit(100)
+  const messages = (dataOrThrow(result) || []).reverse()
   await admin.from('campus_private_messages').update({ read_at: new Date().toISOString() }).eq('target_id', targetId).eq('target_type', targetType).eq('sender_id', recipientId).eq('recipient_id', user.id).is('read_at', null)
   return { messages }
 }
@@ -825,8 +851,8 @@ async function search(scope: { school: string; campus: string }, payload: any) {
   const needle = publicText(payload.query, 100, '搜索内容', true).toLocaleLowerCase('zh-CN')
   const [courseData, market, help, shuttles, lostFound, events, guides, placeResult] = await Promise.all([
     listCourses(scope), listMarket(scope), listHelp(scope), listShuttles(scope), listLostFound(scope), listEvents(scope), listGuides(scope),
-    admin.from('campus_places').select('id,school,campus,name,place_type,area,description,review_status,visibility,archived_at')
-      .eq('school', scope.school).eq('review_status', 'approved').eq('visibility', 'school').is('archived_at', null).limit(100),
+    scopeQuery(admin.from('campus_places').select('id,school,campus,name,place_type,area,description,review_status,visibility,archived_at')
+      .eq('school', scope.school).eq('review_status', 'approved').eq('visibility', 'school').is('archived_at', null), scope).limit(100),
   ])
   const places = (dataOrThrow(placeResult) || []).filter((item: any) => inScope(item, scope))
   const rows: any[] = [
@@ -899,11 +925,10 @@ async function moderate(user: any, payload: any) {
     p_actor_id: user.id, p_target_type: targetType, p_target_id: targetId,
     p_decision: decision, p_reason: reason, p_expected_revision: revision,
   }))
+  // notify() swallows its own storage errors and reports them as false; honour that result
+  // so the moderation screen can say the audit landed but the notification did not.
   let notificationSent = true
-  if (updated.ownerId && targetType !== 'report') {
-    try { await notify(updated.ownerId, user.id, 'campus_content_reviewed', targetId) }
-    catch { notificationSent = false }
-  }
+  if (updated.ownerId && targetType !== 'report') notificationSent = await notify(updated.ownerId, user.id, 'campus_content_reviewed', targetId)
   return { item: { id: updated.id, status: updated.status }, notificationSent }
 }
 

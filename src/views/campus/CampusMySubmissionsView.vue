@@ -1,5 +1,7 @@
 <script setup>
 import { computed, onMounted } from 'vue'
+import CampusEmptyState from '../../components/campus/CampusEmptyState.vue'
+import CampusLoadingState from '../../components/campus/CampusLoadingState.vue'
 import CampusLifeLayout from '../../components/campus/CampusLifeLayout.vue'
 import { useCampusLifePage } from '../../composables/campusLifePage.js'
 import { campusLifeMine } from '../../services/campusLife.js'
@@ -55,9 +57,9 @@ onMounted(() => { void refresh() })
     <template #default>
       <section class="campus-life-panel">
         <div class="campus-mine-heading"><div><h2>投稿记录</h2><p>待审核内容不会出现在公开列表；拒绝意见会显示在对应记录下。</p></div><button class="btn btn-ghost" type="button" :disabled="page.loading.value" @click="refresh">{{ page.loading.value ? '读取中…' : '刷新' }}</button></div>
-        <p v-if="page.loading.value && !page.data.value" class="campus-life-state" role="status">正在读取你的校园投稿…</p>
+        <CampusLoadingState v-if="page.loading.value && !page.data.value">正在读取你的校园投稿…</CampusLoadingState>
         <p v-else-if="page.error.value" class="campus-life-inline-state error" role="alert">{{ page.error.value }} <button class="text-button" type="button" @click="refresh">重试</button></p>
-        <p v-else-if="!items.length" class="campus-life-state">你还没有提交校园内容。<RouterLink to="/campus/publish">去统一发布</RouterLink></p>
+        <CampusEmptyState v-else-if="!items.length" title="你的校园分享，从这里开始" description="发布后的内容和审核进度会集中显示在这里。" action="去发布" to="/campus/publish" />
         <div v-else class="campus-mine-list">
           <article v-for="item in items" :key="item.key" class="campus-mine-row">
             <div><span class="campus-life-tag">{{ item.label }}</span><h3>{{ item.title }}</h3><p v-if="item.reason" class="campus-mine-reason">审核意见：{{ item.reason }}</p><small v-if="dateLabel(item.date)">更新于 {{ dateLabel(item.date) }}</small></div>

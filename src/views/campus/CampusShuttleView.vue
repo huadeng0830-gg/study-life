@@ -1,5 +1,7 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue'
+import CampusEmptyState from '../../components/campus/CampusEmptyState.vue'
+import CampusLoadingState from '../../components/campus/CampusLoadingState.vue'
 import CampusLifeLayout from '../../components/campus/CampusLifeLayout.vue'
 import CampusContentActions from '../../components/campus/CampusContentActions.vue'
 import { useCampusLifePage } from '../../composables/campusLifePage.js'
@@ -27,7 +29,7 @@ onMounted(() => { void refresh(); clockTimer = window.setInterval(() => { now.va
 onUnmounted(() => window.clearInterval(clockTimer))
 
 const routes = computed(() => page.data.value?.routes || [])
-function applicable(route) { return !route.effective_from || (selectedDate.value >= route.effective_from && (!route.effective_to || selectedDate.value <= route.effective_to)) }
+function applicable(route) { return Boolean(selectedDate.value) && (!route.effective_from || selectedDate.value >= route.effective_from) && (!route.effective_to || selectedDate.value <= route.effective_to) }
 function dayForDate() {
   if (serviceDay.value) return serviceDay.value
   const weekday = new Date(`${selectedDate.value}T12:00:00`).getDay()
@@ -35,30 +37,54 @@ function dayForDate() {
 }
 function dayLabel(day) { return ({ weekday: '工作日', weekend: '周末', holiday: '节假日' })[day] || day }
 function directionLabel(direction) { return direction === 'inbound' ? '返程' : '去程' }
-function scheduled(route, direction) {
-  const base = (page.data.value?.departures || []).filter((item) => item.route_id === route.id && item.direction === direction && item.service_day === dayForDate())
-    .map((item) => ({ id: item.id, time: item.departure_time.slice(0, 5), stop: item.stop_name, source: '常规班次' }))
-  const overrides = (page.data.value?.exceptions || []).filter((item) => item.route_id === route.id && item.direction === direction && item.service_date === selectedDate.value)
-  let values = base
-  const suspendedAll = overrides.some((item) => item.exception_type === 'suspended' && !item.departure_time)
-  if (suspendedAll) values = []
-  for (const item of overrides) {
-    if (item.exception_type === 'suspended' && item.departure_time) values = values.filter((row) => row.time !== item.departure_time.slice(0, 5))
-    if (['additional', 'changed'].includes(item.exception_type) && item.departure_time) values.push({ id: item.id, time: item.departure_time.slice(0, 5), stop: '', source: item.exception_type === 'additional' ? '特殊加班车' : '经审核的调整班次', note: item.note })
-  }
-  return values.sort((a, b) => a.time.localeCompare(b.time))
+function tripLabel(minutes) {
+  if (minutes < 1) return '即将发车'
+  const hours = Math.floor(minutes / 60)
+  return `${hours ? `${hours} 小时 ` : ''}${minutes % 60} 分钟后`
 }
-function nextTrip(route, direction) {
-  if (!applicable(route)) return null
-  const values = scheduled(route, direction)
+// 模板里每条线路每个方向都会用到 stops / scheduled / nextTrip，原来每次调用都要
+// 重扫一遍班次与特殊安排（nextTrip 一处就调了三次）。这里按 selectedDate / serviceDay /
+// now 一次性算好，模板只做查表；now 每分钟跳动一次，改日期或改运行日历时自动重算。
+const schedule = computed(() => {
+  const day = dayForDate()
   const today = localDate(new Date(now.value))
-  const next = values.find((item) => selectedDate.value > today || Date.parse(`${selectedDate.value}T${item.time}:00`) >= now.value)
-  if (!next) return null
-  const departureEpoch = new Date(`${selectedDate.value}T${next.time}:00`).getTime()
-  const minutes = Math.max(0, Math.ceil((departureEpoch - now.value) / 60000))
-  return { ...next, minutes, label: minutes < 1 ? '即将发车' : `${Math.floor(minutes / 60) ? `${Math.floor(minutes / 60)} 小时 ` : ''}${minutes % 60} 分钟后` }
-}
-function stops(route, direction) { return (page.data.value?.stops || []).filter((item) => item.route_id === route.id && item.direction === direction).sort((a, b) => a.position - b.position) }
+  const departures = page.data.value?.departures || []
+  const exceptions = page.data.value?.exceptions || []
+  const stops = page.data.value?.stops || []
+  const rows = new Map()
+  for (const route of routes.value) {
+    for (const direction of ['outbound', 'inbound']) {
+      let values = departures
+        .filter((item) => item.route_id === route.id && item.direction === direction && item.service_day === day)
+        .map((item) => ({ id: item.id, time: String(item.departure_time).slice(0, 5), stop: item.stop_name, source: '常规班次' }))
+      const overrides = exceptions.filter((item) => item.route_id === route.id && item.direction === direction && item.service_date === selectedDate.value)
+      if (overrides.some((item) => item.exception_type === 'suspended' && !item.departure_time)) values = []
+      for (const item of overrides) {
+        const time = item.departure_time ? String(item.departure_time).slice(0, 5) : ''
+        if (item.exception_type === 'suspended' && time) values = values.filter((row) => row.time !== time)
+        if (['additional', 'changed'].includes(item.exception_type) && time) {
+          values = values.concat({ id: item.id, time, stop: '', source: item.exception_type === 'additional' ? '特殊加班车' : '经审核的调整班次', note: item.note })
+        }
+      }
+      values.sort((left, right) => left.time.localeCompare(right.time))
+      const upcoming = applicable(route)
+        ? values.find((item) => selectedDate.value > today || Date.parse(`${selectedDate.value}T${item.time}:00`) >= now.value)
+        : null
+      const departureEpoch = upcoming ? new Date(`${selectedDate.value}T${upcoming.time}:00`).getTime() : NaN
+      const minutes = Number.isFinite(departureEpoch) ? Math.max(0, Math.ceil((departureEpoch - now.value) / 60000)) : null
+      rows.set(`${route.id}:${direction}`, {
+        stops: stops.filter((item) => item.route_id === route.id && item.direction === direction).sort((left, right) => left.position - right.position),
+        scheduled: values,
+        next: upcoming ? { ...upcoming, minutes, label: tripLabel(minutes) } : null,
+      })
+    }
+  }
+  return rows
+})
+function tripFor(route, direction) { return schedule.value.get(`${route.id}:${direction}`) || { stops: [], scheduled: [], next: null } }
+function stops(route, direction) { return tripFor(route, direction).stops }
+function scheduled(route, direction) { return tripFor(route, direction).scheduled }
+function nextTrip(route, direction) { return tripFor(route, direction).next }
 function exceptionsFor(route) { return (page.data.value?.exceptions || []).filter((item) => item.route_id === route.id && item.service_date === selectedDate.value) }
 function exceptionLabel(item) { return ({ suspended: '停运覆盖', additional: '加班车', changed: '调整班次' })[item.exception_type] || '特殊安排' }
 
@@ -77,7 +103,7 @@ async function submitException(route) {
 </script>
 
 <template>
-  <CampusLifeLayout title="校车与校园出行" description="展示审核通过的计划时刻表和特殊日期覆盖；没有实时车辆定位接口，不展示虚假实时位置。">
+  <CampusLifeLayout title="校车与校园出行" description="选好出行日期，查看校车线路、计划班次与特殊安排。">
     <template #default>
       <section class="campus-life-panel campus-shuttle-filter">
         <label>出行日期 <input v-model="selectedDate" type="date" /></label>
@@ -86,9 +112,9 @@ async function submitException(route) {
       </section>
       <section class="campus-life-panel">
         <div class="campus-shuttle-heading"><div><h2>线路与班次</h2><p>更新时间和来源随线路展示；过期或日期不适用时不会计算“下一班”。</p></div><RouterLink class="btn btn-primary" to="/campus/publish?kind=shuttle">提交线路</RouterLink></div>
-        <p v-if="page.loading.value && !page.data.value" class="campus-life-state" role="status">正在读取校车时刻表…</p>
+        <CampusLoadingState v-if="page.loading.value && !page.data.value">正在读取校车时刻表…</CampusLoadingState>
         <p v-else-if="page.error.value" class="campus-life-inline-state error" role="alert">{{ page.error.value }} <button class="text-button" type="button" @click="refresh">重试</button></p>
-        <p v-else-if="!routes.length" class="campus-life-state">当前校区还没有审核通过的线路。提交时请附上学校或运营方的公开来源。</p>
+        <CampusEmptyState v-else-if="!routes.length" title="还没有已核实的校车线路" description="有学校或运营方公开时刻表时，可以提交线路供同校同学查阅。" action="提交校车线路" to="/campus/publish?kind=shuttle" />
         <div v-else class="campus-shuttle-routes">
           <article v-for="route in routes" :key="route.id" class="campus-shuttle-route campus-life-card">
             <div class="campus-life-meta"><span class="campus-life-tag">计划班次</span><span v-if="route.campus">{{ route.campus }}</span><span>更新时间：{{ route.updated_at.slice(0, 10) }}</span></div>

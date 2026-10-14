@@ -1,5 +1,8 @@
 <script setup>
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
+import CampusEmptyState from '../../components/campus/CampusEmptyState.vue'
+import CampusLoadingState from '../../components/campus/CampusLoadingState.vue'
+import CampusDirectoryFilter from '../../components/campus/CampusDirectoryFilter.vue'
 import CampusLifeLayout from '../../components/campus/CampusLifeLayout.vue'
 import CampusContentActions from '../../components/campus/CampusContentActions.vue'
 import CampusPrivateChat from '../../components/campus/CampusPrivateChat.vue'
@@ -10,6 +13,11 @@ import {
 } from '../../services/campusLife.js'
 
 const page = useCampusLifePage()
+const query = ref('')
+const category = ref('')
+const filterOptions = [{ value: 'free', label: '赠送' }, { value: 'sale', label: '出售' }, { value: 'wanted', label: '求购' }]
+const visible = computed(() => (page.data.value?.listings || []).filter((item) => (!category.value || item.listing_type === category.value) && (!query.value.trim() || [item.title, item.description, item.condition, item.meetup_area].filter(Boolean).join(' ').toLocaleLowerCase('zh-CN').includes(query.value.trim().toLocaleLowerCase('zh-CN')))))
+
 const contactId = ref('')
 const contactNote = ref('')
 const chat = ref(null)
@@ -34,17 +42,16 @@ function dateLabel(value) {
   const date = new Date(value)
   return Number.isNaN(date.getTime()) ? '' : new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit' }).format(date)
 }
-async function openContact(listingId) {
+function openContact(listingId) {
   contactId.value = contactId.value === listingId ? '' : listingId
+  // One shared note field; clear it when the open form changes target.
   contactNote.value = ''
 }
 async function sendInterest(listing) {
   busyId.value = listing.id
-  await page.act(() => createMarketInterest(listing.id, contactNote.value), '联系意向已发送。发布者接受后可在私信中沟通交接。')
-  contactId.value = ''
-  contactNote.value = ''
+  const result = await page.act(() => createMarketInterest(listing.id, contactNote.value), '联系意向已发送。发布者接受后可在私信中沟通交接。')
   busyId.value = ''
-  await refresh()
+  if (result) { contactId.value = ''; contactNote.value = ''; await refresh() }
 }
 async function decide(interest, decision) {
   busyId.value = interest.id
@@ -69,11 +76,12 @@ function openChat(interest) {
     <template #default>
       <section class="campus-life-panel">
         <div class="campus-market-heading"><div><h2>同校集市</h2><p>仅展示审核通过且仍在售或已预留的信息；不支持平台支付。</p></div><RouterLink class="btn btn-primary" to="/campus/publish?kind=market">发布商品</RouterLink></div>
-        <p v-if="page.loading.value && !page.data.value" class="campus-life-state" role="status">正在读取二手信息…</p>
+        <CampusDirectoryFilter v-if="page.data.value" v-model:query="query" v-model:category="category" :options="filterOptions" :count="visible.length" placeholder="搜索物品、描述或交易地点" />
+        <CampusLoadingState v-if="page.loading.value && !page.data.value">正在读取二手信息…</CampusLoadingState>
         <p v-else-if="page.error.value" class="campus-life-inline-state error" role="alert">{{ page.error.value }} <button class="text-button" type="button" @click="refresh">重试</button></p>
-        <p v-else-if="!page.data.value?.listings?.length" class="campus-life-state">当前学校没有可浏览的在售商品。提交后会先进入审核队列。</p>
+        <CampusEmptyState v-else-if="!visible.length" :title="query || category ? '没有找到匹配内容' : '还没有可浏览的二手信息'" :description="query || category ? '换个关键词，或清除筛选看看。' : '出售、求购或赠送闲置物品，审核后就会显示在这里。'" :action="query || category ? '' : '发布二手信息'" to="/campus/publish?kind=market" />
         <div v-else class="campus-life-grid">
-          <article v-for="listing in page.data.value.listings" :key="listing.id" class="campus-life-card">
+          <article v-for="listing in visible" :key="listing.id" class="campus-life-card">
             <div class="campus-life-meta"><span class="campus-life-tag">{{ typeLabel(listing.listing_type) }}</span><span>{{ listing.category }}</span><span v-if="listing.campus">{{ listing.campus }}</span></div>
             <h3>{{ listing.title }}</h3><strong class="campus-market-price">{{ priceLabel(listing) }}</strong>
             <p>{{ listing.description || '发布者尚未补充详细说明。' }}</p>

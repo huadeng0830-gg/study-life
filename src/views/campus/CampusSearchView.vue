@@ -1,6 +1,8 @@
 <script setup>
 import { ref } from 'vue'
 import CampusLifeLayout from '../../components/campus/CampusLifeLayout.vue'
+import CampusEmptyState from '../../components/campus/CampusEmptyState.vue'
+import CampusLoadingState from '../../components/campus/CampusLoadingState.vue'
 import { useCampusLifePage } from '../../composables/campusLifePage.js'
 import { campusLifeSearch } from '../../services/campusLife.js'
 
@@ -22,9 +24,10 @@ async function search() {
       <section class="campus-life-panel">
         <form class="campus-life-search" role="search" aria-label="校园全站搜索" @submit.prevent="search"><label class="sr-only" for="campus-global-search">搜索校园内容</label><input id="campus-global-search" v-model="query" type="search" maxlength="100" placeholder="搜课程、活动、地点或校园服务" /><button class="btn btn-primary" type="submit" :disabled="page.loading.value">{{ page.loading.value ? '搜索中…' : '搜索' }}</button></form>
         <p v-if="page.error.value" class="campus-life-inline-state error" role="alert">{{ page.error.value }}</p>
-        <p v-else-if="page.loading.value" class="campus-life-state" role="status">正在搜索当前学校和校区…</p>
-        <p v-else-if="searched && !page.data.value?.results?.length" class="campus-life-state">没有找到匹配内容。审核中的投稿不会出现在搜索结果中。</p>
-        <div v-else-if="page.data.value?.results?.length" class="campus-search-results" aria-label="搜索结果"><article v-for="item in page.data.value.results" :key="`${item.type}:${item.id}`" class="campus-search-result"><div><span class="campus-life-tag">{{ labels[item.type] || '校园内容' }}</span><h2>{{ item.title }}</h2><p>{{ item.detail || '暂无补充说明。' }}</p><small v-if="item.campus">{{ item.campus }}</small></div><RouterLink class="btn btn-ghost" :to="routeFor[item.type] || '/campus'">打开模块</RouterLink></article></div>
+        <CampusLoadingState v-else-if="page.loading.value">正在搜索当前学校和校区…</CampusLoadingState>
+        <CampusEmptyState v-else-if="searched && !page.data.value?.results?.length" title="没有找到相关内容" description="试试更短的关键词。审核中的投稿暂时不会出现在结果中。" />
+        <div v-else-if="page.data.value?.results?.length" class="campus-search-results" aria-label="搜索结果"><p class="campus-life-result-count" role="status">找到 {{ page.data.value.results.length }} 条相关内容</p><article v-for="item in page.data.value.results" :key="`${item.type}:${item.id}`" class="campus-search-result"><div><span class="campus-life-tag">{{ labels[item.type] || '校园内容' }}</span><h2>{{ item.title }}</h2><p>{{ item.detail || '暂无补充说明。' }}</p><small v-if="item.campus">{{ item.campus }}</small></div><RouterLink class="btn btn-ghost" :to="routeFor[item.type] || '/campus'">查看{{ labels[item.type] || '内容' }}</RouterLink></article></div>
+        <CampusEmptyState v-else title="校园里，有什么想找的？" description="输入课程、物品、活动或地点名称，搜索同校已审核的公开信息。" />
       </section>
     </template>
   </CampusLifeLayout>

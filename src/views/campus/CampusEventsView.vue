@@ -1,5 +1,7 @@
 <script setup>
 import { onMounted, ref } from 'vue'
+import CampusEmptyState from '../../components/campus/CampusEmptyState.vue'
+import CampusLoadingState from '../../components/campus/CampusLoadingState.vue'
 import CampusLifeLayout from '../../components/campus/CampusLifeLayout.vue'
 import CampusContentActions from '../../components/campus/CampusContentActions.vue'
 import { useCampusLifePage } from '../../composables/campusLifePage.js'
@@ -50,13 +52,13 @@ async function addToCalendar(event) {
 </script>
 
 <template>
-  <CampusLifeLayout title="校园活动与社团" description="活动投稿经审核后展示；报名状态与名额由服务端一致性控制。">
+  <CampusLifeLayout title="校园活动与社团" description="发现同校活动，报名参加，或把感兴趣的活动加入日程。">
     <template #default>
       <section class="campus-life-panel">
         <div class="campus-events-heading"><div><h2>近期活动</h2><p>组织方标识来自投稿信息，未经核验不会展示为学校官方活动。</p></div><RouterLink class="btn btn-primary" to="/campus/publish?kind=event">发布活动</RouterLink></div>
-        <p v-if="page.loading.value && !page.data.value" class="campus-life-state" role="status">正在读取近期活动…</p>
+        <CampusLoadingState v-if="page.loading.value && !page.data.value">正在读取近期活动…</CampusLoadingState>
         <p v-else-if="page.error.value" class="campus-life-inline-state error" role="alert">{{ page.error.value }} <button class="text-button" type="button" @click="refresh">重试</button></p>
-        <p v-else-if="!page.data.value?.length" class="campus-life-state">当前没有已审核且仍在报名时间内的活动。</p>
+        <CampusEmptyState v-else-if="!page.data.value?.length" title="近期还没有校园活动" description="分享社团或校园活动，邀请同学一起参加。" action="发布活动" to="/campus/publish?kind=event" />
         <div v-else class="campus-life-grid">
           <article v-for="event in page.data.value" :key="event.id" class="campus-life-card">
             <div class="campus-life-meta"><span class="campus-life-tag">学生投稿 · 已审核</span><span v-if="event.campus">{{ event.campus }}</span><span>{{ dateLabel(event.starts_at) }}</span></div>

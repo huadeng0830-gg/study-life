@@ -112,7 +112,7 @@ describe('地点结构化评分和隐私边界', () => {
   })
 
   it('新增的地点审核记录只允许服务端访问并保留审核队列索引', () => {
-    const migration = readFileSync(new URL('../supabase/migrations/20261014113330_campus-place-directory.sql', import.meta.url), 'utf8')
+    const migration = readFileSync(new URL('../supabase/migrations/20261014134238_campus_place_directory.sql', import.meta.url), 'utf8')
     expect(migration).toContain('create table public.campus_place_review_events')
     expect(migration).toContain('add column public_contact text not null default')
     expect(migration).toContain('add column source_info text not null default')

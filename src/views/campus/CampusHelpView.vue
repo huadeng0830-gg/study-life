@@ -1,5 +1,8 @@
 <script setup>
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
+import CampusEmptyState from '../../components/campus/CampusEmptyState.vue'
+import CampusLoadingState from '../../components/campus/CampusLoadingState.vue'
+import CampusDirectoryFilter from '../../components/campus/CampusDirectoryFilter.vue'
 import CampusLifeLayout from '../../components/campus/CampusLifeLayout.vue'
 import CampusPrivateChat from '../../components/campus/CampusPrivateChat.vue'
 import CampusContentActions from '../../components/campus/CampusContentActions.vue'
@@ -10,6 +13,11 @@ import {
 } from '../../services/campusLife.js'
 
 const page = useCampusLifePage()
+const query = ref('')
+const category = ref('')
+const filterOptions = [{ value: 'other', label: '其他' }, { value: 'moving', label: '搬运协助' }, { value: 'delivery', label: '物品递送' }, { value: 'parcel', label: '快递代取' }, { value: 'temporary_help', label: '临时求助' }, { value: 'errand', label: '校内跑腿' }, { value: 'daily_task', label: '日常代办' }]
+const visible = computed(() => (page.data.value?.tasks || []).filter((item) => (!category.value || item.task_type === category.value) && (!query.value.trim() || [item.title, item.description, item.pickup_area, item.delivery_area].filter(Boolean).join(' ').toLocaleLowerCase('zh-CN').includes(query.value.trim().toLocaleLowerCase('zh-CN')))))
+
 const applyId = ref('')
 const applyNote = ref('')
 const disputeId = ref('')
@@ -30,6 +38,12 @@ const taskStatuses = { pending_review: '待审核', open: '待接单', assigned:
 const applicationStatuses = { pending: '待处理', accepted: '已接单', rejected: '未接受', withdrawn: '已撤回', closed: '已关闭' }
 function timeLabel(value) { if (!value) return '未设置'; const date = new Date(value); return Number.isNaN(date.getTime()) ? '时间待核实' : new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).format(date) }
 
+function openApply(task) {
+  const same = applyId.value === task.id
+  applyId.value = same ? '' : task.id
+  // The note is a single shared field; clear it when the open form changes target.
+  applyNote.value = ''
+}
 async function apply(task) {
   busyId.value = task.id
   const result = await page.act(() => applyToCampusHelpTask(task.id, applyNote.value), '接单申请已发送。')
@@ -65,16 +79,17 @@ function openChat(application) {
     <template #default>
       <section class="campus-life-panel">
         <div class="campus-help-heading"><div><h2>可接任务</h2><p>接单前确认时间与范围；交接选择有人流的校园公共区域。</p></div><RouterLink class="btn btn-primary" to="/campus/publish?kind=help">发布互助</RouterLink></div>
-        <p v-if="page.loading.value && !page.data.value" class="campus-life-state" role="status">正在读取互助任务…</p>
+        <CampusDirectoryFilter v-if="page.data.value" v-model:query="query" v-model:category="category" :options="filterOptions" :count="visible.length" placeholder="搜索任务或交接区域" />
+        <CampusLoadingState v-if="page.loading.value && !page.data.value">正在读取互助任务…</CampusLoadingState>
         <p v-else-if="page.error.value" class="campus-life-inline-state error" role="alert">{{ page.error.value }} <button class="text-button" type="button" @click="refresh">重试</button></p>
-        <p v-else-if="!page.data.value?.tasks?.length" class="campus-life-state">当前没有待接任务。发布的内容审核通过后才会显示在这里。</p>
+        <CampusEmptyState v-else-if="!visible.length" :title="query || category ? '没有找到匹配内容' : '暂时没有公开的互助任务'" :description="query || category ? '换个关键词，或清除筛选看看。' : '需要搭把手时，发布一个任务，让同校同学看见。'" :action="query || category ? '' : '发布互助任务'" to="/campus/publish?kind=help" />
         <div v-else class="campus-life-grid">
-          <article v-for="task in page.data.value.tasks" :key="task.id" class="campus-life-card">
+          <article v-for="task in visible" :key="task.id" class="campus-life-card">
             <div class="campus-life-meta"><span class="campus-life-tag">{{ typeLabels[task.task_type] || '校园互助' }}</span><span v-if="task.campus">{{ task.campus }}</span><span>{{ timeLabel(task.deadline) }}</span></div>
             <h3>{{ task.title }}</h3><p>{{ task.description || '发布者尚未补充任务说明。' }}</p>
             <p class="campus-life-meta"><span v-if="task.pickup_area">起始：{{ task.pickup_area }}</span><span v-if="task.delivery_area">送达：{{ task.delivery_area }}</span></p>
             <CampusContentActions target-type="help_task" :target-id="task.id" />
-            <button v-if="applyId !== task.id" class="btn btn-ghost" type="button" @click="applyId = task.id">申请接单</button>
+            <button v-if="applyId !== task.id" class="btn btn-ghost" type="button" @click="openApply(task)">申请接单</button>
             <form v-if="applyId === task.id" class="campus-help-inline-form" @submit.prevent="apply(task)"><label>申请说明（请勿写手机号或地址）<textarea v-model="applyNote" maxlength="500" /></label><div class="campus-life-actions"><button class="btn btn-primary" type="submit" :disabled="busyId === task.id">发送申请</button><button class="btn btn-ghost" type="button" @click="applyId = ''">取消</button></div></form>
           </article>
         </div>

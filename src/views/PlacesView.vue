@@ -591,7 +591,7 @@ function searchCampusPlaces(category = 'all') {
         <h1 class="page-title">校园生活</h1>
         <p class="page-desc">查找并共建校园地点信息。地点资料提交审核后公开；到访日期、消费金额和私人备注始终留在本机。</p>
       </div>
-      <div class="page-actions">
+      <div v-if="section !== 'home'" class="page-actions">
         <button class="btn btn-primary" type="button" :aria-expanded="showPlaceForm && section === 'mine'" aria-controls="place-create-form" @click="showPlaceForm && section === 'mine' ? showPlaceForm = false : beginNewPlace()">{{ showPlaceForm && section === 'mine' ? '收起' : '添加地点' }}</button>
       </div>
     </header>

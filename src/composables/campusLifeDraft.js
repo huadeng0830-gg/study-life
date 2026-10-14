@@ -6,12 +6,24 @@ const PREFIX = 'study-life:campus-draft:v1'
 function copy(value) { return typeof globalThis.structuredClone === 'function' ? globalThis.structuredClone(value) : JSON.parse(JSON.stringify(value)) }
 function storage() { try { return globalThis.localStorage || null } catch { return null } }
 
+// Restore only fields supported by the current form, including defaults introduced
+// since the draft was saved. Local storage may contain incomplete or corrupt data.
+function restore(value, fallback) {
+  if (fallback && typeof fallback === 'object' && !Array.isArray(fallback)) {
+    const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {}
+    return Object.fromEntries(Object.entries(fallback).map(([key, initial]) => [key, restore(source[key], initial)]))
+  }
+  // Vue number inputs save numeric JSON even when their empty default is ''.
+  if (typeof fallback === 'string' && typeof value === 'number' && Number.isFinite(value)) return String(value)
+  return typeof value === typeof fallback ? value : copy(fallback)
+}
+
 function parseDraft(storageKey, fallback) {
   const store = storage()
   if (!storageKey || !store) return copy(fallback)
   try {
     const parsed = JSON.parse(store.getItem(storageKey) || 'null')
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? { ...copy(fallback), ...parsed } : copy(fallback)
+    return restore(parsed, fallback)
   } catch { return copy(fallback) }
 }
 
@@ -25,7 +37,7 @@ export function useCampusLifeDraft(domain, fallback) {
   const stopOwner = watch(() => accountUser.value?.id || '', (next) => {
     ownerId.value = next
     value.value = parseDraft(key.value, fallback)
-  }, { immediate: false })
+  }, { flush: 'sync' })
   const stopValue = watch(value, (next) => {
     const store = storage()
     if (!key.value || !store) return
@@ -33,7 +45,7 @@ export function useCampusLifeDraft(domain, fallback) {
       store.setItem(key.value, JSON.stringify(next))
       serial.value += 1
     } catch { /* Draft persistence is best-effort; the form remains usable. */ }
-  }, { deep: true })
+  }, { deep: true, flush: 'sync' })
 
   function clear() {
     try { if (key.value) storage()?.removeItem(key.value) } catch { /* Ignore storage restrictions. */ }

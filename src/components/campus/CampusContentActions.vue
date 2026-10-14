@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import { useCampusFavorites } from '../../composables/campusFavorites.js'
 import { reportCampusContent } from '../../services/campusLife.js'
+import { accountUser } from '../../composables/accountAuth.js'
 
 const props = defineProps({
   targetType: { type: String, required: true },
@@ -17,10 +18,12 @@ const notice = ref('')
 const isSaved = computed(() => favorites.favorites.value.has(`${props.targetType}:${props.targetId}`))
 
 async function toggleFavorite() {
+  if (busy.value) return
+  const owner = accountUser.value?.id
   busy.value = true
   error.value = ''
   notice.value = ''
-  try { await favorites.toggle(props.targetType, props.targetId); notice.value = isSaved.value ? '已加入收藏。' : '已取消收藏。' }
+  try { const result = await favorites.toggle(props.targetType, props.targetId); if (result !== null && owner === accountUser.value?.id) notice.value = isSaved.value ? '已加入收藏。' : '已取消收藏。' }
   catch (cause) { error.value = cause?.message || '收藏没有更新。' }
   finally { busy.value = false }
 }
