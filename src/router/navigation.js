@@ -35,6 +35,7 @@ const DEFAULT_DESKTOP_GROUPS = Object.freeze([
   Object.freeze({ id: 'learning', label: '学习' }),
   Object.freeze({ id: 'schedule', label: '日程' }),
   Object.freeze({ id: 'qixing', label: '齐行' }),
+  Object.freeze({ id: 'campus', label: '校园' }),
   Object.freeze({ id: 'other', label: '其他' }),
 ])
 

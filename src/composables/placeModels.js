@@ -27,6 +27,32 @@ export const PLACE_CATEGORIES = Object.freeze([
   { id: 'social', label: '休闲社交' },
 ])
 
+/** Detailed discovery types share the existing broad rating templates. */
+export const PLACE_TYPES = Object.freeze([
+  { id: 'teaching-building', label: '教学楼', category: 'study' },
+  { id: 'library', label: '图书馆', category: 'study' },
+  { id: 'study-room', label: '自习室', category: 'study' },
+  { id: 'laboratory', label: '实验楼', category: 'study' },
+  { id: 'cafeteria', label: '食堂', category: 'food' },
+  { id: 'restaurant', label: '餐厅', category: 'food' },
+  { id: 'tea-shop', label: '奶茶店', category: 'food' },
+  { id: 'coffee-shop', label: '咖啡店', category: 'food' },
+  { id: 'supermarket', label: '超市', category: 'trade' },
+  { id: 'convenience-store', label: '便利店', category: 'trade' },
+  { id: 'campus-shop', label: '校园商店', category: 'trade' },
+  { id: 'printing', label: '打印复印', category: 'service' },
+  { id: 'parcel-station', label: '快递站', category: 'service' },
+  { id: 'sports', label: '体育场馆', category: 'social' },
+  { id: 'recreation', label: '休闲社交', category: 'social' },
+  { id: 'dorm-facility', label: '宿舍设施', category: 'service' },
+  { id: 'medical', label: '医疗服务', category: 'service' },
+  { id: 'administration', label: '行政办事', category: 'service' },
+  { id: 'shuttle-stop', label: '校车站点', category: 'transport' },
+  { id: 'scenic', label: '校园景点', category: 'social' },
+  { id: 'campus-edge-shop', label: '校园周边', category: 'trade' },
+  { id: 'other', label: '其他校园服务', category: 'service' },
+])
+
 export const PLACE_SCORE_FIELDS = Object.freeze({
   food: Object.freeze([
     { key: 'spice', label: '辣度', type: 'select', options: [{ value: 'none', label: '不辣' }, { value: 'mild', label: '微辣' }, { value: 'medium', label: '中辣' }, { value: 'hot', label: '很辣' }] },
@@ -71,6 +97,11 @@ export const PLACE_SCORE_FIELDS = Object.freeze({
 export const PLACE_VALUE_OPTIONS = VALUE_OPTIONS
 
 const PLACE_CATEGORY_IDS = new Set(PLACE_CATEGORIES.map(({ id }) => id))
+const PLACE_TYPE_BY_ID = new Map(PLACE_TYPES.map((type) => [type.id, type]))
+const PLACE_DEFAULT_TYPE = Object.freeze({
+  food: 'restaurant', service: 'other', study: 'library',
+  transport: 'shuttle-stop', trade: 'campus-shop', social: 'recreation',
+})
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 function text(value, max, label, required = false) {
@@ -111,26 +142,42 @@ export function normalizePlaceScores(category, value = {}) {
   const score = value.value ?? 'mixed'
   if (!VALUE_OPTIONS.some((option) => option.value === score)) throw new Error('“值不值”评分格式不正确。')
   result.value = score
+  if (value.rating !== undefined && value.rating !== null && value.rating !== '') {
+    const rating = Number(value.rating)
+    if (!Number.isInteger(rating) || rating < 1 || rating > 5) throw new Error('综合评分须为 1 至 5 分。')
+    result.rating = rating
+  }
   return result
 }
 
 export function normalizePlaceRecord(value = {}) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('地点档案格式不正确。')
-  const category = PLACE_CATEGORY_IDS.has(value.category) ? value.category : 'food'
+  const requestedType = PLACE_TYPE_BY_ID.get(value.type)
+  const category = PLACE_CATEGORY_IDS.has(value.category) ? value.category : requestedType?.category || 'food'
+  const type = requestedType?.category === category ? requestedType.id : PLACE_DEFAULT_TYPE[category]
   return {
     id: text(value.id || createPlaceId(), 64, '地点编号', true),
     name: text(value.name, 80, '地点名称', true),
     campus: text(value.campus, 100, '校区'),
     area: text(value.area, 80, '区域'),
     placeHint: text(value.placeHint, 100, '相对位置'),
+    type,
     category,
     ratingTemplateId: category,
     scores: normalizePlaceScores(category, value.scores || {}),
     note: text(value.note, 50, '备注'),
+    description: text(value.description, 500, '地点简介'),
+    openingHours: text(value.openingHours, 120, '开放时间'),
+    serviceInfo: text(value.serviceInfo, 500, '服务与价格'),
+    publicContact: text(value.publicContact, 100, '公开业务联系方式'),
+    sourceInfo: text(value.sourceInfo, 160, '信息来源'),
     archivedAt: value.archivedAt ? String(value.archivedAt) : null,
     createdAt: value.createdAt ? String(value.createdAt) : new Date().toISOString(),
     updatedAt: value.updatedAt ? String(value.updatedAt) : new Date().toISOString(),
     visibility: value.visibility === 'school' ? 'school' : 'private',
+    reviewStatus: ['pending', 'approved', 'rejected'].includes(value.reviewStatus)
+      ? value.reviewStatus : value.visibility === 'school' ? 'approved' : 'not_submitted',
+    reviewReason: text(value.reviewReason, 500, '审核说明'),
   }
 }
 
@@ -195,10 +242,14 @@ export function toSchoolPlacePayload(value) {
     campus: place.campus,
     area: place.area,
     placeHint: place.placeHint,
+    type: place.type,
     category: place.category,
     ratingTemplateId: place.ratingTemplateId,
-    scores: place.scores,
-    note: place.note,
+    description: place.description,
+    openingHours: place.openingHours,
+    serviceInfo: place.serviceInfo,
+    publicContact: place.publicContact,
+    sourceInfo: place.sourceInfo,
     visibility: 'school',
   }
 }
@@ -216,6 +267,7 @@ export function toPlaceInvitePayload(value) {
     campus: place.campus,
     area: place.area,
     placeHint: place.placeHint,
+    type: place.type,
     category: place.category,
     ratingTemplateId: place.ratingTemplateId,
     scores: place.scores,

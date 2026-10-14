@@ -1,0 +1,56 @@
+import { campusLifeRequest } from './social.js'
+
+export const campusLifeSearch = (query) => campusLifeRequest('search', { query })
+export const campusLifeMine = () => campusLifeRequest('mine_list')
+export const resubmitCampusContent = (targetType, targetId, revision, content) => campusLifeRequest('content_resubmit', { targetType, targetId, revision, content })
+export const campusLifeFavorites = () => campusLifeRequest('favorite_list')
+export const setCampusFavorite = (targetType, targetId, saved) => campusLifeRequest('favorite_set', { targetType, targetId, saved })
+export const reportCampusContent = (targetType, targetId, reason, detail = '') => campusLifeRequest('content_report', { targetType, targetId, reason, detail })
+
+export const campusCourses = () => campusLifeRequest('courses_list')
+export const submitCampusTeacher = (payload) => campusLifeRequest('teacher_submit', payload)
+export const submitCampusCourse = (payload) => campusLifeRequest('course_submit', payload)
+export const submitCampusTeachingAssignment = (payload) => campusLifeRequest('assignment_submit', payload)
+export const submitCampusCourseReview = (payload) => campusLifeRequest('course_review_submit', payload)
+
+export const campusMarketListings = () => campusLifeRequest('market_list')
+export const submitCampusMarketListing = (payload) => campusLifeRequest('market_submit', payload)
+export const createMarketInterest = (listingId, message = '') => campusLifeRequest('market_interest_create', { listingId, message })
+export const listMarketInterests = () => campusLifeRequest('market_interest_list')
+export const decideMarketInterest = (listingId, interestId, decision) => campusLifeRequest('market_interest_decide', { listingId, interestId, decision })
+export const withdrawMarketInterest = (interestId) => campusLifeRequest('market_interest_withdraw', { interestId })
+export const updateMarketListingStatus = (listingId, status) => campusLifeRequest('market_status_update', { listingId, status })
+
+export const campusHelpTasks = () => campusLifeRequest('help_list')
+export const submitCampusHelpTask = (payload) => campusLifeRequest('help_submit', payload)
+export const applyToCampusHelpTask = (taskId, message = '') => campusLifeRequest('help_apply', { taskId, message })
+export const listCampusHelpApplications = () => campusLifeRequest('help_applications_list')
+export const decideHelpApplication = (taskId, applicationId, decision) => campusLifeRequest('help_application_decide', { taskId, applicationId, decision })
+export const withdrawHelpApplication = (applicationId) => campusLifeRequest('help_application_withdraw', { applicationId })
+export const transitionCampusHelpTask = (taskId, status, reason = '') => campusLifeRequest('help_transition', { taskId, status, reason })
+
+export const campusShuttles = () => campusLifeRequest('shuttle_list')
+export const submitCampusShuttleRoute = (payload) => campusLifeRequest('shuttle_submit', payload)
+export const submitCampusShuttleCorrection = (routeId, detail, sourceUrl = '') => campusLifeRequest('shuttle_correction_submit', { routeId, detail, sourceUrl })
+export const submitCampusShuttleException = (payload) => campusLifeRequest('shuttle_exception_submit', payload)
+
+export const campusLostFound = () => campusLifeRequest('lost_found_list')
+export const submitLostFoundItem = (payload) => campusLifeRequest('lost_found_submit', payload)
+export const submitLostFoundClaim = (itemId, privateEvidence) => campusLifeRequest('lost_found_claim_submit', { itemId, privateEvidence })
+export const listLostFoundClaims = () => campusLifeRequest('lost_found_claims_list')
+export const decideLostFoundClaim = (claimId, decision) => campusLifeRequest('lost_found_claim_decide', { claimId, decision })
+
+export const campusEvents = () => campusLifeRequest('events_list')
+export const submitCampusEvent = (payload) => campusLifeRequest('event_submit', payload)
+export const registerCampusEvent = (eventId) => campusLifeRequest('event_register', { eventId })
+export const cancelCampusEventRegistration = (eventId) => campusLifeRequest('event_cancel_registration', { eventId })
+
+export const campusGuides = () => campusLifeRequest('guides_list')
+export const submitCampusGuide = (payload) => campusLifeRequest('guide_submit', payload)
+
+export const listCampusMessages = (targetType, targetId, recipientId) => campusLifeRequest('message_list', { targetType, targetId, recipientId })
+export const sendCampusMessage = (targetType, targetId, recipientId, body) => campusLifeRequest('message_send', { targetType, targetId, recipientId, body })
+
+export const campusModerationQueue = (page = 0) => campusLifeRequest('moderation_queue', { page })
+export const decideCampusModeration = (targetType, targetId, decision, reason = '', revision) => campusLifeRequest('moderation_decide', { targetType, targetId, decision, reason, revision })
+export const resolveCampusHelpDispute = (disputeId, taskStatus, reason) => campusLifeRequest('help_dispute_resolve', { disputeId, taskStatus, reason })

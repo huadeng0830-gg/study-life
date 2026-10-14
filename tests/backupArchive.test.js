@@ -87,7 +87,11 @@ describe('本机备份文件格式', () => {
     const parsed = await parseBackupArchive(archive)
 
     expect(parsed.providedFields).toEqual(expect.arrayContaining(['places', 'placeVisits', 'placeOffers']))
-    expect(parsed.data.places).toEqual(places)
+    expect(parsed.data.places).toHaveLength(1)
+    expect(parsed.data.places[0]).toMatchObject({
+      ...places[0], type: 'restaurant', description: '', openingHours: '', serviceInfo: '',
+      reviewStatus: 'not_submitted', reviewReason: '',
+    })
     expect(parsed.data.placeVisits).toEqual(placeVisits)
     expect(parsed.data.placeOffers).toEqual(placeOffers)
   })

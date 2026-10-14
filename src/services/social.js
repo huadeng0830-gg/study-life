@@ -12,10 +12,10 @@ export class SocialError extends Error {
   }
 }
 
-function signedInUser({ requireVerified = true } = {}) {
+function signedInUser({ requireVerified = true, area = '好友协作' } = {}) {
   const user = accountUser.value
-  if (!user?.id) throw new SocialError('signed_out', '请先登录账号，再使用好友协作。', 401)
-  if (requireVerified && !user.email_confirmed_at) throw new SocialError('email_verification_required', '请先完成邮箱验证，再使用好友协作。', 403)
+  if (!user?.id) throw new SocialError('signed_out', `请先登录账号，再使用${area}。`, 401)
+  if (requireVerified && !user.email_confirmed_at) throw new SocialError('email_verification_required', `请先完成邮箱验证，再使用${area}。`, 403)
   return user
 }
 
@@ -38,6 +38,17 @@ export async function ensureSocialScheduleReady() {
 }
 
 function messageFor(code, fallback, action = '') {
+  if (action.startsWith('campus_life_')) {
+    const campusMessages = {
+      private_contact_not_allowed: '公开内容或私信不能包含个人联系方式、取件码或宿舍房间号。',
+      profile_required: '请先在“一起约”的资料设置中填写学校；校园归属是自填信息，不代表学校认证。',
+      campus_required: '请先填写学校和当前校区，再浏览该校园内容。',
+      event_full: '活动名额已满。',
+      event_closed: '活动已截止或暂不可报名。',
+      duplicate: '你已提交过相同内容，请刷新后查看。',
+    }
+    if (campusMessages[code]) return campusMessages[code]
+  }
   if (action.startsWith('project_') && ['conflict', 'state_changed'].includes(code)) {
     return fallback || '项目刚刚发生变化，请刷新后重新提交。'
   }
@@ -47,6 +58,7 @@ function messageFor(code, fallback, action = '') {
     invalid_input: '内容格式不正确，请检查后重试。',
     not_found: '内容已更新，请刷新后查看。',
     rate_limited: '操作太频繁了，请稍后再试。',
+    duplicate_place: '相同校区和区域已有同名地点，请先检查现有资料。',
     schedule_unknown: '暂时无法确认双方的课表范围，请检查双方的课表完整日期和账号同步状态。',
     schedule_changed: '课表或可约偏好刚刚发生变化，请刷新共同时间后重试。',
     conflict: '所选时间已不再空闲，请刷新后重新选择。',
@@ -67,8 +79,8 @@ async function parseFunctionError(error) {
   return { code: 'service_unavailable', message: '', status: 0 }
 }
 
-export async function socialRequest(action, payload = {}) {
-  const user = signedInUser({ requireVerified: !['profile_get', 'profile_save'].includes(action) })
+async function requestFunction(functionName, action, payload, { requireVerified = true, area = '好友协作', messageAction = action } = {}) {
+  const user = signedInUser({ requireVerified, area })
   if (!navigator.onLine) throw new SocialError('offline', '当前离线，操作尚未保存；联网后请重试。', 0)
   const client = await getSupabaseClient()
   const { data: authData, error: authError } = await client.auth.getSession()
@@ -78,13 +90,13 @@ export async function socialRequest(action, payload = {}) {
   }
   // The SDK may resolve its default token after an account switch. Bind this
   // mutation to the session that authorized the user's original action.
-  const { data, error } = await client.functions.invoke('campus-social', {
+  const { data, error } = await client.functions.invoke(functionName, {
     body: { action, payload }, headers: { Authorization: `Bearer ${session.access_token}` },
   })
   if (accountUser.value?.id !== user.id) throw new SocialError('account_changed', '登录账号已切换，本次操作已取消。', 401)
   if (error) {
     const detail = await parseFunctionError(error)
-    throw new SocialError(detail.code, messageFor(detail.code, detail.message, action), detail.status)
+    throw new SocialError(detail.code, messageFor(detail.code, detail.message, messageAction), detail.status)
   }
   if (!data || typeof data !== 'object' || !('data' in data)) {
     throw new SocialError('service_unavailable', '服务没有返回有效结果，请稍后重试。', 503)
@@ -92,8 +104,18 @@ export async function socialRequest(action, payload = {}) {
   return data.data
 }
 
+export function socialRequest(action, payload = {}) {
+  return requestFunction('campus-social', action, payload, { requireVerified: !['profile_get', 'profile_save'].includes(action), area: '好友协作' })
+}
+
+export function campusLifeRequest(action, payload = {}) {
+  return requestFunction('campus-life', action, payload, { area: '校园服务', messageAction: `campus_life_${action}` })
+}
+
 export function listCampusPlaces() { return socialRequest('campus_places_list') }
-export function publishCampusPlace(place, { visited = false } = {}) { return socialRequest('campus_place_publish', { place, visited }) }
+export function publishCampusPlace(place) {
+  return socialRequest('campus_place_publish', { place })
+}
 export function saveCampusPlaceRating(placeId, category, scores, note, { visited = false } = {}) {
   return socialRequest('campus_place_rating_save', { placeId, category, scores, note, visited })
 }

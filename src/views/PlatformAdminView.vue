@@ -3,20 +3,35 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { accountAvailable, accountOpen, accountReady, accountUser, initializeAccountAuth } from '../composables/accountAuth.js'
 import { currentVersionInfo } from '../composables/versionInfo.js'
 import { PlatformAdminRequestError, platformAdminRequest } from '../services/platformAdmin.js'
+import ConfirmDialog from '../components/ConfirmDialog.vue'
 
 /** @typedef {{ id: string, email: string, createdAt: string|null, lastSignInAt: string|null, emailVerifiedAt: string|null, status: string, platformOwner: boolean }} AdminAccount */
 /** @typedef {{ users: AdminAccount[], page: number, pageSize: number, total: number, truncated: boolean }} AccountPage */
 /** @typedef {{ checkedAt: string, services: { auth: string, collaborationData: string }, counts: { accounts: number|null, accountsScanned: number, accountsTruncated: boolean, activeProjects: number, collaborationProfiles: number } }} PlatformOverview */
 /** @typedef {{ id: string, actor_user_id: string|null, target_user_id: string|null, action: string, outcome: string, reason: string, created_at: string, completed_at: string|null }} AuditEvent */
+/** @typedef {{ id: string, school: string, name: string, campus: string, area: string, place_hint: string, place_type: string, description: string, opening_hours: string, service_info: string, public_contact: string, source_info: string, category: string, owner_id: string, review_revision: string, created_at: string, updated_at: string }} PendingPlace */
+/** @typedef {{ id: string, place_id: string|null, actor_id: string, decision: string, outcome: string, reason: string, created_at: string, completed_at: string|null }} PlaceReviewEvent */
 /** @typedef {{ account: AdminAccount, suspend: boolean }} StatusChangeDialog */
 /** @typedef {{ tone: string, text: string }} FeedbackMessage */
 
 const PAGE_SIZE = 25
+const PLACE_PAGE_SIZE = 50
 const access = ref('checking')
 const ownerEmail = ref('')
 const overview = ref(/** @type {PlatformOverview|null} */ (null))
 const accounts = ref(/** @type {AccountPage|null} */ (null))
 const auditEvents = ref(/** @type {AuditEvent[]} */ ([]))
+const pendingPlaces = ref(/** @type {PendingPlace[]} */ ([]))
+const pendingPlacePage = ref(1)
+const pendingPlaceTotal = ref(0)
+const placeReviewEvents = ref(/** @type {PlaceReviewEvent[]} */ ([]))
+const reviewReasons = ref({})
+const placeReviewConfirmation = ref(null)
+const placesLoading = ref(false)
+const placeAuditLoading = ref(false)
+const placesError = ref('')
+const placeAuditError = ref('')
+const reviewActionId = ref('')
 const query = ref('')
 const page = ref(1)
 const loading = ref(false)
@@ -36,6 +51,7 @@ let dataRevision = 0
 let searchTimer = 0
 
 const pageCount = computed(() => Math.max(1, Math.ceil((accounts.value?.total || 0) / PAGE_SIZE)))
+const placePageCount = computed(() => Math.max(1, Math.ceil(pendingPlaceTotal.value / PLACE_PAGE_SIZE)))
 const accountSummary = computed(() => {
   const counts = overview.value?.counts
   if (counts?.accountsTruncated && Number.isSafeInteger(counts.accountsScanned)) {
@@ -66,7 +82,11 @@ function dateLabel(value) {
 }
 
 function actionLabel(action) {
-  return ({ 'user.suspend': '暂停账号', 'user.restore': '恢复账号' })[action] || '管理操作'
+  return ({ 'user.suspend': '暂停账号', 'user.restore': '恢复账号', 'place.review': '地点审核' })[action] || '管理操作'
+}
+
+function placeTypeLabel(type) {
+  return ({ 'teaching-building': '教学楼', library: '图书馆', 'study-room': '自习室', laboratory: '实验楼', cafeteria: '食堂', restaurant: '餐厅', 'tea-shop': '奶茶店', 'coffee-shop': '咖啡店', supermarket: '超市', 'convenience-store': '便利店', 'campus-shop': '校园商店', printing: '打印复印', 'parcel-station': '快递站', sports: '体育场馆', recreation: '休闲社交', 'dorm-facility': '宿舍设施', medical: '医疗服务', administration: '行政办事', 'shuttle-stop': '校车站点', scenic: '校园景点', 'campus-edge-shop': '校园周边', other: '其他校园服务' })[type] || '校园地点'
 }
 
 function outcomeLabel(outcome) {
@@ -112,6 +132,42 @@ async function loadAudit(revision = dataRevision) {
   }
 }
 
+async function loadPendingPlaces(revision = dataRevision, pageNumber = pendingPlacePage.value) {
+  placesLoading.value = true
+  placesError.value = ''
+  try {
+    const result = await platformAdminRequest('places_pending', { page: pageNumber })
+    if (revision === dataRevision) {
+      const total = Number.isSafeInteger(result?.total) ? result.total : 0
+      const lastPage = Math.max(1, Math.ceil(total / PLACE_PAGE_SIZE))
+      if (pageNumber > lastPage) {
+        await loadPendingPlaces(revision, lastPage)
+        return
+      }
+      pendingPlacePage.value = Number.isSafeInteger(result?.page) ? result.page : pageNumber
+      pendingPlaceTotal.value = total
+      pendingPlaces.value = Array.isArray(result?.places) ? result.places : []
+    }
+  } catch (error) {
+    if (revision === dataRevision) placesError.value = errorMessage(error, '暂时无法读取地点审核队列。')
+  } finally {
+    if (revision === dataRevision) placesLoading.value = false
+  }
+}
+
+async function loadPlaceReviewAudit(revision = dataRevision) {
+  placeAuditLoading.value = true
+  placeAuditError.value = ''
+  try {
+    const result = await platformAdminRequest('place_review_audit', { limit: 20 })
+    if (revision === dataRevision) placeReviewEvents.value = Array.isArray(result) ? result : []
+  } catch (error) {
+    if (revision === dataRevision) placeAuditError.value = errorMessage(error, '暂时无法读取地点审核记录。')
+  } finally {
+    if (revision === dataRevision) placeAuditLoading.value = false
+  }
+}
+
 async function refreshAll() {
   if (access.value !== 'owner') return
   loading.value = true
@@ -119,7 +175,7 @@ async function refreshAll() {
   feedback.value = null
   const revision = ++dataRevision
   try {
-    await Promise.all([loadOverview(revision), loadAccounts(revision), loadAudit(revision)])
+    await Promise.all([loadOverview(revision), loadAccounts(revision), loadAudit(revision), loadPendingPlaces(revision), loadPlaceReviewAudit(revision)])
   } finally {
     if (revision === dataRevision) loading.value = false
   }
@@ -131,12 +187,20 @@ async function checkAccess() {
   overview.value = null
   accounts.value = null
   auditEvents.value = []
+  pendingPlaces.value = []
+  pendingPlacePage.value = 1
+  pendingPlaceTotal.value = 0
+  placeReviewEvents.value = []
   loading.value = false
   usersLoading.value = false
   auditLoading.value = false
+  placesLoading.value = false
+  placeAuditLoading.value = false
   pageError.value = ''
   usersError.value = ''
   auditError.value = ''
+  placesError.value = ''
+  placeAuditError.value = ''
   feedback.value = null
 
   if (!accountAvailable.value) {
@@ -172,6 +236,54 @@ async function checkAccess() {
       access.value = 'error'
       pageError.value = errorMessage(error, '暂时无法验证平台管理权限。')
     }
+  }
+}
+
+async function reviewPlace(place, decision) {
+  if (reviewActionId.value) return
+  const reason = String(reviewReasons.value[place.id] || '').trim()
+  if (decision === 'rejected' && !reason) {
+    placesError.value = `请先填写「${place.name}」的拒绝原因。`
+    return
+  }
+  if (decision === 'rejected' && reason.length > 500) {
+    placesError.value = '拒绝原因不能超过 500 个字符。'
+    return
+  }
+  placeReviewConfirmation.value = { place, decision, reason }
+}
+
+async function confirmPlaceReview() {
+  const confirmation = placeReviewConfirmation.value
+  if (!confirmation) return
+  placeReviewConfirmation.value = null
+  const { place, decision, reason } = confirmation
+  const label = decision === 'approved' ? '通过' : '拒绝'
+  reviewActionId.value = place.id
+  placesError.value = ''
+  feedback.value = null
+  try {
+    const result = await platformAdminRequest('place_review', {
+      placeId: place.id, expectedRevision: place.review_revision, decision, reason,
+    })
+    feedback.value = result.auditIncomplete || result.notificationIncomplete
+      ? { tone: 'warning', text: `审核状态已更新，但${[result.auditIncomplete ? '完成日志' : '', result.notificationIncomplete ? '申请人通知' : ''].filter(Boolean).join('与')}没有确认保存，请刷新检查。` }
+      : { tone: 'success', text: `「${place.name}」已${label}。` }
+    reviewReasons.value[place.id] = ''
+    const revision = ++dataRevision
+    await Promise.all([loadPendingPlaces(revision), loadPlaceReviewAudit(revision)])
+  } catch (error) {
+    if (error instanceof PlatformAdminRequestError && error.code === 'place_state_changed') {
+      placesError.value = ''
+      feedback.value = null
+      const revision = ++dataRevision
+      await loadPendingPlaces(revision)
+      feedback.value = { tone: 'warning', text: '地点内容或状态已变化，审核队列已刷新；请重新检查最新资料后再处理。' }
+    } else {
+      placesError.value = errorMessage(error, '审核状态没有确认变更，请刷新队列检查。')
+    }
+  } finally {
+    reviewActionId.value = ''
   }
 }
 
@@ -258,11 +370,12 @@ onBeforeUnmount(() => window.clearTimeout(searchTimer))
       <div class="ops-title-group">
         <p class="ops-breadcrumb">管理中心 / 平台运维</p>
         <h1>平台运维</h1>
-        <p class="ops-intro">只管理账号访问与协作服务状态。个人日程、账本和同步快照仍由用户本人控制。</p>
+        <p class="ops-intro">管理账号访问、校园内容审核与协作服务。个人日程、账本和同步快照仍由用户本人控制。</p>
       </div>
       <div v-if="access === 'owner'" class="ops-owner-chip">
         <span class="owner-mark" aria-hidden="true">所</span>
         <span><b>平台所有者</b><small>{{ ownerEmail }}</small></span>
+        <RouterLink class="ops-button ops-button-ghost" to="/campus/moderation">打开校园审核队列</RouterLink>
       </div>
     </header>
 
@@ -301,6 +414,43 @@ onBeforeUnmount(() => window.clearTimeout(searchTimer))
         <div><span>进行中的协作项目</span><b>{{ activeProjectSummary }}</b><small>仅统计状态为进行中的项目</small></div>
         <div><span>协作资料</span><b>{{ collaborationProfileSummary }}</b><small>仅计数，不读取用户日程正文</small></div>
       </section>
+
+      <div class="ops-review-columns">
+        <section class="ops-panel ops-place-review" aria-labelledby="ops-place-review-heading">
+          <div class="ops-panel-heading">
+            <div><h2 id="ops-place-review-heading">校园地点审核 <span class="review-count">{{ pendingPlaceTotal }}</span></h2><p>新提交和资料变更先进入待审核队列；仅审核通过的地点会出现在同校发现中。公开联系方式须核对来源，勿公开个人联系方式。</p></div>
+            <button class="ops-button ops-button-quiet" type="button" :disabled="placesLoading || loading" @click="loadPendingPlaces()">{{ placesLoading ? '刷新中' : '刷新队列' }}</button>
+          </div>
+          <p v-if="placesError" class="ops-inline-error" role="alert">{{ placesError }} <button type="button" @click="loadPendingPlaces()">重试</button></p>
+          <div v-else-if="placesLoading && !pendingPlaces.length" class="ops-empty" role="status">正在读取真实审核队列…</div>
+          <p v-else-if="!pendingPlaces.length" class="ops-empty">当前没有待审核的地点。</p>
+          <ul v-else class="ops-place-review-list" :aria-busy="placesLoading">
+            <li v-for="place in pendingPlaces" :key="place.id" class="ops-place-review-item">
+              <div class="review-place-heading"><div><span>{{ place.school }}<span v-if="place.campus"> · {{ place.campus }}</span></span><h3>{{ place.name }}</h3></div><small>提交 {{ dateLabel(place.created_at) }}</small></div>
+              <p class="review-place-location">{{ placeTypeLabel(place.place_type) }}<span v-if="place.area"> · {{ place.area }}</span><span v-if="place.place_hint"> · {{ place.place_hint }}</span></p>
+              <p v-if="place.description" class="review-place-copy">{{ place.description }}</p>
+              <dl class="review-place-facts"><div v-if="place.opening_hours"><dt>开放时间</dt><dd>{{ place.opening_hours }}</dd></div><div v-if="place.service_info"><dt>服务与价格</dt><dd>{{ place.service_info }}</dd></div><div v-if="place.public_contact"><dt>公开业务联系</dt><dd>{{ place.public_contact }}</dd></div><div v-if="place.source_info"><dt>来源说明</dt><dd>{{ place.source_info }}</dd></div></dl>
+              <label class="ops-search review-reason"><span>拒绝原因（拒绝时必填，发布者可修改后重提）</span><textarea v-model="reviewReasons[place.id]" rows="2" maxlength="500" :disabled="Boolean(reviewActionId)" placeholder="请说明需要补充或修改的内容"></textarea><small>{{ String(reviewReasons[place.id] || '').trim().length }} / 500</small></label>
+              <div class="dialog-actions"><button class="ops-button ops-button-danger" type="button" :disabled="Boolean(reviewActionId)" @click="reviewPlace(place, 'rejected')">{{ reviewActionId === place.id ? '正在提交…' : '拒绝并说明原因' }}</button><button class="ops-button ops-button-primary" type="button" :disabled="Boolean(reviewActionId)" @click="reviewPlace(place, 'approved')">{{ reviewActionId === place.id ? '正在提交…' : '审核通过并发布' }}</button></div>
+            </li>
+          </ul>
+          <div v-if="pendingPlaceTotal > PLACE_PAGE_SIZE" class="ops-place-pagination" aria-label="地点审核队列分页">
+            <button class="ops-button ops-button-quiet" type="button" :disabled="placesLoading || pendingPlacePage <= 1" @click="loadPendingPlaces(dataRevision, pendingPlacePage - 1)">上一页</button>
+            <span>第 {{ pendingPlacePage }} / {{ placePageCount }} 页 · 共 {{ pendingPlaceTotal }} 条</span>
+            <button class="ops-button ops-button-quiet" type="button" :disabled="placesLoading || pendingPlacePage >= placePageCount" @click="loadPendingPlaces(dataRevision, pendingPlacePage + 1)">下一页</button>
+          </div>
+        </section>
+
+        <section class="ops-panel ops-place-audit" aria-labelledby="ops-place-audit-heading">
+          <div class="ops-panel-heading"><div><h2 id="ops-place-audit-heading">地点审核记录</h2><p>审核结论、原因和处理结果保存在服务端审计表。</p></div></div>
+          <p v-if="placeAuditError" class="ops-inline-error" role="alert">{{ placeAuditError }} <button type="button" @click="loadPlaceReviewAudit()">重试</button></p>
+          <div v-else-if="placeAuditLoading && !placeReviewEvents.length" class="ops-empty" role="status">正在读取审核记录…</div>
+          <ul v-else-if="placeReviewEvents.length" class="ops-audit-list">
+            <li v-for="event in placeReviewEvents" :key="event.id"><span class="audit-mark" :data-outcome="event.outcome" aria-hidden="true"></span><div><b>{{ event.decision === 'approved' ? '通过地点' : '拒绝地点' }} · {{ outcomeLabel(event.outcome) }}</b><p>{{ event.reason || '通过并公开展示' }}</p><small>地点 {{ event.place_id || '已删除' }} · {{ dateLabel(event.created_at) }}</small></div></li>
+          </ul>
+          <p v-else class="ops-empty">还没有地点审核记录。</p>
+        </section>
+      </div>
 
       <div class="ops-columns">
         <section class="ops-panel ops-accounts" aria-labelledby="ops-accounts-heading">
@@ -352,6 +502,8 @@ onBeforeUnmount(() => window.clearTimeout(searchTimer))
           </section>
         </aside>
       </div>
+
+      <ConfirmDialog v-if="placeReviewConfirmation" :open="Boolean(placeReviewConfirmation)" :title="placeReviewConfirmation.decision === 'approved' ? '审核并发布地点' : '拒绝地点资料'" :message="placeReviewConfirmation.decision === 'approved' ? `确认通过“${placeReviewConfirmation.place.name}”？通过后，同校学生可以搜索并查看。` : `确认拒绝“${placeReviewConfirmation.place.name}”？发布者会收到填写的原因并可修改后重新提交。`" :confirm-label="placeReviewConfirmation.decision === 'approved' ? '审核通过并发布' : '拒绝并说明原因'" :tone="placeReviewConfirmation.decision === 'approved' ? 'primary' : 'danger'" @close="placeReviewConfirmation = null" @confirm="confirmPlaceReview" />
     </template>
     <section v-else class="ops-gate ops-gate-warning" role="alert">
       <h2>暂时无法验证管理权限</h2><p>{{ pageError || '请检查网络后重试。' }}</p>
@@ -400,6 +552,25 @@ onBeforeUnmount(() => window.clearTimeout(searchTimer))
 .ops-overview > div + div { border-left:1px solid var(--border); }
 .ops-overview b { font-size:var(--fs-22); font-weight:var(--fw-750); font-variant-numeric:tabular-nums; }
 .ops-overview small { color:var(--muted); font-size:var(--fs-10); line-height:1.45; }
+.ops-review-columns { display:grid; grid-template-columns:minmax(0,1.35fr) minmax(270px,.75fr); align-items:start; gap:16px; margin-bottom:16px; }
+.review-count { display:inline-grid; min-width:24px; height:24px; place-items:center; margin-inline-start:5px; padding:0 6px; border-radius:var(--radius-pill); color:var(--primary); background:var(--primary-soft); font-size:var(--fs-11); vertical-align:2px; }
+.ops-place-review-list { display:grid; gap:10px; margin:0; padding:0; list-style:none; }
+.ops-place-review-item { display:grid; gap:8px; padding:13px 0; border-top:1px solid var(--border); }
+.ops-place-pagination { display:flex; align-items:center; justify-content:center; gap:12px; padding-top:12px; border-top:1px solid var(--border); color:var(--muted); font-size:var(--fs-11); }
+.review-place-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
+.review-place-heading > div { display:grid; gap:4px; min-width:0; }
+.review-place-heading span,.review-place-heading small,.review-place-location { color:var(--muted); font-size:var(--fs-10); }
+.review-place-heading h3 { margin:0; font-size:var(--fs-15); }
+.review-place-heading small { flex:none; }
+.review-place-location,.review-place-copy { margin:0; font-size:var(--fs-12); line-height:1.6; overflow-wrap:anywhere; }
+.review-place-facts { display:grid; gap:6px; margin:0; }
+.review-place-facts > div { display:grid; grid-template-columns:78px minmax(0,1fr); gap:8px; font-size:var(--fs-11); line-height:1.55; }
+.review-place-facts dt { color:var(--muted); }
+.review-place-facts dd { margin:0; overflow-wrap:anywhere; }
+.review-reason { margin:2px 0 0; }
+.review-reason textarea { min-height:66px; resize:vertical; }
+.review-reason small { justify-self:end; color:var(--muted); font-weight:var(--fw-400); }
+.ops-place-audit .ops-audit-list small { color:var(--muted); font-size:var(--fs-10); overflow-wrap:anywhere; }
 .ops-columns { display:grid; grid-template-columns:minmax(0,1.55fr) minmax(270px,.9fr); align-items:start; gap:16px; }
 .ops-panel { min-width:0; padding:17px 18px; border:1px solid var(--border); border-radius:var(--radius-12); background:var(--card); box-shadow:var(--shadow-sm); }
 .ops-accounts { min-height:390px; }
@@ -464,6 +635,7 @@ onBeforeUnmount(() => window.clearTimeout(searchTimer))
 .dialog-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:4px; }
 @keyframes ops-spin { to { transform:rotate(360deg); } }
 @media (max-width:760px) {
+  .ops-review-columns { grid-template-columns:minmax(0,1fr); }
   .ops-columns { grid-template-columns:minmax(0,1fr); }
   .ops-side-column { grid-template-columns:repeat(2,minmax(0,1fr)); align-items:start; }
   .ops-signal { align-items:flex-start; flex-direction:column; gap:13px; }

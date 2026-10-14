@@ -11,6 +11,9 @@ const SAFE_MESSAGES = Object.freeze({
   not_found: '没有找到这个账号，请刷新列表。',
   state_changed: '账号状态已变化，请刷新后重试。',
   operation_failed: '账号状态修改失败，请稍后重试。',
+  place_not_found: '没有找到这个地点，请刷新审核队列。',
+  place_state_changed: '地点内容或状态已变化，请刷新后重新检查。',
+  review_operation_failed: '审核结果没有保存，请稍后重试。',
   service_unavailable: '平台管理服务暂时不可用，请稍后重试。',
 })
 

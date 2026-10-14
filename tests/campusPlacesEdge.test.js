@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import vm from 'node:vm'
 import ts from 'typescript'
 import { describe, expect, it, vi } from 'vitest'
-import { normalizePlaceRecord, PLACE_CATEGORIES } from '../src/composables/placeModels.js'
+import { normalizePlaceRecord, PLACE_CATEGORIES, PLACE_TYPES } from '../src/composables/placeModels.js'
 
 const actor = '00000001-0000-4000-8000-000000000001'
 const other = '00000002-0000-4000-8000-000000000002'
@@ -38,6 +38,7 @@ function edge({ tables = {} } = {}) {
       const query = {
         select() { return query },
         eq(key, value) { filters.push((row) => field(row, key) === value); return query },
+        neq(key, value) { filters.push((row) => field(row, key) !== value); return query },
         is(key, value) { filters.push((row) => field(row, key) === value); return query },
         in(key, values) { filters.push((row) => values.includes(field(row, key))); return query },
         or(expression) {
@@ -102,7 +103,7 @@ function edge({ tables = {} } = {}) {
       if (name === 'npm:@supabase/supabase-js@2.117.2') return { createClient: () => admin }
       if (name === './availability.js') return {}
       if (name === '../../../src/composables/tasks/taskWorkProgress.js') return { normalizeTaskWorkCheckpoint: (value) => value }
-      if (name === '../../../src/composables/placeModels.js') return { PLACE_CATEGORIES, normalizePlaceRecord }
+      if (name === '../../../src/composables/placeModels.js') return { PLACE_CATEGORIES, PLACE_TYPES, normalizePlaceRecord }
       throw new Error(`Unexpected Edge dependency: ${name}`)
     },
     exports: {}, Date, Request, Response, Headers, TextEncoder, TextDecoder, console, crypto,
@@ -132,10 +133,53 @@ describe('校内地点 Edge 安全边界', () => {
     expect(rows.campus_place_ratings).toEqual([])
   })
 
+  it('发布校内地点时保存细分类与公开资料，不把私人备注写进地点或评分', async () => {
+    const { handler, rows } = edge()
+    const response = await call(handler, 'campus_place_publish', {
+      place: sharedPlace({
+        type: 'cafeteria', description: '虚构公共简介', openingHours: '每日 7:00–21:00',
+        serviceInfo: '提供早午餐', publicContact: '虚构公开业务邮箱', sourceInfo: '虚构学校官网',
+        note: '仅本机私人提醒', scores: { value: 'worth', rating: 4 },
+      }),
+    })
+    expect(response.status).toBe(200)
+    expect(rows.campus_places[0]).toMatchObject({
+      place_type: 'cafeteria', category: 'food', description: '虚构公共简介',
+      opening_hours: '每日 7:00–21:00', service_info: '提供早午餐',
+      public_contact: '虚构公开业务邮箱', source_info: '虚构学校官网',
+      review_status: 'pending', review_reason: '',
+    })
+    expect(rows.campus_places[0].review_revision).toMatch(/^[0-9a-f-]{36}$/i)
+    expect(rows.campus_places[0]).not.toHaveProperty('note')
+    expect(rows.campus_place_ratings).toEqual([])
+    expect(JSON.stringify(rows)).not.toContain('仅本机私人提醒')
+  })
+
+  it('公开业务联系方式缺少来源说明时拒绝投稿', async () => {
+    const { handler, rows } = edge()
+    const response = await call(handler, 'campus_place_publish', {
+      place: sharedPlace({ publicContact: '虚构业务电话', sourceInfo: '' }),
+    })
+    expect(response.status).toBe(400)
+    expect(rows.campus_places).toEqual([])
+  })
+
+  it('未到访也可以提交地点资料，但只进入待审核且不生成评分', async () => {
+    const { handler, rows } = edge()
+    const response = await call(handler, 'campus_place_publish', {
+      place: sharedPlace({ type: 'cafeteria', scores: { value: 'mixed' } }), visited: false,
+    })
+    const body = await response.json()
+    expect(response.status).toBe(200)
+    expect(body.data).toMatchObject({ published: true, reviewStatus: 'pending' })
+    expect(rows.campus_places[0]).toMatchObject({ review_status: 'pending', review_reason: '' })
+    expect(rows.campus_place_ratings).toEqual([])
+  })
+
   it('只返回个人资料学校一致的校内地点，并隐藏用户编号', async () => {
     const { handler } = edge({ tables: {
       campus_places: [
-        { id: placeId, owner_id: actor, school: '虚构大学', visibility: 'school', name: '虚构面馆', category: 'food', rating_template_id: 'food', campus: '', area: '', place_hint: '', created_at: '2026-10-01', updated_at: '2026-10-01', archived_at: null },
+        { id: placeId, owner_id: actor, school: '虚构大学', visibility: 'school', name: '虚构面馆', category: 'food', rating_template_id: 'food', campus: '', area: '', place_hint: '', public_contact: '虚构公开业务邮箱', source_info: '虚构学校官网', created_at: '2026-10-01', updated_at: '2026-10-01', archived_at: null },
         { id: '00000102-0000-4000-8000-000000000102', owner_id: other, school: '另一所虚构大学', visibility: 'school', name: '不应显示', category: 'food', rating_template_id: 'food', campus: '', area: '', place_hint: '', created_at: '2026-10-01', updated_at: '2026-10-01', archived_at: null },
       ],
       campus_place_ratings: [{ place_id: placeId, user_id: other, scores: { value: 'mixed' }, note: '虚构短评', updated_at: '2026-10-01' }],
@@ -144,14 +188,26 @@ describe('校内地点 Edge 安全边界', () => {
     const body = await response.json()
     expect(response.status).toBe(200)
     expect(body.data.places).toHaveLength(1)
-    expect(body.data.places[0]).toMatchObject({ id: placeId, isMine: true, ratings: [{ isMine: false, note: '虚构短评' }] })
+    expect(body.data.places[0]).toMatchObject({ id: placeId, isMine: true, publicContact: '虚构公开业务邮箱', sourceInfo: '虚构学校官网', ratings: [{ isMine: false, note: '虚构短评' }] })
     expect(JSON.stringify(body)).not.toContain(other)
     expect(JSON.stringify(body)).not.toContain('user_id')
   })
 
+  it('发现列表只公开审核通过的他人地点，投稿人可查看自己的待审状态和原因', async () => {
+    const pendingOwn = { id: placeId, owner_id: actor, school: '虚构大学', visibility: 'school', review_status: 'rejected', review_reason: '补充官方开放时间', name: '本人地点', category: 'food', rating_template_id: 'food', campus: '', area: '', place_hint: '', created_at: '2026-10-01', updated_at: '2026-10-01', archived_at: null }
+    const approved = { id: '00000102-0000-4000-8000-000000000102', owner_id: other, school: '虚构大学', visibility: 'school', review_status: 'approved', review_reason: '', name: '审核通过', category: 'food', rating_template_id: 'food', campus: '', area: '', place_hint: '', created_at: '2026-10-01', updated_at: '2026-10-01', archived_at: null }
+    const pendingOther = { id: '00000103-0000-4000-8000-000000000103', owner_id: other, school: '虚构大学', visibility: 'school', review_status: 'pending', review_reason: '', name: '不应公开', category: 'food', rating_template_id: 'food', campus: '', area: '', place_hint: '', created_at: '2026-10-01', updated_at: '2026-10-01', archived_at: null }
+    const { handler } = edge({ tables: { campus_places: [pendingOwn, approved, pendingOther] } })
+    const response = await call(handler, 'campus_places_list')
+    const body = await response.json()
+    expect(body.data.places.map((place) => place.id)).toEqual([placeId, approved.id])
+    expect(body.data.places[0]).toMatchObject({ reviewStatus: 'rejected', reviewReason: '补充官方开放时间' })
+    expect(JSON.stringify(body)).not.toContain('不应公开')
+  })
+
   it('同校用户可以新增到访评分，评分保存不携带金额或具体到访时间', async () => {
     const { handler, rows, admin } = edge({ tables: {
-      campus_places: [{ id: placeId, owner_id: other, school: '虚构大学', visibility: 'school', name: '虚构面馆', category: 'food', rating_template_id: 'food', campus: '', area: '', place_hint: '', created_at: '2026-10-01', updated_at: '2026-10-01', archived_at: null }],
+      campus_places: [{ id: placeId, owner_id: other, school: '虚构大学', visibility: 'school', review_status: 'approved', name: '虚构面馆', category: 'food', rating_template_id: 'food', campus: '', area: '', place_hint: '', created_at: '2026-10-01', updated_at: '2026-10-01', archived_at: null }],
     } })
     const response = await call(handler, 'campus_place_rating_save', {
       placeId, category: 'food', scores: { value: 'worth', portion: 'large' }, note: '虚构评分', visited: true, price: 18, visitedAt: '2026-10-02T12:00:00Z',
@@ -163,9 +219,43 @@ describe('校内地点 Edge 安全边界', () => {
     expect(admin.rpc).toHaveBeenCalledWith('campus_place_rate_limit', { p_actor_id: actor, p_action: 'rating' })
   })
 
+  it('只有审核通过的地点可以接受评分，包括地点发布者自己的待审核地点', async () => {
+    const pending = { id: placeId, owner_id: other, school: '虚构大学', visibility: 'school', review_status: 'pending', name: '待审地点', category: 'food', rating_template_id: 'food', archived_at: null }
+    const outsider = edge({ tables: { campus_places: [pending] } })
+    const rejected = await call(outsider.handler, 'campus_place_rating_save', { placeId, category: 'food', scores: { rating: 4 }, visited: true })
+    expect(rejected.status).toBe(404)
+    expect(outsider.rows.campus_place_ratings).toEqual([])
+
+    const ownerRecord = { ...pending, owner_id: actor }
+    const owner = edge({ tables: { campus_places: [ownerRecord] } })
+    const ownerRejected = await call(owner.handler, 'campus_place_rating_save', { placeId, category: 'food', scores: { rating: 4 }, visited: true })
+    expect(ownerRejected.status).toBe(404)
+    expect(owner.rows.campus_place_ratings).toEqual([])
+  })
+
+  it('用户没有主动填写公开短评时，更新结构化评分会保留已有公开短评', async () => {
+    const current = { place_id: placeId, user_id: actor, scores: { value: 'mixed' }, note: '虚构的已公开体验', created_at: '2026-10-01', updated_at: '2026-10-01' }
+    const { handler, rows } = edge({ tables: {
+      campus_places: [{ id: placeId, owner_id: other, school: '虚构大学', visibility: 'school', review_status: 'approved', name: '虚构面馆', category: 'food', rating_template_id: 'food', archived_at: null }],
+      campus_place_ratings: [current],
+    } })
+    const response = await call(handler, 'campus_place_rating_save', { placeId, category: 'food', scores: { rating: 4 }, visited: true })
+    expect(response.status).toBe(200)
+    expect(rows.campus_place_ratings[0]).toMatchObject({ note: '虚构的已公开体验', scores: { rating: 4 } })
+  })
+
+  it('阻止同校区同区域的同名重复地点投稿', async () => {
+    const existing = { id: '00000102-0000-4000-8000-000000000102', owner_id: other, school: '虚构大学', campus: '北校区', area: '北苑', name: '虚构面馆', archived_at: null }
+    const { handler, rows } = edge({ tables: { campus_places: [existing] } })
+    const response = await call(handler, 'campus_place_publish', { place: sharedPlace(), visited: false })
+    expect(response.status).toBe(409)
+    expect((await response.json()).code).toBe('duplicate_place')
+    expect(rows.campus_places).toHaveLength(1)
+  })
+
   it('没有到访确认时拒绝直接保存校内评分', async () => {
     const { handler, rows } = edge({ tables: {
-      campus_places: [{ id: placeId, owner_id: other, school: '虚构大学', visibility: 'school', name: '虚构面馆', category: 'food', rating_template_id: 'food', archived_at: null }],
+      campus_places: [{ id: placeId, owner_id: other, school: '虚构大学', visibility: 'school', review_status: 'approved', name: '虚构面馆', category: 'food', rating_template_id: 'food', archived_at: null }],
     } })
     const response = await call(handler, 'campus_place_rating_save', {
       placeId, category: 'food', scores: { value: 'worth' }, note: '虚构评分',
@@ -185,11 +275,20 @@ describe('校内地点 Edge 安全边界', () => {
 
   it('举报只允许同校用户对他人内容提交短说明', async () => {
     const { handler, rows } = edge({ tables: {
-      campus_places: [{ id: placeId, owner_id: other, school: '虚构大学', visibility: 'school', name: '虚构面馆', category: 'food', rating_template_id: 'food', archived_at: null }],
+      campus_places: [{ id: placeId, owner_id: other, school: '虚构大学', visibility: 'school', review_status: 'approved', name: '虚构面馆', category: 'food', rating_template_id: 'food', archived_at: null }],
     } })
     const response = await call(handler, 'campus_place_report', { placeId, reason: 'inaccurate', detail: '虚构地点信息有误' })
     expect(response.status).toBe(200)
     expect(rows.campus_place_reports[0]).toMatchObject({ place_id: placeId, reporter_id: actor, reason: 'inaccurate', detail: '虚构地点信息有误' })
+  })
+
+  it('待审核地点不开放举报入口对应的服务端写入', async () => {
+    const { handler, rows } = edge({ tables: {
+      campus_places: [{ id: placeId, owner_id: other, school: '虚构大学', visibility: 'school', review_status: 'pending', name: '待审地点', category: 'food', rating_template_id: 'food', archived_at: null }],
+    } })
+    const response = await call(handler, 'campus_place_report', { placeId, reason: 'inaccurate', detail: '虚构地点信息有误' })
+    expect(response.status).toBe(404)
+    expect(rows.campus_place_reports).toEqual([])
   })
 
   it('只向已添加好友发送用户确认的最小地点副本', async () => {

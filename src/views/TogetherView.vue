@@ -32,12 +32,11 @@ const statusLabels = {
 }
 const notificationLabels = {
   friend_request: '向你发送了好友请求', friend_accepted: '接受了你的好友请求', friend_removed: '已将你从好友中移除',
-  invitation: '发来一条新邀约', invitation_updated: '更新了邀约', invitation_cancelled: '取消了一条邀约', invitation_expired: '一条邀约已过期', place_preset: '发来一份可拒收的地点预设；前往地点→好友预设查看',
+  invitation: '发来一条新邀约', invitation_updated: '更新了邀约', invitation_cancelled: '取消了一条邀约', invitation_expired: '一条邀约已过期', place_preset: '发来一份可拒收的地点预设；前往地点→好友预设查看', campus_place_reviewed: '地点审核已有结果；前往“校园 → 我的地点”查看意见', campus_content_reviewed: '校园内容审核已有结果；查看校园服务中的“我发布的”', campus_market_interest: '有人表达了二手商品联系意向', campus_help_application: '有人申请接手互助任务', campus_help_update: '互助任务或争议状态已更新', campus_lost_found_claim: '失物认领申请有更新', campus_event_update: '活动报名有更新', campus_private_message: '收到一条校园服务私信',
 }
 const browserTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Shanghai'
 const timeZones = [...new Set([browserTimeZone, 'Asia/Shanghai', 'Asia/Tokyo', 'Asia/Hong_Kong', 'Asia/Singapore', 'UTC', 'Europe/London', 'America/Los_Angeles', 'America/New_York'])]
 const durationChoices = [90, 120, 180]
-
 const context = createCollaborationContext(() => [accountUser.value?.id || '', Boolean(accountUser.value?.email_confirmed_at)], { onError: (error) => announce('error', error.message) })
 const activeTab = ref('time')
 const pageLoading = context.state(false)
@@ -127,7 +126,6 @@ const visibleInvitations = computed(() => sortedInvitations.value.filter((invite
 }))
 const canUseSocial = computed(() => Boolean(accountUser.value?.email_confirmed_at))
 const emailDiscoverabilityDisabled = computed(() => !accountUser.value?.email_confirmed_at)
-
 let proposalGeneration = 0
 let availabilityGeneration = 0
 let stopRealtime = null
@@ -135,7 +133,7 @@ let realtimeTimer = 0
 
 function blankProfile() {
   return {
-    nickname: '', school: '', emailDiscoverable: false, timezone: browserTimeZone, scheduleCompleteThrough: '', semesterEnd: '',
+    nickname: '', school: '', campus: '', emailDiscoverable: false, timezone: browserTimeZone, scheduleCompleteThrough: '', semesterEnd: '',
     availabilityPreferences: { startTime: '09:00', endTime: '22:00', minimumMinutes: 90, classBufferMinutes: 30, includeWeekends: true },
   }
 }
@@ -311,6 +309,7 @@ async function saveProfile() {
     const result = await socialRequest('profile_save', {
       nickname: profileDraft.value.nickname,
       school: profileDraft.value.school,
+      campus: profileDraft.value.campus,
       emailDiscoverable: emailDiscoverabilityDisabled.value ? false : profileDraft.value.emailDiscoverable,
       timezone: profileDraft.value.timezone,
       scheduleCompleteThrough: profileDraft.value.scheduleCompleteThrough,
@@ -649,10 +648,11 @@ onBeforeUnmount(() => {
 
       <section v-else-if="!hasProfile" class="together-card profile-setup">
         <div class="section-heading"><div><span class="eyebrow">首次设置</span><h2>先告诉好友怎么称呼你</h2></div><span class="privacy-chip">🔒 邮箱默认不被搜索</span></div>
-        <p class="muted">昵称和学校仅展示给已添加的好友。请分别确认课表已录入完整的日期，以及本学期结束日。</p>
+        <p class="muted">昵称和学校仅展示给已添加的好友。学校和校区由你填写，仅用于筛选校园内容，不代表学校认证。请确认课表完整日期和学期结束日。</p>
         <form class="profile-grid" @submit.prevent="saveProfile">
           <label>昵称 <input v-model="profileDraft.nickname" maxlength="32" autocomplete="nickname" required placeholder="好友看到的称呼" /></label>
           <label>学校（选填） <input v-model="profileDraft.school" maxlength="100" placeholder="可留空" /></label>
+          <label>当前校区（选填） <input v-model="profileDraft.campus" maxlength="100" placeholder="用于筛选校园信息" /></label>
           <label>时区
             <select v-model="profileDraft.timezone"><option v-for="zone in timeZones" :key="zone" :value="zone">{{ zone }}</option></select>
           </label>
@@ -779,9 +779,9 @@ onBeforeUnmount(() => {
 
           <section class="together-card profile-preferences-card">
             <div class="section-heading"><div><span class="eyebrow">隐私设置</span><h2>我的资料与可约偏好</h2></div><button type="button" class="text-button" aria-controls="together-profile-editor" :aria-expanded="profileEditorOpen" @click="profileEditorOpen = !profileEditorOpen">{{ profileEditorOpen ? '收起' : '修改' }}</button></div>
-            <p class="muted">邮箱发现默认关闭。公开主页和完整邮箱展示均不提供；昵称、选填学校和共同可约时间只用于好友协作。</p>
+            <p class="muted">邮箱发现默认关闭。公开主页和完整邮箱展示均不提供；学校与校区由你填写，仅用于校园内容筛选，不是官方身份认证。</p>
             <form v-if="profileEditorOpen" id="together-profile-editor" class="profile-grid" @submit.prevent="saveProfile">
-              <label>昵称 <input v-model="profileDraft.nickname" maxlength="32" required /></label><label>学校（选填） <input v-model="profileDraft.school" maxlength="100" /></label>
+              <label>昵称 <input v-model="profileDraft.nickname" maxlength="32" required /></label><label>学校（选填） <input v-model="profileDraft.school" maxlength="100" /></label><label>当前校区（选填） <input v-model="profileDraft.campus" maxlength="100" /></label>
               <label>时区 <select v-model="profileDraft.timezone"><option v-for="zone in timeZones" :key="zone" :value="zone">{{ zone }}</option></select></label>
               <label>课表确认完整至 <input v-model="profileDraft.scheduleCompleteThrough" type="date" required /></label>
               <label>本学期结束日期 <input v-model="profileDraft.semesterEnd" type="date" required /></label>
@@ -799,7 +799,7 @@ onBeforeUnmount(() => {
           <div class="invitation-toolbar"><div><span class="eyebrow">实时通知</span><p class="muted">好友请求与邀约变化会即时显示。即将开始的已确认邀约会在这里提醒。</p></div><ActionButton tone="ghost" type="button" class="btn btn-ghost" :disabled="notificationsBusy || unreadCount === 0" :busy="notificationsBusy" kind="frequent" feedback="external" :show-error="false" :action="() => markNotificationsRead()">{{ notificationsBusy ? '正在更新…' : `全部标为已读${unreadCount ? `（${unreadCount}）` : ''}` }}</ActionButton></div>
           <section class="together-card notification-card"><div class="section-heading"><div><span class="eyebrow">消息</span><h2>通知</h2></div><button type="button" class="icon-button" aria-label="刷新通知" :disabled="notificationsBusy" @click="loadNotifications">↻</button></div>
             <p v-if="notificationsBusy" class="muted">正在读取通知…</p><p v-else-if="notificationsError" class="inline-error">{{ notificationsError }} <button type="button" class="text-button" @click="loadNotifications">重试</button></p>
-            <div v-else-if="notificationItems.length" class="notification-list"><article v-for="item in notificationItems" :key="item.id" class="notification-row" :class="{ unread: !item.read_at }"><span class="notification-dot"></span><div><b>{{ item.actor?.nickname || '三两事好友' }}</b><span>{{ notificationLabels[item.kind] || '有一条新通知' }}</span><small>{{ formatTime(item.created_at) }}</small></div></article></div>
+            <div v-else-if="notificationItems.length" class="notification-list"><article v-for="item in notificationItems" :key="item.id" class="notification-row" :class="{ unread: !item.read_at }"><span class="notification-dot"></span><div><b>{{ item.kind === 'campus_place_reviewed' ? '校园内容审核' : item.actor?.nickname || '三两事好友' }}</b><span>{{ notificationLabels[item.kind] || '有一条新通知' }}</span><small>{{ formatTime(item.created_at) }}</small></div></article></div>
             <p v-else class="muted empty-copy">还没有通知。</p>
           </section>
           <section class="together-card invitation-list-card"><div class="section-heading"><div><span class="eyebrow">共同日程</span><h2>邀约</h2></div><button type="button" class="icon-button" aria-label="刷新邀约" :disabled="invitationsBusy" @click="loadInvitations">↻</button></div>

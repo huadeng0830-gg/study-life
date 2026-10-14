@@ -39,6 +39,8 @@ const ROUTES = [
   { path: '/events', name: '日程', mustInclude: ['小组会议'] },
   { path: '/lists', name: '清单', mustInclude: ['本周采购'] },
   { path: '/bills', name: '账本', mustInclude: ['午饭'] },
+  { path: '/campus', name: '校园生活', mustInclude: ['校园生活', '搜索校园地点', '最近更新的地点'] },
+  { path: '/campus/mine', name: '我的校园投稿', mustInclude: ['我的校园投稿', '投稿记录'] },
   { path: '/review', name: '本周回顾', mustInclude: ['本周回顾'] },
 ]
 

@@ -9,7 +9,7 @@ import {
   userFreeIntervals,
 } from './availability.js'
 import { normalizeTaskWorkCheckpoint } from '../../../src/composables/tasks/taskWorkProgress.js'
-import { PLACE_CATEGORIES, normalizePlaceRecord } from '../../../src/composables/placeModels.js'
+import { PLACE_CATEGORIES, PLACE_TYPES, normalizePlaceRecord } from '../../../src/composables/placeModels.js'
 
 const supabaseUrl = Deno.env.get('SUPABASE_URL') || ''
 const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || ''
@@ -27,7 +27,7 @@ const allowedOrigins = new Set([
   'app://study-life',
   ...(Deno.env.get('CAMPUS_SOCIAL_ALLOWED_ORIGINS') || '').split(',').map((origin) => origin.trim()).filter(Boolean),
 ])
-const SAFE_PROFILE_FIELDS = 'user_id,nickname,school,email_discoverable,timezone,schedule_complete_through,semester_end,availability_preferences,updated_at'
+const SAFE_PROFILE_FIELDS = 'user_id,nickname,school,campus,email_discoverable,timezone,schedule_complete_through,semester_end,availability_preferences,updated_at'
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
 
@@ -330,7 +330,7 @@ async function getProfiles(userIds: string[]) {
 function profileView(profile: any) {
   if (!profile) return null
   return {
-    userId: profile.user_id || profile.userId, nickname: profile.nickname, school: profile.school || '',
+    userId: profile.user_id || profile.userId, nickname: profile.nickname, school: profile.school || '', campus: profile.campus || '',
     emailDiscoverable: profile.email_discoverable, timezone: profile.timezone,
     scheduleCompleteThrough: profile.schedule_complete_through,
     semesterEnd: profile.semester_end,
@@ -561,6 +561,7 @@ async function saveProfile(user: any, payload: any) {
   const userId = user.id
   const nickname = cleanText(payload.nickname, 32, '昵称', true)
   const school = cleanText(payload.school, 100, '学校')
+  const campus = cleanText(payload.campus, 100, '校区')
   const timezone = cleanText(payload.timezone || 'Asia/Shanghai', 64, '时区', true)
   try { new Intl.DateTimeFormat('en-US', { timeZone: timezone }).format(new Date()) } catch { throw new ApiError('invalid_input', '请选择有效的时区。') }
   if (payload.emailDiscoverable === true) verified(user)
@@ -587,7 +588,7 @@ async function saveProfile(user: any, payload: any) {
       || !Number.isInteger(minimum) || minimum < 30 || minimum > 720
       || !Number.isInteger(buffer) || buffer < 0 || buffer > 180) throw new ApiError('invalid_input', '可约时间偏好不正确。')
   const row = {
-    user_id: userId, nickname, school, email_discoverable: payload.emailDiscoverable === true,
+    user_id: userId, nickname, school, campus, email_discoverable: payload.emailDiscoverable === true,
     timezone, schedule_complete_through: complete, semester_end: semesterEnd,
     availability_preferences: {
       startTime: start, endTime: end, minimumMinutes: minimum, classBufferMinutes: buffer,
@@ -793,8 +794,16 @@ function placeView(row: any, ratings: any[], actorId: string) {
     campus: row.campus || '',
     area: row.area || '',
     placeHint: row.place_hint || '',
+    type: row.place_type || normalizePlaceRecord({ name: row.name, category: row.category }).type,
     category: row.category,
     ratingTemplateId: row.rating_template_id,
+    description: row.description || '',
+    openingHours: row.opening_hours || '',
+    serviceInfo: row.service_info || '',
+    publicContact: row.public_contact || '',
+    sourceInfo: row.source_info || '',
+    reviewStatus: row.review_status || 'approved',
+    ...(row.owner_id === actorId && row.review_reason ? { reviewReason: row.review_reason } : {}),
     visibility: 'school',
     isMine: row.owner_id === actorId,
     createdAt: row.created_at,
@@ -811,8 +820,9 @@ function placeView(row: any, ratings: any[], actorId: string) {
 async function listCampusPlaces(userId: string) {
   const school = await requirePlaceSchool(userId)
   const { data: rows, error } = await admin.from('campus_places')
-    .select('id,owner_id,name,campus,area,place_hint,category,rating_template_id,created_at,updated_at')
-    .eq('school', school).eq('visibility', 'school').is('archived_at', null).order('name').order('id').limit(200)
+    .select('id,owner_id,name,campus,area,place_hint,place_type,description,opening_hours,service_info,public_contact,source_info,category,rating_template_id,review_status,review_revision,review_reason,created_at,updated_at')
+    .eq('school', school).eq('visibility', 'school').is('archived_at', null)
+    .or(`review_status.eq.approved,owner_id.eq.${userId}`).order('name').order('id').limit(200)
   if (error) dbError(error)
   const placeIds = (rows || []).map((row: any) => row.id)
   let ratings: any[] = []
@@ -829,38 +839,59 @@ async function saveCampusPlaceRating(userId: string, placeId: string, category: 
   if (visited !== true) throw new ApiError('visit_required', '请先确认已经到访，再保存校内评分。', 400)
   const school = await requirePlaceSchool(userId)
   const { data: place, error: lookupError } = await admin.from('campus_places')
-    .select('id').eq('id', placeId).eq('school', school).eq('visibility', 'school').is('archived_at', null).maybeSingle()
+    .select('id,owner_id,category,review_status').eq('id', placeId).eq('school', school).eq('visibility', 'school').is('archived_at', null).maybeSingle()
   if (lookupError) dbError(lookupError)
   if (!place) throw new ApiError('not_found', '地点已更新或不在你的学校范围内。', 404)
+  if (place.review_status !== 'approved') throw new ApiError('not_found', '地点尚未通过审核。', 404)
+  if (place.category !== category) throw new ApiError('invalid_input', '地点评分模板已变化，请刷新后重试。', 409)
   const normalizedScores = normalizePlaceRecord({ id: placeId, name: '地点', category, scores, visibility: 'school' }).scores
+  let ratingNote = note
+  if (ratingNote === undefined) {
+    const { data: currentRating, error: ratingLookupError } = await admin.from('campus_place_ratings')
+      .select('note').eq('place_id', placeId).eq('user_id', userId).maybeSingle()
+    if (ratingLookupError) dbError(ratingLookupError)
+    ratingNote = currentRating?.note || ''
+  }
   const { error } = await admin.from('campus_place_ratings').upsert({
     place_id: placeId, user_id: userId, scores: normalizedScores,
-    note: cleanText(note, 50, '备注'), updated_at: new Date().toISOString(),
+    note: cleanText(ratingNote, 50, '备注'), updated_at: new Date().toISOString(),
   }, { onConflict: 'place_id,user_id' })
   if (error) dbError(error)
   return { saved: true }
 }
 
 async function publishCampusPlace(userId: string, payload: any) {
-  if (payload.visited !== true) throw new ApiError('visit_required', '请先确认已经到访，再分享到校内。', 400)
   const school = await requirePlaceSchool(userId)
   const raw = payload.place
   if (!raw || !PLACE_CATEGORIES.some((item) => item.id === raw.category)) throw new ApiError('invalid_input', '地点类型无效。')
+  if (raw.type && !PLACE_TYPES.some((item) => item.id === raw.type && item.category === raw.category)) {
+    throw new ApiError('invalid_input', '地点细分类别与评分模板不匹配。')
+  }
   const place = normalizePlaceRecord(raw)
   if (place.visibility !== 'school') throw new ApiError('invalid_input', '仅本机地点不会上传。')
+  if (place.publicContact && !place.sourceInfo) throw new ApiError('invalid_input', '公开业务联系方式需要附上可供审核的来源说明。')
   const id = assertUUID(place.id, '地点')
   await allowCampusPlaceAction(userId, 'publish')
-  const { data: existing, error: lookupError } = await admin.from('campus_places').select('owner_id').eq('id', id).maybeSingle()
+  const { data: existing, error: lookupError } = await admin.from('campus_places')
+    .select('owner_id,review_status').eq('id', id).maybeSingle()
   if (lookupError) dbError(lookupError)
   if (existing && existing.owner_id !== userId) throw new ApiError('forbidden', '只能修改自己发布的地点内容。', 403)
+  const { data: duplicate, error: duplicateError } = await admin.from('campus_places')
+    .select('id,name').eq('school', school).eq('campus', place.campus).eq('area', place.area)
+    .eq('name', place.name).neq('id', id).is('archived_at', null).limit(1).maybeSingle()
+  if (duplicateError) dbError(duplicateError)
+  if (duplicate) throw new ApiError('duplicate_place', `「${duplicate.name}」已在相同校区和区域发布，请先检查并报告现有资料。`, 409)
   const { error } = await admin.from('campus_places').upsert({
     id, owner_id: userId, school, name: place.name, campus: place.campus, area: place.area,
-    place_hint: place.placeHint, category: place.category, rating_template_id: place.ratingTemplateId,
+    place_hint: place.placeHint, place_type: place.type, description: place.description,
+    opening_hours: place.openingHours, service_info: place.serviceInfo,
+    public_contact: place.publicContact, source_info: place.sourceInfo,
+    category: place.category, rating_template_id: place.ratingTemplateId,
+    review_status: 'pending', review_reason: '', review_revision: crypto.randomUUID(),
     visibility: 'school', archived_at: null, updated_at: new Date().toISOString(),
   }, { onConflict: 'id' })
   if (error) dbError(error)
-  await saveCampusPlaceRating(userId, id, place.category, place.scores, place.note, payload.visited)
-  return { published: true, id }
+  return { published: true, id, reviewStatus: 'pending' }
 }
 
 async function reportCampusPlace(userId: string, payload: any) {
@@ -870,9 +901,10 @@ async function reportCampusPlace(userId: string, payload: any) {
   if (!reason) throw new ApiError('invalid_input', '请选择举报原因。')
   await allowCampusPlaceAction(userId, 'report')
   const { data: place, error: lookupError } = await admin.from('campus_places')
-    .select('id,owner_id').eq('id', placeId).eq('school', school).eq('visibility', 'school').is('archived_at', null).maybeSingle()
+    .select('id,owner_id,review_status').eq('id', placeId).eq('school', school).eq('visibility', 'school').is('archived_at', null).maybeSingle()
   if (lookupError) dbError(lookupError)
   if (!place) throw new ApiError('not_found', '地点已更新或不在你的学校范围内。', 404)
+  if (place.review_status !== 'approved') throw new ApiError('not_found', '地点尚未通过审核。', 404)
   if (place.owner_id === userId) throw new ApiError('invalid_input', '不能举报自己发布的地点。')
   const { error } = await admin.from('campus_place_reports').insert({
     place_id: placeId, reporter_id: userId, reason, detail: cleanText(payload.detail, 50, '补充说明'),

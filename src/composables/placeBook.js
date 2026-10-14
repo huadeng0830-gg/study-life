@@ -41,6 +41,35 @@ function transactionForPlaceVisit(visit, place) {
   return transaction
 }
 
+export function createPlaceRecord(placeValue = {}) {
+  const now = stamp()
+  const place = normalizePlaceRecord({ ...placeValue, id: placeValue?.id || createPlaceId(), createdAt: now, updatedAt: now })
+  if (places.value.some((item) => String(item.id) === place.id)) throw new Error('这个地点已存在。')
+  places.value.push(place)
+  commit(PLACE_STORAGE_KEYS.places)
+  return place
+}
+
+/** Sync only this user's remote moderation result onto matching locally stored submissions. */
+export function syncPlaceReviewStatuses(submissions = []) {
+  if (!Array.isArray(submissions) || !submissions.length) return 0
+  const statuses = new Map(submissions
+    .filter((item) => item?.isMine === true && ['pending', 'approved', 'rejected'].includes(item.reviewStatus))
+    .map((item) => [String(item.id), { reviewStatus: item.reviewStatus, reviewReason: item.reviewStatus === 'rejected' ? String(item.reviewReason || '').slice(0, 500) : '' }]))
+  if (!statuses.size) return 0
+  let changed = 0
+  for (const place of places.value) {
+    const remote = statuses.get(String(place.id))
+    if (!remote || place.visibility !== 'school') continue
+    if (place.reviewStatus === remote.reviewStatus && place.reviewReason === remote.reviewReason) continue
+    place.reviewStatus = remote.reviewStatus
+    place.reviewReason = remote.reviewReason
+    changed += 1
+  }
+  if (changed) commit(PLACE_STORAGE_KEYS.places)
+  return changed
+}
+
 export function createPlaceWithVisit(placeValue, visitValue) {
   const now = stamp()
   const place = normalizePlaceRecord({ ...placeValue, id: placeValue?.id || createPlaceId(), createdAt: now, updatedAt: now, visibility: placeValue?.visibility || 'private' })

@@ -1,6 +1,6 @@
 const MAX_BODY_BYTES = 8_192
 const MAX_REASON_LENGTH = 500
-const ACTIONS = new Set(['identity', 'overview', 'users_list', 'audit_list', 'user_suspend', 'user_restore'])
+const ACTIONS = new Set(['identity', 'overview', 'users_list', 'audit_list', 'user_suspend', 'user_restore', 'places_pending', 'place_review', 'place_review_audit'])
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 export class PlatformAdminError extends Error {
@@ -111,6 +111,24 @@ export function createPlatformAdminHandler({ service, allowedOrigins = [], logge
           const limit = Number(payload.limit ?? 20)
           if (!Number.isSafeInteger(limit) || limit < 1 || limit > 50) throw new PlatformAdminError('invalid_input', '审计记录数量无效。')
           return json({ data: await service.listAudit(limit) }, 200, corsOrigin)
+        }
+        case 'places_pending':
+          return json({ data: await service.listPendingPlaces({ page: positivePage(payload.page) }) }, 200, corsOrigin)
+        case 'place_review_audit': {
+          const limit = Number(payload.limit ?? 20)
+          if (!Number.isSafeInteger(limit) || limit < 1 || limit > 50) throw new PlatformAdminError('invalid_input', '审核记录数量无效。')
+          return json({ data: await service.listPlaceReviewAudit(limit) }, 200, corsOrigin)
+        }
+        case 'place_review': {
+          const placeId = requiredUuid(payload.placeId, '地点')
+          const expectedRevision = requiredUuid(payload.expectedRevision, '审核版本')
+          const decision = payload.decision
+          if (decision !== 'approved' && decision !== 'rejected') throw new PlatformAdminError('invalid_input', '审核决定无效。')
+          const reason = decision === 'rejected'
+            ? requiredText(payload.reason, '拒绝原因')
+            : typeof payload.reason === 'string' ? payload.reason.trim().slice(0, MAX_REASON_LENGTH) : ''
+          const result = await service.reviewCampusPlace({ actorUserId: user.id, placeId, decision, reason, expectedRevision })
+          return json({ data: result }, 200, corsOrigin)
         }
         case 'user_suspend':
         case 'user_restore': {

@@ -9,9 +9,15 @@
 [🌐 在线体验](https://study-life.pages.dev/) · [📦 GitHub](https://github.com/huadeng0830-gg/study-life)
 
 <!-- RELEASE_STATUS:START -->
-> **当前源码版本**：网页 / PWA `1.2.0` · Windows 桌面版 `1.2.0`
+> **当前源码版本**：网页 / PWA `1.2.2` · Windows 桌面版 `1.2.2`
 > **最近更新**：
-> - 新增调课通知应用、通知档案、只读提问、考试日历、去年今日、值日班务、数据体检和地点档案；支持可拒收的好友地点预设
+> - 地点目录与教师课程、二手集市、校园互助、校车、失物招领、活动和校园指南
+> - 全站搜索、收藏、统一发布、我的投稿、内容审核与审计
+> - 学校校区范围筛选、版本化拒绝重提和事务状态流转
+> - 可翻页审核队列及校车班次、课程关联审核详情
+> - 修复投稿状态竞态、通知失败误报和班车投稿记录读取
+> - Supabase Edge 鉴权、RLS 与受限事务 RPC
+> - 私信限定发布者与对应联系对象并清理账号切换缓存
 > [下载已发布的 Windows 安装包与版本说明](https://github.com/huadeng0830-gg/study-life/releases/latest)
 <!-- RELEASE_STATUS:END -->
 

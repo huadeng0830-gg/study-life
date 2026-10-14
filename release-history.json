@@ -1,5 +1,65 @@
 [
   {
+    "version": "1.2.2",
+    "legacyVersion": "2026年10月14日-版本3",
+    "channel": "stable",
+    "publishedAt": null,
+    "title": "三两事 1.2.2",
+    "summary": "校园生活中心、地点目录与跨模块审核流程升级",
+    "changes": {
+      "features": [
+        "地点目录与教师课程、二手集市、校园互助、校车、失物招领、活动和校园指南",
+        "全站搜索、收藏、统一发布、我的投稿、内容审核与审计"
+      ],
+      "improvements": [
+        "学校校区范围筛选、版本化拒绝重提和事务状态流转",
+        "可翻页审核队列及校车班次、课程关联审核详情"
+      ],
+      "fixes": [
+        "修复投稿状态竞态、通知失败误报和班车投稿记录读取"
+      ],
+      "security": [
+        "Supabase Edge 鉴权、RLS 与受限事务 RPC",
+        "私信限定发布者与对应联系对象并清理账号切换缓存"
+      ],
+      "breaking": []
+    },
+    "notes": [
+      "地点目录与教师课程、二手集市、校园互助、校车、失物招领、活动和校园指南",
+      "全站搜索、收藏、统一发布、我的投稿、内容审核与审计",
+      "学校校区范围筛选、版本化拒绝重提和事务状态流转",
+      "可翻页审核队列及校车班次、课程关联审核详情",
+      "修复投稿状态竞态、通知失败误报和班车投稿记录读取",
+      "Supabase Edge 鉴权、RLS 与受限事务 RPC",
+      "私信限定发布者与对应联系对象并清理账号切换缓存"
+    ],
+    "releaseUrl": "https://github.com/huadeng0830-gg/study-life/releases"
+  },
+  {
+    "version": "1.2.1",
+    "legacyVersion": "2026年10月14日-版本2",
+    "channel": "stable",
+    "publishedAt": null,
+    "title": "三两事 1.2.1",
+    "summary": "新增校园地点发现、细分类筛选、想去清单和审核结果通知",
+    "changes": {
+      "features": [
+        "新增校园地点发现、细分类筛选、想去清单和审核结果通知"
+      ],
+      "improvements": [],
+      "fixes": [
+        "隔离本机到访隐私与公开评分，并为审核版本及分页补齐保护"
+      ],
+      "security": [],
+      "breaking": []
+    },
+    "notes": [
+      "新增校园地点发现、细分类筛选、想去清单和审核结果通知",
+      "隔离本机到访隐私与公开评分，并为审核版本及分页补齐保护"
+    ],
+    "releaseUrl": "https://github.com/huadeng0830-gg/study-life/releases"
+  },
+  {
     "version": "1.2.0",
     "legacyVersion": "2026年10月14日-版本1",
     "channel": "stable",

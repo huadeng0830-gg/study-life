@@ -3,6 +3,7 @@ import { createPlatformAdminHandler } from '../supabase/functions/platform-admin
 
 const OWNER = { id: '71bbaaa0-1ef1-4ad4-9b77-90b792846c10', email: 'owner@example.test', email_confirmed_at: '2026-10-01T00:00:00Z' }
 const TARGET_ID = '1f80fded-15f4-4b07-a262-3be8b47463d9'
+const REVIEW_REVISION = 'b78c01f2-265d-4776-b345-cf3127eb1a33'
 const ALLOWED_ORIGIN = 'https://study-life.pages.dev'
 
 function makeHandler(overrides = {}) {
@@ -12,6 +13,9 @@ function makeHandler(overrides = {}) {
     getOverview: vi.fn(async () => ({ counts: { accounts: 1, activeProjects: 0 } })),
     listUsers: vi.fn(async () => ({ users: [], page: 1, pageSize: 25, total: 0 })),
     listAudit: vi.fn(async () => []),
+    listPendingPlaces: vi.fn(async () => []),
+    listPlaceReviewAudit: vi.fn(async () => []),
+    reviewCampusPlace: vi.fn(async ({ decision }) => ({ status: decision, auditIncomplete: false })),
     setUserSuspended: vi.fn(async () => ({ status: 'suspended', auditIncomplete: false })),
     ...overrides,
   }
@@ -91,5 +95,42 @@ describe('platform-admin function authorization boundary', () => {
       reason: 'Spam account reported',
     })
     expect(await response.json()).toEqual({ data: { status: 'suspended', auditIncomplete: true } })
+  })
+
+  it('only an authenticated platform owner can read the live place review queue', async () => {
+    const pageResult = { places: [{ id: TARGET_ID, name: '虚构地点', review_revision: REVIEW_REVISION }], page: 1, pageSize: 50, total: 1, hasMore: false }
+    const { handler, service } = makeHandler({ listPendingPlaces: vi.fn(async () => pageResult) })
+    const response = await handler(request({ body: { action: 'places_pending' } }))
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ data: pageResult })
+    expect(service.listPendingPlaces).toHaveBeenCalledWith({ page: 1 })
+
+    const nonOwner = makeHandler({ isOwner: vi.fn(async () => false) })
+    const denied = await nonOwner.handler(request({ body: { action: 'places_pending' } }))
+    expect(denied.status).toBe(403)
+    expect(nonOwner.service.listPendingPlaces).not.toHaveBeenCalled()
+  })
+
+  it('validates review identifiers, decisions, and required rejection reasons before writing', async () => {
+    const { handler, service } = makeHandler()
+    const invalidId = await handler(request({ body: { action: 'place_review', payload: { placeId: 'bad', expectedRevision: REVIEW_REVISION, decision: 'approved' } } }))
+    const invalidRevision = await handler(request({ body: { action: 'place_review', payload: { placeId: TARGET_ID, expectedRevision: 'not-a-revision', decision: 'approved' } } }))
+    const invalidDecision = await handler(request({ body: { action: 'place_review', payload: { placeId: TARGET_ID, expectedRevision: REVIEW_REVISION, decision: 'published' } } }))
+    const missingReason = await handler(request({ body: { action: 'place_review', payload: { placeId: TARGET_ID, expectedRevision: REVIEW_REVISION, decision: 'rejected', reason: ' ' } } }))
+    expect(invalidId.status).toBe(400)
+    expect(invalidRevision.status).toBe(400)
+    expect(invalidDecision.status).toBe(400)
+    expect(missingReason.status).toBe(400)
+    expect(service.reviewCampusPlace).not.toHaveBeenCalled()
+  })
+
+  it('records the authenticated actor when forwarding the real review decision', async () => {
+    const { handler, service } = makeHandler()
+    const response = await handler(request({ body: { action: 'place_review', payload: { placeId: TARGET_ID, expectedRevision: REVIEW_REVISION, decision: 'rejected', reason: '请补充开放时间' } } }))
+    expect(response.status).toBe(200)
+    expect(service.reviewCampusPlace).toHaveBeenCalledWith({
+      actorUserId: OWNER.id, placeId: TARGET_ID, decision: 'rejected', reason: '请补充开放时间', expectedRevision: REVIEW_REVISION,
+    })
+    expect(await response.json()).toEqual({ data: { status: 'rejected', auditIncomplete: false } })
   })
 })

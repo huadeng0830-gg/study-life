@@ -9,9 +9,11 @@ describe('导航信息架构', () => {
   it('只把真实页面注册为导航项，一级分组聚焦四个核心空间，低频页面收进其他', () => {
     expect(navigationRegistry).toHaveLength(12)
     expect(new Set(navigationRegistry.map((item) => item.path)).size).toBe(navigationRegistry.length)
-    expect(desktopNavigationGroups.map((group) => group.label)).toEqual(['今日', '学习', '日程', '齐行', '其他'])
+    expect(desktopNavigationGroups.map((group) => group.label)).toEqual(['今日', '学习', '日程', '齐行', '校园', '其他'])
     expect(desktopNavigationGroups.find((group) => group.id === 'learning').items.map((item) => item.id)).toEqual(['schedule', 'course', 'tasks', 'exams'])
-    expect(desktopNavigationGroups.find((group) => group.id === 'other').items.map((item) => item.id)).toEqual(['lists', 'bills', 'places', 'review'])
+    expect(desktopNavigationGroups.find((group) => group.id === 'campus').items.map((item) => item.id)).toEqual(['places'])
+    expect(desktopNavigationGroups.find((group) => group.id === 'other').items.map((item) => item.id)).toEqual(['lists', 'bills', 'review'])
+    expect(routes.find((route) => route.path === '/places')?.redirect).toBe('/campus')
     expect(navigationRegistry.find((item) => item.id === 'schedule').mobileLabel).toBe('课表')
     expect(routes.find((route) => route.path === '/notes')?.redirect).toBe('/')
   })
@@ -30,5 +32,12 @@ describe('导航信息架构', () => {
     expect(adminRoute.meta.navigation).toBeUndefined()
     expect(routeLoaders['/admin']).toBeTypeOf('function')
     expect(navigationRegistry.some((item) => item.path === '/admin')).toBe(false)
+  })
+
+  it('为校园业务区注册投稿记录页和真实懒加载器', () => {
+    const mineRoute = routes.find((route) => route.path === '/campus/mine')
+
+    expect(mineRoute).toMatchObject({ name: 'campus-mine', meta: { title: '我的校园投稿' } })
+    expect(routeLoaders['/campus/mine']).toBeTypeOf('function')
   })
 })

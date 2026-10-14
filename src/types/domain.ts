@@ -190,7 +190,15 @@ export interface Transaction {
 }
 
 export type PlaceCategory = 'food' | 'service' | 'study' | 'transport' | 'trade' | 'social'
+export type PlaceType =
+  | 'teaching-building' | 'library' | 'study-room' | 'laboratory'
+  | 'cafeteria' | 'restaurant' | 'tea-shop' | 'coffee-shop'
+  | 'supermarket' | 'convenience-store' | 'campus-shop'
+  | 'printing' | 'parcel-station' | 'sports' | 'recreation'
+  | 'dorm-facility' | 'medical' | 'administration' | 'shuttle-stop'
+  | 'scenic' | 'campus-edge-shop' | 'other'
 export type PlaceVisibility = 'private' | 'school'
+export type PlaceReviewStatus = 'not_submitted' | 'pending' | 'approved' | 'rejected'
 
 export interface PlaceRecord {
   id: string
@@ -198,14 +206,22 @@ export interface PlaceRecord {
   campus: string
   area: string
   placeHint: string
+  type: PlaceType
   category: PlaceCategory
   ratingTemplateId: PlaceCategory
   scores: Record<string, string | number | boolean>
   note: string
+  description: string
+  openingHours: string
+  serviceInfo: string
+  publicContact: string
+  sourceInfo: string
   archivedAt: string | null
   createdAt: string
   updatedAt: string
   visibility: PlaceVisibility
+  reviewStatus: PlaceReviewStatus
+  reviewReason: string
 }
 
 export interface PlaceVisit {

@@ -89,6 +89,75 @@ const service = {
     return data || []
   },
 
+  async listPendingPlaces({ page = 1 } = {}) {
+    const client = requireAdminClient()
+    const pageSize = 50
+    const start = (page - 1) * pageSize
+    const { data, count, error } = await client.from('campus_places')
+      .select('id,school,name,campus,area,place_hint,place_type,description,opening_hours,service_info,public_contact,source_info,category,owner_id,review_revision,created_at,updated_at', { count: 'exact' })
+      .eq('review_status', 'pending').eq('visibility', 'school').is('archived_at', null)
+      .order('updated_at', { ascending: true }).order('id').range(start, start + pageSize - 1)
+    if (error) throw error
+    const total = Number(count) || 0
+    return { places: data || [], page, pageSize, total, hasMore: start + (data || []).length < total }
+  },
+
+  async listPlaceReviewAudit(limit) {
+    const client = requireAdminClient()
+    const { data, error } = await client.from('campus_place_review_events')
+      .select('id,place_id,actor_id,decision,outcome,reason,created_at,completed_at')
+      .order('created_at', { ascending: false }).limit(limit)
+    if (error) throw error
+    return data || []
+  },
+
+  async reviewCampusPlace({ actorUserId, placeId, decision, reason, expectedRevision }) {
+    const client = requireAdminClient()
+    const { data: place, error: lookupError } = await client.from('campus_places')
+      .select('id,owner_id,review_status,review_revision').eq('id', placeId).maybeSingle()
+    if (lookupError) throw lookupError
+    if (!place) throw new PlatformAdminError('place_not_found', '没有找到这个地点，请刷新审核队列。', 404)
+    if (place.review_status !== 'pending') throw new PlatformAdminError('place_state_changed', '地点状态已变化，请刷新审核队列。', 409)
+    if (String(place.review_revision || '').toLowerCase() !== expectedRevision.toLowerCase()) {
+      throw new PlatformAdminError('place_state_changed', '地点资料已更新，请先刷新并重新检查内容。', 409)
+    }
+
+    const { data: event, error: auditError } = await client.from('campus_place_review_events').insert({
+      place_id: placeId,
+      actor_id: actorUserId,
+      decision,
+      outcome: 'started',
+      reason,
+      content_revision: expectedRevision,
+    }).select('id').single()
+    if (auditError || !event?.id) throw new PlatformAdminError('service_unavailable', '审核记录暂不可用，地点状态没有修改。', 503)
+
+    const { data: changed, error: updateError } = await client.from('campus_places').update({
+      review_status: decision,
+      review_reason: decision === 'rejected' ? reason : '',
+      updated_at: new Date().toISOString(),
+    }).eq('id', placeId).eq('review_status', 'pending').eq('review_revision', expectedRevision).select('id').maybeSingle()
+    const outcome = updateError ? 'failed' : changed?.id ? 'succeeded' : 'failed'
+    const { error: completionError } = await client.from('campus_place_review_events').update({
+      outcome,
+      completed_at: new Date().toISOString(),
+    }).eq('id', event.id)
+
+    if (updateError) throw new PlatformAdminError('review_operation_failed', '审核结果没有保存，请稍后重试。', 502)
+    if (!changed?.id) throw new PlatformAdminError('place_state_changed', '地点状态已变化，请刷新审核队列。', 409)
+    const { error: notificationError } = await client.from('social_notifications').insert({
+      recipient_id: place.owner_id,
+      actor_id: actorUserId,
+      kind: 'campus_place_reviewed',
+      resource_id: placeId,
+    })
+    return {
+      status: decision,
+      auditIncomplete: Boolean(completionError),
+      notificationIncomplete: Boolean(notificationError),
+    }
+  },
+
   async setUserSuspended({ actorUserId, targetUserId, suspended, reason }) {
     const client = requireAdminClient()
     const { data: targetResult, error: targetError } = await client.auth.admin.getUserById(targetUserId)

@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { beforeEach, describe, expect, it } from 'vitest'
 import { useDomainCommands } from '../src/composables/domain/commands.js'
-import { createPlaceWithVisit, importPlacePreset, placeOffers, placeVisits, places } from '../src/composables/placeBook.js'
+import { createPlaceRecord, createPlaceWithVisit, importPlacePreset, placeOffers, placeVisits, places, syncPlaceReviewStatuses } from '../src/composables/placeBook.js'
 
 const domain = useDomainCommands()
 
@@ -13,6 +13,14 @@ beforeEach(() => {
 })
 
 describe('地点与账本的本机关联', () => {
+  it('可以先收藏待去地点，不会伪造到访或账本记录', () => {
+    const place = createPlaceRecord({ id: 'place-want', name: '虚构图书馆', type: 'library', category: 'study' })
+    expect(place).toMatchObject({ id: 'place-want', type: 'library', category: 'study', visibility: 'private' })
+    expect(places.value).toEqual([place])
+    expect(placeVisits.value).toEqual([])
+    expect(domain.transactions.value).toEqual([])
+  })
+
   it('一笔支出只能关联一家地点和一条到访', () => {
     const transaction = domain.createTransaction({
       id: 'expense-place-link', name: '午饭', amount: 18, direction: 'expense', date: '2026-09-02',
@@ -40,5 +48,19 @@ describe('地点与账本的本机关联', () => {
     expect(placeVisits.value).toEqual([])
     expect(importPlacePreset([preset])).toEqual({ imported: 0, skipped: 1 })
     expect(places.value).toHaveLength(1)
+  })
+
+  it('只把本人投稿的服务端审核结果同步到本机地点，并清除审批后的旧拒绝意见', () => {
+    createPlaceRecord({ id: 'submitted-place', name: '虚构地点', visibility: 'school', reviewStatus: 'pending' })
+    createPlaceRecord({ id: 'private-place', name: '私人地点', visibility: 'private' })
+    expect(syncPlaceReviewStatuses([
+      { id: 'submitted-place', isMine: true, reviewStatus: 'rejected', reviewReason: '请补充营业时间' },
+      { id: 'private-place', isMine: true, reviewStatus: 'rejected', reviewReason: '不应同步' },
+      { id: 'other-user-place', isMine: false, reviewStatus: 'approved' },
+    ])).toBe(1)
+    expect(places.value.find((place) => place.id === 'submitted-place')).toMatchObject({ reviewStatus: 'rejected', reviewReason: '请补充营业时间' })
+    expect(places.value.find((place) => place.id === 'private-place')).toMatchObject({ reviewStatus: 'not_submitted', reviewReason: '' })
+    expect(syncPlaceReviewStatuses([{ id: 'submitted-place', isMine: true, reviewStatus: 'approved' }])).toBe(1)
+    expect(places.value.find((place) => place.id === 'submitted-place')).toMatchObject({ reviewStatus: 'approved', reviewReason: '' })
   })
 })
