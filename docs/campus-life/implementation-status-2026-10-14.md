@@ -40,7 +40,9 @@ Edge Function 验证 Supabase 会话和邮箱确认状态，并从服务端个�
 
 第二条迁移含拒绝后重提 RPC、报名通知幂等键、例外班次审核理由/版本字段，以及服务端专用权限配置。
 
-Web/PWA 版本为 1.2.2。生产部署链路依次运行生产配置检查、构建、构建产物密钥扫描，再上传 Cloudflare Pages。Supabase 迁移和 Edge Function 版本分别部署；本轮需要发布的函数为 `campus-social`、`platform-admin` 和 `campus-life`，均应启用 JWT 验证。Windows 桌面应用不构建、不发布。
+Web/PWA 版本为 1.2.2。生产库已应用上列三条迁移；Edge Function 当前版本为 `campus-life` v1、`campus-social` v7、`platform-admin` v3，均启用 JWT 验证。Cloudflare Pages 由 GitHub `main` 自动生产发布，功能提交 `960d5da` 的部署 ID 为 `345279c3-d9b9-4bb1-9755-539e7f985bc9`，部署 URL 为 `https://345279c3.study-life.pages.dev`，稳定地址为 `https://study-life.pages.dev`；Cloudflare 返回 build 和 deploy success。Windows 桌面应用未构建或发布。
+
+本机 `npm run deploy:production` 已通过生产配置、Pages 配置、构建和 Supabase 构建产物扫描；最后的 Wrangler 直传因本机登录令牌过期无法刷新而停止。GitHub 绑定的 Pages 自动生产构建随后成功，因此线上交付已完成。
 
 回退时先回退 Pages 和 Edge Function 代码，保留新增表、列和审核事件。它们是向后兼容的加法结构，不应直接删除；移除前须单独核对并保全用户投稿、私信和审计记录。
 
@@ -56,6 +58,8 @@ Web/PWA 版本为 1.2.2。生产部署链路依次运行生产配置检查、构
 
 ## 验证记录
 
-发布前需通过全量单元/组件测试、ESLint、Vue/TypeScript 类型检查、生产构建和 Cloudflare bundle secret scan；Supabase 迁移应用后需运行安全与性能 advisors，并通过服务端 RPC 冒烟检查确认表、权限和 Edge Function 可用。真实学校身份边界、校方资料准确性和真实账号 UI 流程不由本地测试替代。
+全量门禁通过：348 个测试文件中的 3,141 项测试、ESLint、Vue/TypeScript 类型检查、类型基线、生产构建。发布签名同步后的生产构建再次通过，转换 3,286 个模块并检查 191 个 JavaScript 资源的 Supabase 配置。生产 RPC 冒烟确认审核队列可执行；新 RPC 仅 `service_role` 有执行权限，`authenticated` 无权限。Chrome 缺失分包恢复回归为 GREEN：页面仅导航两次，显示可重试失败界面且没有无限刷新或残留骨架屏。
 
-部署完成后在此补记：迁移版本、Edge Function 版本、Pages 部署 URL/ID、线上冒烟结果和 advisor 发现。不要记录密钥、用户投稿内容或私信正文。
+数据库性能 advisor 已不再报告未建索引的外键。安全 advisor 仍提示 17 张 RLS 表没有直连策略（服务端函数通过受限 `service_role` 访问），并提示 Supabase Auth 的泄露密码保护尚未开启；后者是现存认证设置，建议在 Supabase Auth 密码安全设置中启用：[Supabase 密码安全说明](https://supabase.com/docs/guides/auth/password-security#password-strength-and-leaked-password-protection)。线上静态资源完整性脚本受本机网络代理限制未能返回结果；Cloudflare 生产部署记录确认构建与发布成功。真实学校身份边界、校方资料准确性和真实账号 UI 流程不由本地测试替代。
+
+不要记录密钥、用户投稿内容或私信正文。
