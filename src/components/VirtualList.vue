@@ -3,7 +3,7 @@ import { computed, nextTick, onActivated, onBeforeUnmount, onDeactivated, onMoun
 import { animationsEnabled } from '../composables/motion.js'
 
 const props = defineProps({
-  items: { type: Array, required: true },
+  items: { type: /** @type {import('vue').PropType<any[]>} */ (Array), required: true },
   itemKey: { type: [String, Function], default: 'id' },
   estimatedHeight: { type: Number, default: 84 },
   gap: { type: Number, default: 10 },

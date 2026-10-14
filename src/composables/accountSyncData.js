@@ -4,6 +4,7 @@ import { normalizeMoodLog } from './mood.js'
 import { normalizeFocusSettings } from './focusTimer.js'
 import { SYNC_DEFAULTS, SYNC_KEYS, isSyncKey } from './syncKeys.js'
 import { normalizeWeeklyReflections } from './weeklyReflections.js'
+import { normalizeDataHealthThresholds } from './dataHealthReport.js'
 
 export { SYNC_DEFAULTS, SYNC_KEYS, isSyncKey }
 
@@ -78,6 +79,7 @@ function normalizeIncomingValue(key, value) {
   if (key === 'sl_festive_lunar') return normalizeLunarAnniversaries(value)
   if (key === 'sl_mood_log') return normalizeMoodLog(value)
   if (key === 'sl_focus_settings') return normalizeFocusSettings(value)
+  if (key === 'sl_data_health_settings') return normalizeDataHealthThresholds(value)
   if (key === 'sl_performance_mode') {
     if (value === 'low') return 'on'
     if (value === 'high') return 'off'
@@ -129,6 +131,11 @@ function isValidKeyValue(key, value) {
       && (v.recentTemporaries === undefined || Array.isArray(v.recentTemporaries))
   }
   if (key === 'sl_performance_mode') return ['auto', 'on', 'off', 'low', 'high'].includes(value)
+  if (key === 'sl_notices') return Array.isArray(value) && value.every((item) => isPlainObject(item)
+    && typeof item.id === 'string' && typeof item.raw === 'string'
+    && ['new', 'handled', 'archived'].includes(String(item.status)))
+  if (key === 'sl_notice_sources') return Array.isArray(value) && value.every((item) => isPlainObject(item)
+    && typeof item.source === 'string' && typeof item.muted === 'boolean')
   return true
 }
 

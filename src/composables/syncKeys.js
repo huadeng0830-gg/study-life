@@ -4,6 +4,7 @@
 // 这里只依赖 ledgerCategories（纯数据），core 与 accountSyncData 共用同一份键表。
 import { DEFAULT_CATEGORIES } from './ledgerCategories.js'
 
+/** @type {Record<string, any>} */
 export const SYNC_DEFAULTS = {
   sl_courses: [],
   sl_course_templates: [],
@@ -40,8 +41,7 @@ export const SYNC_DEFAULTS = {
     { id: 'learning', label: '学习', items: ['schedule', 'course', 'tasks', 'exams'] },
     { id: 'schedule', label: '日程', items: ['events', 'together'] },
     { id: 'qixing', label: '齐行', items: ['projects'] },
-    { id: 'records', label: '记录', items: ['bills', 'lists'] },
-    { id: 'review', label: '回顾', items: ['review'] },
+    { id: 'other', label: '其他', items: ['lists', 'bills', 'places', 'review'] },
   ],
   sl_wallpaper_config: {},
   sl_performance_mode: 'auto',
@@ -55,12 +55,12 @@ export const SYNC_DEFAULTS = {
   sl_reminder_log: [],
   // 已退役的独立笔记只作为归档数据保留，避免旧云快照在升级时丢失正文。
   sl_archived_quick_notes: [],
+  sl_notices: [],
+  sl_notice_sources: [],
+  sl_data_health_settings: { staleTaskDays: 90, unhandledNoticeDays: 30, maxTransactionAmount: 100000 },
   sl_weekly_reflections: {},
 }
 
-/**
- * @type {(keyof typeof SYNC_DEFAULTS)[]}
- */
 export const SYNC_KEYS = Object.keys(SYNC_DEFAULTS)
 const SYNC_KEY_SET = new Set(SYNC_KEYS)
 

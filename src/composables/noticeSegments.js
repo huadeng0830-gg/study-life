@@ -35,6 +35,7 @@ export const SEGMENT_PROCESS_OPTIONS = [
   { key: 'task', label: '创建待办' },
   { key: 'homework', label: '添加作业' },
   { key: 'event', label: '加入日程' },
+  { key: 'archive', label: '仅保存通知' },
 ]
 
 /* ------------------------------------------------------------------ 行与单位 */

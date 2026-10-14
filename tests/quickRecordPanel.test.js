@@ -151,4 +151,21 @@ describe('QuickRecordPanel 保存交互', () => {
       Object.defineProperty(window, 'innerWidth', { configurable: true, value: originalWidth })
     }
   })
+
+  it('输入法组词时不解析也不提交，compositionend 稳定后再生成草稿', async () => {
+    sessionStorage.clear()
+    const events = mountPanel()
+    const input = document.body.querySelector('.smart-input')
+    input.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true, data: '' }))
+    input.value = '午饭18元'
+    input.dispatchEvent(new InputEvent('input', { bubbles: true, isComposing: true }))
+    const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true, isComposing: true })
+    input.dispatchEvent(enter)
+    expect(enter.defaultPrevented).toBe(false)
+    expect(document.body.querySelector('.record-card')).toBeNull()
+    expect(events).toEqual([])
+
+    input.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: '午饭18元' }))
+    await vi.waitFor(() => expect(document.body.querySelector('.record-card')).not.toBeNull(), { timeout: 1000 })
+  })
 })

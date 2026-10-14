@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, expect, it } from 'vitest'
 import { parseQuickRecord } from '../src/composables/quickRecord/parser.js'
-import { quickRecordDraftText, reconcileQuickRecordDrafts, validateQuickRecord } from '../src/composables/quickRecord/workflow.js'
+import { quickRecordDraftText, quickRecordKeyAction, reconcileQuickRecordDrafts, validateQuickRecord } from '../src/composables/quickRecord/workflow.js'
 import { quickRecordDraftKey, readQuickRecordDraft, writeQuickRecordDraft } from '../src/composables/quickRecord/draftStorage.js'
 
 const now = new Date('2026-10-09T10:00:00')
@@ -55,6 +55,16 @@ describe('快速记录识别边界', () => {
 })
 
 describe('快速记录核对与暂存', () => {
+  it('根据输入法状态和行数决定直出按键动作', () => {
+    expect(quickRecordKeyAction({ key: 'Enter', isComposing: true })).toBe('ignore')
+    expect(quickRecordKeyAction({ key: 'Enter', keyCode: 229 })).toBe('ignore')
+    expect(quickRecordKeyAction({ key: 'Enter' })).toBe('save')
+    expect(quickRecordKeyAction({ key: 'Enter' }, { multiLine: true })).toBe('newline')
+    expect(quickRecordKeyAction({ key: 'Enter', ctrlKey: true }, { multiLine: true })).toBe('save')
+    expect(quickRecordKeyAction({ key: 'Tab' })).toBe('next-field')
+    expect(quickRecordKeyAction({ key: 'Escape' })).toBe('original')
+  })
+
   it('新加一行保留原有手动修改及勾选，重复文本仍是独立记录', () => {
     const previous = parseQuickRecord('午饭18元\n午饭18元', { now }).map((draft, i) => ({ ...draft, title: `自定义午饭${i}`, selected: i === 0 }))
     const merged = reconcileQuickRecordDrafts(parseQuickRecord('午饭18元\n午饭18元\n奶茶9元', { now }), previous)
@@ -68,6 +78,7 @@ describe('快速记录核对与暂存', () => {
     expect(validateQuickRecord({ type: 'event', title: '组会', date: '2026-02-30', time: '15:00', endTime: '14:00' })).toMatchObject({ date: expect.any(String), endTime: expect.any(String) })
     expect(validateQuickRecord({ type: 'expense', title: '午饭', date: '2026-10-09', amount: '1.234' }).amount).toBeTruthy()
     expect(validateQuickRecord({ type: 'todo', title: '买洗衣液' })).toEqual({})
+    expect(validateQuickRecord({ type: 'externalExam', title: '四级', date: '' }).date).toBeTruthy()
   })
 
   it('草稿按账号和入口隔离，往返保留修改和未选中项', () => {

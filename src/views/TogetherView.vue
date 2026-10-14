@@ -32,7 +32,7 @@ const statusLabels = {
 }
 const notificationLabels = {
   friend_request: '向你发送了好友请求', friend_accepted: '接受了你的好友请求', friend_removed: '已将你从好友中移除',
-  invitation: '发来一条新邀约', invitation_updated: '更新了邀约', invitation_cancelled: '取消了一条邀约', invitation_expired: '一条邀约已过期',
+  invitation: '发来一条新邀约', invitation_updated: '更新了邀约', invitation_cancelled: '取消了一条邀约', invitation_expired: '一条邀约已过期', place_preset: '发来一份可拒收的地点预设；前往地点→好友预设查看',
 }
 const browserTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Shanghai'
 const timeZones = [...new Set([browserTimeZone, 'Asia/Shanghai', 'Asia/Tokyo', 'Asia/Hong_Kong', 'Asia/Singapore', 'UTC', 'Europe/London', 'America/Los_Angeles', 'America/New_York'])]

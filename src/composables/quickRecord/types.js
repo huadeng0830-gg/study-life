@@ -9,11 +9,12 @@ export const RECORD_TYPES = Object.freeze({
   refund: { label: '退款', icon: '↩️' },
   bill: { label: '固定账单', icon: '🧾' },
   countdown: { label: '重要日期', icon: '⏳' },
+  externalExam: { label: '校外考试', icon: '🎓' },
   unknown: { label: '不确定类型', icon: '❓' },
 })
 
 // 快捷入口统一进入结构化记录，避免出现与待办、日程分离的自由笔记数据。
-export const QUICK_ACTIONS = ['todo', 'homework', 'event', 'expense', 'income', 'countdown', 'bill']
+export const QUICK_ACTIONS = ['todo', 'homework', 'event', 'expense', 'income', 'countdown', 'externalExam', 'bill']
 
 export const QUICK_RECORD_EXAMPLES = {
   auto: ['午饭18元，微信', '明天下午三点开组会', '早餐6元\n公交2元\n奶茶9元'],
@@ -23,6 +24,7 @@ export const QUICK_RECORD_EXAMPLES = {
   expense: ['午饭18元，微信', '咖啡12块5', '早餐6元\n公交2元\n奶茶9元'],
   income: ['生活费到账500微信', '兼职收入200元', '收到奖学金1000元'],
   countdown: ['距离六级考试还有90天', '12月20日期末考试', '明年1月1日新年'],
+  externalExam: ['下周六考四级', '3 月 10 日教资报名截止'],
   bill: ['每月15号39元话费', '每月6元iCloud订阅', '每年120元会员'],
 }
 

@@ -31,6 +31,8 @@ import { findUniqueCourseByName } from '../composables/courseLinks.js'
 import { taskFocusLocation } from '../composables/learningFocus.js'
 import { classifyTasks } from '../composables/smartClassify.js'
 import { useDomainCommands } from '../composables/domain/commands.js'
+import { createNoticeRecord, removeNoticeRecord } from '../composables/noticeArchive.js'
+import { applyScheduleProposal } from '../composables/scheduleNoticeOperations.js'
 import { selectTaskView } from '../composables/domain/selectors.js'
 import { TASK_PLAN_STATE, isArchived, taskStatus } from '../composables/domain/state.js'
 import { addAppDays, appCalendarDaysBetween, appDateTime, appNow, appToday, formatAppDate } from '../composables/timeContext.js'
@@ -296,17 +298,67 @@ function onNoticeCommit(payload) {
   const firstData = payload.data || payload.items?.[0] || {}
   const course = findUniqueCourseByName(courses.value, firstData.course)
   const withCourse = (value) => ({ ...value, courseId: findUniqueCourseByName(courses.value, value.course)?.id ?? '' })
+  const saveNotice = (notice, linkedEntityType = '', linkedEntityId = '') => {
+    if (!notice?.raw) return
+    try { createNoticeRecord({ ...notice, status: 'handled', linkedEntityType, linkedEntityId }) }
+    catch { showNoticeMessage('记录已保存，但通知原文未能写入通知档案，请检查本机存储状态。') }
+  }
+  if (payload.type === 'schedule') {
+    const result = applyScheduleProposal(payload.scheduleProposal, payload.courseId, {
+      conflictChoice: payload.conflictChoice,
+      courses: courses.value,
+    })
+    if (!result.ok) { showToast(result.message, { type: 'warning' }); return }
+
+    const targetException = result.saved.at(-1)
+    let noticeRecord = null
+    let archiveWarning = ''
+    try {
+      if (payload.notice?.raw) {
+        noticeRecord = createNoticeRecord({
+          ...payload.notice,
+          status: 'handled',
+          linkedEntityType: 'schedule_exception',
+          linkedEntityId: targetException?.id || '',
+          scheduleProposalId: targetException?.id || '',
+        })
+      }
+    } catch {
+      archiveWarning = '；通知原文未能写入通知档案'
+    }
+    const courseName = courses.value.find((item) => String(item.id) === String(payload.courseId))?.name || '课程'
+    showToast(`${courseName}的课表安排已更新${archiveWarning}`, {
+      type: archiveWarning ? 'warning' : 'success',
+      actionLabel: '撤销',
+      undoFn: () => {
+        result.undo()
+        if (noticeRecord) removeNoticeRecord(noticeRecord.id)
+      },
+      duration: 0,
+    })
+    return
+  }
+  if (payload.type === 'archive') {
+    for (const notice of payload.items || []) saveNotice(notice)
+    showNoticeMessage(payload.items?.length > 1 ? `已保存 ${payload.items.length} 条通知原文` : '已保存通知原文并标记为已处理')
+    return
+  }
   if (payload.type === 'update') {
     if (!domain.updateTask(payload.id, firstData)) return
+    saveNotice(payload.notice, 'task', payload.id)
     showNoticeMessage(payload.courseUnmatched
       ? `已更新“${payload.title}”；课程名称未唯一匹配，原课程关联已保留`
       : `已根据新通知更新“${payload.title}”`)
   } else if (payload.type === 'event') {
-    payload.items.forEach((item) => domain.createEvent({ ...withCourse(item), courseName: item.course || '', createdFrom: 'clipboard', sourceType: 'notice' }))
+    let firstCreated = null
+    payload.items.forEach((item) => { const created = domain.createEvent({ ...withCourse(item), courseName: item.course || '', createdFrom: 'clipboard', sourceType: 'notice' }); firstCreated ||= created })
+    saveNotice(firstData.__notice || payload.notice, 'event', firstCreated?.id || '')
     showNoticeMessage(payload.items.length > 1 ? `已加入 ${payload.items.length} 项日程` : `已加入日程“${payload.items[0].title}”`)
   } else {
     const items = payload.items?.length ? payload.items : [firstData]
-    items.forEach((item) => domain.createTask({ ...withCourse(item), kind: payload.kind || 'todo', createdFrom: 'clipboard', sourceType: 'notice' }))
+    let firstCreated = null
+    items.forEach((item) => { const { __notice: _notice, ...data } = item; const created = domain.createTask({ ...withCourse(data), kind: payload.kind || 'todo', createdFrom: 'clipboard', sourceType: 'notice' }); firstCreated ||= created })
+    saveNotice(firstData.__notice || payload.notice, 'task', firstCreated?.id || '')
     showNoticeMessage(items.length > 1 ? `已创建 ${items.length} 项${payload.kind === 'homework' ? '作业' : '待办'}` : course || !firstData.course ? `已创建待办“${payload.title}”` : `已创建“${payload.title}”；课程名称未唯一匹配，请检查关联`)
   }
 }
@@ -665,6 +717,7 @@ function updateTaskCheckpointField(field, value) {
           <div class="task-tools-menu">
             <Button variant="ghost" @click="smartOrganize"><Sparkles data-icon="inline-start" />一键整理</Button>
             <Button variant="ghost" @click="openNotice"><ClipboardPaste data-icon="inline-start" />粘贴通知</Button>
+            <Button variant="ghost" @click="router.push('/notices')">通知档案</Button>
             <DomainCsvImportButton kind="tasks" :records="tasks" @import="importCsvTasks" />
           </div>
         </details>

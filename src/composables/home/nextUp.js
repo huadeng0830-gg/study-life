@@ -73,7 +73,7 @@ export function selectHomeNextUp({
     if (entry?.date && entry.at <= nowTs + 7 * 86400000) candidates.push({ kind: 'task', entity: item, date: entry.date, time: entry.time, dueAt: Math.max(nowTs, entry.at), state: 'upcoming', timeSummary: entry.label, stageId: entry.stage?.id })
   })
   bills.filter((item) => isBillDueSoon(item, now)).forEach((item) => add('bill', item, item.nextDate))
-  milestones.filter((item) => !isArchived(item)).forEach((item) => {
+  milestones.filter((item) => !isArchived(item) && item.kind !== 'externalExam').forEach((item) => {
     const countdown = countdownState(item, now)
     if (countdown.target && !countdown.isPast) add('milestone', item, policyDateKey(countdown.target), item.time)
   })

@@ -59,6 +59,14 @@ describe('domain state and projections', () => {
     expect(reminders.map((item) => item.sourceType).sort()).toEqual(['bill', 'event', 'milestone', 'task'])
   })
 
+  it('keeps external exam timelines out of the dense home reminder panel', () => {
+    const reminders = selectReminders({ milestones: [
+      { id: 'term', name: '期末考试', kind: 'exam', date: '2026-09-03' },
+      { id: 'external', name: '四级', kind: 'externalExam', date: '2026-09-02', examDate: '2026-09-02' },
+    ] }, new Date('2026-09-01T10:00:00'))
+    expect(reminders.map((item) => item.sourceId)).toEqual(['term'])
+  })
+
   it('keeps unscheduled tasks out of Today until the user assigns a date', () => {
     const task = { id: 'inbox', title: '买洗衣液', status: 'pending', dueDate: '' }
     expect(taskPlanningState(task, new Date('2026-08-29T09:00:00'))).toBe('unplanned')
@@ -119,6 +127,22 @@ describe('domain compatibility and relations', () => {
     migrateDomainData({ tasks, transactions })
     expect(tasks[0]).toMatchObject({ kind: 'homework', status: 'pending', updatedAt: '2026-08-01T00:00:00Z' })
     expect(transactions[0].direction).toBe('expense')
+  })
+
+  it('migrates legacy external exam milestones without creating a separate collection', () => {
+    const milestones = [{ id: 'outside', category: '校外考试', date: '2027-01-15', location: '市一中' }]
+    migrateDomainData({ milestones })
+    expect(milestones).toHaveLength(1)
+    expect(milestones[0]).toMatchObject({ kind: 'externalExam', examDate: '2027-01-15', venue: '市一中', requiredItems: expect.any(Array) })
+  })
+
+  it('migrates the old single notice link into a list so a place offer can be added alongside it', () => {
+    const notices = [{ id: 'notice-1', linkedEntityType: 'task', linkedEntityId: 'task-1' }]
+    expect(migrateDomainData({ notices })).toBeGreaterThan(0)
+    expect(notices[0].linkedEntities).toEqual([{ type: 'task', id: 'task-1' }])
+    notices[0].linkedEntities.push({ type: 'place-offer', id: 'offer-1' })
+    expect(migrateDomainData({ notices })).toBe(0)
+    expect(notices[0].linkedEntities).toEqual([{ type: 'task', id: 'task-1' }, { type: 'place-offer', id: 'offer-1' }])
   })
 
   it('course deletion unlinks every related entity but preserves its readable name', () => {

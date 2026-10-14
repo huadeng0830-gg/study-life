@@ -31,8 +31,9 @@ import { isValidPlanningDate, matchesMilestoneQuery, milestoneCalendarOccurrence
 import { useDebouncedRef } from '../composables/useDebouncedRef.js'
 import { countdownState } from '../composables/store/countdown.js'
 import { clearFocusFromRoute, focusElementWhenReady, readFocusQuery } from '../composables/focusNavigation.js'
+import { defaultExternalExamItems, externalExamTimelineTarget, normalizeExternalExamItems } from '../composables/externalExam.js'
 
-const CATEGORIES = ['学习', '生活', '纪念日', '项目', '其他']
+const CATEGORIES = ['学习', '校外考试', '生活', '纪念日', '项目', '其他']
 const domain = useDomainCommands()
 /** @type {import('vue').Ref<import('../types/domain').Milestone[]>} */
 const exams = domain.milestones
@@ -68,6 +69,7 @@ const focusMessage = ref('')
 const focusedMilestoneId = ref('')
 /** @type {import('vue').Ref<{ open: boolean, message: string, type: string, actionLabel: string, undoFn?: () => unknown, viewFn?: () => unknown, duration: number }>} */
 const toast = ref({ open: false, message: '', type: 'info', actionLabel: '', duration: 3200 })
+const newRequiredItemName = ref('')
 let focusHandled = ''
 
 watch(appToday, (todayKey, previousTodayKey) => {
@@ -96,14 +98,24 @@ function emptyForm() {
     courseId: '',
     reviewProgress: 0,
     reminderMinutes: '',
+    registerStart: '',
+    registerDeadline: '',
+    examDate: '',
+    examTime: '',
+    venue: '',
+    campus: '',
+    seatNo: '',
+    admissionNo: '',
+    requiredItems: defaultExternalExamItems(),
   }
 }
 
-function openAdd() {
+function openAdd(kind = 'countdown') {
   editingId.value = null
   error.value = ''
   errorField.value = ''
   form.value = emptyForm()
+  if (kind === 'externalExam') form.value.category = '校外考试'
   showForm.value = true
 }
 
@@ -124,7 +136,7 @@ function openEdit(item) {
   errorField.value = ''
   form.value = {
     name: item.name,
-    date: item.date,
+    date: item.kind === 'externalExam' ? item.examDate || item.registerDeadline || item.date : item.date,
     time: item.time ?? '',
     location: item.location ?? '',
     note: item.note ?? '',
@@ -134,18 +146,31 @@ function openEdit(item) {
     courseId: item.courseId ?? '',
     reviewProgress: Number(item.reviewProgress ?? 0),
     reminderMinutes: String(item.reminderMinutes ?? ''),
+    registerStart: item.registerStart ?? '',
+    registerDeadline: item.registerDeadline ?? '',
+    examDate: item.examDate ?? (item.kind === 'externalExam' ? item.date : ''),
+    examTime: item.examTime ?? item.time ?? '',
+    venue: item.venue ?? item.location ?? '',
+    campus: item.campus ?? '',
+    seatNo: item.seatNo ?? '',
+    admissionNo: item.admissionNo ?? '',
+    requiredItems: item.kind === 'externalExam' ? normalizeExternalExamItems(item.requiredItems) : defaultExternalExamItems(),
   }
+  newRequiredItemName.value = ''
   showForm.value = true
 }
 
 function save() {
+  const isExternalExam = form.value.category === '校外考试'
+  const primaryDate = isExternalExam ? (form.value.examDate || form.value.registerDeadline) : form.value.date
   if (!form.value.name.trim()) {
     error.value = '请填写重要日期名称'
     errorField.value = 'name'
     void nextTick(() => nameInput.value?.focus())
     return
   }
-  if (!isValidPlanningDate(form.value.date)) {
+  if (!isValidPlanningDate(primaryDate)
+    || (isExternalExam && [form.value.registerStart, form.value.registerDeadline, form.value.examDate].some((date) => date && !isValidPlanningDate(date)))) {
     error.value = '请选择有效的目标日期'
     errorField.value = 'date'
     void nextTick(() => dateInput.value?.focus())
@@ -160,17 +185,30 @@ function save() {
   const isStudyCountdown = form.value.category === '学习'
   const data = {
     name: form.value.name.trim(),
-    date: form.value.date,
-    time: form.value.time,
-    location: form.value.location.trim(),
+    date: primaryDate,
+    time: isExternalExam ? form.value.examTime : form.value.time,
+    location: isExternalExam ? form.value.venue.trim() : form.value.location.trim(),
     note: form.value.note.trim(),
     category: form.value.category,
-    repeat: form.value.repeat,
+    repeat: isExternalExam ? 'none' : form.value.repeat,
+    kind: isExternalExam ? 'externalExam' : form.value.category === '学习' ? 'exam' : 'countdown',
     pinned: form.value.pinned,
     courseId: isStudyCountdown ? form.value.courseId : '',
     courseName: isStudyCountdown ? (courses.value.find((course) => course.id === form.value.courseId)?.name ?? '') : '',
     reviewProgress: isStudyCountdown ? Math.max(0, Math.min(100, Number(form.value.reviewProgress) || 0)) : 0,
     reminderMinutes: defaultReminderMinutes('milestone', reminder),
+    ...(isExternalExam ? {
+      kind: 'externalExam',
+      registerStart: form.value.registerStart,
+      registerDeadline: form.value.registerDeadline,
+      examDate: form.value.examDate,
+      examTime: form.value.examTime,
+      venue: form.value.venue.trim(),
+      campus: form.value.campus.trim(),
+      seatNo: form.value.seatNo.trim(),
+      admissionNo: form.value.admissionNo.trim(),
+      requiredItems: normalizeExternalExamItems(form.value.requiredItems),
+    } : {}),
   }
   if (editingId.value) {
     if (!domain.updateMilestone(editingId.value, data)) {
@@ -178,7 +216,7 @@ function save() {
       return
     }
   } else {
-    domain.createMilestone({ ...data, kind: form.value.category === '学习' ? 'exam' : 'countdown', createdFrom: 'manual' })
+    domain.createMilestone({ ...data, createdFrom: 'manual' })
   }
   showForm.value = false
   showToast(editingId.value ? '重要日期已更新' : '重要日期已添加', { type: 'success' })
@@ -189,8 +227,34 @@ function clearFormError(field) {
 }
 
 function setFormDate(offset) {
-  form.value.date = addAppDays(appToday.value, offset)
+  if (form.value.category === '校外考试') form.value.examDate = addAppDays(appToday.value, offset)
+  else form.value.date = addAppDays(appToday.value, offset)
   clearFormError('date')
+}
+
+function addRequiredItem() {
+  const name = newRequiredItemName.value.trim()
+  if (!name) return
+  form.value.requiredItems.push({ name, quantity: 1, unit: '', checked: false })
+  newRequiredItemName.value = ''
+}
+
+function removeRequiredItem(index) {
+  form.value.requiredItems.splice(index, 1)
+}
+
+function updateExternalExamItems(item, updater) {
+  const requiredItems = normalizeExternalExamItems(item.requiredItems).map((entry, index) => updater(entry, index))
+  domain.updateMilestone(item.id, { requiredItems })
+}
+
+function toggleRequiredItem(item, index) {
+  updateExternalExamItems(item, (entry, itemIndex) => itemIndex === index ? { ...entry, checked: !entry.checked } : entry)
+}
+
+function checkAllRequiredItems(item) {
+  updateExternalExamItems(item, (entry) => ({ ...entry, checked: true }))
+  showToast('考试用品已全部确认', { type: 'success' })
 }
 
 const defaultReminder = computed(() => defaultReminderMinutes('milestone'))
@@ -207,7 +271,12 @@ function showToast(message, { type = 'info', actionLabel = '', undoFn = undefine
 }
 
 const courseNamesById = computed(() => new Map(courses.value.map((course) => [course.id, course.name])))
-const milestoneView = computed(() => selectMilestoneWorkspace(exams.value, {
+const timelineMilestones = computed(() => exams.value.map((item) => {
+  if (item.kind !== 'externalExam') return item
+  const target = externalExamTimelineTarget(item, appToday.value)
+  return target ? { ...item, date: target.date, time: target.time, externalExamStage: target.stage } : item
+}))
+const milestoneView = computed(() => selectMilestoneWorkspace(timelineMilestones.value, {
   now: appNow.value, query: searchQuery.value, category: categoryFilter.value,
   period: periodFilter.value, sortKey: sortKey.value, showPast: showPast.value,
   showHistory: showHistory.value, courseNames: courseNamesById.value,
@@ -220,7 +289,7 @@ const calendarItems = computed(() => {
   const year = calendarPlaceholder.value.year
   const rows = []
 
-  for (const item of exams.value) {
+  for (const item of timelineMilestones.value) {
     if (isArchived(item) !== showHistory.value) continue
     if (categoryFilter.value !== 'all' && (item.category || '其他') !== categoryFilter.value) continue
     if (!matchesMilestoneQuery(item, searchQuery.value, courseNamesById.value)) continue
@@ -606,6 +675,7 @@ function courseLabel(item) {
           显示已结束
         </label>
         <Button v-if="!showHistory" class="btn btn-primary" @click="openAdd">＋ 添加重要日期</Button>
+        <Button v-if="!showHistory" variant="outline" @click="openAdd('externalExam')">＋ 校外考试</Button>
       </div>
     </header>
 
@@ -677,6 +747,7 @@ function courseLabel(item) {
         <div class="exam-top">
           <div class="meta-row">
             <Badge variant="secondary" class="category">{{ item.category ?? '其他' }}</Badge>
+            <Badge v-if="item.kind === 'externalExam'" variant="outline" class="repeat-tag">报名与备考</Badge>
             <Badge v-if="item.repeat === 'yearly'" variant="outline" class="repeat-tag">每年重复</Badge>
             <Badge v-if="item.pinned" variant="outline" class="repeat-tag">置顶</Badge>
             <Badge v-if="isArchived(item)" variant="outline" class="repeat-tag">已归档</Badge>
@@ -705,8 +776,14 @@ function courseLabel(item) {
           </div>
           <div class="exam-info">
             <h2 class="name"><button type="button" :title="item.name" @pointerdown.stop @click.stop="openEdit(item)">{{ item.name }}</button></h2>
-            <div class="date">{{ shortDateOf(item) }}</div>
+            <div class="date">{{ item.kind === 'externalExam' ? (item.externalExamStage === 'registration' ? '报名截止 · ' : '考试 · ') : '' }}{{ shortDateOf(item) }}</div>
+            <div v-if="item.kind === 'externalExam' && item.externalExamStage === 'registration' && item.examDate" class="external-exam-meta">考试日期：{{ item.examDate }}{{ item.examTime ? ` ${item.examTime}` : '' }}</div>
             <div v-if="item.category === '学习' && item.course" class="loc" :title="item.course">{{ item.course }}</div>
+            <div v-if="item.kind === 'externalExam' && item.registerStart" class="external-exam-meta">报名开始：{{ item.registerStart }}</div>
+            <div v-if="item.kind === 'externalExam' && item.registerDeadline" class="external-exam-meta">报名截止：{{ item.registerDeadline }}</div>
+            <div v-if="item.kind === 'externalExam' && item.campus" class="external-exam-meta">校区：{{ item.campus }}</div>
+            <div v-if="item.kind === 'externalExam' && item.seatNo" class="external-exam-meta">座位号：{{ item.seatNo }}</div>
+            <div v-if="item.kind === 'externalExam' && item.admissionNo" class="external-exam-meta">准考证号：{{ item.admissionNo }}</div>
             <div v-if="item.location" class="loc" :title="item.location">{{ item.location }}</div>
             <div v-if="item.note" class="note" :title="item.note"><span>备注</span>{{ item.note }}</div>
           </div>
@@ -719,6 +796,20 @@ function courseLabel(item) {
             </template>
           </div>
         </div>
+
+        <section v-if="item.kind === 'externalExam'" class="external-exam-checklist" aria-label="考试随身物品" @click.stop>
+          <div class="external-exam-checklist-head">
+            <strong>考试随身物品</strong>
+            <span>{{ (item.requiredItems || []).filter((entry) => entry.checked).length }}/{{ (item.requiredItems || []).length }}</span>
+          </div>
+          <div class="external-exam-items">
+            <label v-for="(entry, index) in item.requiredItems || []" :key="entry.id || `${item.id}-${entry.name}-${index}`" class="external-exam-item" :class="{ checked: entry.checked }">
+              <input type="checkbox" :checked="entry.checked" :aria-label="`确认携带${entry.name}`" @change="toggleRequiredItem(item, index)" />
+              <span>{{ entry.name }}<small v-if="entry.quantity !== 1 || entry.unit">×{{ entry.quantity }} {{ entry.unit }}</small></span>
+            </label>
+          </div>
+          <button v-if="item.examDate === appToday || (item.examDate === undefined && item.date === appToday)" type="button" class="external-exam-check-all" @click="checkAllRequiredItems(item)">考试日一键确认全部用品</button>
+        </section>
 
         <div v-if="item.category === '学习'" class="review-progress">
           <div class="progress-caption"><span>复习完成度</span><b>{{ item.progress }}%</b></div>
@@ -806,16 +897,45 @@ function courseLabel(item) {
 
         <div class="form-row">
           <div>
-            <label for="exams-target-date">目标日期 *</label>
-            <input id="exams-target-date" ref="dateInput" v-model="form.date" type="date" :aria-invalid="errorField === 'date' || undefined" :aria-describedby="errorField === 'date' ? 'dates-form-error' : undefined" @input="clearFormError('date')" />
+            <label v-if="form.category !== '校外考试'" for="exams-target-date">目标日期 *</label>
+            <input v-if="form.category !== '校外考试'" id="exams-target-date" ref="dateInput" v-model="form.date" type="date" :aria-invalid="errorField === 'date' || undefined" :aria-describedby="errorField === 'date' ? 'dates-form-error' : undefined" @input="clearFormError('date')" />
+            <label v-else for="exams-exam-date">考试日期</label>
+            <input v-if="form.category === '校外考试'" id="exams-exam-date" ref="dateInput" v-model="form.examDate" type="date" :aria-invalid="errorField === 'date' || undefined" :aria-describedby="errorField === 'date' ? 'dates-form-error' : undefined" @input="clearFormError('date')" />
           </div>
           <div>
-            <label for="exams-time">具体时间</label>
-            <input id="exams-time" v-model="form.time" type="time" />
+            <label for="exams-time">{{ form.category === '校外考试' ? '考试时间' : '具体时间' }}</label>
+            <input id="exams-time" v-if="form.category !== '校外考试'" v-model="form.time" type="time" />
+            <input id="exams-time" v-else v-model="form.examTime" type="time" />
           </div>
         </div>
 
-        <div class="date-shortcuts" role="group" aria-label="快速选择目标日期"><button type="button" :aria-pressed="form.date === appToday" @click="setFormDate(0)">今天</button><button type="button" :aria-pressed="form.date === addAppDays(appToday, 1)" @click="setFormDate(1)">明天</button><button type="button" :aria-pressed="form.date === addAppDays(appToday, 7)" @click="setFormDate(7)">一周后</button></div>
+        <div class="date-shortcuts" role="group" aria-label="快速选择目标日期"><button type="button" :aria-pressed="(form.category === '校外考试' ? form.examDate : form.date) === appToday" @click="setFormDate(0)">今天</button><button type="button" :aria-pressed="(form.category === '校外考试' ? form.examDate : form.date) === addAppDays(appToday, 1)" @click="setFormDate(1)">明天</button><button type="button" :aria-pressed="(form.category === '校外考试' ? form.examDate : form.date) === addAppDays(appToday, 7)" @click="setFormDate(7)">一周后</button></div>
+
+        <template v-if="form.category === '校外考试'">
+          <div class="form-row">
+            <div><label for="external-register-start">报名开始</label><input id="external-register-start" v-model="form.registerStart" type="date" /></div>
+            <div><label for="external-register-deadline">报名截止</label><input id="external-register-deadline" v-model="form.registerDeadline" type="date" /></div>
+          </div>
+          <div class="form-row">
+            <div><label for="external-venue">考点 / 考场</label><Input id="external-venue" v-model="form.venue" maxlength="200" placeholder="选填，例如：市一中考点" /></div>
+            <div><label for="external-campus">校区</label><Input id="external-campus" v-model="form.campus" maxlength="100" placeholder="选填" /></div>
+          </div>
+          <div class="form-row">
+            <div><label for="external-seat">座位号</label><Input id="external-seat" v-model="form.seatNo" maxlength="50" placeholder="选填" /></div>
+            <div><label for="external-admission">准考证号</label><Input id="external-admission" v-model="form.admissionNo" maxlength="50" placeholder="选填" /></div>
+          </div>
+          <section class="external-exam-form-items" aria-label="考试用品清单">
+            <div class="external-exam-form-heading"><strong>考试用品</strong><small>可调整数量或添加自定义物品</small></div>
+            <div v-for="(entry, index) in form.requiredItems" :key="entry.id || `${entry.name}-${index}`" class="external-exam-form-item">
+              <input v-model="entry.name" maxlength="60" :aria-label="`用品 ${index + 1} 名称`" />
+              <input v-model.number="entry.quantity" type="number" min="0.01" step="1" :aria-label="`${entry.name}数量`" />
+              <input v-model="entry.unit" maxlength="10" :aria-label="`${entry.name}单位`" placeholder="单位" />
+              <button type="button" :aria-label="`删除${entry.name}`" @click="removeRequiredItem(index)">移除</button>
+            </div>
+            <div class="external-exam-add-item"><Input v-model="newRequiredItemName" maxlength="60" aria-label="新增考试用品" placeholder="例如：水、透明文件袋" @keydown.enter.prevent="addRequiredItem" /><button type="button" @click="addRequiredItem">添加用品</button></div>
+          </section>
+          <small class="field-hint">至少填写考试日期或报名截止日期；提醒会在报名截止前 14/7/3 天、考试前 30/7/1 天触发，并在考前一晚提示检查用品。</small>
+        </template>
 
         <div class="form-row">
           <div>
@@ -824,7 +944,7 @@ function courseLabel(item) {
               <option v-for="category in CATEGORIES" :key="category" :value="category">{{ category }}</option>
             </select>
           </div>
-          <div>
+          <div v-if="form.category !== '校外考试'">
             <label for="exams-repeat">重复</label>
             <select id="exams-repeat" v-model="form.repeat">
               <option value="none">不重复</option>
@@ -833,10 +953,10 @@ function courseLabel(item) {
           </div>
         </div>
 
-        <small v-if="form.repeat === 'yearly'" class="field-hint">按公历每年重复，卡片显示下一次日期；2 月 29 日在平年按 2 月最后一天显示。</small>
+        <small v-if="form.repeat === 'yearly' && form.category !== '校外考试'" class="field-hint">按公历每年重复，卡片显示下一次日期；2 月 29 日在平年按 2 月最后一天显示。</small>
 
-        <label for="exams-location">地点</label>
-        <Input id="exams-location" v-model="form.location" maxlength="200" placeholder="选填，例如：教学楼 A101" />
+        <label v-if="form.category !== '校外考试'" for="exams-location">地点</label>
+        <Input v-if="form.category !== '校外考试'" id="exams-location" v-model="form.location" maxlength="200" placeholder="选填，例如：教学楼 A101" />
 
         <label for="exams-note">备注</label>
         <textarea id="exams-note" v-model="form.note" rows="3" maxlength="2000" placeholder="准备事项、提醒内容或其他补充"></textarea>
@@ -888,3 +1008,22 @@ function courseLabel(item) {
 </template>
 
 <style scoped src="./exams.css"></style>
+<style scoped>
+.external-exam-meta{color:var(--ink-soft);font-size:var(--fs-12)}
+.external-exam-checklist{display:flex;flex-direction:column;gap:8px;margin-top:12px;padding:12px;border:1px solid var(--border);border-radius:var(--radius-md);background:var(--bg-tint)}
+.external-exam-checklist-head,.external-exam-form-heading{display:flex;align-items:baseline;justify-content:space-between;gap:8px;color:var(--text);font-size:var(--fs-12)}
+.external-exam-checklist-head span,.external-exam-form-heading small{color:var(--ink-soft);font-size:var(--fs-11)}
+.external-exam-items{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 12px}
+.external-exam-item{display:flex;align-items:center;gap:7px;min-width:0;color:var(--text);font-size:var(--fs-12)}
+.external-exam-item input{flex:0 0 auto}
+.external-exam-item span{min-width:0}
+.external-exam-item small{display:block;color:var(--ink-soft);font-size:var(--fs-10)}
+.external-exam-item.checked span{text-decoration:line-through;color:var(--ink-soft)}
+.external-exam-check-all,.external-exam-add-item button,.external-exam-form-item button{min-height:32px;padding:5px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--card);color:var(--primary);font:inherit;font-size:var(--fs-11);cursor:pointer}
+.external-exam-form-items{display:flex;flex-direction:column;gap:8px;padding:10px;border:1px solid var(--border);border-radius:var(--radius-md);background:var(--bg-tint)}
+.external-exam-form-item{display:grid;grid-template-columns:minmax(0,1fr) 70px 70px auto;gap:6px;align-items:center}
+.external-exam-form-item input{min-width:0;width:100%;min-height:36px;padding:6px 8px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--card);color:var(--text);font:inherit;font-size:var(--fs-12)}
+.external-exam-add-item{display:flex;gap:7px}
+.external-exam-add-item :deep(input){min-width:0;flex:1}
+@media(max-width:520px){.external-exam-items{grid-template-columns:1fr}.external-exam-form-item{grid-template-columns:minmax(0,1fr) 56px 56px auto}}
+</style>

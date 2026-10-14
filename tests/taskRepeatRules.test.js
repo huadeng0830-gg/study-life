@@ -77,6 +77,13 @@ describe('每天 / 每周 / 每两周', () => {
     expect(nextRepeatDueDate('2026-03-10', 'biweekly')).toBe('2026-03-24')
     expect(nextRepeatDueDate('2026-12-18', 'biweekly')).toBe('2027-01-01')
   })
+
+  it('每周规则可选指定星期；缺失锚点仍沿用原来的 +7 天', () => {
+    expect(nextRepeatDueDate('2026-10-14', 'weekly', { weekday: 1 })).toBe('2026-10-19')
+    expect(nextRepeatDueDate('2026-10-14', 'weekly', { weekday: 3 })).toBe('2026-10-21')
+    expect(nextRepeatDueDate('2026-10-14', 'weekly', { weekday: 8 })).toBe('2026-10-21')
+    expect(nextRepeatDueDate('2026-10-14', 'weekly')).toBe('2026-10-21')
+  })
 })
 
 describe('工作日（跳过周末）', () => {
@@ -225,6 +232,12 @@ describe('旧导出名 createNextWeeklyTask：行为一字不变', () => {
       courseId: 'c1',
     })
     expect(next.id).toMatch(/^t\d{13}-[a-z0-9]+$/)
+  })
+
+  it('weekly 的星期锚点由同一套下一期生成器读取', () => {
+    const next = createNextRepeatingTask(taskOf('2026-10-14', { repeat: 'weekly', repeatWeekday: 1 }), NOW)
+    expect(next.dueDate).toBe('2026-10-19')
+    expect(next.repeatWeekday).toBe(1)
   })
 
   it('别的规则传进来仍然返回 null（不因为函数被泛化就顺手扩大语义）', () => {

@@ -16,9 +16,10 @@ import { defaultAccount, policyDateKey, policyTimeKey } from '../settingsPolicy.
 const HOMEWORK_WORDS = /作业|实验报告|论文|习题|复习|预习|测验|英语作文|报告/
 const EVENT_WORDS = /开会|会议|组会|班会|答辩|面试|约|活动|讲座|值班|课题组|上课|课程/
 const COUNTDOWN_WORDS = /倒计时|还有\d+天|距离.*?(考试|生日|放假|纪念日)|六级|四级|考研/
+const EXTERNAL_EXAM_WORDS = /四级|六级|教资|教师资格|雅思|托福|普通话|计算机等级|法考|考公|国考|省考/
 const INCOME_WORDS = /生活费|工资|奖学金|报销|退款|到账|收入|收款|红包|转入|兼职/
 const BILL_WORDS = /每月|每周|每年|每季度|周期|自动续费|月租|订阅|会员/
-const ALLOWED_FORCED_TYPES = new Set(['expense', 'income', 'bill', 'countdown', 'event', 'homework', 'todo'])
+const ALLOWED_FORCED_TYPES = new Set(['expense', 'income', 'bill', 'countdown', 'externalExam', 'event', 'homework', 'todo'])
 
 let uidSeq = 0
 function uid() {
@@ -120,6 +121,10 @@ function inferIntent(source, schedule, amountCount, forcedType, preferredType = 
     return { type: 'expense', confidence: 0.92, uncertain: false }
   }
 
+  const relativeCountdown = /(?:还有|剩余)\s*\d+\s*天|距离.*(?:还有|剩余)/.test(source)
+  if (!relativeCountdown && EXTERNAL_EXAM_WORDS.test(source) && (hasDate || /报名|考试|准考证|笔试|面试/.test(source))) {
+    return { type: 'externalExam', confidence: 0.88, uncertain: false }
+  }
   if (COUNTDOWN_WORDS.test(source) && hasDate) return { type: 'countdown', confidence: 0.8, uncertain: false }
   if (EVENT_WORDS.test(source) && (hasDate || hasTime)) return { type: 'event', confidence: 0.84, uncertain: false }
   if (HOMEWORK_WORDS.test(source)) return { type: 'homework', confidence: 0.72, uncertain: false }
@@ -207,6 +212,19 @@ function parseStatement(statement, { courses = [], now = new Date(), forcedType 
     base.title = cleanTaskTitle(source, schedule.title)
     base.date = schedule.date || relativeCountdownDate || ''
     base.time = schedule.time || ''
+  } else if (type === 'externalExam') {
+    base.title = cleanTaskTitle(source, schedule.title).replace(/(?:报名)?(?:截止|截至)$/g, '').trim() || source
+    base.date = schedule.date || ''
+    base.time = schedule.time || ''
+    base.registerStart = ''
+    base.registerDeadline = /报名(?:截止|截至|结束)/.test(source) ? base.date : ''
+    base.examDate = base.registerDeadline ? '' : base.date
+    base.examTime = base.examDate ? base.time : ''
+    base.venue = schedule.location || ''
+    base.campus = ''
+    base.seatNo = ''
+    base.admissionNo = ''
+    base.requiredItems = undefined
   } else if (type === 'event') {
     base.title = cleanTaskTitle(source, schedule.title)
     base.date = schedule.date || ''

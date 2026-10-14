@@ -70,7 +70,7 @@ function rawFingerprint(raw) {
 const EXPLICIT_COMMIT_KEY_LIST = Object.freeze([
   'sl_expenses', 'sl_tasks', 'sl_events', 'sl_exams', 'sl_bills', 'sl_focus_sessions',
   'sl_checklists', 'sl_courses', 'sl_course_templates', 'sl_ledger_fx', 'sl_ledger_budget',
-  'sl_ledger_templates', 'sl_schedule_exceptions',
+  'sl_ledger_templates', 'sl_schedule_exceptions', 'sl_places', 'sl_place_visits', 'sl_place_offers',
 ])
 export { EXPLICIT_COMMIT_KEY_LIST }
 const EXPLICIT_COMMIT_KEYS = new Set(EXPLICIT_COMMIT_KEY_LIST)

@@ -12,6 +12,7 @@ import { detachCourseRelations } from './relations.js'
 import { defaultAccount, defaultReminderMinutes, policyDateKey, policyTimeKey } from '../settingsPolicy.js'
 import { eventInputError } from '../events/eventFields.js'
 import { normalizeTimeStages, taskRepeatBase, taskStages } from '../tasks/taskTimePlan'
+import { normalizeExternalExam } from '../externalExam.js'
 
 let lastStamp = 0
 function stamp() {
@@ -170,7 +171,13 @@ function restoreDeletedItem(list, entity, { preserveArchive = false } = {}) {
 }
 
 export function useDomainCommands() {
-  const tasks = useStoredRef('sl_tasks', []); const courses = useStoredRef('sl_courses', []); const milestones = useStoredRef('sl_exams', []); const bills = useStoredRef('sl_bills', []); const transactions = useStoredRef('sl_expenses', []); const events = useStoredRef('sl_events', []); const focusSessions = useStoredRef('sl_focus_sessions', [])
+  const tasks = useStoredRef('sl_tasks', /** @type {import('../../types/domain').Task[]} */ ([]))
+  const courses = useStoredRef('sl_courses', /** @type {import('../../types/domain').Course[]} */ ([]))
+  const milestones = useStoredRef('sl_exams', /** @type {import('../../types/domain').Milestone[]} */ ([]))
+  const bills = useStoredRef('sl_bills', /** @type {import('../../types/domain').Bill[]} */ ([]))
+  const transactions = useStoredRef('sl_expenses', /** @type {import('../../types/domain').Transaction[]} */ ([]))
+  const events = useStoredRef('sl_events', /** @type {import('../../types/domain').QuickEvent[]} */ ([]))
+  const focusSessions = useStoredRef('sl_focus_sessions', /** @type {Record<string, any>[]} */ ([]))
   const commitTasks = () => touchStoredRef('sl_tasks')
   const commitTransactions = () => touchStoredRef('sl_expenses')
   const commitEvents = () => touchStoredRef('sl_events')
@@ -262,8 +269,41 @@ export function useDomainCommands() {
     if (restored) commitTasks()
     return restored
   }
-  function createMilestone(value) { const now = stamp(); const item = { id: value.id || createId('e'), name: String(value.name || value.title || '').trim(), date: value.date || '', time: value.time || '', location: value.location || '', note: value.note || '', category: value.category || '学习', repeat: value.repeat || 'none', pinned: Boolean(value.pinned), courseId: value.courseId || '', courseName: value.courseName || value.course || '', reviewProgress: Number(value.reviewProgress) || 0, reminderMinutes: defaultReminderMinutes('milestone', value.reminderMinutes), kind: value.kind || 'countdown', createdAt: now, updatedAt: now, ...origin(value) }; if (!item.name || !item.date) throw new Error('请补充名称和目标日期'); milestones.value.push(item); commitMilestones(); return item }
-  function updateMilestone(id, value) { const item = milestones.value.find((entry) => entry.id === id); if (!item) return null; Object.assign(item, value, { updatedAt: stamp() }); commitMilestones(); return item }
+  function createMilestone(value) {
+    const now = stamp()
+    const item = {
+      id: value.id || createId('e'),
+      name: String(value.name || value.title || '').trim(),
+      date: value.date || value.examDate || value.registerDeadline || '',
+      time: value.time || value.examTime || '',
+      location: value.location || value.venue || '',
+      note: value.note || '',
+      category: value.category || (value.kind === 'externalExam' ? '校外考试' : '学习'),
+      repeat: value.repeat || 'none',
+      pinned: Boolean(value.pinned),
+      courseId: value.courseId || '',
+      courseName: value.courseName || value.course || '',
+      reviewProgress: Number(value.reviewProgress) || 0,
+      reminderMinutes: defaultReminderMinutes('milestone', value.reminderMinutes),
+      kind: value.kind || 'countdown',
+      createdAt: now,
+      updatedAt: now,
+      ...origin(value),
+    }
+    if (item.kind === 'externalExam') Object.assign(item, normalizeExternalExam({ ...item, ...value, id: item.id, createdAt: now, updatedAt: now, ...origin(value) }))
+    if (!item.name || !item.date) throw new Error('请补充名称和目标日期')
+    milestones.value.push(item)
+    commitMilestones()
+    return item
+  }
+  function updateMilestone(id, value) {
+    const item = milestones.value.find((entry) => entry.id === id)
+    if (!item) return null
+    Object.assign(item, value, { updatedAt: stamp() })
+    if (item.kind === 'externalExam') Object.assign(item, normalizeExternalExam(item))
+    commitMilestones()
+    return item
+  }
   const milestoneRestoreRelations = new Map()
   function deleteMilestone(id) {
     const index = milestones.value.findIndex((item) => item.id === id)
@@ -340,6 +380,7 @@ export function useDomainCommands() {
       billId: value.billId || '', billingPeriodKey: value.billingPeriodKey || '',
       ...(currency ? { currency } : {}),
       ...(hasSplitInput ? { split: normalizeSplit(value.split) } : {}),
+      ...(value.placeId ? { placeId: String(value.placeId) } : {}),
       createdAt: now, updatedAt: now, ...origin(value),
     }
     return item
@@ -437,6 +478,10 @@ export function useDomainCommands() {
       ...(value.split !== undefined ? { split: normalizeSplit(value.split) } : {}),
       updatedAt: stamp(),
     })
+    if (value.placeId !== undefined) {
+      if (value.placeId) item.placeId = String(value.placeId)
+      else delete item.placeId
+    }
     commitTransactions()
     return item
   }
@@ -476,6 +521,26 @@ export function useDomainCommands() {
     commitTransactions()
     return previous
   }
+  /** 供撤销分类合并使用：恢复此前存在但现在已失效的分类键，不重新校验目标分类。 */
+  function restoreTransactionCategories(changes = []) {
+    if (!Array.isArray(changes)) throw new Error('撤销分类数据格式不正确')
+    const targets = changes.map((change) => {
+      const id = String(change?.id ?? '').trim()
+      if (!id || !Object.hasOwn(change || {}, 'categoryId')) throw new Error('撤销分类缺少记录或原分类')
+      const item = transactions.value.find((entry) => String(entry.id) === id)
+      if (!item || item.archivedAt || item.deletedAt || item.tombstone) throw new Error('原收支记录已不可用，无法撤销分类合并')
+      return { item, categoryId: change.categoryId, hasCategory: change.hasCategory !== false }
+    })
+    if (!targets.length) return []
+    const updatedAt = stamp()
+    for (const { item, categoryId, hasCategory } of targets) {
+      if (!hasCategory) delete item.cat
+      else item.cat = categoryId
+      item.updatedAt = updatedAt
+    }
+    commitTransactions()
+    return targets.map(({ item }) => item)
+  }
   function deleteTransaction(id) {
     const item = transactions.value.find((entry) => entry.id === id)
     if (!item) return null
@@ -494,6 +559,32 @@ export function useDomainCommands() {
   }
   function restoreDeletedTransaction(entity) {
     const restored = restoreDeletedItem(transactions, entity)
+    if (restored) commitTransactions()
+    return restored
+  }
+  /**
+   * 归档一条不涉及退款或固定账单关系的交易。
+   *
+   * 数据体检只能用可撤销的生命周期动作清理异常金额；关联支付与退款
+   * 会影响账本关系，必须留给原有专门操作处理，不能从体检页一键归档。
+   */
+  function archiveTransaction(id) {
+    const item = transactions.value.find((entry) => String(entry.id) === String(id))
+    if (!item) return null
+    if (isRefundTransaction(item) || isBillPayment(item) || transactionBillId(item) || item.billingPeriodKey || item.source === 'bill') {
+      return { blocked: true, reason: '退款或固定账单支付记录请在账本中复核，体检页不会改动它们。' }
+    }
+    if (transactions.value.some((entry) => isRefundTransaction(entry) && entry.refundOf === id
+      && !entry.archivedAt && !entry.deletedAt && !entry.tombstone)) {
+      return { blocked: true, reason: '这笔支出有未归档的退款关联，请先在账本中复核。' }
+    }
+    const archived = archiveItem(transactions, item.id)
+    if (archived) commitTransactions()
+    return archived
+  }
+  function restoreTransaction(id) {
+    const item = transactions.value.find((entry) => String(entry.id) === String(id))
+    const restored = item ? restoreItem(transactions, item.id) : null
     if (restored) commitTransactions()
     return restored
   }
@@ -804,5 +895,5 @@ export function useDomainCommands() {
     if (session.todoId) recordTaskFocusSession(session.todoId, session)
     return session
   }
-  return { tasks, courses, milestones, bills, transactions, events, focusSessions, createTask, updateTask, toggleTask, completeTask, setTaskStageCompleted, deleteTask, restoreDeletedTask, archiveTask, restoreTask, createMilestone, updateMilestone, deleteMilestone, restoreDeletedMilestone, archiveMilestone, restoreMilestone, createEvent, updateEvent, deleteEvent, restoreDeletedEvent, archiveEvent, restoreEvent, createTransaction, createImportedTransactions, updateTransaction, updateTransactionCategories, deleteTransaction, restoreDeletedTransaction, refundTransaction, undoBillPayment, createBill, updateBill, deleteBill, archiveBill, restoreBill, setBillActive, skipBill, deleteCourse, createCourse, replaceCourses, archiveCourse, restoreCourse, recordTaskFocusSession, recordFocusSession, payBill }
+  return { tasks, courses, milestones, bills, transactions, events, focusSessions, createTask, updateTask, toggleTask, completeTask, setTaskStageCompleted, deleteTask, restoreDeletedTask, archiveTask, restoreTask, createMilestone, updateMilestone, deleteMilestone, restoreDeletedMilestone, archiveMilestone, restoreMilestone, createEvent, updateEvent, deleteEvent, restoreDeletedEvent, archiveEvent, restoreEvent, createTransaction, createImportedTransactions, updateTransaction, updateTransactionCategories, restoreTransactionCategories, deleteTransaction, restoreDeletedTransaction, archiveTransaction, restoreTransaction, refundTransaction, undoBillPayment, createBill, updateBill, deleteBill, archiveBill, restoreBill, setBillActive, skipBill, deleteCourse, createCourse, replaceCourses, archiveCourse, restoreCourse, recordTaskFocusSession, recordFocusSession, payBill }
 }

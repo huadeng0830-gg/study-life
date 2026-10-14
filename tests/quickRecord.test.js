@@ -81,6 +81,14 @@ describe('quickRecord.parser', () => {
     expect(draft.date).toBe('2026-12-01')
   })
 
+  it('把校外考试与报名截止快捷语句识别为结构化考试记录', () => {
+    const now = new Date('2026-10-14T10:00:00')
+    const [exam] = parseQuickRecord('下周六考四级', { now })
+    expect(exam).toMatchObject({ type: 'externalExam', examDate: expect.any(String), registerDeadline: '' })
+    const [registration] = parseQuickRecord('3 月 10 日教资报名截止', { now })
+    expect(registration).toMatchObject({ type: 'externalExam', registerDeadline: expect.any(String), examDate: '' })
+  })
+
   it('没有日期的普通记录仍可成为待办', () => {
     const [draft] = parseQuickRecord('买洗衣液')
     expect(draft.type).toBe('todo')

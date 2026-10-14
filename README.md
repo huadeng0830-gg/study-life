@@ -9,12 +9,9 @@
 [🌐 在线体验](https://study-life.pages.dev/) · [📦 GitHub](https://github.com/huadeng0830-gg/study-life)
 
 <!-- RELEASE_STATUS:START -->
-> **当前源码版本**：网页 / PWA `1.1.2` · Windows 桌面版 `1.1.2`
+> **当前源码版本**：网页 / PWA `1.2.0` · Windows 桌面版 `1.2.0`
 > **最近更新**：
-> - 管理中心新增可复制的诊断信息，含版本、结构版本、分区计数与静默失败的作用域
-> - 本机写入失败时不再静默：管理中心会提示有多少项修改尚未保存，避免刷新后丢失
-> - 修正分区清单指向：专注记录不再跳到无关的周回顾页，无页面的分区改为显示实际归属
-> - 修正运行状态列表的无效 dl 结构，并去除同屏重复的刷新按钮与分区明细
+> - 新增调课通知应用、通知档案、只读提问、考试日历、去年今日、值日班务、数据体检和地点档案；支持可拒收的好友地点预设
 > [下载已发布的 Windows 安装包与版本说明](https://github.com/huadeng0830-gg/study-life/releases/latest)
 <!-- RELEASE_STATUS:END -->
 

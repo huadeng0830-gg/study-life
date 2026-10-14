@@ -119,6 +119,9 @@ export function selectReminders({ tasks = [], bills = [], milestones = [], event
   }
   for (const milestone of Array.isArray(milestones) ? milestones : []) {
     if (!isActiveEntity(milestone)) continue
+    // 校外考试的报名、考前提醒由提醒调度器按阶段推送；完整清单留在考试日历，
+    // 首页只保留普通重要日期，避免多条考试节点挤占行动区。
+    if (milestone.kind === 'externalExam') continue
     const countdown = countdownState(milestone, now)
     const item = { key: ref('milestone', milestone), sourceType: 'milestone', sourceId: milestone.id, kind: 'milestone', title: milestone.name, dueAt: countdown.sortValue, priority: countdown.cls === 'hot' ? 'high' : 'normal', entity: milestone }
     if (!excludedKeys.has(item.key) && !countdown.isPast && countdown.sortValue - now.getTime() <= 14 * 86400000) results.push(item)

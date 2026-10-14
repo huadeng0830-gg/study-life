@@ -16,6 +16,10 @@ import {
   checklistAmount, checklistItemName, checklistItems, checklistQuantity, formatChecklistText,
   parseChecklistLines, selectChecklistItems, summarizeChecklist,
 } from '../composables/domain/checklistModel.js'
+import {
+  currentSemesterStartDate, DUTY_WEEKDAYS, dutyMemberChoices, firstDutyDateOnOrAfter,
+  normalizeDutyMembers, summarizeDutyCounts,
+} from '../composables/domain/checklistDuty.js'
 
 const commands = useChecklistCommands()
 const { lists } = commands
@@ -46,6 +50,10 @@ const listType = ref('general')
 /** @type {import('vue').Ref<string | number>} */
 const listBudget = ref('')
 const templateId = ref('')
+const dutyWeekday = ref(1)
+const dutyMembersInput = ref('')
+const dutyRepeatEnabled = ref(true)
+const dutySemesterStartDate = ref('')
 const listError = ref('')
 const listErrorField = ref('name')
 const showItemForm = ref(false)
@@ -53,7 +61,7 @@ const showItemForm = ref(false)
 const itemListId = ref(null)
 /** @type {import('vue').Ref<string | null>} */
 const editingItemId = ref(null)
-/** @type {import('vue').Ref<{name: string, quantity: string | number, unit: string, price: string | number, category: string, note: string}>} */
+/** @type {import('vue').Ref<{name: string, quantity: string | number, unit: string, price: string | number, category: string, note: string, assignedTo?: string, substitutedBy?: string, dueDate?: string}>} */
 const itemForm = ref(emptyItem())
 const itemError = ref('')
 const itemErrorField = ref('name')
@@ -99,6 +107,28 @@ const quickName = computed({
 })
 const allVisibleSelected = computed(() => visibleItems.value.length > 0 && visibleItems.value.every((item) => selectedIds.value.has(item.id)))
 const template = computed(() => CHECKLIST_TEMPLATES.find((item) => item.id === templateId.value))
+const isDutyForm = computed(() => editingListId.value
+  ? Boolean(findList(editingListId.value)?.dutyEnabled)
+  : Boolean(template.value?.dutyEnabled))
+const existingDutyMembers = computed(() => {
+  void lists.value
+  return dutyMemberChoices(lists.value)
+})
+const selectedDutyMembers = computed(() => normalizeDutyMembers(dutyMembersInput.value))
+const dutySemesterStart = computed(() => activeList.value?.semesterStartDate || currentSemesterStartDate(clock.value))
+const dateKey = (date) => {
+  const pad = (value) => String(value).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+}
+const dutyStats = computed(() => {
+  void lists.value
+  return summarizeDutyCounts(lists.value, { semesterStartDate: dutySemesterStart.value, throughDate: dateKey(clock.value) })
+})
+const dutyStatsText = computed(() => {
+  const assignments = dutyStats.value.byMember.map((entry) => `${entry.name} ${entry.count} 次`).join('、') || '暂无已排班次数'
+  const substitutions = dutyStats.value.substitutedBy.map((entry) => `${entry.name} ${entry.count} 次`).join('、') || '暂无代班'
+  return `本学期值日/值班：${assignments} · 代班：${substitutions}`
+})
 const formList = computed(() => findList(itemListId.value))
 const bulkList = computed(() => findList(bulkListId.value))
 const bulkPreview = computed(() => {
@@ -179,6 +209,11 @@ watch(lists, () => {
   selectedIds.value = new Set([...selectedIds.value].filter((id) => valid.has(id)))
   if (category.value && !categoryOptions.value.includes(category.value)) category.value = ''
 })
+watch(dutyWeekday, (next, previous) => {
+  if (!template.value?.name?.includes('X')) return
+  const oldName = template.value.name.replace('X', DUTY_WEEKDAYS[previous]?.label?.replace('星期', '') || '一')
+  if (listName.value === oldName) listName.value = template.value.name.replace('X', DUTY_WEEKDAYS[next]?.label?.replace('星期', '') || '一')
+})
 watch(() => [route.query.focus, lists.value], async () => {
   if (route.path !== '/lists') return
   const { id } = readFocusQuery(route)
@@ -198,13 +233,20 @@ watch(() => [route.query.focus, lists.value], async () => {
 
 function chooseTemplate(id) {
   const previous = template.value
+  const previousName = previous?.name?.includes('X') ? previous.name.replace('X', DUTY_WEEKDAYS[dutyWeekday.value]?.label?.replace('星期', '') || '一') : previous?.name
   templateId.value = id
-  if (!listName.value.trim() || listName.value === previous?.name) listName.value = template.value?.name || ''
+  const nextName = template.value?.name?.includes('X') ? template.value.name.replace('X', DUTY_WEEKDAYS[dutyWeekday.value]?.label?.replace('星期', '') || '一') : template.value?.name
+  if (!listName.value.trim() || listName.value === previousName) listName.value = nextName || ''
   listType.value = template.value?.type || 'general'
+  if (template.value?.dutyEnabled) dutyRepeatEnabled.value = template.value.repeat === 'weekly'
 }
 function openCreateList(id = '') {
   editingListId.value = null
   listName.value = ''; listType.value = 'general'; listBudget.value = ''; templateId.value = ''; listError.value = ''
+  dutyWeekday.value = clock.value.getDay()
+  dutyMembersInput.value = ''
+  dutyRepeatEnabled.value = true
+  dutySemesterStartDate.value = currentSemesterStartDate(clock.value)
   if (typeof id === 'string' && id) chooseTemplate(id)
   showListForm.value = true
 }
@@ -214,12 +256,39 @@ function openEditList() {
   closeMenu()
   editingListId.value = list.id
   listName.value = list.name; listType.value = list.type || 'general'; listBudget.value = list.budget ?? ''; listError.value = ''
+  dutyWeekday.value = Number.isInteger(Number(list.repeatWeekday)) ? Number(list.repeatWeekday) : clock.value.getDay()
+  dutyMembersInput.value = (list.dutyMembers || []).join('、')
+  dutyRepeatEnabled.value = list.repeat === 'weekly'
+  dutySemesterStartDate.value = list.semesterStartDate || currentSemesterStartDate(clock.value)
   showListForm.value = true
 }
 function saveList() {
   try {
-    const data = { name: listName.value, type: listType.value, budget: listType.value === 'shopping' ? listBudget.value : '' }
-    const list = editingListId.value ? commands.updateList(editingListId.value, data) : commands.createList({ ...data, items: template.value?.items ?? [] })
+    const duty = isDutyForm.value
+    const members = normalizeDutyMembers(dutyMembersInput.value)
+    const data = {
+      name: listName.value, type: listType.value, budget: listType.value === 'shopping' ? listBudget.value : '',
+      ...(duty ? {
+        dutyEnabled: true,
+        dutyMembers: members,
+        repeat: dutyRepeatEnabled.value ? 'weekly' : 'none',
+        repeatWeekday: Number(dutyWeekday.value),
+        semesterStartDate: dutySemesterStartDate.value === currentSemesterStartDate(clock.value) ? '' : dutySemesterStartDate.value,
+      } : {}),
+    }
+    const list = editingListId.value
+      ? commands.updateList(editingListId.value, data)
+      : commands.createList({
+        ...data,
+        ...(duty ? {
+          dutyTemplateId: template.value?.id || '',
+          occurrenceDate: firstDutyDateOnOrAfter(clock.value, Number(dutyWeekday.value)),
+          items: (template.value?.items || []).map((item, index) => ({
+            ...item, dueDate: firstDutyDateOnOrAfter(clock.value, Number(dutyWeekday.value)),
+            assignedTo: members[index % Math.max(members.length, 1)] || '',
+          })),
+        } : { items: template.value?.items ?? [] }),
+      })
     if (!list) throw new Error('这份清单已被删除，请关闭后重新选择')
     activeId.value = list.id
     listQuery.value = ''
@@ -230,6 +299,22 @@ function saveList() {
     listErrorField.value = errorField(listError.value)
     focusError('lists', listErrorField.value)
   }
+}
+function toggleDutyMember(name) {
+  const members = normalizeDutyMembers(dutyMembersInput.value)
+  const target = name.normalize('NFKC').toLocaleLowerCase()
+  dutyMembersInput.value = (members.some((member) => member.normalize('NFKC').toLocaleLowerCase() === target)
+    ? members.filter((member) => member.normalize('NFKC').toLocaleLowerCase() !== target)
+    : [...members, name]).join('、')
+}
+function createNextDutyOccurrence() {
+  const source = activeList.value
+  if (!source) return
+  const next = commands.createNextDutyOccurrence(source.id)
+  if (!next) { showToast('没有可生成的下一期，或这一天已经排过班', { type: 'info' }); return }
+  activeId.value = next.id
+  listQuery.value = ''
+  offerUndo(`已创建 ${next.occurrenceDate} 的值日/班务清单`, () => commands.deleteList(next.id), source.id)
 }
 function duplicateList() {
   closeMenu()
@@ -298,13 +383,23 @@ function openAddItem() {
   if (!activeList.value) return
   itemListId.value = activeList.value.id
   editingItemId.value = null
-  itemForm.value = { ...emptyItem(), name: quickName.value.trim(), category: category.value || '其他' }
+  itemForm.value = {
+    ...emptyItem(), name: quickName.value.trim(), category: category.value || '其他',
+    ...(activeList.value.dutyEnabled ? { assignedTo: '', substitutedBy: '', dueDate: activeList.value.occurrenceDate || '' } : {}),
+  }
   itemError.value = ''; showItemForm.value = true
 }
 function openEditItem(item, listId = activeList.value?.id) {
   itemListId.value = listId
   editingItemId.value = item.id
-  itemForm.value = { name: checklistItemName(item), quantity: checklistQuantity(item), unit: item.unit || '件', price: item.price ?? '', category: item.category || '其他', note: item.note || '' }
+  itemForm.value = {
+    name: checklistItemName(item), quantity: checklistQuantity(item), unit: item.unit || '件', price: item.price ?? '',
+    category: item.category || '其他', note: item.note || '',
+    ...(findList(listId)?.dutyEnabled ? {
+      assignedTo: item.assignedTo || '', substitutedBy: item.substitutedBy || '',
+      dueDate: item.dueDate || findList(listId)?.occurrenceDate || '',
+    } : {}),
+  }
   itemError.value = ''; showItemForm.value = true; openSwipeItemId.value = ''
 }
 function saveItem() {
@@ -444,6 +539,7 @@ function emptyAction() {
         <div class="list-head">
           <div class="list-heading"><span class="list-type">{{ typeInfo(activeList.type).icon }} {{ typeInfo(activeList.type).label }}</span><h2 id="active-list-title">{{ activeList.name }}</h2><p v-if="updatedText(activeList)" class="updated-note">{{ updatedText(activeList) }}</p></div>
           <div class="list-menu">
+            <button v-if="activeList.dutyEnabled && activeList.repeat === 'weekly'" type="button" class="btn btn-primary" @click="createNextDutyOccurrence">生成下一期</button>
             <button type="button" class="btn btn-ghost" @click="openEditList">编辑清单</button>
             <details ref="listMenu" class="more-menu" @keydown.esc.prevent.stop="closeMenuFromKey">
               <summary aria-label="更多清单操作">•••</summary>
@@ -462,6 +558,9 @@ function emptyAction() {
           <div><span>待完成事项</span><b>{{ stats.remaining }}<small>项</small></b><span>{{ stats.count && !stats.remaining ? '全部完成了 ✓' : '逐项勾选，不再遗漏' }}</span></div>
           <div v-if="activeList.type === 'shopping'"><span>{{ stats.unpricedCount ? '已估总额' : '预计总额' }}</span><b class="summary-money">{{ money(stats.total) }}</b><span>待购 {{ money(stats.pendingTotal) }} · 已购 {{ money(stats.boughtTotal) }}</span></div>
         </div>
+        <p v-if="activeList.dutyEnabled" class="duty-overview" role="status">
+          <span>{{ activeList.repeat === 'weekly' ? `每周${DUTY_WEEKDAYS.find(item => item.value === activeList.repeatWeekday)?.label || '指定星期'}` : '单次排班' }} · {{ dutyStatsText }}（{{ dutySemesterStart }} 起）</span>
+        </p>
         <div v-if="activeList.type === 'shopping' && (stats.unpricedCount || stats.budget !== null)" class="shopping-insight" :class="{ 'over-budget': budgetExceeded }">
           <span v-if="stats.unpricedCount">{{ stats.unpricedCount }} 项未估价，金额为已估价事项的小计</span>
           <span v-if="stats.budget !== null">预算 {{ money(stats.budget) }} · {{ budgetExceeded ? `超出 ${money(-(stats.budgetRemaining ?? 0))}` : `剩余 ${money(stats.budgetRemaining)}` }}</span>
@@ -499,6 +598,9 @@ function emptyAction() {
               <button type="button" class="item-edit" :aria-label="`编辑${checklistItemName(item)}`" @click="openEditItem(item)">
                 <span class="item-title"><b :title="checklistItemName(item)">{{ checklistItemName(item) }}</b><span v-if="item.category && item.category !== '其他'" class="category-chip">{{ item.category }}</span></span>
                 <small v-if="activeList.type === 'shopping' || checklistQuantity(item) !== 1 || item.note"><template v-if="activeList.type === 'shopping' || checklistQuantity(item) !== 1">{{ checklistQuantity(item) }} {{ item.unit || '件' }}<template v-if="item.note"> · </template></template>{{ item.note }}</small>
+                <small v-if="activeList.dutyEnabled && (item.dueDate || item.assignedTo || item.substitutedBy)" class="duty-item-meta">
+                  {{ item.dueDate || activeList.occurrenceDate || '未排日期' }}<template v-if="item.assignedTo"> · 负责：{{ item.assignedTo }}</template><template v-if="item.substitutedBy"> · <template v-if="item.assignedTo">{{ item.assignedTo }}由{{ item.substitutedBy }}代班</template><template v-else>代班：{{ item.substitutedBy }}</template></template>
+                </small>
               </button>
               <strong v-if="activeList.type === 'shopping'" class="item-price" :class="{ unpriced: checklistAmount(item) === null }">{{ checklistAmount(item) === null ? '未估价' : money(checklistAmount(item)) }}</strong>
             </article>
@@ -515,7 +617,7 @@ function emptyAction() {
           <p class="form-hint">从空白开始，或选择一份可修改的模板。</p>
           <div class="template-options" role="group" aria-label="清单模板">
             <button type="button" class="template-option" :class="{ chosen: !templateId }" :aria-pressed="!templateId" @click="chooseTemplate('')"><span aria-hidden="true">＋</span><b>空白清单</b><small>自由记录</small></button>
-            <button v-for="entry in CHECKLIST_TEMPLATES" :key="entry.id" type="button" class="template-option" :class="{ chosen: templateId === entry.id }" :aria-pressed="templateId === entry.id" @click="chooseTemplate(entry.id)"><span aria-hidden="true">{{ typeInfo(entry.type).icon }}</span><b>{{ entry.name }}</b><small>{{ entry.items.length }} 项</small></button>
+            <button v-for="entry in CHECKLIST_TEMPLATES" :key="entry.id" type="button" class="template-option" :class="{ chosen: templateId === entry.id }" :aria-pressed="templateId === entry.id" @click="chooseTemplate(entry.id)"><span aria-hidden="true">{{ typeInfo(entry.type).icon }}</span><b>{{ entry.name.replace('X', DUTY_WEEKDAYS[dutyWeekday]?.label?.replace('星期', '') || '一') }}</b><small>{{ entry.items.length }} 项</small></button>
           </div>
           <p v-if="template" class="template-preview">{{ template.items.map(item => item.name).join('、') }}</p>
         </template>
@@ -523,6 +625,21 @@ function emptyAction() {
         <input id="lists-name" v-model="listName" maxlength="80" required autofocus placeholder="例如：本周采购" :aria-invalid="listError && listErrorField === 'name' ? true : undefined" :aria-describedby="listError ? 'lists-form-error' : undefined" @input="listError = ''" />
         <label for="lists-type">清单类型</label>
         <select id="lists-type" v-model="listType"><option v-for="(info, key) in LIST_TYPES" :key="key" :value="key">{{ info.icon }} {{ info.label }}</option></select>
+        <section v-if="isDutyForm" class="duty-form-fields" aria-label="值日与班务安排">
+          <label for="lists-duty-members">成员名单</label>
+          <input id="lists-duty-members" v-model="dutyMembersInput" maxlength="4000" list="duty-member-options" placeholder="输入同学姓名，用逗号或顿号分隔" />
+          <datalist id="duty-member-options"><option v-for="name in existingDutyMembers" :key="name" :value="name" /></datalist>
+          <p class="form-hint">可以点选之前记录过的同学，也可以手动输入；名单保存在这份清单中。</p>
+          <div v-if="existingDutyMembers.length" class="duty-member-picker" role="group" aria-label="从已有名字中选择成员">
+            <button v-for="name in existingDutyMembers" :key="name" type="button" :class="{ chosen: selectedDutyMembers.includes(name) }" :aria-pressed="selectedDutyMembers.includes(name)" @click="toggleDutyMember(name)">{{ selectedDutyMembers.includes(name) ? '✓ ' : '＋ ' }}{{ name }}</button>
+          </div>
+          <label for="lists-duty-weekday">排班星期</label>
+          <select id="lists-duty-weekday" v-model.number="dutyWeekday"><option v-for="weekday in DUTY_WEEKDAYS" :key="weekday.value" :value="weekday.value">{{ weekday.label }}</option></select>
+          <label class="checkbox-label"><input v-model="dutyRepeatEnabled" type="checkbox" />每周生成下一期</label>
+          <label for="lists-duty-semester-start">本学期起始日期</label>
+          <input id="lists-duty-semester-start" v-model="dutySemesterStartDate" type="date" />
+          <p class="form-hint">默认按学期常用月份估算，可改为学校实际开学日期；统计只计起始日期到今天的排班。</p>
+        </section>
         <template v-if="listType === 'shopping'"><label for="lists-budget">购物预算（元，选填）</label><input id="lists-budget" v-model="listBudget" type="number" inputmode="decimal" min="0" max="100000000" step="0.01" placeholder="留空表示不设置预算" :aria-invalid="listError && listErrorField === 'budget' ? true : undefined" :aria-describedby="listError ? 'lists-form-error' : undefined" @input="listError = ''" /></template>
         <p v-if="listError" id="lists-form-error" class="error" role="alert">{{ listError }}</p>
       </form>
@@ -534,6 +651,11 @@ function emptyAction() {
         <p class="form-hint">{{ formList?.name || '原清单已被删除' }}</p>
         <label for="lists-item-name">事项名称 <span aria-hidden="true">*</span></label>
         <input id="lists-item-name" v-model="itemForm.name" maxlength="120" required autofocus placeholder="例如：洗衣液、带充电器" :aria-invalid="itemError && itemErrorField === 'name' ? true : undefined" :aria-describedby="itemError ? 'lists-item-error' : undefined" @input="itemError = ''" />
+        <template v-if="formList?.dutyEnabled">
+          <label for="lists-item-due-date">值日日期</label><input id="lists-item-due-date" v-model="itemForm.dueDate" type="date" />
+          <label for="lists-item-assignee">负责同学</label><input id="lists-item-assignee" v-model="itemForm.assignedTo" list="duty-item-member-options" maxlength="80" placeholder="选择已有名字或手动填写" /><datalist id="duty-item-member-options"><option v-for="name in dutyMemberChoices([formList])" :key="name" :value="name" /></datalist>
+          <label for="lists-item-substitute">代班同学</label><input id="lists-item-substitute" v-model="itemForm.substitutedBy" list="duty-item-member-options" maxlength="80" placeholder="没有代班时留空" />
+        </template>
         <div class="form-row" :class="{ three: formList?.type === 'shopping' }">
           <div><label for="lists-item-quantity">数量</label><input id="lists-item-quantity" v-model="itemForm.quantity" type="number" inputmode="decimal" min="0.001" max="1000000" step="any" :aria-invalid="itemError && itemErrorField === 'quantity' ? true : undefined" :aria-describedby="itemError ? 'lists-item-error' : undefined" @input="itemError = ''" /></div>
           <div><label for="lists-item-unit">单位</label><input id="lists-item-unit" v-model="itemForm.unit" list="checklist-units" maxlength="20" placeholder="件" /><datalist id="checklist-units"><option v-for="unit in CHECKLIST_UNITS" :key="unit" :value="unit" /></datalist></div>
@@ -621,6 +743,7 @@ function emptyAction() {
 .summary-grid b small { font-size: var(--fs-12); font-weight: var(--fw-600); color: var(--ink-soft); }
 .summary-grid b.summary-money { font-size: var(--fs-21); overflow-wrap: anywhere; }
 .summary-progress { margin-top: 2px; max-width: 140px; }
+.duty-overview { margin: 12px 24px 0; padding: 10px 12px; border: 1px solid var(--border); border-radius: var(--radius-8); color: var(--ink-soft); background: var(--bg-tint); font-size: var(--fs-12); line-height: 1.6; overflow-wrap: anywhere; }
 .shopping-insight { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 6px 14px; margin: 12px 24px 0; padding: 10px 12px; background: var(--primary-soft); color: var(--primary); border-radius: var(--radius-8); font-size: var(--fs-11); line-height: 1.6; }
 .shopping-insight.over-budget { background: var(--danger-soft); color: var(--danger); }
 .quick-add { display: grid; grid-template-columns: minmax(0, 1fr) auto auto auto; gap: 8px; padding: 22px 24px 16px; }
@@ -669,6 +792,11 @@ function emptyAction() {
 .form input, .form select, .form textarea { width: 100%; }
 .form textarea { resize: vertical; min-height: 72px; }
 .form-hint { margin: 0; color: var(--ink-soft); font-size: var(--fs-12); line-height: 1.6; }
+.duty-form-fields { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-10); background: var(--bg-tint); }
+.duty-form-fields > label:not(.checkbox-label) { margin-top: 4px; color: var(--ink-soft); font-size: var(--fs-13); }
+.duty-member-picker { display: flex; flex-wrap: wrap; gap: 6px; }
+.duty-member-picker button { min-height: 36px; padding: 6px 10px; border: 1px solid var(--border); border-radius: var(--radius-pill); color: var(--ink-soft); background: var(--card); font-size: var(--fs-12); }
+.duty-member-picker button.chosen { border-color: var(--primary); color: var(--primary); background: var(--primary-soft); }
 .template-options { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 4px; }
 .template-option { display: flex; flex-direction: column; gap: 5px; align-items: flex-start; min-width: 0; padding: 12px; color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-10); background: var(--bg-tint); text-align: left; }
 .template-option b { font-size: var(--fs-12); }
@@ -715,14 +843,16 @@ button:disabled { opacity: .45; cursor: not-allowed; }
   .summary-grid { margin-inline: 16px; }
   .summary-grid b { font-size: var(--fs-23); }
   .summary-grid b.summary-money { font-size: var(--fs-17); }
-  .shopping-insight { margin-inline: 16px; }
+.shopping-insight { margin-inline: 16px; }
+.duty-overview { margin-inline: 16px; }
   .quick-add { padding: 18px 16px 14px; }
   .item-toolbar, .search-toolbar { padding-inline: 16px; }
   .item-tools { margin-left: auto; }
   .search-toolbar { grid-template-columns: 1fr 1fr; }
   .search-toolbar input { grid-column: 1 / -1; }
   .filter-result { padding-inline: 16px; }
-  .shopping-item { gap: 8px; padding-inline: 12px; }
+.shopping-item { gap: 8px; padding-inline: 12px; }
+.duty-overview { margin-inline: 12px; }
   .item-check { padding: 10px; width: 44px; }
   .item-title { gap: 5px; }
   .category-chip { max-width: 64px; }

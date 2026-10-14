@@ -85,12 +85,16 @@ export function validateScheduleException(value) {
     const seen = new Set()
     for (const slot of value.courseSlots) {
       const id = String(slot?.courseId ?? '').trim()
-      const start = periodIndex(slot?.start)
-      const end = periodIndex(slot?.end)
-      if (!ids.includes(id) || seen.has(id) || start < 0 || end < 0) {
+      const hasStart = Boolean(slot?.start)
+      const hasEnd = Boolean(slot?.end)
+      const hasLocation = Boolean(String(slot?.location || '').trim())
+      const start = hasStart ? periodIndex(slot.start) : -1
+      const end = hasEnd ? periodIndex(slot.end) : -1
+      const locationOnly = !hasStart && !hasEnd && hasLocation
+      if (!ids.includes(id) || seen.has(id) || (!locationOnly && (start < 0 || end < 0)) || hasStart !== hasEnd) {
         return { field: 'courseSlots', message: '请为每门补课课程选择有效的开始和结束节次', courseId: id }
       }
-      if (end < start) return { field: 'courseSlots', message: '补课结束节次不能早于开始节次', courseId: id }
+      if (!locationOnly && end < start) return { field: 'courseSlots', message: '补课结束节次不能早于开始节次', courseId: id }
       seen.add(id)
     }
   }
@@ -157,7 +161,12 @@ export function upsertScheduleException(value) {
     // 单节课例外才有 courseIds；其余类型显式写 null，避免导出里留下"曾经有过的"痕迹。
     courseIds: session ? normalizeCourseIds(value.courseIds) : null,
     courseSlots: type === 'session_makeup' && Array.isArray(value.courseSlots)
-      ? value.courseSlots.map((slot) => ({ courseId: String(slot.courseId).trim(), start: slot.start, end: slot.end }))
+      ? value.courseSlots.map((slot) => ({
+        courseId: String(slot.courseId).trim(),
+        ...(slot.start ? { start: slot.start } : {}),
+        ...(slot.end ? { end: slot.end } : {}),
+        ...(String(slot.location || '').trim() ? { location: String(slot.location).trim() } : {}),
+      }))
       : null,
     note: String(value.note ?? '').trim(),
     updatedAt: value.updatedAt || new Date().toISOString(),
@@ -232,6 +241,9 @@ export function scheduleExceptionsForDate(date, exceptions = scheduleExceptions.
       || right.date.localeCompare(left.date)
       || String(left.id ?? '').localeCompare(String(right.id ?? '')))
 }
+
+// 通知确认页和课表编辑器共用同一写入入口；保留旧名称作为兼容别名。
+export const saveScheduleException = upsertScheduleException
 
 /** 当天生效的「整天例外」（保持旧的单条语义，供网格标记与既有调用方使用）。 */
 export function scheduleExceptionForDate(date, exceptions = scheduleExceptions.value) {
@@ -310,23 +322,41 @@ function coursesForDateFromIndex(index, date, exceptions) {
     ? mapped.filter((course) => !sessionHidden.has(String(course.id)))
     : mapped
 
-  // 部分补课在指定节次显示；旧记录没有 courseSlots 时才沿用课程原节次。
-  // 已有同 ID 的课不加；同一课程的停课安排优先，避免停课后又被补回来。
+  // 部分补课在指定节次显示；通知确认也可用 slot 临时覆盖本日课程的节次或教室。
+  // 同一课程的停课安排优先，避免停课后又被补回来。
   if (!sessionMakeupIds.size) return afterOff
   const present = new Set(afterOff.map((course) => String(course.id)))
   const additions = []
-  for (const item of scheduleExceptionsForDate(date, exceptions)) {
+  for (const item of scheduleExceptionsForDate(date, exceptions).slice().reverse()) {
     if (item.type !== 'session_makeup') continue
     // 损坏或引用已删除节次的记录不能悄悄回落到另一时间。
     if (item.courseSlots != null && validateScheduleException(item)) continue
     for (const courseId of normalizeCourseIds(item.courseIds)) {
-      if (present.has(courseId) || sessionHidden.has(courseId)) continue
+      if (sessionHidden.has(courseId)) continue
       const course = index.byId?.get(courseId)
       if (!course) continue
       const slot = item.courseSlots?.find((entry) => String(entry.courseId).trim() === courseId)
+      if (present.has(courseId)) {
+        const position = afterOff.findIndex((row) => String(row.id) === courseId)
+        if (position >= 0 && slot) {
+          afterOff[position] = {
+            ...afterOff[position],
+            ...(slot.start ? { start: slot.start } : {}),
+            ...(slot.end ? { end: slot.end } : {}),
+            ...(slot.location ? { room: slot.location } : {}),
+            sessionMakeup: true,
+            exceptionId: item.id,
+            exceptionDate: date,
+          }
+        }
+        continue
+      }
+      if (sessionHidden.has(courseId)) continue
       additions.push({
         ...course,
-        ...(slot ? { start: slot.start, end: slot.end } : {}),
+        ...(slot?.start ? { start: slot.start } : {}),
+        ...(slot?.end ? { end: slot.end } : {}),
+        ...(slot?.location ? { room: slot.location } : {}),
         displayDay: actualDay,
         sourceDay: course.day,
         sessionMakeup: true,

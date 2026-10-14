@@ -2,7 +2,7 @@
 const WEEKDAY = { 日: 0, 天: 0, 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6 }
 const CN_DIGITS = { 零: 0, 〇: 0, 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 }
 const PERIOD_WORDS = '凌晨|早上|上午|中午|下午|晚上|夜里|今晚|今早'
-const ACTION_WORDS = '提交|上交|上传|完成|报名|填写|领取|参加|召开|开会|举行|签到|报到|集合|上课|听|交|改到|换到|处理|确认|缴费'
+const ACTION_WORDS = '提交|上交|上传|完成|报名|填写|领取|参加|召开|开会|举行|签到|报到|集合|上课|听|交|改到|换到|调课|停课|补课|换教室|处理|确认|缴费'
 
 export const NOTICE_TYPE_OPTIONS = [
   { value: '缴费', label: '缴费', icon: '💰' },
@@ -289,7 +289,7 @@ function classifyNotice(text, title) {
   // 原先只认 开会/召开/举行，于是它掉到兜底的"通知"里 —— 用户拿到的是一条
   // 没法加进日程的泛泛通知，而不是一条该出现在日历上的彩排。
   if (/班会|会议|开会|组会|答辩|面试|讲座|活动|签到|召开|举行|运动会|彩排/.test(text)) return '会议'
-  if (/调课|改到|换到|上课|课程/.test(text)) return '课程'
+  if (/调课|停课|补课|改到|换到|换教室|上课|课程/.test(text)) return '课程'
   if (/作业|实验报告|论文|习题|上交|提交|上传/.test(text)) return '作业'
   if (/截止|截至|最晚|逾期|之前|以前/.test(text)) return '截止'
   if (/(报名|报到|集合|提交|完成|缴费)/.test(text) && /前|日期|时间|今天|明天|后天|本周|下周|\d{1,2}月|\d{1,2}日/.test(text)) return '截止'
@@ -362,6 +362,106 @@ function recommendationFor(type) {
   return { key: 'task', label: '创建待办', reason: '这条内容包含需要完成或处理的动作。' }
 }
 
+function scheduleWeekDay(text, date) {
+  if (date && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    const day = new Date(`${date}T00:00:00`).getDay()
+    return day === 0 ? 6 : day - 1
+  }
+  const matches = [...String(text).matchAll(/(?:下|本|这)?(?:周|星期|礼拜)([一二三四五六日天])/g)]
+  const last = matches.at(-1)?.[1]
+  const weekdays = { 一: 0, 二: 1, 三: 2, 四: 3, 五: 4, 六: 5, 日: 6, 天: 6 }
+  return last ? weekdays[last] : null
+}
+
+function scheduleNumber(value) {
+  if (/^\d+$/.test(value)) return Number(value)
+  if (value === '十') return 10
+  if (value.includes('十')) {
+    const [left, right] = value.split('十')
+    return (left ? CN_DIGITS[left] ?? 0 : 1) * 10 + (right ? CN_DIGITS[right] ?? 0 : 0)
+  }
+  return CN_DIGITS[value] ?? 0
+}
+
+function englishScheduleDates(text, now) {
+  const weekdays = { monday: 0, tuesday: 1, wednesday: 2, thursday: 3, friday: 4, saturday: 5, sunday: 6 }
+  const results = []
+  for (const match of text.matchAll(/\b(next|this|on)?\s*(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/gi)) {
+    const target = weekdays[match[2].toLocaleLowerCase()]
+    const current = (now.getDay() + 6) % 7
+    const delta = match[1]?.toLocaleLowerCase() === 'next'
+      ? 7 - current + target
+      : match[1]?.toLocaleLowerCase() === 'this'
+        ? target - current
+        : (target - current + 7) % 7 || 7
+    results.push({
+      raw: match[0],
+      start: match.index,
+      end: match.index + match[0].length,
+      value: dateString(addDays(now, delta)),
+      isPublication: false,
+    })
+  }
+  return results
+}
+
+function scheduleCourseHint(text, courses, dates, times) {
+  const names = [...new Set((Array.isArray(courses) ? courses : [])
+    .map((course) => String(course?.name ?? '').trim()).filter(Boolean))]
+    .sort((left, right) => right.length - left.length)
+  const exact = names.find((name) => text.includes(name))
+  if (exact) return exact
+
+  let remainder = text
+  const spans = [
+    ...dates.map(({ start, end }) => ({ start, end })),
+    ...times.map(({ start, end }) => ({ start, end })),
+  ].sort((left, right) => right.start - left.start)
+  for (const span of spans) remainder = remainder.slice(0, span.start) + ' ' + remainder.slice(span.end)
+  remainder = remainder
+    .replace(/(?:第\s*[零〇一二两三四五六七八九十百\d]+\s*(?:[-—到至~～]\s*[零〇一二两三四五六七八九十百\d]+\s*)?节(?:课)?)/g, ' ')
+    .replace(/(?:下|本|这)?(?:周|星期|礼拜)[一二三四五六日天]?/g, ' ')
+    .replace(/(?:调课|调到|调至|调整到|停课|不上课|本节不上|取消课程|补课|补上课|加课|换教室|改到|改为|换到|换为|教室|地点|请|通知|安排|调整|课程|上课|课表|本节|本次|这节|同学们|大家|老师|转到|移到)/g, ' ')
+    .replace(/[\d年月日号第节课：:，,。；;、!！?？\s]/g, '')
+  return remainder.length >= 2 && remainder.length <= 16 ? remainder : ''
+}
+
+/** 把明确的调课表达解析成候选；缺少的信息留空，交给确认页补齐。 */
+export function parseScheduleProposal(value, courses = [], now = new Date()) {
+  const text = normalizeText(value)
+  const cancel = /停课|本节不上|不上课|取消(?:本次)?(?:课程|课)|本次不(?:上课|开课)|cancel\s+(?:the\s+)?class|class\s+(?:is\s+)?cancel(l)?ed/i.test(text)
+  const makeup = !cancel && /补课|补上(?:课)?|加课|增开课程|make[ -]?up\s+class/i.test(text)
+  const change = /调课|串讲|串课|换教室|改到|换到|调至|调到|调整到|改为|改在|移到|move(?:d)?\s+class|class\s+(?:is\s+)?moved|rescheduled|room\s+change/i.test(text)
+  if (!cancel && !makeup && !change) return null
+
+  const kind = cancel ? 'cancel' : makeup ? 'makeup' : 'move'
+  const periodMatches = [...text.matchAll(/第\s*([零〇一二两三四五六七八九十百\d]+)\s*(?:[-—到至~～]\s*([零〇一二两三四五六七八九十百\d]+)\s*)?节(?:课)?/g)]
+  const periodSpans = periodMatches.map((match) => ({ start: match.index, end: match.index + match[0].length }))
+  const dates = [...extractDateCandidates(text, now), ...englishScheduleDates(text, now)].filter((candidate) => !candidate.isPublication && candidate.value
+    && !periodSpans.some((span) => candidate.start < span.end && candidate.end > span.start))
+  const sourceDate = kind === 'move' && dates.length > 1 ? dates[0].value : ''
+  const date = dates.length ? dates.at(-1).value : ''
+  const period = periodMatches.at(-1)
+  const periodStart = period ? scheduleNumber(period[1]) : null
+  const periodEnd = period ? scheduleNumber(period[2] || period[1]) : null
+  const locations = [
+    ...[...text.matchAll(/(?:改到|换到|调至|调到|改为|换为|换教室(?:到|为)?|改教室(?:到|为)?|教室(?:改为|换到|调整为|为|到)?|地点(?:调整为|改为|为)?|to)\s*([A-Za-z]{0,2}\s*\d{2,4}[A-Za-z]{0,2})/gi)].map((match) => match[1]),
+  ]
+  const courseName = scheduleCourseHint(text, courses, dates, extractTimeCandidates(text))
+
+  return {
+    kind,
+    date,
+    weekDay: scheduleWeekDay(text, date),
+    periodStart: periodStart > 0 ? periodStart : null,
+    periodEnd: periodEnd > 0 ? periodEnd : null,
+    courseName,
+    location: locations[0]?.replace(/\s+/g, '').trim() || '',
+    raw: String(value ?? ''),
+    ...(sourceDate ? { sourceDate } : {}),
+  }
+}
+
 function extractNoticeItems(text, courses, now) {
   const clauses = normalizeText(text).split(/[\n。！？!?；;]/).flatMap((line) => line.split(/[，,]/)).map((item) => item.trim()).filter(Boolean)
   const actionClauses = clauses.filter((clause) => new RegExp(`(?:${ACTION_WORDS}|报到|带)`).test(clause) && !/缴费平台|缴费工作安排|缴费通知|缴费时间/.test(clause))
@@ -390,7 +490,9 @@ function extractNoticeItems(text, courses, now) {
 export function buildNoticeUnderstanding(parsed) {
   if (!parsed) return null
   const type = parsed.type || '通知'
-  const recommendation = recommendationFor(type)
+  const recommendation = parsed.scheduleProposal
+    ? { key: 'schedule', label: '应用到课表', reason: '识别到课程安排变更；确认课程和节次后写入已有课表例外。' }
+    : recommendationFor(type)
   const facts = []
   const addFact = (key, label, value, kind = 'text') => { if (value) facts.push({ key, label, value, kind }) }
   const dateValue = parsed.dueDate || parsed.dateRange
@@ -526,6 +628,7 @@ export function parseNotice(source, courses = [], now = new Date(), options = {}
   // 清理标题时使用全部日期，避免通知落款日期泄漏到标题。
   const rawTitle = cleanTitle(normalizedText, dateCandidates, timeCandidates, locations)
   const type = classifyNotice(normalizedText, rawTitle)
+  const scheduleProposal = parseScheduleProposal(normalizedText, courses, now)
   const title = refineTitle(rawTitle, type, normalizedText)
   const uncertain = /可能|暂定|预计|待定|或许|另行通知/.test(normalizedText)
   const selectedTime = selectTimeCandidate(timeCandidates, normalizedText, type)
@@ -544,6 +647,7 @@ export function parseNotice(source, courses = [], now = new Date(), options = {}
     title,
     content: normalizedText,
     type,
+    scheduleProposal,
     course,
     dueDate: selectedDate?.value ?? '',
     dueTime: selectedTime?.time ?? '',
@@ -572,6 +676,55 @@ export function parseNotice(source, courses = [], now = new Date(), options = {}
   }
   if (!options.skipItems) result.items = extractNoticeItems(normalizedText, courses, now)
   return result
+}
+
+/**
+ * Extract a reviewable local offer draft from a merchant notice.
+ * Only a clearly labelled sale price (or a single unambiguous currency amount)
+ * is prefilled; phrases such as "满 30 减 10" never become a redemption price.
+ */
+export function parsePlaceOfferCandidate(source, now = new Date()) {
+  const text = normalizeText(source)
+  if (!text || !/(优惠|折扣|团购|代金券|优惠券|学生价|特价|买一送一|第二份|立减|满\s*\d+(?:\.\d+)?\s*减|\d+(?:\.\d+)?\s*折|新品|上新|新款)/.test(text)) return null
+
+  const amountPattern = String.raw`(?:人民币|RMB|[¥￥]\s*)?\s*(\d{1,6}(?:\.\d{1,2})?)\s*(?:元|块)?`
+  const saleLabel = new RegExp(String.raw`(?:优惠价|团购价|特价|到手价|券后价|折后价|售价|仅需|只要)\s*[:：]?\s*${amountPattern}`, 'i')
+  const originalLabel = new RegExp(String.raw`原价\s*[:：]?\s*${amountPattern}`, 'i')
+  const rawSaleMatch = text.match(saleLabel)
+  const saleMatch = rawSaleMatch && !/^\s*折/.test(text.slice(rawSaleMatch.index + rawSaleMatch[0].length))
+    ? rawSaleMatch : null
+  const originalMatch = text.match(originalLabel)
+  const amountMatches = [...text.matchAll(new RegExp(amountPattern, 'gi'))]
+    .filter((match) => {
+      if (!match[1] || Number(match[1]) <= 0) return false
+      const before = text.slice(Math.max(0, match.index - 8), match.index)
+      const after = text.slice(match.index + match[0].length)
+      return !/原价\s*[:：]?\s*$/.test(before) && !/^\s*折/.test(after)
+    })
+  const currencyAmounts = [...text.matchAll(/[¥￥]\s*(\d{1,6}(?:\.\d{1,2})?)/g)]
+  const hasThresholdDiscount = /满\s*\d+(?:\.\d+)?\s*减\s*\d+(?:\.\d+)?/.test(text)
+  let price = saleMatch ? Number(saleMatch[1]) : null
+  if (price === null && !hasThresholdDiscount && amountMatches.length === 1 && currencyAmounts.length <= 1) {
+    price = Number(amountMatches[0][1])
+  }
+  const originalPrice = originalMatch ? Number(originalMatch[1]) : null
+
+  const parsed = parseNotice(text, [], now, { skipItems: true })
+  const title = String(parsed.title && parsed.title !== '待处理通知' ? parsed.title : parsed.summary || text.split('\n')[0] || '通知优惠')
+    .slice(0, 60)
+  const expiry = extractDateCandidates(text, now).find((candidate) => {
+    if (candidate.isPublication || !candidate.value) return false
+    const context = text.slice(Math.max(0, candidate.start - 18), Math.min(text.length, candidate.end + 18))
+    return /有效期|使用期限|截止|截至|到期|核销至|活动至|可用至/.test(context)
+  })
+
+  return {
+    title,
+    price: Number.isFinite(price) && price > 0 ? price : null,
+    originalPrice: Number.isFinite(originalPrice) && originalPrice > 0 ? originalPrice : null,
+    expiresAt: expiry?.value || '',
+    priceNeedsConfirmation: !(Number.isFinite(price) && price > 0),
+  }
 }
 
 export function findNoticeChanges(parsed, tasks) {

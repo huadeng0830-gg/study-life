@@ -28,6 +28,21 @@ export const CHECKLIST_TEMPLATES = [
     id: 'room', name: '房间整理', type: 'chores', description: '拆成小事，逐项完成',
     items: [{ name: '整理桌面' }, { name: '收纳衣物' }, { name: '清理冰箱' }, { name: '清扫地面' }, { name: '清倒垃圾' }],
   },
+  {
+    id: 'dorm-duty', name: '宿舍值日（每周X）', dutyBaseName: '宿舍值日', dutyEnabled: true, repeat: 'weekly',
+    type: 'chores', description: '按每周指定星期轮值，可记录负责人与代班',
+    items: [{ name: '清扫地面' }, { name: '清倒垃圾' }, { name: '整理公共区域' }],
+  },
+  {
+    id: 'lab-duty', name: '实验室值班', dutyBaseName: '实验室值班', dutyEnabled: true, repeat: 'weekly',
+    type: 'chores', description: '登记本周值班同学和交接事项',
+    items: [{ name: '检查公共区域' }, { name: '整理共享器材' }, { name: '完成值班交接' }],
+  },
+  {
+    id: 'committee-meeting', name: '班委例会', dutyBaseName: '班委例会', dutyEnabled: true, repeat: 'weekly',
+    type: 'general', description: '记录本周议题、纪要和后续分工',
+    items: [{ name: '整理会议议题' }, { name: '记录会议决定' }, { name: '跟进待办分工' }],
+  },
 ]
 
 /** @param {Partial<import('../../types/checklists').Checklist> | null | undefined} list */

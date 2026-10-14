@@ -10,7 +10,8 @@ import { buildEntityManifest, buildSyncManifest, hashSyncValue, mergeRestoreMark
 import { mergeSyncPayload } from './syncMerge.js'
 import { validateAndRepairRelations } from './syncIntegrity.js'
 import { requestAccountSync } from '../services/accountSync.js'
-import { ACCOUNT_SYNC_DATA_SCHEMA_VERSION } from './accountSyncSchema.js'
+import { ACCOUNT_SYNC_DATA_SCHEMA_VERSION, migrateAccountSyncPayload } from './accountSyncSchema.js'
+import { projectAccountSyncValues, restoreLocalPlaceLinks } from './placeModels.js'
 
 export const ACCOUNT_SYNC_POLL_MS = 60000
 export const ACCOUNT_SYNC_DEBOUNCE_MS = 4000
@@ -209,10 +210,11 @@ async function cycle(id, revision, choices, assertLock = () => {}) {
     }
     const remote = probe.exists ? await provider('pull', {}, id, revision) : probe
     const local = await localValues()
+    const cloudLocal = projectAccountSyncValues(local)
     assertCurrent(id, revision)
     const sequence = localSequence
     const localTombstones = currentTombstones(local, meta)
-    let values = local
+    let values = cloudLocal
     let tombstones = localTombstones
     let markers = meta.restoreMarkers
     if (remote.exists) {
@@ -247,13 +249,15 @@ async function cycle(id, revision, choices, assertLock = () => {}) {
         //      所以拉下来的 manifest 在这里只承担"挡住不可信数据"一件事。
         // 而且这一轮同步成功后会把重新算好的 manifest 推回云端，问题随即自愈。
       }
-      const remoteValues = validateSyncPayload(remote.data.values)
+      const remoteValues = projectAccountSyncValues(
+        validateSyncPayload(migrateAccountSyncPayload(remote.data.values)),
+      )
       const remoteTombstones = remote.data.manifest.tombstones || []
       const remoteMarkers = remote.data.manifest.restoreMarkers || []
       const defaults = accountDefaultValues()
       defaults.sl_festive_config.installDate = local.sl_festive_config?.installDate || ''
       const merge = mergeSyncPayload({ baseManifest: meta.hasBaseline ? meta.baseline : buildEntityManifest(defaults),
-        localValues: local, remoteValues, localTombstones, remoteTombstones, remoteRestoreMarkers: remoteMarkers, keys: SYNC_KEYS })
+        localValues: cloudLocal, remoteValues, localTombstones, remoteTombstones, remoteRestoreMarkers: remoteMarkers, keys: SYNC_KEYS })
       tombstones = mergeTombstones(localTombstones, remoteTombstones)
       markers = mergeRestoreMarkers(meta.restoreMarkers, remoteMarkers)
       const restored = new Set(markers.map((item) => item.tombstoneId))
@@ -279,10 +283,11 @@ async function cycle(id, revision, choices, assertLock = () => {}) {
     values = validateSyncPayload(values)
     assertValidSyncPayload(values)
     if (validateStableEntityIds(values).length) throw new Error('合并后的记录编号异常，本次未应用。')
+    const localValuesToRestore = restoreLocalPlaceLinks(local, values)
     const manifest = buildSyncManifest(values, { tombstones, restoreMarkers: markers, schemaVersion: ACCOUNT_SYNC_DATA_SCHEMA_VERSION })
     // 不把设备名或生成时间当成业务更改；无变化时不制造新版本。
     const same = remote.exists && !manifestDrifted
-      && hashSyncValue(values) === hashSyncValue(remote.data.values)
+      && hashSyncValue(values) === hashSyncValue(projectAccountSyncValues(remote.data.values))
       && hashSyncValue(tombstones) === hashSyncValue(remote.data.manifest.tombstones || [])
       && hashSyncValue(markers) === hashSyncValue(remote.data.manifest.restoreMarkers || [])
     // manifestDrifted 时即使**值**一模一样也要回写一次：那份 manifest 是错的，
@@ -311,12 +316,12 @@ async function cycle(id, revision, choices, assertLock = () => {}) {
     if (sequence !== localSequence) {
       assertCurrent(id, revision)
       await accountLocalSnapshot('metadata:' + id, { ...meta, hasBaseline: true,
-        baseline: acknowledgedLocalBaseline(meta, local, values), tombstones, restoreMarkers: markers, revision: acknowledged.revision })
+        baseline: acknowledgedLocalBaseline(meta, cloudLocal, values), tombstones, restoreMarkers: markers, revision: acknowledged.revision })
       continue
     }
     const nextMeta = { version: 1, hasBaseline: true, baseline: buildEntityManifest(values), tombstones, restoreMarkers: markers,
       revision: acknowledged.revision, lastSyncedAt: new Date().toISOString() }
-    if (hashSyncValue(values) !== hashSyncValue(local)) {
+    if (hashSyncValue(values) !== hashSyncValue(cloudLocal)) {
       await accountLocalSnapshot('rollback:' + id, { values: local, meta })
       assertCurrent(id, revision)
       if (sequence !== localSequence) continue
@@ -327,7 +332,7 @@ async function cycle(id, revision, choices, assertLock = () => {}) {
       assertLock()
       assertCurrent(id, revision)
       if (sequence !== localSequence) { localStorage.removeItem(ACCOUNT_SYNC_COMMIT_KEY); continue }
-      await restoreStoredValues(values, { markChanged: false, assertBeforeApply: () => { assertLock(); assertCurrent(id, revision) } })
+      await restoreStoredValues(localValuesToRestore, { markChanged: false, assertBeforeApply: () => { assertLock(); assertCurrent(id, revision) } })
       // 账号切换会等待本次提交；一旦应用开始，完整保存基线后再允许切换。
       await accountLocalSnapshot('metadata:' + id, nextMeta)
       localStorage.removeItem(ACCOUNT_SYNC_COMMIT_KEY)

@@ -7,11 +7,11 @@ import { DEFAULT_MOBILE_NAVIGATION, normalizeMobileNavigation } from '../src/com
 
 describe('导航信息架构', () => {
   it('只把真实页面注册为导航项，一级分组聚焦四个核心空间，低频页面收进其他', () => {
-    expect(navigationRegistry).toHaveLength(11)
+    expect(navigationRegistry).toHaveLength(12)
     expect(new Set(navigationRegistry.map((item) => item.path)).size).toBe(navigationRegistry.length)
     expect(desktopNavigationGroups.map((group) => group.label)).toEqual(['今日', '学习', '日程', '齐行', '其他'])
     expect(desktopNavigationGroups.find((group) => group.id === 'learning').items.map((item) => item.id)).toEqual(['schedule', 'course', 'tasks', 'exams'])
-    expect(desktopNavigationGroups.find((group) => group.id === 'other').items.map((item) => item.id)).toEqual(['lists', 'bills', 'review'])
+    expect(desktopNavigationGroups.find((group) => group.id === 'other').items.map((item) => item.id)).toEqual(['lists', 'bills', 'places', 'review'])
     expect(navigationRegistry.find((item) => item.id === 'schedule').mobileLabel).toBe('课表')
     expect(routes.find((route) => route.path === '/notes')?.redirect).toBe('/')
   })

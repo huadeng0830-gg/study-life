@@ -19,7 +19,7 @@ export function validateQuickRecord(draft) {
     if (normalizeAmount(draft.amount) === null) issues.amount = '金额需大于 0，且最多保留两位小数'
     if (draft.categoryUncertain && !draft.categoryConfirmed) issues.category = '请确认建议分类，或选择其它分类'
   }
-  if (['event', 'countdown', 'bill', 'expense', 'income'].includes(draft.type) && !draft.date) {
+  if (['event', 'countdown', 'externalExam', 'bill', 'expense', 'income'].includes(draft.type) && !draft.date) {
     issues.date = '请补充日期'
   } else if (draft.date && !validDate(draft.date)) {
     issues.date = '请填写有效日期'
@@ -58,4 +58,15 @@ export function reconcileQuickRecordDrafts(parsed, previous) {
 /** @param {import('./contracts').QuickRecordDraft[]} drafts */
 export function quickRecordDraftText(drafts) {
   return drafts.map((draft) => draft.raw).filter(Boolean).join('\n')
+}
+
+/** 中文输入法组词期间不接管按键；多行保留回车编辑，单行可直存。 */
+export function quickRecordKeyAction(event, { multiLine = false, smallViewport = false } = {}) {
+  if (event?.isComposing || event?.keyCode === 229) return 'ignore'
+  if (event?.key === 'Escape') return 'original'
+  if (event?.key === 'Tab') return 'next-field'
+  if (event?.key !== 'Enter') return 'ignore'
+  if (event.ctrlKey || event.metaKey) return 'save'
+  if (event.shiftKey || smallViewport || multiLine) return 'newline'
+  return 'save'
 }

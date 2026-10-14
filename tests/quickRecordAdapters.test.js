@@ -2,6 +2,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { useDomainCommands } from '../src/composables/domain/commands.js'
 import { useQuickRecordAdapters } from '../src/composables/quickRecord/adapters.js'
+import { createPlaceWithVisit, placeVisits, places, updatePlace } from '../src/composables/placeBook.js'
 import { selectReminders } from '../src/composables/domain/selectors.js'
 
 const domain = useDomainCommands()
@@ -14,6 +15,8 @@ beforeEach(() => {
   domain.bills.value = []
   domain.transactions.value = []
   domain.events.value = []
+  places.value = []
+  placeVisits.value = []
 })
 
 describe('QuickRecord 业务适配与撤销', () => {
@@ -55,6 +58,69 @@ describe('QuickRecord 业务适配与撤销', () => {
     expect(domain.transactions.value[0].direction).toBe('income')
     result.undo()
     expect(domain.transactions.value).toHaveLength(0)
+  })
+
+  it('撤销关联地点的快速记账时一并移除到访并恢复地点评分', () => {
+    createPlaceWithVisit({ id: 'place-quick', name: '虚构食堂', category: 'food', scores: { value: 'worth' } }, {
+      id: 'visit-quick-base', visitedAt: '2026-09-01', scores: { value: 'worth' },
+    })
+    const result = quickRecord.save({
+      id: 'qr-place-expense', type: 'expense', title: '午饭', raw: '午饭18元', amount: 18,
+      category: 'food', date: '2026-09-02', placeId: 'place-quick', placeValue: 'not-worth',
+    })
+    expect(placeVisits.value).toHaveLength(2)
+    expect(domain.transactions.value[0].placeId).toBe('place-quick')
+
+    result.undo()
+
+    expect(domain.transactions.value).toHaveLength(0)
+    expect(placeVisits.value.map((visit) => visit.id)).toEqual(['visit-quick-base'])
+    expect(places.value[0].scores.value).toBe('worth')
+  })
+
+  it('地点关联消费沿用账本的一亿元金额上限', () => {
+    createPlaceWithVisit({ id: 'place-large-quick', name: '虚构珠宝店', category: 'trade', scores: { value: 'mixed' } }, {
+      id: 'visit-large-base', visitedAt: '2026-09-01', scores: { value: 'mixed' },
+    })
+    const result = quickRecord.save({
+      id: 'qr-large-place-expense', type: 'expense', title: '定制饰品', raw: '定制饰品250000元', amount: 250000,
+      category: 'shopping', date: '2026-09-02', placeId: 'place-large-quick',
+    })
+    expect(domain.transactions.value[0].amount).toBe(250000)
+    expect(placeVisits.value.at(-1).price).toBe(250000)
+    result.undo()
+    expect(domain.transactions.value).toHaveLength(0)
+    expect(placeVisits.value).toHaveLength(1)
+  })
+
+  it('延迟撤销不覆盖之后修改的地点评分', () => {
+    createPlaceWithVisit({ id: 'place-later-edit', name: '虚构面馆', category: 'food', scores: { value: 'worth' } }, {
+      id: 'visit-later-base', visitedAt: '2026-09-01', scores: { value: 'worth' },
+    })
+    const result = quickRecord.save({
+      id: 'qr-later-edit', type: 'expense', title: '午饭', raw: '午饭18元', amount: 18,
+      category: 'food', date: '2026-09-02', placeId: 'place-later-edit', placeValue: 'not-worth',
+    })
+    updatePlace('place-later-edit', { scores: { value: 'mixed' } })
+
+    result.undo()
+
+    expect(places.value[0].scores.value).toBe('mixed')
+    expect(placeVisits.value).toHaveLength(1)
+  })
+
+  it('校外考试草稿写入 sl_exams 兼容字段并带默认用品，且可撤销', () => {
+    const result = quickRecord.save({
+      id: 'qr-external-exam', type: 'externalExam', title: '四级', raw: '下周六考四级',
+      date: '2026-10-24', examDate: '2026-10-24', examTime: '09:00', venue: '市一中',
+    })
+    expect(domain.milestones.value[0]).toMatchObject({
+      kind: 'externalExam', category: '校外考试', date: '2026-10-24', examDate: '2026-10-24',
+      time: '09:00', examTime: '09:00', venue: '市一中', location: '市一中',
+      requiredItems: expect.arrayContaining([expect.objectContaining({ name: '2B 铅笔', quantity: 2 })]),
+    })
+    result.undo()
+    expect(domain.milestones.value).toHaveLength(0)
   })
 
   it('固定账单保存本身不重复创建交易，支付一次只推进一个周期', () => {

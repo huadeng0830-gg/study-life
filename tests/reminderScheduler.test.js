@@ -14,6 +14,8 @@ async function freshModules() {
   localStorage.setItem('sl_tasks', JSON.stringify(globalThis.__seedTasks || []))
   localStorage.setItem('sl_events', '[]')
   localStorage.setItem('sl_exams', '[]')
+  localStorage.setItem('sl_notices', '[]')
+  localStorage.setItem('sl_notice_sources', '[]')
   localStorage.setItem('sl_quick_record_settings', JSON.stringify({ timezone: 'UTC' }))
   await import('../src/composables/store/core.js')
   await import('../src/composables/settingsPolicy.js')
@@ -129,6 +131,40 @@ describe('提醒调度器', () => {
     expect(scheduler.collectDueReminders(utc('2026-12-31', '12:00'))).toContainEqual(expect.objectContaining({ key: 'milestone:new-year', fireAt: utc('2026-12-31', '12:00') }))
   })
 
+  it('校外考试在报名截止前 14 天和考试前一晚按各自去重键提醒', async () => {
+    const scheduler = await freshModules()
+    const { clock, useStoredRef } = await import('../src/composables/store/core.js')
+    useStoredRef('sl_exams', []).value = [{
+      id: 'external-reminder', kind: 'externalExam', name: '四级', category: '校外考试',
+      date: '2026-10-24', examDate: '2026-10-24', registerDeadline: '2026-10-18', requiredItems: [],
+    }]
+
+    const registration = scheduler.collectDueReminders(utc('2026-10-04', '09:00'))
+    expect(registration).toContainEqual(expect.objectContaining({
+      key: 'milestone:external-reminder:externalExam:registration:14',
+      at: '2026-10-04 09:00',
+      body: '四级 报名截止还有 14 天',
+    }))
+
+    const carryItems = scheduler.collectDueReminders(utc('2026-10-23', '20:00'))
+    expect(carryItems).toContainEqual(expect.objectContaining({
+      key: 'milestone:external-reminder:externalExam:carry-items:1',
+      at: '2026-10-23 20:00',
+    }))
+    expect(new Set(carryItems.map((entry) => entry.key)).size).toBe(carryItems.length)
+
+    const registrationKey = 'milestone:external-reminder:externalExam:registration:14'
+    const registrationNow = utc('2026-10-04', '09:00')
+    clock.value = new Date(registrationNow)
+    useStoredRef('sl_reminder_log', []).value = [{ key: registrationKey, firedAt: registrationNow, signature: '2026-10-04 09:00' }]
+    scheduler.startReminderScheduler()
+    try {
+      expect(scheduler.collectDueReminders(registrationNow).map((item) => item.key)).not.toContain(registrationKey)
+    } finally {
+      scheduler.stopReminderScheduler()
+    }
+  })
+
   it('取消或用 status 归档的任务和重要日期不再提醒', async () => {
     seed([
       { id: 'cancelled', title: '已取消', status: 'cancelled', dueDate: '2026-10-04', dueTime: '11:35', reminderMinutes: 0 },
@@ -138,5 +174,21 @@ describe('提醒调度器', () => {
     const { useStoredRef } = await import('../src/composables/store/core.js')
     useStoredRef('sl_exams', []).value = [{ id: 'archived-date', name: '已归档日期', status: 'archived', date: '2026-10-04', time: '11:35', reminderMinutes: 0 }]
     expect(scheduler.collectDueReminders(utc('2026-10-04', '11:35'))).toEqual([])
+  })
+
+  it('通知提醒只纳入 new，已处理、已归档和屏蔽来源都不会提醒', async () => {
+    const scheduler = await freshModules()
+    const now = utc('2026-10-04', '11:35')
+    const { clock, useStoredRef } = await import('../src/composables/store/core.js')
+    clock.value = new Date(now)
+    useStoredRef('sl_notices', []).value = [
+      { id: 'notice-new', title: '虚构待处理通知', source: '虚构课程群', status: 'new', raw: '虚构通知原文' },
+      { id: 'notice-done', title: '虚构已处理通知', source: '虚构课程群', status: 'handled', raw: '虚构通知原文' },
+      { id: 'notice-archived', title: '虚构已归档通知', source: '虚构课程群', status: 'archived', raw: '虚构通知原文' },
+      { id: 'notice-muted', title: '虚构屏蔽来源通知', source: '已屏蔽群', status: 'new', raw: '虚构通知原文' },
+    ]
+    useStoredRef('sl_notice_sources', []).value = [{ id: 'source-fictional-1', source: '已屏蔽群', muted: true }]
+
+    expect(scheduler.collectDueReminders(now).filter((item) => item.kind === 'notice').map((item) => item.key)).toEqual(['notice:notice-new:'])
   })
 })

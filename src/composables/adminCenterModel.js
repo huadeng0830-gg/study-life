@@ -11,7 +11,7 @@ const SYNC_STATUS = Object.freeze({
 })
 
 /** 每个待处理事项自带按钮文案，视图不再用三元表达式反推该点哪个面板。 */
-const ACTION_LABELS = Object.freeze({ account: '查看账号', data: '打开数据管理' })
+const ACTION_LABELS = Object.freeze({ account: '查看账号', data: '打开数据管理', health: '打开数据体检' })
 
 /** 诊断里最多回带几条静默失败；再多只是噪声，且 `silentErrors` 本身只留 20 条。 */
 const SILENT_ERROR_LIMIT = 10
@@ -60,8 +60,26 @@ function networkPresentation(online) {
   return { label: '网络状态未知', tone: 'pending', detail: '当前环境没有提供浏览器网络状态；本机功能不受影响。' }
 }
 
+export function buildDataHealthSummary(report = []) {
+  const items = Array.isArray(report) ? report : []
+  const warningCount = items.filter((item) => item?.severity === 'warning').length
+  const infoCount = items.filter((item) => item?.severity === 'info').length
+  const totalCount = warningCount + infoCount
+  if (!totalCount) {
+    return { label: '未发现问题', tone: 'success', detail: '已检查当前可读取的本机记录。', totalCount, warningCount, infoCount }
+  }
+  const tone = warningCount ? 'warning' : 'neutral'
+  return {
+    label: `${totalCount} 类待复核`, tone,
+    detail: `${warningCount} 类需复核 · ${infoCount} 类提示；逐条查看后再决定是否归档或合并。`,
+    totalCount, warningCount, infoCount,
+  }
+}
+
 /** Build truthful, device-scoped status and follow-up actions from existing app state. */
-export function buildAdminCenterModel({
+/** @param {{inventory?: any, inventoryError?: string, persistence?: any, safeMode?: boolean, account?: any, backupNeedsAttention?: boolean, backupTitle?: string, pendingKeys?: string[], online?: boolean|null, dataHealthReport?: any[]}} options */
+export function buildAdminCenterModel(options = {}) {
+  const {
   inventory = null,
   inventoryError = '',
   persistence = {},
@@ -71,7 +89,8 @@ export function buildAdminCenterModel({
   backupTitle = '建议导出备份',
   pendingKeys = [],
   online = null,
-}) {
+  dataHealthReport = [],
+  } = options
   const data = inventoryPresentation(inventory, inventoryError)
   const save = persistencePresentation(persistence, safeMode)
   let sync
@@ -89,6 +108,7 @@ export function buildAdminCenterModel({
   const unsaved = Array.isArray(pendingKeys) ? pendingKeys : []
   const actions = []
   const push = (item) => actions.push({ ...item, actionLabel: ACTION_LABELS[item.action] || ACTION_LABELS.data })
+  const dataHealth = buildDataHealthSummary(dataHealthReport)
 
   if (['error', 'conflict'].includes(persistence.status)) {
     push({ id: 'save', tone: 'danger', title: '本机保存需要处理', detail: save.detail, action: 'data' })
@@ -97,6 +117,12 @@ export function buildAdminCenterModel({
     push({ id: 'inventory', tone: 'danger', title: '无法读取本机数据', detail: inventoryError, action: 'data' })
   } else if (inventory?.issues.length) {
     push({ id: 'integrity', tone: 'warning', title: '部分数据无法读取', detail: data.detail, action: 'data' })
+  }
+  if (dataHealth.totalCount) {
+    push({
+      id: 'data-health', tone: dataHealth.tone, title: `本机数据体检：${dataHealth.label}`,
+      detail: dataHealth.detail, action: 'health',
+    })
   }
   // 仍未落盘的键是「刷新即丢」的真实风险：静默失败路径只写 console，
   // 没有这一项，用户要等到关页面才发现内容没存上。
@@ -124,6 +150,7 @@ export function buildAdminCenterModel({
     save,
     sync,
     network: networkPresentation(online),
+    dataHealth,
     actions,
     hasActions: actions.length > 0,
     // 远程服务仍无健康探针。这是本页明确的能力边界，单独成行保留，
@@ -145,7 +172,9 @@ export function buildAdminCenterModel({
  * 真实异常，其 message 可能带着用户内容（例如配额错误里附带的键名或片段）。
  * 报出 `storage-local` 就足以定位到存储层，排查者再去要原始堆栈。
  */
-export function buildAdminDiagnostics({ inventory = null, model = null, version = {}, syncLastSyncedAt = '', pendingKeys = [], online = null, silentErrors = [] } = {}) {
+/** @param {{inventory?: any, model?: any, version?: any, syncLastSyncedAt?: string, pendingKeys?: string[], online?: boolean|null, silentErrors?: any[]}} options */
+export function buildAdminDiagnostics(options = {}) {
+  const { inventory = null, model = null, version = {}, syncLastSyncedAt = '', pendingKeys = [], online = null, silentErrors = [] } = options
   const status = (entry) => (entry ? { label: entry.label, tone: entry.tone } : null)
   const recent = (Array.isArray(silentErrors) ? silentErrors : []).slice(-SILENT_ERROR_LIMIT)
   return JSON.stringify({

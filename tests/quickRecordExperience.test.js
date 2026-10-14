@@ -63,7 +63,9 @@ describe('快速记录完整录入体验', () => {
     expect(document.querySelectorAll('.record-card')).toHaveLength(1)
     button('清空').click()
     await nextTick()
-    expect(document.querySelectorAll('.action-row button')).toHaveLength(8)
+    const actions = [...document.querySelectorAll('.action-row button')]
+    expect(actions).toHaveLength(9)
+    expect(actions.some((item) => item.textContent.includes('校外考试'))).toBe(true)
     document.querySelector('.example-entry').click()
     await nextTick()
     expect(document.querySelectorAll('.record-card')).toHaveLength(1)

@@ -33,6 +33,15 @@ export interface QuickRecordDraft {
   categoryEdited?: boolean
   account: string
   cycle: string
+  registerStart?: string
+  registerDeadline?: string
+  examDate?: string
+  examTime?: string
+  venue?: string
+  campus?: string
+  seatNo?: string
+  admissionNo?: string
+  requiredItems?: Array<{ name: string; quantity?: number; unit?: string; checked?: boolean }>
   questions: Array<{ field: string; label: string; choices: string[] }>
   confidence: number
   uncertain: boolean

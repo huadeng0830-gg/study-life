@@ -4,8 +4,24 @@ import {
   validateSyncPayload,
 } from '../src/composables/accountSyncData.js'
 import { normalizeStoredValue } from '../src/composables/store'
+import { migrateAccountSyncPayload } from '../src/composables/accountSyncSchema.js'
+import { SYNC_KEYS } from '../src/composables/syncKeys.js'
+import { projectAccountSyncValues, restoreLocalPlaceLinks } from '../src/composables/placeModels.js'
 
 describe('账号同步数据保护', () => {
+  it('旧账号快照缺少通知分区时补空集合且不改动旧记录', () => {
+    const old = { sl_tasks: [{ id: 'task-fictional-1', title: '虚构任务' }] }
+    expect(migrateAccountSyncPayload(old)).toEqual({
+      ...old, sl_notices: [], sl_notice_sources: [],
+      sl_data_health_settings: { staleTaskDays: 90, unhandledNoticeDays: 30, maxTransactionAmount: 100000 },
+    })
+  })
+
+  it('旧版 sl_exams 中的外部考试在同步前补齐新字段和默认用品', () => {
+    const result = migrateAccountSyncPayload({ sl_exams: [{ id: 'external', kind: 'externalExam', date: '2027-01-15' }] })
+    expect(result.sl_exams[0]).toMatchObject({ examDate: '2027-01-15', category: '校外考试', requiredItems: expect.any(Array) })
+  })
+
   it('拒绝会让页面崩溃的错误字段类型', () => {
     expect(() => validateSyncPayload({ sl_tasks: { 0: { id: 1 } } })).toThrow('格式异常')
     expect(() => validateSyncPayload({ sl_semester: [] })).toThrow('格式异常')
@@ -39,6 +55,34 @@ describe('账号同步数据保护', () => {
       value: { start: '2026-09-01', mode: 'school' },
       repaired: true,
     })
+  })
+
+  it('地点实体和到访详情不加入账号快照同步', () => {
+    expect(SYNC_KEYS).not.toContain('sl_places')
+    expect(SYNC_KEYS).not.toContain('sl_place_visits')
+    expect(SYNC_KEYS).not.toContain('sl_place_offers')
+  })
+
+  it('所有地点引用都只留在本机，并在同步合并后恢复', () => {
+    const values = { sl_expenses: [
+      { id: 'transaction-private', placeId: 'place-private', amount: 12 },
+      { id: 'transaction-school', placeId: 'place-school', amount: 18 },
+      { id: 'transaction-unknown', placeId: 'place-unknown', amount: 8 },
+    ], sl_notices: [{ id: 'notice-1', linkedEntities: [{ type: 'task', id: 'task-1' }, { type: 'place-offer', id: 'offer-local' }] }] }
+    const projected = projectAccountSyncValues(values)
+    expect(projected.sl_expenses).toEqual([
+      { id: 'transaction-private', amount: 12 },
+      { id: 'transaction-school', amount: 18 },
+      { id: 'transaction-unknown', amount: 8 },
+    ])
+    expect(projected.sl_notices[0].linkedEntities).toEqual([{ type: 'task', id: 'task-1' }])
+    expect(values.sl_expenses[0].placeId).toBe('place-private')
+    const restored = restoreLocalPlaceLinks(values, projected)
+    expect(restored.sl_expenses[0].placeId).toBe('place-private')
+    expect(restored.sl_expenses[1].placeId).toBe('place-school')
+    expect(restored.sl_notices[0].linkedEntities).toEqual([
+      { type: 'task', id: 'task-1' }, { type: 'place-offer', id: 'offer-local' },
+    ])
   })
 })
 

@@ -19,6 +19,9 @@ const BACKUP_FIELDS = Object.freeze({
   sl_festive_lunar: 'festiveLunar', sl_ui_language: 'uiLanguage',
   sl_mood_log: 'moodLog', sl_reminder_log: 'reminderLog',
   sl_focus_active: 'activeFocus', sl_task_center_log: 'taskCenterLog', sl_archived_quick_notes: 'archivedQuickNotes',
+  sl_notices: 'notices', sl_notice_sources: 'noticeSources',
+  sl_places: 'places', sl_place_visits: 'placeVisits', sl_place_offers: 'placeOffers',
+  sl_data_health_settings: 'dataHealthSettings',
   // Retirement requires this archive before removing these legacy records.
   // Keep their original export fields even though the current UI no longer restores them.
   sl_food_places: 'foodPlaces', sl_food_history: 'foodHistory', sl_food_filters: 'foodFilters', sl_packages: 'packages',

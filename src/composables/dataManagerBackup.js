@@ -365,7 +365,7 @@ async function applyRestorePayload(backup, { fromCheckpoint = false } = {}) {
   const expectedIdentity = backup.expectedIdentity || captureAccountDataIdentity()
   const mutationVersions = Object.fromEntries(Object.keys(restoredValues).map((key) => [key, storedMutationVersion(key)]))
   if (fromCheckpoint && backup.storedValues) {
-    const knownKeys = new Set(Object.values(BACKUP_STORAGE_KEYS))
+    const knownKeys = new Set(/** @type {string[]} */ (Object.values(BACKUP_STORAGE_KEYS)))
     const allowedKeys = new Set(BACKUP_MODULES.filter((mod) => selectedModules.includes(mod.key)).flatMap((mod) => mod.keys))
     for (const [key, value] of Object.entries(backup.storedValues)) {
       if (knownKeys.has(key) && allowedKeys.has(key)) restoredValues[key] = JSON.parse(JSON.stringify(value))

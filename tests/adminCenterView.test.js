@@ -18,6 +18,7 @@ import { clearAnnouncement } from '../src/composables/liveRegion.js'
 import { silentErrors } from '../src/composables/globalError.js'
 import { dismissPersistenceNotice, reportPersistenceFailure } from '../src/composables/store/persistenceState.js'
 import { BACKUP_MODULES } from '../src/composables/backupArchive.js'
+import { useDomainCommands } from '../src/composables/domain/commands.js'
 
 registerMirrorTeardown()
 vi.mock('virtual:pwa-register', () => ({ registerSW: vi.fn(() => vi.fn()) }))
@@ -144,6 +145,104 @@ describe('管理中心：运行状态诚实呈现', () => {
     for (const label of ['应用版本', '发布通道', '业务数据结构', '账号同步结构', '构建标识', '代码提交']) {
       expect(text, `版本区缺少「${label}」`).toContain(label)
     }
+  })
+})
+
+describe('管理中心：本机数据体检', () => {
+  it('按设置阈值归档异常待办，并可通过提示撤销', async () => {
+    const domain = useDomainCommands()
+    domain.tasks.value = []
+    const stale = domain.createTask({ title: '虚构的旧待办', dueDate: '2026-01-01' })
+    await settle()
+    page().querySelector('.admin-refresh').click()
+    await settle()
+
+    const card = page().querySelector('#admin-data-health')
+    expect(card.textContent).toContain('本机数据体检')
+    const threshold = card.querySelector('input[aria-label], input')
+    expect(threshold).toBeTruthy()
+    const staleIssue = [...card.querySelectorAll('.admin-health-issues > li')]
+      .find((item) => item.textContent.includes('长期未完成的待办'))
+    expect(staleIssue).toBeTruthy()
+    staleIssue.querySelector('details > summary').click()
+    await settle()
+    staleIssue.querySelector('.admin-text-action').click()
+    await settle()
+    const archiveConfirm = [...document.body.querySelectorAll('button')].find((button) => button.textContent.trim() === '确认并继续')
+    archiveConfirm?.click()
+    await settle()
+
+    let saved = JSON.parse(localStorage.getItem('sl_tasks'))
+    expect(saved.find((item) => item.id === stale.id)?.archivedAt).toBeTruthy()
+    const undo = [...document.querySelectorAll('button')].find((button) => button.textContent.trim() === '撤销')
+    expect(undo).toBeTruthy()
+    undo.click()
+    await settle()
+    saved = JSON.parse(localStorage.getItem('sl_tasks'))
+    expect(saved.find((item) => item.id === stale.id)?.archivedAt).toBeFalsy()
+  })
+
+  it('保存阈值并合并重复待办备注，撤销时恢复两条原记录', async () => {
+    const domain = useDomainCommands()
+    domain.tasks.value = []
+    const primary = domain.createTask({ title: '虚构的同组事项', dueDate: '2026-11-20', note: '主记录备注' })
+    const duplicate = domain.createTask({ title: '虚构的同组事项', dueDate: '2026-11-20', note: '重复记录备注' })
+    await settle()
+    page().querySelector('.admin-refresh').click()
+    await settle()
+
+    const card = page().querySelector('#admin-data-health')
+    const input = card.querySelector('input[type="number"]')
+    input.value = '120'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    card.querySelector('.admin-health-save').click()
+    await settle()
+    expect(JSON.parse(localStorage.getItem('sl_data_health_settings')).staleTaskDays).toBe(120)
+
+    const duplicateIssue = [...card.querySelectorAll('.admin-health-issues > li')]
+      .find((item) => item.textContent.includes('重复待办'))
+    expect(duplicateIssue).toBeTruthy()
+    duplicateIssue.querySelector('details > summary').click()
+    duplicateIssue.querySelectorAll('.admin-text-action')[0].click()
+    await settle()
+    const mergeConfirm = [...document.body.querySelectorAll('button')].find((button) => button.textContent.trim() === '确认并继续')
+    mergeConfirm?.click()
+    await settle()
+
+    let saved = JSON.parse(localStorage.getItem('sl_tasks'))
+    expect(saved.find((item) => item.id === primary.id)?.note).toContain('重复记录备注')
+    expect(saved.find((item) => item.id === duplicate.id)?.archivedAt).toBeTruthy()
+    const undo = [...document.querySelectorAll('button')].find((button) => button.textContent.trim() === '撤销')
+    expect(undo).toBeTruthy()
+    undo.click()
+    await settle()
+    saved = JSON.parse(localStorage.getItem('sl_tasks'))
+    expect(saved.find((item) => item.id === primary.id)?.note).toBe('主记录备注')
+    expect(saved.find((item) => item.id === duplicate.id)?.archivedAt).toBeFalsy()
+  })
+
+  it('大量异常记录按页展示，每页只挂载有限的逐条处理控件', async () => {
+    const domain = useDomainCommands()
+    domain.tasks.value = []
+    for (let index = 0; index < 11; index += 1) {
+      domain.createTask({ title: '分页虚构待办', dueDate: '2026-11-22' })
+    }
+    await settle()
+    page().querySelector('.admin-refresh').click()
+    await settle()
+
+    const issue = [...page().querySelectorAll('.admin-health-issues > li')]
+      .find((item) => item.textContent.includes('重复待办'))
+    issue.querySelector('details > summary').click()
+    await settle()
+    expect(issue.querySelectorAll('.admin-health-samples > li')).toHaveLength(8)
+    expect(issue.querySelector('.admin-health-pagination').textContent).toContain('第 1 / 2 组')
+
+    issue.querySelector('.admin-health-pagination button:last-child').click()
+    await settle()
+    expect(issue.querySelectorAll('.admin-health-samples > li')).toHaveLength(2)
+    expect(issue.querySelector('.admin-health-pagination').textContent).toContain('第 2 / 2 组')
+    expect(issue.querySelector('.admin-health-pagination button:last-child').disabled).toBe(true)
   })
 })
 

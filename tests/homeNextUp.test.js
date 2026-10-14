@@ -33,4 +33,15 @@ describe('home next-up projection', () => {
     expect(result.nextUp).toEqual({ kind: 'none' })
     expect(result.nextTimingLabel).toBe('')
   })
+
+  it('keeps external exams on their dedicated timeline instead of taking over the home next-up card', () => {
+    const today = appToday.value
+    const result = selectHomeNextUp({
+      now: appNow.value,
+      today,
+      courses: [], tasks: [], events: [], bills: [],
+      milestones: [{ id: 'outside', name: '四级', kind: 'externalExam', date: addAppDays(today, 1), examDate: addAppDays(today, 1) }],
+    })
+    expect(result.nextUp).toEqual({ kind: 'none' })
+  })
 })

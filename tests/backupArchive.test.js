@@ -33,7 +33,7 @@ describe('本机备份文件格式', () => {
 
     expect(snapshot).toMatchObject({
       app: 'study-life',
-      version: 13,
+      version: 16,
       schema: 'study-life.backup/v1',
       data: {
         courses,
@@ -45,6 +45,66 @@ describe('本机备份文件格式', () => {
     })
     expect(Number.isNaN(Date.parse(snapshot.exportedAt))).toBe(false)
     expect(snapshot).not.toHaveProperty('checksum')
+  })
+
+  it('通知原文和来源设置可以完整备份、校验并恢复', async () => {
+    const notices = [{ id: 'notice-fictional-1', raw: '虚构通知：周五交实验报告', source: '虚构课程群', title: '实验报告', topic: '作业', status: 'handled', createdAt: '2026-10-01T08:00:00.000Z' }]
+    const noticeSources = [{ id: 'source-fictional-1', source: '虚构课程群', muted: true }]
+    const snapshot = createBackupSnapshot(memoryStorage({ sl_notices: JSON.stringify(notices), sl_notice_sources: JSON.stringify(noticeSources) }))
+    const parsed = await parseBackupArchive(await completeBackupArchive(snapshot))
+
+    expect(parsed.providedFields).toContain('notices')
+    expect(parsed.providedFields).toContain('noticeSources')
+    expect(parsed.data.notices).toMatchObject(notices)
+    expect(parsed.data.noticeSources).toEqual(noticeSources)
+  })
+
+  it('体检阈值跟随本机备份往返，旧备份缺省时不覆盖已有设置', async () => {
+    const settings = { staleTaskDays: 120, unhandledNoticeDays: 45, maxTransactionAmount: 80000 }
+    const snapshot = createBackupSnapshot(memoryStorage({ sl_data_health_settings: JSON.stringify(settings) }))
+    const parsed = await parseBackupArchive(await completeBackupArchive(snapshot))
+
+    expect(parsed.data.dataHealthSettings).toEqual(settings)
+    expect(parsed.providedFields).toContain('dataHealthSettings')
+
+    const legacy = await parseBackupArchive(await completeBackupArchive({
+      app: 'study-life', version: 14, schema: 'study-life.backup/v1', ownerId: '',
+      data: { courses: [], countdowns: [], __owner_id: '' },
+    }))
+    expect(legacy.data.dataHealthSettings).toBeNull()
+    expect(legacy.providedFields).not.toContain('dataHealthSettings')
+  })
+
+  it('地点、到访和优惠在本机备份、校验和恢复中完整往返', async () => {
+    const places = [{ id: 'place-fiction-1', name: '虚构面馆', campus: '虚构校区', area: '北苑', placeHint: '食堂二楼', category: 'food', ratingTemplateId: 'food', scores: { value: 'worth', portion: 'large' }, note: '虚构备注', visibility: 'private', createdAt: '2026-10-01T00:00:00.000Z', updatedAt: '2026-10-01T00:00:00.000Z', archivedAt: null }]
+    const placeVisits = [{ id: 'visit-fiction-1', placeId: 'place-fiction-1', visitedAt: '2026-10-02T12:00:00.000Z', price: 18, scores: { value: 'worth', portion: 'large' }, transactionId: 'expense-fiction-1', createdAt: '2026-10-02T12:00:00.000Z' }]
+    const placeOffers = [{ id: 'offer-fiction-1', placeId: 'place-fiction-1', title: '虚构午餐券', note: '虚构优惠说明', price: 12, originalPrice: 18, expiresAt: '2026-12-31', status: 'active', transactionId: '', noticeId: '', createdAt: '2026-10-03T12:00:00.000Z' }]
+    const archive = await completeBackupArchive(createBackupSnapshot(memoryStorage({
+      sl_places: JSON.stringify(places),
+      sl_place_visits: JSON.stringify(placeVisits),
+      sl_place_offers: JSON.stringify(placeOffers),
+    })))
+    const parsed = await parseBackupArchive(archive)
+
+    expect(parsed.providedFields).toEqual(expect.arrayContaining(['places', 'placeVisits', 'placeOffers']))
+    expect(parsed.data.places).toEqual(places)
+    expect(parsed.data.placeVisits).toEqual(placeVisits)
+    expect(parsed.data.placeOffers).toEqual(placeOffers)
+  })
+
+  it('旧备份缺少通知分区时填默认值但不把空值加入恢复范围', async () => {
+    const legacyArchive = await completeBackupArchive({
+      app: 'study-life',
+      version: 13,
+      schema: 'study-life.backup/v1',
+      ownerId: '',
+      data: { courses: [], countdowns: [], __owner_id: '' },
+    })
+    const parsed = await parseBackupArchive(legacyArchive)
+    expect(parsed.data.notices).toEqual([])
+    expect(parsed.data.noticeSources).toEqual([])
+    expect(parsed.providedFields).not.toContain('notices')
+    expect(parsed.providedFields).not.toContain('noticeSources')
   })
 
   it('持久化 JSON 损坏时停止导出并保留原始值', () => {

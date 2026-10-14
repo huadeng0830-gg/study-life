@@ -4,6 +4,25 @@
 // RELEASE_UPDATES 仅保留最近 3 条内置说明，完整的简短发布历史保存在 release-history.json。
 export const RELEASE_UPDATES = Object.freeze([
   {
+    version: '1.2.0',
+    legacyVersion: '2026年10月14日-版本1',
+    channel: 'stable',
+    summary: '新增调课通知应用、通知档案、只读提问、考试日历、去年今日、值日班务、数据体检和地点档案；支持可拒收的好友地点预设',
+    signature: '0bb6a85c02',
+    changes: {
+      features: [
+      '新增调课通知应用、通知档案、只读提问、考试日历、去年今日、值日班务、数据体检和地点档案；支持可拒收的好友地点预设',
+      ],
+      improvements: [],
+      fixes: [],
+      security: [],
+      breaking: [],
+    },
+    notes: [
+      '新增调课通知应用、通知档案、只读提问、考试日历、去年今日、值日班务、数据体检和地点档案；支持可拒收的好友地点预设',
+    ],
+  },
+  {
     version: '1.1.2',
     legacyVersion: '2026年10月13日-版本2',
     channel: 'stable',
@@ -57,47 +76,16 @@ export const RELEASE_UPDATES = Object.freeze([
       '管理请求逐次验证 Supabase 会话和服务端所有者登记',
     ],
   },
-  {
-    version: '1.1.0',
-    legacyVersion: '2026年10月12日-版本1',
-    channel: 'stable',
-    summary: '以 SemVer 统一网页与 Windows 客户端版本，并建立可验证的更新流程',
-    signature: 'deed9b789a',
-    changes: {
-      features: [
-      '新增个人管理中心，集中查看本机数据、保存状态和账号同步事项',
-      ],
-      improvements: [
-      '从桌面侧栏和手机更多入口进入，并直达现有业务管理页面',
-      '管理页适配现有移动端断点与标题层级规范',
-      ],
-      fixes: [
-      '改进浅色高对比配色、键盘焦点反馈和首页操作按钮的主题对比度',
-      '调整全局表面与打印样式顺序，确保两类规则正确生效',
-      '修正首次读取数据时误显示为无待处理事项',
-      ],
-      security: [],
-      breaking: [],
-    },
-    notes: [
-      '新增个人管理中心，集中查看本机数据、保存状态和账号同步事项',
-      '从桌面侧栏和手机更多入口进入，并直达现有业务管理页面',
-      '管理页适配现有移动端断点与标题层级规范',
-      '改进浅色高对比配色、键盘焦点反馈和首页操作按钮的主题对比度',
-      '调整全局表面与打印样式顺序，确保两类规则正确生效',
-      '修正首次读取数据时误显示为无待处理事项',
-    ],
-  },
 ])
 
 // SemVer 是面向用户和发布的正式版本。日期式标识只用于旧网页客户端的升级兼容。
-export const APP_VERSION = '1.1.2'
+export const APP_VERSION = '1.2.0'
 export const RELEASE_VERSION = APP_VERSION
 export const RELEASE_CHANNEL = 'stable'
 export const LEGACY_RELEASE_VERSION = RELEASE_UPDATES[0].legacyVersion || RELEASE_UPDATES[0].version
 
 // 与第一条签名保持一致，交给 vite.config.js 校验源码一致性。
-export const RELEASE_SOURCE_SIGNATURE = '39f19577e3'
+export const RELEASE_SOURCE_SIGNATURE = '0bb6a85c02'
 
 // 兼容旧引用：当前版本的更新说明。
 export const RELEASE_NOTES = RELEASE_UPDATES[0].notes

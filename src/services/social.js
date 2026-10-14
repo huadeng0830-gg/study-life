@@ -92,6 +92,25 @@ export async function socialRequest(action, payload = {}) {
   return data.data
 }
 
+export function listCampusPlaces() { return socialRequest('campus_places_list') }
+export function publishCampusPlace(place, { visited = false } = {}) { return socialRequest('campus_place_publish', { place, visited }) }
+export function saveCampusPlaceRating(placeId, category, scores, note, { visited = false } = {}) {
+  return socialRequest('campus_place_rating_save', { placeId, category, scores, note, visited })
+}
+export function reportCampusPlace(placeId, reason, detail = '') {
+  return socialRequest('campus_place_report', { placeId, reason, detail })
+}
+export function deleteCampusPlaceRating(placeId) { return socialRequest('campus_place_rating_delete', { placeId }) }
+export function deleteCampusPlace(placeId) { return socialRequest('campus_place_delete', { placeId }) }
+export function listCampusPlaceInvites() { return socialRequest('campus_place_invites_list') }
+export function sendCampusPlaceInvite(friendId, places, inviteId) {
+  return socialRequest('campus_place_invite_send', { friendId, places, inviteId })
+}
+export function acceptCampusPlaceInvite(inviteId) { return socialRequest('campus_place_invite_preview', { inviteId }) }
+export function completeCampusPlaceInvite(inviteId) { return socialRequest('campus_place_invite_complete', { inviteId }) }
+export function rejectCampusPlaceInvite(inviteId) { return socialRequest('campus_place_invite_reject', { inviteId }) }
+export function cancelCampusPlaceInvite(inviteId) { return socialRequest('campus_place_invite_cancel', { inviteId }) }
+
 export async function subscribeSocialNotifications(userId, onChange) {
   const client = await getSupabaseClient()
   if (accountUser.value?.id !== userId) return () => {}

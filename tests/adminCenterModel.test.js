@@ -106,6 +106,21 @@ describe('个人管理中心状态模型', () => {
     expect(model.actions.find((entry) => entry.id === 'pending-writes').actionLabel).toBe('打开数据管理')
     expect(model.actions.every((entry) => typeof entry.actionLabel === 'string' && entry.actionLabel)).toBe(true)
   })
+
+  it('数据体检按警告与提示分类计数，并提供回到卡片的入口', () => {
+    const model = buildAdminCenterModel({
+      inventory: { issues: [] },
+      dataHealthReport: [
+        { id: 'duplicate-tasks', severity: 'warning', count: 2 },
+        { id: 'stale-tasks', severity: 'info', count: 1 },
+      ],
+    })
+
+    expect(model.dataHealth).toMatchObject({ totalCount: 2, warningCount: 1, infoCount: 1, tone: 'warning' })
+    expect(model.actions.find((item) => item.id === 'data-health')).toMatchObject({
+      action: 'health', actionLabel: '打开数据体检', tone: 'warning',
+    })
+  })
 })
 
 describe('管理中心诊断信息', () => {

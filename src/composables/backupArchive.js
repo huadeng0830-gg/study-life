@@ -7,6 +7,9 @@ import {
 } from './narrativeLanguages.js'
 import { normalizePerformanceMode } from './performanceMode.js'
 import { isWeeklyReflectionsShape, normalizeWeeklyReflections } from './weeklyReflections.js'
+import { normalizeNoticeRecord } from './noticeArchiveModel.js'
+import { DEFAULT_DATA_HEALTH_THRESHOLDS, normalizeDataHealthThresholds } from './dataHealthReport.js'
+import { normalizePlaceOffer, normalizePlaceRecord, normalizePlaceVisit } from './placeModels.js'
 import { getPendingPersistenceKeys, readLatestStoredRaw } from './store/snapshotAccess.js'
 
 export const BACKUP_STORAGE_KEYS = Object.freeze({
@@ -23,6 +26,9 @@ export const BACKUP_STORAGE_KEYS = Object.freeze({
   checklists: 'sl_checklists',
   bills: 'sl_bills',
   expenses: 'sl_expenses',
+  places: 'sl_places',
+  placeVisits: 'sl_place_visits',
+  placeOffers: 'sl_place_offers',
   ledgerCategories: 'sl_ledger_categories',
   ledgerFreq: 'sl_ledger_freq',
   ledgerFx: 'sl_ledger_fx',
@@ -53,6 +59,9 @@ export const BACKUP_STORAGE_KEYS = Object.freeze({
   activeFocus: 'sl_focus_active',
   taskCenterLog: 'sl_task_center_log',
   archivedQuickNotes: 'sl_archived_quick_notes',
+  notices: 'sl_notices',
+  noticeSources: 'sl_notice_sources',
+  dataHealthSettings: 'sl_data_health_settings',
   weeklyReflections: 'sl_weekly_reflections',
 })
 
@@ -64,13 +73,16 @@ export const BACKUP_MODULES = Object.freeze([
   { key: 'countdown', label: '重要日期', keys: ['sl_exams', 'sl_countdown_show_past'] },
   { key: 'checklists', label: '清单', keys: ['sl_checklists'] },
   { key: 'ledger', label: '账本', keys: ['sl_bills', 'sl_expenses', 'sl_ledger_categories', 'sl_ledger_freq', 'sl_ledger_fx', 'sl_ledger_budget', 'sl_ledger_templates'] },
+  { key: 'places', label: '地点记录', keys: ['sl_places', 'sl_place_visits', 'sl_place_offers'] },
   { key: 'appearance', label: '外观与主题', keys: ['sl_theme', 'sl_custom_theme_color', 'sl_high_contrast', 'sl_auto_wallpaper_color', 'sl_wallpaper_accent', 'sl_appearance', 'sl_wallpaper_config', 'sl_performance_mode', 'sl_navigation_mobile', 'sl_navigation_desktop'] },
   { key: 'atmosphere', label: '氛围与心情', keys: ['sl_festive_config', 'sl_festive_birthday_full', 'sl_mood_log', 'sl_festive_lunar', 'sl_ui_language'] },
   { key: 'reminders', label: '提醒记录', keys: ['sl_reminder_log'] },
+  { key: 'notices', label: '通知档案', keys: ['sl_notices', 'sl_notice_sources'] },
+  { key: 'data-health', label: '数据体检设置', keys: ['sl_data_health_settings'] },
   { key: 'reviews', label: '周回顾记录', keys: ['sl_weekly_reflections'] },
 ])
 
-const BACKUP_ARRAY_FIELDS = ['courses', 'countdowns', 'tasks', 'events', 'focusSessions', 'courseCheckins', 'courseTemplates', 'checklists', 'bills', 'expenses', 'ledgerCategories', 'ledgerTemplates', 'scheduleExceptions', 'festiveLunar', 'reminderLog', 'taskCenterLog', 'archivedQuickNotes']
+const BACKUP_ARRAY_FIELDS = ['courses', 'countdowns', 'tasks', 'events', 'focusSessions', 'courseCheckins', 'courseTemplates', 'checklists', 'bills', 'expenses', 'places', 'placeVisits', 'placeOffers', 'ledgerCategories', 'ledgerTemplates', 'scheduleExceptions', 'festiveLunar', 'reminderLog', 'taskCenterLog', 'archivedQuickNotes', 'notices', 'noticeSources']
 const BACKUP_ARRAY_KEYS = new Set(BACKUP_ARRAY_FIELDS.map((field) => BACKUP_STORAGE_KEYS[field]))
 
 function readStored(storage, key, fallback) {
@@ -110,7 +122,7 @@ export function createBackupSnapshot(storage = browserStorage(), metadata = {}) 
   const unsavedKeys = metadata.unsavedKeys || getPendingPersistenceKeys()
   const snapshot = {
     app: 'study-life',
-    version: 13,
+    version: 16,
     schema: 'study-life.backup/v1',
     exportedAt: new Date().toISOString(),
     ownerId: ownerId || '',
@@ -129,6 +141,9 @@ export function createBackupSnapshot(storage = browserStorage(), metadata = {}) 
       checklists: readStored(latestStorage, BACKUP_STORAGE_KEYS.checklists, []),
       bills: readStored(latestStorage, BACKUP_STORAGE_KEYS.bills, []),
       expenses: readStored(latestStorage, BACKUP_STORAGE_KEYS.expenses, []),
+      places: readStored(latestStorage, BACKUP_STORAGE_KEYS.places, []),
+      placeVisits: readStored(latestStorage, BACKUP_STORAGE_KEYS.placeVisits, []),
+      placeOffers: readStored(latestStorage, BACKUP_STORAGE_KEYS.placeOffers, []),
       ledgerCategories: readStored(latestStorage, BACKUP_STORAGE_KEYS.ledgerCategories, null),
       ledgerFreq: readStored(latestStorage, BACKUP_STORAGE_KEYS.ledgerFreq, null),
       ledgerFx: readStored(latestStorage, BACKUP_STORAGE_KEYS.ledgerFx, null),
@@ -159,6 +174,9 @@ export function createBackupSnapshot(storage = browserStorage(), metadata = {}) 
       activeFocus: readStored(latestStorage, BACKUP_STORAGE_KEYS.activeFocus, null),
       taskCenterLog: readStored(latestStorage, BACKUP_STORAGE_KEYS.taskCenterLog, []),
       archivedQuickNotes: readStored(latestStorage, BACKUP_STORAGE_KEYS.archivedQuickNotes, []),
+      notices: readStored(latestStorage, BACKUP_STORAGE_KEYS.notices, []),
+      noticeSources: readStored(latestStorage, BACKUP_STORAGE_KEYS.noticeSources, []),
+      dataHealthSettings: readStored(latestStorage, BACKUP_STORAGE_KEYS.dataHealthSettings, { ...DEFAULT_DATA_HEALTH_THRESHOLDS }),
       weeklyReflections: readStored(latestStorage, BACKUP_STORAGE_KEYS.weeklyReflections, {}),
     },
   }
@@ -210,7 +228,7 @@ function sanitizeWallpaperImages(value) {
 
 /** 校验并归一化导入内容，同时保留原文件实际携带的字段供恢复流程使用。 */
 export async function parseBackupArchive(value) {
-  if (!value || value.app !== 'study-life' || ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13].includes(value.version) || !value.data) {
+  if (!value || value.app !== 'study-life' || ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16].includes(value.version) || !value.data) {
     throw new Error('这不是有效的控制台备份文件')
   }
   if (value.version >= 7 && value.schema !== 'study-life.backup/v1') {
@@ -242,6 +260,18 @@ export async function parseBackupArchive(value) {
   if (data.weeklyReflections !== null && data.weeklyReflections !== undefined && !isWeeklyReflectionsShape(data.weeklyReflections)) {
     throw new Error('备份中的周回顾记录格式不正确，恢复已停止。')
   }
+  if (Array.isArray(data.notices) && data.notices.some((item) => !item || typeof item !== 'object' || Array.isArray(item)
+    || typeof item.id !== 'string' || !item.id.trim() || typeof item.raw !== 'string' || !item.raw.trim())) {
+    throw new Error('备份中的通知档案格式不正确，恢复已停止。')
+  }
+  if (Array.isArray(data.noticeSources) && data.noticeSources.some((item) => !item || typeof item !== 'object' || Array.isArray(item)
+    || typeof item.id !== 'string' || !item.id.trim() || typeof item.source !== 'string' || typeof item.muted !== 'boolean')) {
+    throw new Error('备份中的通知来源设置格式不正确，恢复已停止。')
+  }
+  if (data.dataHealthSettings !== null && data.dataHealthSettings !== undefined
+    && (typeof data.dataHealthSettings !== 'object' || Array.isArray(data.dataHealthSettings))) {
+    throw new Error('备份中的数据体检设置格式不正确，恢复已停止。')
+  }
   return {
     ...value,
     ownerId: typeof value.ownerId === 'string' ? value.ownerId : (typeof data.__owner_id === 'string' ? data.__owner_id : ''),
@@ -260,6 +290,12 @@ export async function parseBackupArchive(value) {
       checklists: Array.isArray(data.checklists) ? data.checklists : [],
       bills: Array.isArray(data.bills) ? data.bills : [],
       expenses: Array.isArray(data.expenses) ? data.expenses : [],
+      places: Array.isArray(data.places) ? data.places.map((item) => normalizePlaceRecord(item)) : [],
+      placeVisits: Array.isArray(data.placeVisits) ? data.placeVisits.map((item) => {
+        const place = (data.places || []).find((entry) => String(entry?.id) === String(item?.placeId))
+        return normalizePlaceVisit(item, place?.category || 'food')
+      }) : [],
+      placeOffers: Array.isArray(data.placeOffers) ? data.placeOffers.map((item) => normalizePlaceOffer(item)) : [],
       ledgerCategories: Array.isArray(data.ledgerCategories) ? data.ledgerCategories : null,
       ledgerFreq: data.ledgerFreq && typeof data.ledgerFreq === 'object' ? data.ledgerFreq : null,
       ledgerFx: data.ledgerFx && typeof data.ledgerFx === 'object' ? data.ledgerFx : null,
@@ -288,6 +324,10 @@ export async function parseBackupArchive(value) {
       activeFocus: data.activeFocus && typeof data.activeFocus === 'object' ? data.activeFocus : null,
       taskCenterLog: Array.isArray(data.taskCenterLog) ? data.taskCenterLog : [],
       archivedQuickNotes: Array.isArray(data.archivedQuickNotes) ? data.archivedQuickNotes : [],
+      notices: Array.isArray(data.notices) ? data.notices.map((item) => normalizeNoticeRecord(item)) : [],
+      noticeSources: Array.isArray(data.noticeSources) ? data.noticeSources : [],
+      dataHealthSettings: data.dataHealthSettings && typeof data.dataHealthSettings === 'object'
+        ? normalizeDataHealthThresholds(data.dataHealthSettings) : null,
       weeklyReflections: normalizeWeeklyReflections(data.weeklyReflections),
       __wallpaper_images: sanitizeWallpaperImages(data.__wallpaper_images),
     },

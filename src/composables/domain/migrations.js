@@ -1,4 +1,26 @@
-export const DOMAIN_SCHEMA_VERSION = 3
+import { normalizeExternalExam } from '../externalExam.js'
+
+export const DOMAIN_SCHEMA_VERSION = 6
+
+export function normalizeNoticeRecords(notices = []) {
+  if (!Array.isArray(notices)) return { value: [], changed: true }
+  let changed = false
+  const value = notices.map((notice) => {
+    if (!notice || typeof notice !== 'object' || Array.isArray(notice)) { changed = true; return null }
+    const normalized = {
+      ...notice,
+      source: String(notice.source || ''),
+      topic: String(notice.topic || '通知'),
+      status: ['new', 'handled', 'archived'].includes(notice.status) ? notice.status : 'new',
+      linkedEntityType: String(notice.linkedEntityType || ''),
+      linkedEntityId: notice.linkedEntityId == null ? '' : String(notice.linkedEntityId),
+      scheduleProposalId: String(notice.scheduleProposalId || ''),
+    }
+    if (JSON.stringify(normalized) !== JSON.stringify(notice)) changed = true
+    return normalized
+  }).filter(Boolean)
+  return { value, changed }
+}
 
 export function detachRetiredNoteRelations({ tasks = [], events = [] } = {}) {
   let changed = 0
@@ -15,7 +37,7 @@ export function detachRetiredNoteRelations({ tasks = [], events = [] } = {}) {
 }
 
 // 补充缺失字段，并在退役独立笔记后解除旧任务/日程到笔记的关系；原文和备注内容不变。
-export function migrateDomainData({ tasks = [], milestones = [], transactions = [], events = [] } = {}) {
+export function migrateDomainData({ tasks = [], milestones = [], transactions = [], events = [], notices = [] } = {}) {
   let changed = 0
   for (const task of tasks) {
     if (task.done === undefined) { task.done = task.status === 'completed'; changed++ }
@@ -24,7 +46,17 @@ export function migrateDomainData({ tasks = [], milestones = [], transactions = 
     if (!task.updatedAt && task.createdAt) { task.updatedAt = task.createdAt; changed++ }
   }
   for (const item of milestones) {
-    if (!item.kind) { item.kind = item.category === '学习' ? 'exam' : 'countdown'; changed++ }
+    if (!item.kind) {
+      item.kind = item.category === '学习' ? 'exam' : item.category === '校外考试' ? 'externalExam' : 'countdown'
+      changed++
+    }
+    if (item.kind === 'externalExam' || item.category === '校外考试') {
+      const normalized = normalizeExternalExam(item)
+      if (JSON.stringify(normalized) !== JSON.stringify(item)) {
+        Object.assign(item, normalized)
+        changed++
+      }
+    }
     if (!item.updatedAt && item.createdAt) { item.updatedAt = item.createdAt; changed++ }
   }
   for (const item of transactions) {
@@ -32,5 +64,24 @@ export function migrateDomainData({ tasks = [], milestones = [], transactions = 
     if (!item.updatedAt && item.createdAt) { item.updatedAt = item.createdAt; changed++ }
   }
   for (const item of events) if (!item.updatedAt && item.createdAt) { item.updatedAt = item.createdAt; changed++ }
+  for (const notice of notices) {
+    if (!notice || typeof notice !== 'object' || Array.isArray(notice)) continue
+    if (!notice.topic) { notice.topic = '通知'; changed++ }
+    if (!['new', 'handled', 'archived'].includes(notice.status)) { notice.status = 'new'; changed++ }
+    if (typeof notice.source !== 'string') { notice.source = ''; changed++ }
+    if (notice.linkedEntityId === null || notice.linkedEntityId === undefined) { notice.linkedEntityId = ''; changed++ }
+    const existingLinks = Array.isArray(notice.linkedEntities) ? notice.linkedEntities : null
+    const sourceLinks = existingLinks || (notice.linkedEntityType && notice.linkedEntityId
+      ? [{ type: notice.linkedEntityType, id: notice.linkedEntityId }]
+      : [])
+    const linkedEntities = [...new Map(sourceLinks
+      .filter((link) => link && typeof link === 'object' && link.type && link.id)
+      .map((link) => ({ type: String(link.type), id: String(link.id) }))
+      .map((link) => [`${link.type}:${link.id}`, link])).values()]
+    if (JSON.stringify(linkedEntities) !== JSON.stringify(notice.linkedEntities)) {
+      notice.linkedEntities = linkedEntities
+      changed++
+    }
+  }
   return changed + detachRetiredNoteRelations({ tasks, events })
 }

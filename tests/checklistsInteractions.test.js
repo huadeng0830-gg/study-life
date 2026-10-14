@@ -70,6 +70,31 @@ describe('清单实际交互', () => {
     expect(document.querySelector('#checklist-list-form')).toBeNull()
   })
 
+  it('值日模板可选成员、设置每周星期、标记代班并生成下一期', async () => {
+    await boot()
+    await click([...host.querySelectorAll('.starter-card')].find((button) => button.textContent.includes('宿舍值日')))
+    await fill(document.querySelector('#lists-duty-members'), '虚构同学甲、虚构同学乙')
+    await choose(document.querySelector('#lists-duty-weekday'), '1')
+    await click(byText('创建清单'))
+
+    const list = commands.lists.value[0]
+    expect(list).toMatchObject({ dutyEnabled: true, dutyTemplateId: 'dorm-duty', repeat: 'weekly', repeatWeekday: 1 })
+    expect(list.dutyMembers).toEqual(['虚构同学甲', '虚构同学乙'])
+    expect(list.items[0].assignedTo).toBe('虚构同学甲')
+    expect(list.occurrenceDate).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+
+    await click(host.querySelector('[aria-label="编辑清扫地面"]'))
+    await fill(document.querySelector('#lists-item-substitute'), '虚构同学乙')
+    await click(byText('保存修改'))
+    expect(list.items[0].substitutedBy).toBe('虚构同学乙')
+    expect(host.querySelector('.duty-overview').textContent).toContain('本学期值日/值班')
+    expect(host.querySelector('.duty-overview').textContent).toContain('代班')
+
+    await click(byText('生成下一期'))
+    expect(commands.lists.value).toHaveLength(2)
+    expect(commands.lists.value[1].items[0]).toMatchObject({ assignedTo: '虚构同学乙', substitutedBy: '', done: false })
+  })
+
   it('多行添加预览会去重，保存后清除遮挡新事项的筛选，整批可撤销', async () => {
     const { first } = seed(); await boot()
     await fill(host.querySelector('[aria-label="搜索当前清单事项"]'), '牛奶')

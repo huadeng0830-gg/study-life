@@ -4,12 +4,16 @@ import Modal from './Modal.vue'
 import { buildNoticeUnderstanding, findNoticeChanges, NOTICE_TYPE_OPTIONS, parseNotice } from '../composables/noticeParser.js'
 import { buildNoticeCandidates, MAX_NOTICE_SEGMENTS, SEGMENT_PROCESS_OPTIONS } from '../composables/noticeSegments.js'
 import { findUniqueCourseByName } from '../composables/courseLinks.js'
+import { rankCandidates } from '../composables/searchRelevance.js'
+import { scheduleExceptions } from '../composables/store/schedule.js'
+import { buildScheduleExceptionInputs, findScheduleProposalConflicts, scheduleProposalSummary, scheduleProposalWeekDay } from '../composables/scheduleNoticeOperations.js'
 import { isSupported as voiceSupportedByEnv, transcribe, voiceErrorMessage, VOICE_STATES } from '../composables/voiceInput.js'
 
 const props = defineProps({ open: Boolean, tasks: { type: Array, default: () => [] }, courses: { type: Array, default: () => [] } })
 const emit = defineEmits(['close', 'commit'])
 const source = ref('')
-const parsed = ref(null)
+const sourceName = ref('')
+const parsed = ref(/** @type {any} */ (null))
 const matches = ref([])
 const selectedId = ref('')
 const useExisting = ref(false)
@@ -28,6 +32,8 @@ const segments = ref([])
 const segmentOverflow = ref(0)
 const selectedSegmentIds = ref([])
 const segmentProcess = ref({})
+const selectedScheduleCourseId = ref('')
+const scheduleConflictChoice = ref('')
 const voiceState = ref(VOICE_STATES.idle)
 const listening = ref(false)
 const voiceMessage = ref('')
@@ -52,11 +58,43 @@ const updatePreview = computed(() => selectedTask.value
 // 段数 ≥ 2 时走多段确认页；只有 1 段时保持原单条流程不动（避免单条通知也多一层界面）
 const multiMode = computed(() => segments.value.length > 1)
 const selectedSegments = computed(() => segments.value.filter((row) => selectedSegmentIds.value.includes(row.id)))
-const processLabel = computed(() => ({ task: '创建待办', homework: '添加作业', event: '加入日程' }[processKey.value] || '创建待办'))
+const processOptions = computed(() => parsed.value?.scheduleProposal && !multiMode.value
+  ? [...SEGMENT_PROCESS_OPTIONS, { key: 'schedule', label: '应用到课表' }]
+  : SEGMENT_PROCESS_OPTIONS)
+const processLabel = computed(() => ({ task: '创建待办', homework: '添加作业', event: '加入日程', archive: '仅保存通知', schedule: '应用到课表' }[processKey.value] || '创建待办'))
 const actionLabel = computed(() => {
+  if (processKey.value === 'archive') return '仅保存通知'
+  if (processKey.value === 'schedule') return '应用到课表'
   if (multiMode.value) return selectedSegments.value.length > 1 ? `添加 ${selectedSegments.value.length} 项` : '按确认内容保存'
   return selectedItems.value.length > 1 ? `添加 ${selectedItems.value.length} 项` : processLabel.value
 })
+const scheduleCourseOptions = computed(() => {
+  const courses = /** @type {Array<Record<string, any>>} */ (Array.isArray(props.courses) ? props.courses : [])
+  const query = String(parsed.value?.scheduleProposal?.courseName || '').trim()
+  if (!query) return courses
+  const ranked = rankCandidates(courses.map((course) => ({ title: course.name, contents: [course.room, course.teacher], course })), query)
+  const rankedCourses = [...new Map(ranked.map((candidate) => [candidate.course.id, candidate.course])).values()]
+  const remaining = courses.filter((course) => !rankedCourses.some((item) => item.id === course.id))
+  const queryChars = new Set(Array.from(query.toLocaleLowerCase()))
+  const score = (name) => {
+    const chars = new Set(Array.from(String(name || '').toLocaleLowerCase()))
+    let common = 0
+    for (const char of queryChars) if (chars.has(char)) common += 1
+    return queryChars.size + chars.size ? (2 * common) / (queryChars.size + chars.size) : 0
+  }
+  return [...rankedCourses, ...remaining.map((course, index) => ({ course, index, score: score(course.name) }))
+    .sort((left, right) => right.score - left.score || left.index - right.index)
+    .map((row) => row.course)]
+})
+const selectedScheduleCourse = computed(() => /** @type {Array<Record<string, any>>} */ (props.courses).find((course) => String(course.id) === String(selectedScheduleCourseId.value)) || null)
+const scheduleProposalInputs = computed(() => buildScheduleExceptionInputs(parsed.value?.scheduleProposal, selectedScheduleCourseId.value, props.courses))
+const scheduleConflicts = computed(() => findScheduleProposalConflicts(scheduleProposalInputs.value, scheduleExceptions.value))
+const scheduleWeekDayLabel = computed(() => {
+  const index = scheduleProposalWeekDay(parsed.value?.scheduleProposal)
+  return index == null ? '星期待确认' : `星期${['一', '二', '三', '四', '五', '六', '日'][index]}`
+})
+
+watch(scheduleConflicts, () => { scheduleConflictChoice.value = '' })
 const extraFields = computed(() => {
   if (!parsed.value) return []
   return [
@@ -75,10 +113,11 @@ watch(() => props.open, (open) => {
     cancelOcr()
     return
   }
-  source.value = ''; parsed.value = null; matches.value = []; selectedId.value = ''; selectedItemIds.value = []
+  source.value = ''; sourceName.value = ''; parsed.value = null; matches.value = []; selectedId.value = ''; selectedItemIds.value = []
   segments.value = []; segmentOverflow.value = 0; selectedSegmentIds.value = []; segmentProcess.value = {}
   voiceState.value = VOICE_STATES.idle; listening.value = false; voiceMessage.value = ''
   ocrKind.value = 'homework'; ocrProgress.value = 0; ocrMessage.value = ''
+  selectedScheduleCourseId.value = ''; scheduleConflictChoice.value = ''
   useExisting.value = false; processKey.value = 'task'; editingField.value = ''; editingAction.value = false; editingSource.value = false
   showMore.value = false; showProcessOptions.value = false; error.value = ''; clipboardMessage.value = ''
   void readClipboard()
@@ -101,6 +140,9 @@ async function readClipboard() {
 function rowsFromCandidates(result) {
   return result.candidates.map((candidate) => {
     const one = buildNoticeUnderstanding(candidate.parsed)
+    const recommendation = one.recommendation.key === 'schedule'
+      ? { key: 'task', label: '创建待办', reason: '多条通知需逐条确认；这条课表变更先作为待办保存。' }
+      : one.recommendation
     return {
       id: candidate.id,
       index: candidate.index,
@@ -110,8 +152,8 @@ function rowsFromCandidates(result) {
       type: candidate.parsed.type,
       summary: one.summary,
       facts: one.facts,
-      recommendation: one.recommendation,
-      recommendationKey: one.recommendation.key,
+      recommendation,
+      recommendationKey: recommendation.key,
     }
   })
 }
@@ -121,6 +163,8 @@ function analyze() {
   if (!source.value.trim()) { error.value = '请先粘贴老师或班群通知'; return }
   try {
     const next = parseNotice(source.value, props.courses)
+    selectedScheduleCourseId.value = findUniqueCourseByName(props.courses, next.scheduleProposal?.courseName)?.id ?? ''
+    scheduleConflictChoice.value = ''
     parsed.value = next; matches.value = findNoticeChanges(next, props.tasks); selectedId.value = matches.value[0]?.task.id ?? ''; useExisting.value = false
     processKey.value = buildNoticeUnderstanding(next).recommendation.key
     selectedItemIds.value = (next.items?.length ? next.items : [{ id: 'single' }]).map((item) => item.id || 'single')
@@ -145,6 +189,8 @@ function analyzeVoice(finalText) {
   error.value = ''
   try {
     const next = parseNotice(text, props.courses)
+    selectedScheduleCourseId.value = findUniqueCourseByName(props.courses, next.scheduleProposal?.courseName)?.id ?? ''
+    scheduleConflictChoice.value = ''
     parsed.value = next; matches.value = findNoticeChanges(next, props.tasks); selectedId.value = matches.value[0]?.task.id ?? ''; useExisting.value = false
     processKey.value = buildNoticeUnderstanding(next).recommendation.key
     selectedItemIds.value = (next.items?.length ? next.items : [{ id: 'single' }]).map((item) => item.id || 'single')
@@ -286,6 +332,18 @@ function dateText(value) {
   if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return value || ''
   const [, month, day] = value.split('-'); return `${Number(month)}月${Number(day)}日`
 }
+function noticeRecordFor(parsedNotice, raw = parsedNotice?.rawText) {
+  const action = String(parsedNotice?.actionText || '').trim()
+  return {
+    raw: String(raw || '').trim(),
+    source: sourceName.value.trim(),
+    title: parsedNotice?.title || '未命名通知',
+    publishedAt: parsedNotice?.dateCandidates?.find((item) => item.isPublication)?.value || '',
+    topic: parsedNotice?.type || '通知',
+    status: 'handled',
+    needsAction: Boolean(action && action !== '无需操作'),
+  }
+}
 function factText(fact) { return fact.kind === 'date' ? dateText(fact.value) : fact.value }
 function toggleItem(id) { selectedItemIds.value = selectedItemIds.value.includes(id) ? selectedItemIds.value.filter((value) => value !== id) : [...selectedItemIds.value, id] }
 function taskUpdateProposal(task, item) {
@@ -400,6 +458,7 @@ function segmentPayload(row) {
     paymentPlatform: one.paymentPlatform || '',
     updatedFromNoticeAt: new Date().toISOString(),
     noticeType: one.type,
+    __notice: noticeRecordFor(one, row.text),
   }
 }
 
@@ -414,6 +473,10 @@ function saveSegments() {
     groups.get(key).push(row)
   }
   for (const [key, group] of groups) {
+    if (key === 'archive') {
+      emit('commit', { type: 'archive', items: group.map((row) => noticeRecordFor(row.parsed, row.text)), title: group[0].title })
+      continue
+    }
     const data = group.map((row) => segmentPayload(row))
     if (key === 'event') { emit('commit', { type: 'event', items: data, title: data[0].title }); continue }
     emit('commit', { type: 'create', kind: key === 'homework' ? 'homework' : 'todo', items: data, title: data[0].title, data: data[0] })
@@ -424,15 +487,41 @@ function saveSegments() {
 function save() {
   error.value = ''
   if (multiMode.value) { saveSegments(); return }
-  if (!parsed.value || !selectedItems.value.length) { error.value = '至少保留一项需要处理的事项。'; return }
+  if (!parsed.value) { error.value = '请先解析通知，再确认保存。'; return }
+  if (processKey.value === 'archive') {
+    emit('commit', { type: 'archive', items: [noticeRecordFor(parsed.value)], title: parsed.value.title })
+    emit('close')
+    return
+  }
+  if (processKey.value === 'schedule') {
+    const proposal = parsed.value.scheduleProposal
+    if (!proposal) { error.value = '没有识别到课表变更，请重新解析通知。'; return }
+    if (!proposal.date) { error.value = '请先确认课表变更日期。'; return }
+    if (!selectedScheduleCourseId.value) { error.value = '请从候选课程中选择一门具体课程。'; return }
+    if (proposal.kind === 'move' && !proposal.sourceDate && !proposal.periodStart && !proposal.location) {
+      error.value = '请补上调整后的节次或地点，再应用到课表。'; return
+    }
+    if (!scheduleProposalInputs.value.length) { error.value = '课表日期或节次无效，请检查后重试。'; return }
+    if (scheduleConflicts.value.length && !scheduleConflictChoice.value) { error.value = '请先选择替换已有安排或并存。'; return }
+    emit('commit', {
+      type: 'schedule',
+      scheduleProposal: { ...proposal, weekDay: scheduleProposalWeekDay(proposal) },
+      courseId: selectedScheduleCourseId.value,
+      conflictChoice: scheduleConflictChoice.value || 'coexist',
+      notice: noticeRecordFor(parsed.value),
+    })
+    emit('close')
+    return
+  }
+  if (!selectedItems.value.length) { error.value = '至少保留一项需要处理的事项。'; return }
   if (useExisting.value && (!selectedTask.value || selectedItems.value.length !== 1 || processKey.value !== 'task')) { error.value = '更新已有待办时只能选择一个待办事项。'; return }
   const items = selectedItems.value
   if (useExisting.value) {
     const proposal = taskUpdateProposal(selectedTask.value, items[0])
-    emit('commit', { type: 'update', id: selectedTask.value.id, title: selectedTask.value.title, data: proposal.patch, courseUnmatched: proposal.courseUnmatched })
+    emit('commit', { type: 'update', id: selectedTask.value.id, title: selectedTask.value.title, data: proposal.patch, courseUnmatched: proposal.courseUnmatched, notice: noticeRecordFor(parsed.value) })
   }
-  else if (processKey.value === 'event') emit('commit', { type: 'event', items: items.map((item) => payloadFor(item)), title: parsed.value.title })
-  else emit('commit', { type: 'create', kind: processKey.value === 'homework' ? 'homework' : 'todo', items: items.map((item) => payloadFor(item)), title: parsed.value.title, data: payloadFor(items[0]) })
+  else if (processKey.value === 'event') emit('commit', { type: 'event', items: items.map((item) => payloadFor(item)), title: parsed.value.title, notice: noticeRecordFor(parsed.value) })
+  else emit('commit', { type: 'create', kind: processKey.value === 'homework' ? 'homework' : 'todo', items: items.map((item) => payloadFor(item)), title: parsed.value.title, data: payloadFor(items[0]), notice: noticeRecordFor(parsed.value) })
   emit('close')
 }
 </script>
@@ -445,6 +534,7 @@ function save() {
       <section v-if="!parsed || editingSource" class="paste-card">
         <div class="section-kicker">粘贴原通知</div>
         <textarea v-model="source" aria-label="粘贴原通知" rows="7" placeholder="例如：下周三晚上八点前提交实验报告，文件名为学号姓名。"></textarea>
+        <label class="notice-source-field">来源（可选）<input v-model="sourceName" type="text" maxlength="60" placeholder="例如：虚构课程群" /></label>
         <p v-if="clipboardMessage" class="clipboard-message" role="status">{{ clipboardMessage }}</p>
         <div class="privacy-note"><span>⌁</span><p><b>仅在本机解析</b><br />文字不会发送到网络，分析后也不会自动保存。</p></div>
         <div class="ocr-row">
@@ -496,7 +586,35 @@ function save() {
 
         <section v-if="parsed.items?.length" class="items-card"><div class="subhead"><div><span class="section-kicker">多事项</span><h3>识别到 {{ parsed.items.length }} 个事项</h3></div><button type="button" class="link-btn" @click="selectedItemIds = selectedItemIds.length === parsed.items.length ? [] : parsed.items.map((item) => item.id)">{{ selectedItemIds.length === parsed.items.length ? '取消全选' : '全选' }}</button></div><button v-for="item in parsed.items" :key="item.id" type="button" class="item-row" :class="{ selected: selectedItemIds.includes(item.id) }" @click="toggleItem(item.id)"><span class="item-check">{{ selectedItemIds.includes(item.id) ? '✓' : '' }}</span><span><b>{{ item.title }}</b><small>{{ item.dateRange || dateText(item.dueDate) || '时间未识别' }}{{ item.dueTime ? ` ${item.dueTime}` : '' }}{{ item.location ? ` · ${item.location}` : '' }}</small></span></button></section>
 
-        <section class="process-card"><div class="subhead"><div><span class="section-kicker">推荐处理</span><h3>{{ processLabel }}</h3></div><span class="recommend-mark">✓</span></div><p>{{ understanding.recommendation.reason }}</p><button type="button" class="change-process" :aria-expanded="showProcessOptions" @click="showProcessOptions = !showProcessOptions">{{ showProcessOptions ? '收起其他方式' : '更改处理方式' }}⌄</button><div v-if="showProcessOptions" class="process-options"><label v-for="option in [{ key: 'task', label: '创建待办' }, { key: 'event', label: '加入日程' }, { key: 'homework', label: '添加作业' }]" :key="option.key"><input v-model="processKey" type="radio" :value="option.key" />{{ option.label }}</label></div></section>
+        <section class="process-card"><div class="subhead"><div><span class="section-kicker">推荐处理</span><h3>{{ processLabel }}</h3></div><span class="recommend-mark">✓</span></div><p>{{ understanding.recommendation.reason }}</p><button type="button" class="change-process" :aria-expanded="showProcessOptions" @click="showProcessOptions = !showProcessOptions">{{ showProcessOptions ? '收起其他方式' : '更改处理方式' }}⌄</button><div v-if="showProcessOptions" class="process-options"><label v-for="option in processOptions" :key="option.key"><input v-model="processKey" type="radio" :value="option.key" />{{ option.label }}</label></div></section>
+
+        <section v-if="parsed.scheduleProposal" class="schedule-preview">
+          <div class="subhead"><div><span class="section-kicker">课表变更预览</span><h3>{{ scheduleProposalSummary(parsed.scheduleProposal) }}</h3></div></div>
+          <label>课程
+            <select v-model="selectedScheduleCourseId" aria-label="选择需要调整的课程">
+              <option value="">请选择具体课程</option>
+              <option v-for="course in scheduleCourseOptions" :key="course.id" :value="course.id">
+                {{ course.name }} · 星期{{ ['一', '二', '三', '四', '五', '六', '日'][course.day] || '待确认' }} · {{ course.start }}–{{ course.end }}{{ course.room ? ` · ${course.room}` : '' }}
+              </option>
+            </select>
+          </label>
+          <div class="schedule-fields">
+            <label>调整日期<input v-model="parsed.scheduleProposal.date" type="date" aria-label="调整日期" /></label>
+            <label v-if="parsed.scheduleProposal.sourceDate">原上课日<input v-model="parsed.scheduleProposal.sourceDate" type="date" aria-label="原上课日" /></label>
+            <label>开始节次<input v-model.number="parsed.scheduleProposal.periodStart" type="number" min="1" :max="20" placeholder="使用原节次" /></label>
+            <label>结束节次<input v-model.number="parsed.scheduleProposal.periodEnd" type="number" min="1" :max="20" placeholder="同开始节次" /></label>
+            <label class="schedule-location">地点<input v-model="parsed.scheduleProposal.location" type="text" maxlength="80" placeholder="可留空" /></label>
+          </div>
+          <p class="schedule-hint">{{ scheduleWeekDayLabel }} · {{ parsed.scheduleProposal.kind === 'cancel' ? '这门课当天停课' : parsed.scheduleProposal.kind === 'makeup' ? '在调整日期补上这门课' : '调整这门课的日期、节次或地点' }}。确认后仅写入课表例外。</p>
+          <div v-if="scheduleConflicts.length" class="schedule-conflicts" role="group" aria-label="课表安排冲突">
+            <b>发现 {{ scheduleConflicts.length }} 条可能冲突的课表安排</b>
+            <p v-for="item in scheduleConflicts" :key="item.id">{{ item.date }} · {{ item.type === 'session_off' ? '停课' : item.type === 'session_makeup' ? '补课/调整' : '整日安排' }} · {{ item.note || '已有课表例外' }}</p>
+            <p v-if="scheduleConflicts.some((item) => item.type === 'session_off')" class="schedule-conflict-warning">已有停课安排仍会优先生效；选择并存时，这门课不会显示。</p>
+            <label><input v-model="scheduleConflictChoice" type="radio" value="replace" />替换这些安排</label>
+            <label><input v-model="scheduleConflictChoice" type="radio" value="coexist" />与这些安排并存</label>
+          </div>
+          <p v-else-if="selectedScheduleCourse" class="schedule-hint">{{ selectedScheduleCourse.name }} · {{ scheduleWeekDayLabel }}</p>
+        </section>
 
         <section v-if="matches.length" class="match-box"><div class="subhead"><div><span class="section-kicker">发现相似待办</span><h3>可能是已有待办的更新</h3></div></div><label v-for="item in matches" :key="item.task.id" class="match-row"><input v-model="selectedId" type="radio" :value="item.task.id" /> <span><b>{{ item.task.title }}</b><small>相似度 {{ Math.round(item.score * 100) }}%</small></span></label><label class="update-choice"><input v-model="useExisting" type="checkbox" :disabled="processKey !== 'task'" /> 更新选中的原待办</label><div v-if="useExisting && selectedTask" class="diff-list"><p class="update-hint">只更新通知明确识别出的新字段；其他内容保留。通知原文会保存在来源记录中。</p><div v-for="row in updatePreview.rows" :key="row[0]"><b>{{ row[0] }}</b><span>{{ row[1] }}</span><i>→</i><strong>{{ row[2] }}</strong></div><p v-if="!updatePreview.rows.length" class="update-hint">没有识别到可更新字段；保存时只记录这条通知，待办内容会保留。</p><p v-if="updatePreview.courseUnmatched" class="update-warning">课程名称未能唯一匹配，现有课程关联会保留。</p></div></section>
 
@@ -510,7 +628,7 @@ function save() {
 </template>
 
 <style scoped>
-.notice-shell{display:flex;flex-direction:column;gap:12px;max-width:680px;margin:0 auto}.paste-card,.understanding-card,.items-card,.segments-card,.process-card,.match-box,.more-card,.raw-card{border:1px solid var(--border);border-radius:var(--radius-14);background:var(--card)}
+.notice-shell{display:flex;flex-direction:column;gap:12px;max-width:680px;margin:0 auto}.paste-card,.understanding-card,.items-card,.segments-card,.process-card,.match-box,.more-card,.raw-card{border:1px solid var(--border);border-radius:var(--radius-14);background:var(--card)}.notice-source-field{display:flex;flex-direction:column;gap:5px;margin-top:9px;color:var(--muted);font-size:var(--fs-11)}.notice-source-field input{min-height:38px;padding:7px 9px;border:1px solid var(--border);border-radius:var(--radius-8);background:var(--bg);color:var(--text);font:inherit}
 .ocr-row{display:flex;align-items:end;gap:8px;flex-wrap:wrap;margin-top:10px}.ocr-row>label:first-child{display:flex;flex-direction:column;gap:4px;color:var(--muted);font-size:var(--fs-10)}.ocr-row select{min-height:36px;padding:6px 8px;border:1px solid var(--border);border-radius:var(--radius-8);background:var(--card);color:var(--text);font:inherit;font-size:var(--fs-11)}.ocr-file-button{display:inline-flex;align-items:center;justify-content:center;min-height:36px;padding:0 11px;border-radius:var(--radius-8);background:var(--primary-soft);color:var(--primary);font-size:var(--fs-11);font-weight:var(--fw-700);cursor:pointer}.ocr-file-button input{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}.ocr-file-button:focus-within{outline:2px solid var(--primary);outline-offset:2px}.ocr-message,.ocr-hint{margin:0;color:var(--muted);font-size:var(--fs-10);line-height:1.5}.ocr-hint{margin-top:5px}
 .voice-row{display:flex;align-items:center;gap:9px;margin-top:10px;flex-wrap:wrap}.voice-status{flex:1 1 180px;color:var(--muted);font-size:var(--fs-11);line-height:1.5}
 .segments-card{padding:14px}.segment-row{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-top:7px;padding:6px 6px 6px 9px;border:1px solid transparent;border-radius:var(--radius-9);background:var(--bg)}.segment-row.selected{border-color:var(--primary);background:var(--primary-soft)}
@@ -518,4 +636,6 @@ function save() {
 .segment-kind{display:flex;align-items:center;gap:5px;color:var(--muted);font-size:var(--fs-11)}.segment-kind select{max-width:130px;padding:5px 6px;border:1px solid var(--border);border-radius:var(--radius-8);background:var(--card);color:var(--text);font-size:var(--fs-11)}.paste-card{padding:16px}.section-kicker{color:var(--primary);font-size:var(--fs-10);font-weight:var(--fw-900);letter-spacing:.1em}.paste-card textarea{width:100%;min-height:150px;margin-top:8px;line-height:1.65;resize:vertical}.privacy-note{display:flex;gap:9px;margin-top:10px;padding:10px;border-radius:var(--radius-9);background:color-mix(in srgb, var(--success) 10%, var(--card));color:var(--success)}.privacy-note span{font-size:var(--fs-20)}.privacy-note p{font-size:var(--fs-11);line-height:1.5}.paste-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:12px}.clipboard-message{margin-top:7px;color:var(--warning);font-size:var(--fs-11)}.understanding-card{position:relative;padding:17px}.type-line{display:flex;align-items:flex-start;gap:8px}.type-chips{display:flex;flex-wrap:wrap;gap:5px}.type-chip{padding:5px 8px;border:1px solid var(--border);border-radius:var(--radius-pill);background:var(--bg);color:var(--muted);font-size:var(--fs-11)}.type-chip.active{border-color:var(--primary);background:var(--primary-soft);color:var(--primary);font-weight:var(--fw-800)}.confidence{position:absolute;top:16px;right:17px;font-size:var(--fs-10)}.confidence.high{color:var(--success)}.confidence.medium{color:var(--warning)}.confidence.low{color:var(--danger)}h2{margin:17px 0 4px;font-size:var(--fs-22);line-height:1.25}.summary{margin:0;color:var(--muted);font-size:var(--fs-12);line-height:1.55}.action-card{display:flex;flex-direction:column;gap:4px;margin-top:16px;padding:13px;border-radius:var(--radius-11);background:var(--primary-soft)}.action-card.passive{background:var(--bg)}.action-label{color:var(--primary);font-size:var(--fs-10);font-weight:var(--fw-900);letter-spacing:.08em}.action-card strong{font-size:var(--fs-16);line-height:1.4}.action-card small{color:var(--muted);font-size:var(--fs-11)}.facts{display:flex;flex-wrap:wrap;gap:7px;margin-top:12px}.fact-wrap{flex:1 1 200px;min-width:0}.fact-row,.fact-editor{display:flex;align-items:center;gap:10px;width:100%;min-height:40px;padding:8px 10px;border-radius:var(--radius-9);background:var(--bg);text-align:left}.fact-row{border:1px solid transparent}.fact-row:hover{border-color:var(--primary)}.fact-row span,.fact-editor span{flex:0 0 auto;color:var(--muted);font-size:var(--fs-11)}.fact-row b{overflow:hidden;color:var(--text);font-size:var(--fs-13);text-overflow:ellipsis;white-space:nowrap}.fact-row i{margin-left:auto;color:var(--muted);font-size:var(--fs-11);font-style:normal}.fact-editor input{min-width:0;flex:1;padding:5px;background:var(--card)}.warnings{margin-top:10px;padding:8px 10px;border-radius:var(--radius-8);background:color-mix(in srgb, var(--warning) 12%, var(--card));color:var(--warning);font-size:var(--fs-11);line-height:1.5}.warnings p{margin:0}.candidate-dates{color:var(--muted)}.items-card,.process-card,.match-box{padding:14px}.subhead{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}.subhead h3{margin-top:3px;font-size:var(--fs-14)}.item-row{display:flex;align-items:center;gap:9px;width:100%;padding:9px;margin-top:7px;border:1px solid transparent;border-radius:var(--radius-9);background:var(--bg);text-align:left}.item-row.selected{border-color:var(--primary);background:var(--primary-soft)}.item-check{display:grid;place-items:center;flex:0 0 20px;width:20px;height:20px;border:1px solid var(--border);border-radius:var(--radius-6);background:var(--card);color:var(--primary);font-weight:var(--fw-900)}.item-row b,.item-row small{display:block}.item-row b{font-size:var(--fs-12)}.item-row small{margin-top:2px;color:var(--muted);font-size:var(--fs-10)}.recommend-mark{color:var(--primary);font-weight:var(--fw-900)}.process-card>p{margin:4px 0 8px;color:var(--muted);font-size:var(--fs-11)}.change-process{padding:0;border:0;background:none;color:var(--primary);font-size:var(--fs-11)}.process-options{display:flex;flex-wrap:wrap;gap:10px;margin-top:11px;padding-top:10px;border-top:1px solid var(--border)}.process-options label,.update-choice{display:flex;align-items:center;gap:5px;color:var(--muted);font-size:var(--fs-11)}.match-box{border-color:color-mix(in srgb, var(--warning) 35%, var(--border));background:color-mix(in srgb, var(--warning) 8%, var(--card))}.match-row{display:flex;gap:7px;align-items:center;margin-top:7px;padding:8px;border-radius:var(--radius-8);background:var(--card)}.match-row span{display:flex;flex-direction:column;gap:2px}.match-row b{font-size:var(--fs-11)}.match-row small{color:var(--muted);font-size:var(--fs-10)}.update-choice{margin-top:9px;color:var(--text)}.diff-list{display:flex;flex-direction:column;gap:4px;margin-top:8px;padding:8px;border-radius:var(--radius-7);background:var(--card);font-size:var(--fs-10)}.diff-list div{display:grid;grid-template-columns:54px minmax(0,1fr) 15px minmax(0,1fr);gap:5px}.diff-list span,.diff-list strong{min-width:0;overflow-wrap:anywhere}.diff-list span{color:var(--muted);text-decoration:line-through}.diff-list i{font-style:normal;color:var(--muted)}.diff-list strong{color:var(--primary)}.update-hint,.update-warning{margin:0;line-height:1.5}.update-hint{color:var(--muted)}.update-warning{color:var(--warning)}summary{cursor:pointer;list-style:none}summary::-webkit-details-marker{display:none}.more-card,.raw-card{padding:12px 14px}.more-card summary,.raw-card summary{display:flex;justify-content:space-between;color:var(--text);font-size:var(--fs-12);font-weight:var(--fw-800)}.more-card summary span,.raw-card summary span{color:var(--muted);font-size:var(--fs-10);font-weight:var(--fw-400)}.more-content,.raw-content{padding-top:10px}.existing-more{display:flex;flex-direction:column;gap:5px}.existing-more button{border:0;background:none;color:var(--muted);font-size:var(--fs-11);text-align:left}.add-fields{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:7px;color:var(--muted);font-size:var(--fs-11)}.add-fields button{padding:4px 7px;border:1px solid var(--border);border-radius:var(--radius-6);background:var(--card);color:var(--primary);font-size:var(--fs-10)}.extra-editor{margin-top:8px}.extra-editor label{display:flex;flex-direction:column;gap:5px;color:var(--muted);font-size:var(--fs-11)}.extra-editor input,.extra-editor textarea{width:100%;background:var(--card)}.more-tip{margin:10px 0 0;color:var(--muted);font-size:var(--fs-10)}.raw-content pre{max-height:180px;margin:0;overflow:auto;white-space:pre-wrap;color:var(--muted);font-family:inherit;font-size:var(--fs-11);line-height:1.6}.raw-actions{display:flex;gap:12px;margin-top:8px}.link-btn{padding:0;border:0;background:none;color:var(--primary);font-size:var(--fs-11)}.error{margin:0;color:var(--danger);font-size:var(--fs-12)}.notice-footer{display:flex;justify-content:flex-end;gap:8px}.btn{min-height:36px}
 @media(max-width:520px){.notice-shell{gap:9px}.segment-row{padding:7px}.segment-pick{flex-basis:100%}.segment-kind select{flex:1;max-width:none}.understanding-card{padding:14px}.confidence{position:static;margin-top:8px}.type-line{display:block}.type-chips{margin-top:7px}h2{font-size:var(--fs-20);margin-top:13px}.action-card{margin-top:13px}.facts{display:block}.fact-wrap{margin-top:6px}.notice-footer{justify-content:stretch}.notice-footer .btn{flex:1}.paste-card textarea{min-height:120px}.diff-list div{grid-template-columns:48px minmax(0,1fr) 12px minmax(0,1fr);gap:4px}}
 .action-heading{display:flex;justify-content:space-between;align-items:center}.action-edit{padding:0;border:0;background:none;color:var(--primary);font-size:var(--fs-11)}.action-input{width:100%;font-size:var(--fs-15);font-weight:var(--fw-800);background:var(--card)}
+.schedule-preview{display:flex;flex-direction:column;gap:10px;padding:14px;border-color:color-mix(in srgb, var(--primary) 35%, var(--border));background:color-mix(in srgb, var(--primary) 5%, var(--card))}.schedule-preview>label,.schedule-fields label{display:flex;flex-direction:column;gap:5px;color:var(--muted);font-size:var(--fs-11)}.schedule-preview select,.schedule-preview input{min-width:0;min-height:38px;padding:7px 9px;border:1px solid var(--border);border-radius:var(--radius-8);background:var(--card);color:var(--text);font:inherit}.schedule-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.schedule-fields .schedule-location{grid-column:1/-1}.schedule-hint{margin:0;color:var(--muted);font-size:var(--fs-11);line-height:1.5}.schedule-conflicts{display:flex;flex-direction:column;gap:7px;padding:10px;border-radius:var(--radius-8);background:color-mix(in srgb, var(--warning) 10%, var(--card));color:var(--warning);font-size:var(--fs-11)}.schedule-conflicts p{margin:0;overflow-wrap:anywhere}.schedule-conflicts .schedule-conflict-warning{color:var(--text);font-weight:600}.schedule-conflicts label{display:flex;align-items:center;gap:7px;min-height:36px;color:var(--text)}
+@media(max-width:520px){.schedule-fields{grid-template-columns:minmax(0,1fr)}.schedule-fields .schedule-location{grid-column:auto}}
 </style>

@@ -175,6 +175,8 @@ export interface Transaction {
   sourceType?: string
   sourceId?: string
   relationId?: string
+  /** 关联本机或校内可见地点；本机地点编号不会随账号快照上传。 */
+  placeId?: string
   createdAt?: string
   updatedAt?: string
   createdFrom?: string
@@ -185,6 +187,50 @@ export interface Transaction {
   archivedAt?: string
   deletedAt?: string
   tombstone?: boolean
+}
+
+export type PlaceCategory = 'food' | 'service' | 'study' | 'transport' | 'trade' | 'social'
+export type PlaceVisibility = 'private' | 'school'
+
+export interface PlaceRecord {
+  id: string
+  name: string
+  campus: string
+  area: string
+  placeHint: string
+  category: PlaceCategory
+  ratingTemplateId: PlaceCategory
+  scores: Record<string, string | number | boolean>
+  note: string
+  archivedAt: string | null
+  createdAt: string
+  updatedAt: string
+  visibility: PlaceVisibility
+}
+
+export interface PlaceVisit {
+  id: string
+  placeId: string
+  visitedAt: string
+  price: number | null
+  scores: Record<string, string | number | boolean>
+  transactionId: string
+  note?: string
+  createdAt: string
+}
+
+export interface PlaceOffer {
+  id: string
+  placeId: string
+  title: string
+  note: string
+  price: number
+  originalPrice: number | null
+  expiresAt: string
+  status: 'active' | 'redeemed'
+  transactionId: string
+  noticeId: string
+  createdAt: string
 }
 
 export interface Bill {
@@ -211,7 +257,7 @@ export interface Milestone {
   name: string
   date: string
   time?: string
-  kind?: 'exam' | 'countdown' | 'deadline' | 'anniversary'
+    kind?: 'exam' | 'countdown' | 'deadline' | 'anniversary' | 'externalExam'
   courseId?: string
   courseName?: string
   category?: string
@@ -220,7 +266,16 @@ export interface Milestone {
   repeat?: 'none' | 'yearly'
   pinned?: boolean
   reviewProgress?: number
-  reminderMinutes?: number
+    reminderMinutes?: number
+    registerStart?: string
+    registerDeadline?: string
+    examDate?: string
+    examTime?: string
+    venue?: string
+    campus?: string
+    seatNo?: string
+    admissionNo?: string
+    requiredItems?: Array<{ id?: string; name: string; quantity?: number; unit?: string; checked?: boolean }>
   archivedAt?: string | null
   status?: string
   active?: boolean

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildNoticeUnderstanding, parseNotice } from '../src/composables/noticeParser.js'
+import { buildNoticeUnderstanding, parseNotice, parsePlaceOfferCandidate } from '../src/composables/noticeParser.js'
 
 const now = new Date('2026-09-01T10:00:00')
 
@@ -172,5 +172,22 @@ describe('通知解析真实输入回归', () => {
     const parsed = parseNotice('9月5日前完成报名，9月7日前缴费，9月10日上午8点到体育馆报到。', [], now)
     expect(parsed.items).toHaveLength(3)
     expect(parsed.items.map((item) => item.dueDate)).toEqual(['2026-09-05', '2026-09-07', '2026-09-10'])
+  })
+
+  it('从优惠通知生成需要用户确认的本地草稿', () => {
+    expect(parsePlaceOfferCandidate('虚构门店优惠：团购价 ¥12.50，原价18元，有效期至2026年12月31日。', now)).toMatchObject({
+      price: 12.5, originalPrice: 18, expiresAt: '2026-12-31', priceNeedsConfirmation: false,
+    })
+    expect(parsePlaceOfferCandidate('虚构店团购优惠：满30减10，或享8折。', now)).toMatchObject({
+      price: null, originalPrice: null, priceNeedsConfirmation: true,
+    })
+    expect(parsePlaceOfferCandidate('虚构店特价9折，有效期至2026年12月31日。', now)).toMatchObject({
+      price: null, priceNeedsConfirmation: true,
+    })
+    expect(parsePlaceOfferCandidate('虚构店优惠价8折，原价20元。', now)).toMatchObject({
+      price: null, originalPrice: 20, priceNeedsConfirmation: true,
+    })
+    expect(parsePlaceOfferCandidate('虚构新品上新，售价18元。', now)).toMatchObject({ price: 18 })
+    expect(parsePlaceOfferCandidate('周五下午3点在教学楼302开班会。', now)).toBeNull()
   })
 })

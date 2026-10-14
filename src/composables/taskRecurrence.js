@@ -82,6 +82,24 @@ function nextWeekday(date) {
   return date
 }
 
+/** `weekly` 的可选星期锚点；缺失或非法时沿用旧的 +7 天语义。 */
+function validWeekday(value) {
+  if (value === null || value === undefined || value === '' || typeof value === 'boolean') return null
+  const weekday = Number(value)
+  return Number.isInteger(weekday) && weekday >= 0 && weekday <= 6 ? weekday : null
+}
+
+function nextWeeklyDate(date, requestedWeekday) {
+  const weekday = validWeekday(requestedWeekday)
+  if (weekday === null) {
+    date.setDate(date.getDate() + 7)
+    return date
+  }
+  const offset = (weekday - date.getDay() + 7) % 7 || 7
+  date.setDate(date.getDate() + offset)
+  return date
+}
+
 /**
  * 按原始日号推进，并把目标月不存在的日期夹到月末（31 号 → 2 月末 → 下个月 31 号）。
  * 没有传锚点的单次调用沿用当前日号；重复待办会把 `repeatAnchorDay` 传给每一期，
@@ -121,16 +139,16 @@ function repeatEndKey(value) {
  *
  * @param {string} dueDate 本期截止日期 `YYYY-MM-DD`
  * @param {string} repeat 重复规则；不认识的值按 `none` 处理并返回空串
- * @param {{ until?: string, anchorDay?: number }} [options] `until` 为重复截止日期（含当天），`anchorDay` 为每月锚点；空/非法 `until` = 一直重复
+ * @param {{ until?: string, anchorDay?: number, weekday?: number }} [options] `until` 为重复截止日期（含当天），`anchorDay` 为每月锚点，`weekday` 为每周锚点；空/非法 `until` = 一直重复
  */
-export function nextRepeatDueDate(dueDate, repeat, { until = '', anchorDay } = {}) {
+export function nextRepeatDueDate(dueDate, repeat, { until = '', anchorDay, weekday } = {}) {
   const rule = normalizeTaskRepeat(repeat)
   if (rule === 'none') return ''
   const date = parseDueDate(dueDate)
   if (!date) return ''
   if (rule === 'daily') date.setDate(date.getDate() + 1)
   else if (rule === 'weekdays') nextWeekday(date)
-  else if (rule === 'weekly') date.setDate(date.getDate() + 7)
+  else if (rule === 'weekly') nextWeeklyDate(date, weekday)
   else if (rule === 'biweekly') date.setDate(date.getDate() + 14)
   else addMonthsClamped(date, anchorDay)
   const next = dateText(date)
@@ -153,6 +171,7 @@ export function createNextRepeatingTask(task, now = new Date()) {
   const nextBase = nextRepeatDueDate(base.date, rule, {
     until: task.repeatEndDate,
     anchorDay: repeatAnchorDay,
+    weekday: task.repeatWeekday,
   })
   if (!nextBase) return null
   const days = Math.round((Date.parse(`${nextBase}T12:00:00Z`) - Date.parse(`${base.date}T12:00:00Z`)) / 86400000)

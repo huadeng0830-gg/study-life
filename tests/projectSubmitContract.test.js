@@ -3,6 +3,7 @@ import vm from 'node:vm'
 import ts from 'typescript'
 import { describe, expect, it, vi } from 'vitest'
 import * as availability from '../supabase/functions/campus-social/availability.js'
+import * as placeModels from '../src/composables/placeModels.js'
 import { normalizeTaskWorkCheckpoint } from '../src/composables/tasks/taskWorkProgress.js'
 
 const actor = '00000001-0000-4000-8000-000000000001'
@@ -18,6 +19,7 @@ function setup() {
       if (name === 'npm:@supabase/supabase-js@2.117.2') return { createClient: () => admin }
       if (name === './availability.js') return availability
       if (name === '../../../src/composables/tasks/taskWorkProgress.js') return { normalizeTaskWorkCheckpoint }
+      if (name === '../../../src/composables/placeModels.js') return placeModels
       throw new Error('Unexpected dependency: ' + name)
     }, exports: {}, Date, Request, Response, Headers, TextEncoder, TextDecoder, console, crypto,
   })

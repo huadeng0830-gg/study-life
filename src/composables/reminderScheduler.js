@@ -16,17 +16,21 @@
 // 【去重必须落盘】只用内存 Set 的话，刷新页面会重复提醒；接入云同步后两台设备
 // 还会各响一次。所以 fired 记录写进一个新的存储键，跟着数据一起同步。
 import { clock, useStoredRef } from './store/core.js'
-import { policyDateKey, policyDateTime, settings } from './settingsPolicy.js'
+import { policyDateKey, policyDateTime, policyTimeKey, settings } from './settingsPolicy.js'
 import { countdownTarget } from './store/countdown.js'
 import { isArchived, isTaskActionable } from './domain/state.js'
 import { stageBoundaryAt, stageLabel, stageTimeState, taskStages } from './tasks/taskTimePlan'
+import { activeNoticeReminders } from './noticeArchiveModel.js'
+import { externalExamReminderSpecs } from './externalExam.js'
 
 // 直接注册存储 ref，而不是从某个 barrel import —— 后者会把本模块拉进
 // store → domain → … 的依赖链，而这个调度器只需要读三份集合。
 // useStoredRef 对同一键是幂等的（storedRefs 单例），与 commands.js 拿到的是同一份。
-const tasks = useStoredRef('sl_tasks', [])
-const events = useStoredRef('sl_events', [])
-const milestones = useStoredRef('sl_exams', [])
+const tasks = useStoredRef('sl_tasks', /** @type {import('../types/domain').Task[]} */ ([]))
+const events = useStoredRef('sl_events', /** @type {import('../types/domain').QuickEvent[]} */ ([]))
+const milestones = useStoredRef('sl_exams', /** @type {import('../types/domain').Milestone[]} */ ([]))
+const noticeRecords = useStoredRef('sl_notices', /** @type {Record<string, any>[]} */ ([]))
+const noticeSources = useStoredRef('sl_notice_sources', /** @type {Record<string, any>[]} */ ([]))
 
 export const REMINDER_LOG_KEY = 'sl_reminder_log'
 const reminderLog = useStoredRef(REMINDER_LOG_KEY, [])
@@ -74,7 +78,8 @@ function writeLog() {
 // 日志只保留最近一天，且同一个 key 只记一次 —— 它是去重集合，不是流水账。
 function pruneLog(nowMs) {
   const cutoff = nowMs - CATCH_UP_WINDOW_MS
-  logEntries = logEntries.filter((item) => Number(item.firedAt) > cutoff)
+  // 通知档案只提醒一次；保留已触发标记，避免旧的未处理通知每六小时重复弹出。
+  logEntries = logEntries.filter((item) => item.key.startsWith('notice:') || Number(item.firedAt) > cutoff)
 }
 
 function markFired(key, nowMs, signature = '') {
@@ -112,7 +117,7 @@ function notifyPermission() {
  * @param {number} nowMs
  * @returns {{ key: string, kind: string, title: string, body: string, fireAt: number, minutes: number }[]}
  */
-export function collectDueReminders(nowMs = Date.now()) {
+export function collectDueReminders(nowMs = clock.value.getTime()) {
   const policy = settings.value?.defaultReminders || {}
   const windowStart = nowMs - CATCH_UP_WINDOW_MS
   const horizon = nowMs + SCHEDULE_HORIZON_MS
@@ -135,7 +140,7 @@ export function collectDueReminders(nowMs = Date.now()) {
     if (fireAt > horizon || fireAt < windowStart) return
     const key = options.key || reminderKey(kind, item.id)
     // An event's time/reminder change schedules a new notification; title-only edits do not.
-    const signature = kind === 'event' || kind === 'task' ? `${dueAt}:${minutes}` : ''
+    const signature = options.signature || (kind === 'event' || kind === 'task' ? `${dueAt}:${minutes}` : '')
     const fired = firedEntries.get(key)
     if ((fired && (!signature || !fired.signature || fired.signature === signature)) || queuedKeys.has(key)) return
     queuedKeys.add(key)
@@ -180,11 +185,28 @@ export function collectDueReminders(nowMs = Date.now()) {
   }
   for (const item of milestones.value || []) {
     if (isArchived(item) || item?.active === false) continue
+    if (item?.kind === 'externalExam') {
+      for (const spec of externalExamReminderSpecs(item)) {
+        push('milestone', item, spec.date, spec.time, 0, {
+          key: `milestone:${item.id}:${spec.key}`,
+          body: spec.body,
+          signature: `${spec.date} ${spec.time}`,
+        })
+      }
+      continue
+    }
     // Resolve from the catch-up window's start: using "now" would skip a
     // recently passed annual occurrence and lose its catch-up notification.
     const target = item?.repeat === 'yearly' ? countdownTarget(item, new Date(windowStart)) : null
     const date = target ? policyDateKey(target) : item?.date
     push('milestone', item, date, item?.time, item?.reminderMinutes ?? policy.milestone)
+  }
+  const now = nowMs === clock.value.getTime() ? clock.value : new Date(nowMs)
+  const reminderDate = policyDateKey(now)
+  const reminderTime = policyTimeKey(now)
+  for (const item of activeNoticeReminders(noticeRecords.value, noticeSources.value)) {
+    const revision = item.updatedAt || item.createdAt || ''
+    push('notice', item, reminderDate, reminderTime, 0, { key: `notice:${item.id}:${revision}`, body: `${item.title || '一条通知'} · 仍未处理` })
   }
 
   return due.sort((left, right) => left.fireAt - right.fireAt)
@@ -200,7 +222,8 @@ function fire(entries) {
   const entry = pending[0]
   if (notifyPermission() !== 'granted') return false
   try {
-    const notification = new Notification(`三两事 · ${entry.kind === 'task' ? '待办' : entry.kind === 'event' ? '日程' : '重要节点'}提醒`, {
+    const kindLabel = entry.kind === 'task' ? '待办' : entry.kind === 'event' ? '日程' : entry.kind === 'notice' ? '通知' : '重要节点'
+    const notification = new Notification(`三两事 · ${kindLabel}提醒`, {
       body: pending.map((item) => item.body).join('\n'),
       tag: entry.key,
     })

@@ -1,5 +1,26 @@
 [
   {
+    "version": "1.2.0",
+    "legacyVersion": "2026年10月14日-版本1",
+    "channel": "stable",
+    "publishedAt": null,
+    "title": "三两事 1.2.0",
+    "summary": "新增调课通知应用、通知档案、只读提问、考试日历、去年今日、值日班务、数据体检和地点档案；支持可拒收的好友地点预设",
+    "changes": {
+      "features": [
+        "新增调课通知应用、通知档案、只读提问、考试日历、去年今日、值日班务、数据体检和地点档案；支持可拒收的好友地点预设"
+      ],
+      "improvements": [],
+      "fixes": [],
+      "security": [],
+      "breaking": []
+    },
+    "notes": [
+      "新增调课通知应用、通知档案、只读提问、考试日历、去年今日、值日班务、数据体检和地点档案；支持可拒收的好友地点预设"
+    ],
+    "releaseUrl": "https://github.com/huadeng0830-gg/study-life/releases"
+  },
+  {
     "version": "1.1.2",
     "legacyVersion": "2026年10月13日-版本2",
     "channel": "stable",

@@ -7,8 +7,10 @@ const RECORD_FIELDS = Object.freeze({
   courses: ['课程', '门'], courseTemplates: ['课程模板', '套'], courseCheckins: ['课程打卡', '次'],
   scheduleExceptions: ['调课', '条'], tasks: ['待办', '项'], events: ['日程', '项'],
   taskCenterLog: ['快捷记录', '条'], archivedQuickNotes: ['存档笔记', '条'],
+  notices: ['通知档案', '条'],
   focusSessions: ['专注', '次'], countdowns: ['重要日期', '个'], checklists: ['清单', '份'],
   bills: ['账单', '笔'], expenses: ['收支', '笔'], moodLog: ['心情', '天'], reminderLog: ['提醒', '条'],
+  places: ['地点', '家'], placeVisits: ['到访记录', '次'], placeOffers: ['优惠记录', '条'],
   weeklyReflections: ['周回顾', '周'],
 })
 

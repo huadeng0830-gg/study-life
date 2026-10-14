@@ -9,6 +9,7 @@ import {
   userFreeIntervals,
 } from './availability.js'
 import { normalizeTaskWorkCheckpoint } from '../../../src/composables/tasks/taskWorkProgress.js'
+import { PLACE_CATEGORIES, normalizePlaceRecord } from '../../../src/composables/placeModels.js'
 
 const supabaseUrl = Deno.env.get('SUPABASE_URL') || ''
 const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || ''
@@ -175,6 +176,10 @@ function dbError(error: any): never {
     ['SOCIAL_INVALID_INVITATION', 'invalid_input', '邀约内容或时间无效。', 400],
     ['SOCIAL_INVALID_PROPOSAL', 'invalid_input', '改约时间无效。', 400],
     ['SOCIAL_INVALID_ACTION', 'invalid_input', '操作无效。', 400],
+    ['CAMPUS_PLACE_RATE_LIMIT', 'rate_limited', '地点操作太频繁了，请稍后再试。', 429],
+    ['CAMPUS_PLACE_FORBIDDEN', 'forbidden', '只能修改自己发布的地点内容。', 403],
+    ['CAMPUS_PLACE_NOT_FOUND', 'not_found', '地点已更新或不在你的学校范围内。', 404],
+    ['CAMPUS_PLACE_INVALID_ACTION', 'invalid_input', '地点操作无效。', 400],
     ['QIXING_FORBIDDEN', 'forbidden', '你没有权限进行这项项目操作。', 403],
     ['QIXING_OWNER_REQUIRED', 'owner_required', '只有项目负责人可以进行这项操作。', 403],
     ['QIXING_OWNER_TRANSFER_REQUIRED', 'owner_transfer_required', '请先将项目负责人转交给其他成员，再退出项目。', 409],
@@ -615,6 +620,292 @@ async function markNotificationsRead(userId: string, payload: any) {
   return { updated: data?.length || 0 }
 }
 
+async function allowCampusPlaceAction(userId: string, action: string) {
+  const { data, error } = await admin.rpc('campus_place_rate_limit', { p_actor_id: userId, p_action: action })
+  if (error) dbError(error)
+  if (data !== true) throw new ApiError('rate_limited', '地点操作太频繁了，请稍后再试。', 429)
+}
+
+function normalizePlaceInvitePlaces(rawPlaces: unknown) {
+  if (!Array.isArray(rawPlaces) || rawPlaces.length < 1 || rawPlaces.length > 50) {
+    throw new ApiError('invalid_input', '请选择 1 到 50 家已评分的地点。')
+  }
+  const seen = new Set<string>()
+  const places = rawPlaces.map((raw: any) => {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)
+      || !PLACE_CATEGORIES.some((item) => item.id === raw.category)) {
+      throw new ApiError('invalid_input', '好友预设中的地点类型无效。')
+    }
+    const id = assertUUID(raw.id, '地点')
+    if (seen.has(id)) throw new ApiError('invalid_input', '好友预设中不能重复选择同一家店。')
+    seen.add(id)
+    const place = normalizePlaceRecord({ ...raw, note: '', visibility: 'school' })
+    const scored = Object.keys(place.scores).some((key) => key !== 'value') || place.scores.value !== 'mixed'
+    if (!scored) throw new ApiError('invalid_input', '好友预设只能包含已经填写过评分的地点。')
+    return {
+      id,
+      name: place.name,
+      campus: place.campus,
+      area: place.area,
+      placeHint: place.placeHint,
+      category: place.category,
+      ratingTemplateId: place.ratingTemplateId,
+      scores: place.scores,
+    }
+  })
+  if (new TextEncoder().encode(JSON.stringify({ places })).byteLength > 28_000) {
+    throw new ApiError('invalid_input', '好友预设内容过多，请减少地点后重试。')
+  }
+  return places
+}
+
+async function sendCampusPlaceInvite(userId: string, payload: any) {
+  const friendId = assertUUID(payload.friendId, '好友')
+  const inviteId = assertUUID(payload.inviteId, '邀请')
+  if (friendId === userId) throw new ApiError('invalid_input', '请选择一位好友。')
+  await requireFriendship(userId, friendId)
+  await allowCampusPlaceAction(userId, 'invite')
+  const places = normalizePlaceInvitePlaces(payload.places)
+  const now = new Date()
+  const createdAt = now.toISOString()
+  const expiresAt = new Date(now.getTime() + 30 * 24 * 60 * 60_000).toISOString()
+  const { error } = await admin.from('campus_place_invites').insert({
+    id: inviteId, sender_id: userId, recipient_id: friendId,
+    payload: { places }, status: 'pending', created_at: createdAt, expires_at: expiresAt,
+  })
+  if (error?.code === '23505') throw new ApiError('pending_invite_exists', '你和这位好友已有一份待处理的地点预设。', 409)
+  if (error) dbError(error)
+  const { error: noticeError } = await admin.from('social_notifications').insert({
+    recipient_id: friendId, actor_id: userId, kind: 'place_preset', resource_id: inviteId,
+  })
+  if (noticeError) {
+    const { error: rollbackError } = await admin.from('campus_place_invites').delete().eq('id', inviteId)
+    if (rollbackError) dbError(rollbackError)
+    dbError(noticeError)
+  }
+  return { sent: true, inviteId, expiresAt, placeCount: places.length }
+}
+
+async function listCampusPlaceInvites(userId: string) {
+  const [incomingResult, outgoingResult, friendResult] = await Promise.all([
+    admin.from('campus_place_invites').select('id,sender_id,recipient_id,payload,status,created_at,expires_at')
+      .eq('recipient_id', userId).eq('status', 'pending').order('created_at', { ascending: false }).limit(50),
+    admin.from('campus_place_invites').select('id,sender_id,recipient_id,payload,status,created_at,expires_at')
+      .eq('sender_id', userId).eq('status', 'pending').order('created_at', { ascending: false }).limit(50),
+    admin.from('social_friendships').select('user_low,user_high').or(`user_low.eq.${userId},user_high.eq.${userId}`).limit(500),
+  ])
+  for (const result of [incomingResult, outgoingResult, friendResult]) if (result.error) dbError(result.error)
+  const friendIds = new Set((friendResult.data || []).map((row: any) => row.user_low === userId ? row.user_high : row.user_low))
+  const rows = [...(incomingResult.data || []), ...(outgoingResult.data || [])]
+  const now = Date.now()
+  const visible: any[] = []
+  for (const row of rows) {
+    const friendId = row.sender_id === userId ? row.recipient_id : row.sender_id
+    const expired = !row.expires_at || Date.parse(row.expires_at) <= now
+    if (expired || !friendIds.has(friendId)) {
+      const { error } = await admin.from('campus_place_invites').update({
+        status: expired ? 'expired' : 'revoked', payload: { places: [] }, responded_at: new Date(now).toISOString(),
+      }).eq('id', row.id).eq('status', 'pending')
+      if (error) dbError(error)
+      continue
+    }
+    visible.push(row)
+  }
+  const profiles = await getProfiles(visible.map((row) => row.sender_id === userId ? row.recipient_id : row.sender_id))
+  const profileById = new Map(profiles.map((profile: any) => [profile.user_id, friendView(profile)]))
+  return {
+    incoming: visible.filter((row) => row.recipient_id === userId).map((row) => ({
+      id: row.id, sender: profileById.get(row.sender_id), places: Array.isArray(row.payload?.places) ? row.payload.places : [],
+      createdAt: row.created_at, expiresAt: row.expires_at,
+    })),
+    outgoing: visible.filter((row) => row.sender_id === userId).map((row) => ({
+      id: row.id, recipient: profileById.get(row.recipient_id), placeCount: Array.isArray(row.payload?.places) ? row.payload.places.length : 0,
+      createdAt: row.created_at, expiresAt: row.expires_at,
+    })),
+  }
+}
+
+async function getPendingPlaceInvite(userId: string, inviteId: string) {
+  const { data: invite, error } = await admin.from('campus_place_invites')
+    .select('id,sender_id,recipient_id,payload,status,expires_at').eq('id', inviteId).maybeSingle()
+  if (error) dbError(error)
+  if (!invite || invite.recipient_id !== userId || invite.status !== 'pending') {
+    throw new ApiError('not_found', '地点预设已更新，请刷新列表。', 404)
+  }
+  if (!invite.expires_at || Date.parse(invite.expires_at) <= Date.now()) {
+    await admin.from('campus_place_invites').update({ status: 'expired', payload: { places: [] }, responded_at: new Date().toISOString() })
+      .eq('id', inviteId).eq('status', 'pending')
+    throw new ApiError('not_found', '地点预设已过期。', 404)
+  }
+  await requireFriendship(userId, invite.sender_id)
+  return invite
+}
+
+async function previewCampusPlaceInvite(userId: string, payload: any) {
+  const invite = await getPendingPlaceInvite(userId, assertUUID(payload.inviteId, '邀请'))
+  const places = normalizePlaceInvitePlaces(invite.payload?.places)
+  return { places }
+}
+
+async function updateCampusPlaceInvite(userId: string, payload: any, decision: 'reject' | 'cancel') {
+  const inviteId = assertUUID(payload.inviteId, '邀请')
+  const invite: any = decision === 'cancel'
+    ? await (async () => {
+      const { data, error } = await admin.from('campus_place_invites').select('id,sender_id,recipient_id,status,expires_at')
+        .eq('id', inviteId).maybeSingle()
+      if (error) dbError(error)
+      if (!data || data.sender_id !== userId || data.status !== 'pending') throw new ApiError('not_found', '地点预设已更新。', 404)
+      await requireFriendship(userId, data.recipient_id)
+      return data
+    })()
+    : await getPendingPlaceInvite(userId, inviteId)
+  const isRecipient = decision === 'reject'
+  const patch = { status: decision === 'reject' ? 'rejected' : 'revoked', payload: { places: [] }, responded_at: new Date().toISOString() }
+  const query = admin.from('campus_place_invites').update(patch).eq('id', inviteId).eq('status', 'pending')
+  const { data, error } = await query.eq(isRecipient ? 'recipient_id' : 'sender_id', userId).select('id')
+  if (error) dbError(error)
+  if (!data?.length) throw new ApiError('state_changed', '地点预设刚刚发生变化，请刷新后查看。', 409)
+  return decision === 'reject' ? { rejected: true } : { cancelled: true }
+}
+
+async function completeCampusPlaceInvite(userId: string, payload: any) {
+  const inviteId = assertUUID(payload.inviteId, '邀请')
+  await getPendingPlaceInvite(userId, inviteId)
+  const { data, error } = await admin.from('campus_place_invites')
+    .update({ status: 'accepted', payload: { places: [] }, responded_at: new Date().toISOString() })
+    .eq('id', inviteId).eq('recipient_id', userId).eq('status', 'pending').select('id')
+  if (error) dbError(error)
+  if (!data?.length) throw new ApiError('state_changed', '地点预设已更新；本机副本仍已保留。', 409)
+  return { completed: true }
+}
+
+async function requirePlaceSchool(userId: string) {
+  const profile = await getProfile(userId)
+  const school = cleanText(profile?.school, 100, '学校', true)
+  if (!school) throw new ApiError('profile_required', '请先在好友资料中填写学校，再查看校内地点。', 409)
+  return school
+}
+
+function placeView(row: any, ratings: any[], actorId: string) {
+  return {
+    id: row.id,
+    name: row.name,
+    campus: row.campus || '',
+    area: row.area || '',
+    placeHint: row.place_hint || '',
+    category: row.category,
+    ratingTemplateId: row.rating_template_id,
+    visibility: 'school',
+    isMine: row.owner_id === actorId,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    ratings: ratings.filter((item) => item.place_id === row.id).map((item) => ({
+      scores: item.scores,
+      note: item.note || '',
+      isMine: item.user_id === actorId,
+      updatedAt: item.updated_at,
+    })),
+  }
+}
+
+async function listCampusPlaces(userId: string) {
+  const school = await requirePlaceSchool(userId)
+  const { data: rows, error } = await admin.from('campus_places')
+    .select('id,owner_id,name,campus,area,place_hint,category,rating_template_id,created_at,updated_at')
+    .eq('school', school).eq('visibility', 'school').is('archived_at', null).order('name').order('id').limit(200)
+  if (error) dbError(error)
+  const placeIds = (rows || []).map((row: any) => row.id)
+  let ratings: any[] = []
+  if (placeIds.length) {
+    const result = await admin.from('campus_place_ratings')
+      .select('place_id,user_id,scores,note,updated_at').in('place_id', placeIds).order('place_id').limit(2000)
+    if (result.error) dbError(result.error)
+    ratings = result.data || []
+  }
+  return { places: (rows || []).map((row: any) => placeView(row, ratings, userId)) }
+}
+
+async function saveCampusPlaceRating(userId: string, placeId: string, category: string, scores: unknown, note: unknown, visited: unknown) {
+  if (visited !== true) throw new ApiError('visit_required', '请先确认已经到访，再保存校内评分。', 400)
+  const school = await requirePlaceSchool(userId)
+  const { data: place, error: lookupError } = await admin.from('campus_places')
+    .select('id').eq('id', placeId).eq('school', school).eq('visibility', 'school').is('archived_at', null).maybeSingle()
+  if (lookupError) dbError(lookupError)
+  if (!place) throw new ApiError('not_found', '地点已更新或不在你的学校范围内。', 404)
+  const normalizedScores = normalizePlaceRecord({ id: placeId, name: '地点', category, scores, visibility: 'school' }).scores
+  const { error } = await admin.from('campus_place_ratings').upsert({
+    place_id: placeId, user_id: userId, scores: normalizedScores,
+    note: cleanText(note, 50, '备注'), updated_at: new Date().toISOString(),
+  }, { onConflict: 'place_id,user_id' })
+  if (error) dbError(error)
+  return { saved: true }
+}
+
+async function publishCampusPlace(userId: string, payload: any) {
+  if (payload.visited !== true) throw new ApiError('visit_required', '请先确认已经到访，再分享到校内。', 400)
+  const school = await requirePlaceSchool(userId)
+  const raw = payload.place
+  if (!raw || !PLACE_CATEGORIES.some((item) => item.id === raw.category)) throw new ApiError('invalid_input', '地点类型无效。')
+  const place = normalizePlaceRecord(raw)
+  if (place.visibility !== 'school') throw new ApiError('invalid_input', '仅本机地点不会上传。')
+  const id = assertUUID(place.id, '地点')
+  await allowCampusPlaceAction(userId, 'publish')
+  const { data: existing, error: lookupError } = await admin.from('campus_places').select('owner_id').eq('id', id).maybeSingle()
+  if (lookupError) dbError(lookupError)
+  if (existing && existing.owner_id !== userId) throw new ApiError('forbidden', '只能修改自己发布的地点内容。', 403)
+  const { error } = await admin.from('campus_places').upsert({
+    id, owner_id: userId, school, name: place.name, campus: place.campus, area: place.area,
+    place_hint: place.placeHint, category: place.category, rating_template_id: place.ratingTemplateId,
+    visibility: 'school', archived_at: null, updated_at: new Date().toISOString(),
+  }, { onConflict: 'id' })
+  if (error) dbError(error)
+  await saveCampusPlaceRating(userId, id, place.category, place.scores, place.note, payload.visited)
+  return { published: true, id }
+}
+
+async function reportCampusPlace(userId: string, payload: any) {
+  const placeId = assertUUID(payload.placeId, '地点')
+  const school = await requirePlaceSchool(userId)
+  const reason = ['inaccurate', 'sensitive', 'abuse', 'other'].includes(payload.reason) ? payload.reason : ''
+  if (!reason) throw new ApiError('invalid_input', '请选择举报原因。')
+  await allowCampusPlaceAction(userId, 'report')
+  const { data: place, error: lookupError } = await admin.from('campus_places')
+    .select('id,owner_id').eq('id', placeId).eq('school', school).eq('visibility', 'school').is('archived_at', null).maybeSingle()
+  if (lookupError) dbError(lookupError)
+  if (!place) throw new ApiError('not_found', '地点已更新或不在你的学校范围内。', 404)
+  if (place.owner_id === userId) throw new ApiError('invalid_input', '不能举报自己发布的地点。')
+  const { error } = await admin.from('campus_place_reports').insert({
+    place_id: placeId, reporter_id: userId, reason, detail: cleanText(payload.detail, 50, '补充说明'),
+  })
+  if (error?.code === '23505') throw new ApiError('already_reported', '你已经举报过这个地点。', 409)
+  if (error) dbError(error)
+  return { reported: true }
+}
+
+async function deleteCampusPlaceRating(userId: string, payload: any) {
+  const placeId = assertUUID(payload.placeId, '地点')
+  const school = await requirePlaceSchool(userId)
+  const { data: place, error: lookupError } = await admin.from('campus_places')
+    .select('id').eq('id', placeId).eq('school', school).maybeSingle()
+  if (lookupError) dbError(lookupError)
+  if (!place) return { deleted: false }
+  const { error } = await admin.from('campus_place_ratings').delete().eq('place_id', placeId).eq('user_id', userId)
+  if (error) dbError(error)
+  return { deleted: true }
+}
+
+async function deleteCampusPlace(userId: string, payload: any) {
+  const placeId = assertUUID(payload.placeId, '地点')
+  await allowCampusPlaceAction(userId, 'publish')
+  const { data: place, error: lookupError } = await admin.from('campus_places').select('id,owner_id').eq('id', placeId).maybeSingle()
+  if (lookupError) dbError(lookupError)
+  if (!place) return { deleted: false }
+  if (place.owner_id !== userId) throw new ApiError('forbidden', '只能删除自己发布的地点内容。', 403)
+  const { error } = await admin.from('campus_places').delete().eq('id', placeId).eq('owner_id', userId)
+  if (error) dbError(error)
+  return { deleted: true }
+}
+
 async function handle(user: any, action: string, payload: any) {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new ApiError('invalid_input', '请求内容无效。')
   if (action === 'profile_get') return { profile: profileView(await getProfile(user.id)) }
@@ -640,6 +931,24 @@ async function handle(user: any, action: string, payload: any) {
     case 'invitation_cancel': return dispatch(user.id, 'cancel_invitation', { invitationId: assertUUID(payload.invitationId, '邀约') })
     case 'notifications_list': return listNotifications(user.id)
     case 'notifications_mark_read': return markNotificationsRead(user.id, payload)
+    case 'campus_places_list': return listCampusPlaces(user.id)
+    case 'campus_place_publish': return publishCampusPlace(user.id, payload)
+    case 'campus_place_rating_save': {
+      const placeId = assertUUID(payload.placeId, '地点')
+      const category = PLACE_CATEGORIES.some((item) => item.id === payload.category) ? String(payload.category) : ''
+      if (!category) throw new ApiError('invalid_input', '地点类型无效。')
+      await allowCampusPlaceAction(user.id, 'rating')
+      return saveCampusPlaceRating(user.id, placeId, category, payload.scores, payload.note, payload.visited)
+    }
+    case 'campus_place_report': return reportCampusPlace(user.id, payload)
+    case 'campus_place_rating_delete': return deleteCampusPlaceRating(user.id, payload)
+    case 'campus_place_delete': return deleteCampusPlace(user.id, payload)
+    case 'campus_place_invites_list': return listCampusPlaceInvites(user.id)
+    case 'campus_place_invite_send': return sendCampusPlaceInvite(user.id, payload)
+    case 'campus_place_invite_preview': return previewCampusPlaceInvite(user.id, payload)
+    case 'campus_place_invite_complete': return completeCampusPlaceInvite(user.id, payload)
+    case 'campus_place_invite_reject': return updateCampusPlaceInvite(user.id, payload, 'reject')
+    case 'campus_place_invite_cancel': return updateCampusPlaceInvite(user.id, payload, 'cancel')
     case 'project_time_availability': return projectAvailability(user.id, assertUUID(payload.projectId, '项目'), payload.days)
     case 'project_meetings_list': return projectDispatch(user.id, 'meetings_list', { projectId: assertUUID(payload.projectId, '项目') })
     case 'project_meeting_create': {

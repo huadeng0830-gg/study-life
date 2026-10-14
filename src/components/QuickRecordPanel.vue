@@ -1,7 +1,11 @@
 <script setup>
+import { ref, watch } from 'vue'
 import ActionButton from './ActionButton.vue'
 import Modal from './Modal.vue'
+import StudyQuestionMode from './StudyQuestionMode.vue'
 import { useQuickRecordPanel } from '../composables/useQuickRecordPanel.js'
+import { places } from '../composables/placeBook.js'
+import { PLACE_VALUE_OPTIONS } from '../composables/placeModels.js'
 
 const props = defineProps({
   open: Boolean,
@@ -9,6 +13,8 @@ const props = defineProps({
   context: { type: Object, default: () => ({}) },
 })
 const emit = defineEmits(['close', 'saved'])
+const mode = ref('record')
+watch(() => props.open, (open) => { if (open) mode.value = 'record' })
 
 const {
   input,
@@ -46,7 +52,10 @@ const {
   previewTypes,
   catInfo,
   onSmartInput,
+  onCompositionStart,
+  onCompositionEnd,
   onSmartKeydown,
+  insertSuggestion,
   chooseAction,
   chooseAuto,
   recentIcon,
@@ -84,7 +93,11 @@ const {
 <template>
   <Modal :open="open" title="⚡ 快速记录" medium sheet :auto-focus="false" :sheet-detents="[0.82, 0.92]" @close="requestClose">
     <section class="quick-record">
-      <fieldset class="entry-fields" :disabled="saving" aria-label="编辑快速记录">
+      <div class="mode-switch" role="group" aria-label="选择快速面板模式">
+        <button type="button" :aria-pressed="mode === 'record'" :class="{ on: mode === 'record' }" @click="mode = 'record'">记录</button>
+        <button type="button" :aria-pressed="mode === 'question'" :class="{ on: mode === 'question' }" @click="mode = 'question'">提问</button>
+      </div>
+      <fieldset v-if="mode === 'record'" class="entry-fields" :disabled="saving" aria-label="编辑快速记录">
         <div class="compose-heading"><b>想到就记，保存前再确认</b><small>待办 · 日程 · 收支 · 重要日期</small></div>
         <div class="input-wrap">
           <textarea
@@ -99,7 +112,8 @@ const {
             :placeholder="placeholder"
             :aria-describedby="`quick-input-help-${panelId}`"
             @input="onSmartInput"
-            @compositionend="onSmartInput"
+            @compositionstart="onCompositionStart"
+            @compositionend="onCompositionEnd"
             @keydown.enter.exact="onSmartKeydown"
             @keydown.ctrl.enter="onSmartKeydown"
             @keydown.meta.enter="onSmartKeydown"
@@ -112,6 +126,14 @@ const {
             :aria-label="listening ? '停止语音' : '语音输入'"
             @click="toggleVoice"
           >{{ listening ? '⏹' : '🎤' }}</button>
+        </div>
+
+        <div v-if="input.trim()" class="record-shortcuts" role="group" aria-label="输入建议">
+          <button type="button" @click="insertSuggestion('下周三前')">下周三前</button>
+          <button type="button" @click="insertSuggestion('18块5')">18块5</button>
+          <button type="button" @click="insertSuggestion('下午3点')">下午3点</button>
+          <span v-if="drafts.length === 1">识别为：{{ recordTypeMeta(drafts[0].type).label }} · Enter 保存 · Tab 改字段 · Esc 回到原文</span>
+          <span v-else>Enter 换行 · Ctrl/Cmd + Enter 保存</span>
         </div>
 
         <div class="input-tools">
@@ -183,6 +205,8 @@ const {
 
               <div class="chips">
                 <label v-if="isFinancial(draft)" class="amount-chip">¥ <input :id="fieldId(draft, 'amount')" v-model.number="draft.amount" type="number" min="0.01" step="0.01" inputmode="decimal" aria-label="金额" :aria-invalid="Boolean(issueFor(draft, 'amount')) || undefined" :aria-describedby="fieldDescription(draft, 'amount')" /></label>
+                <label v-if="draft.type === 'expense' && places.some((place) => !place.archivedAt)" class="place-link-chip">地点<select v-model="draft.placeId" :aria-label="`关联地点：${draft.title || draft.raw}`"><option value="">不关联</option><option v-for="place in places.filter((item) => !item.archivedAt)" :key="place.id" :value="place.id">{{ place.name }} · {{ place.visibility === 'school' ? '校内' : '本机' }}</option></select></label>
+                <label v-if="draft.type === 'expense' && draft.placeId" class="place-link-chip">值不值<select v-model="draft.placeValue"><option v-for="option in PLACE_VALUE_OPTIONS" :key="option.value" :value="option.value">{{ option.label }}</option></select></label>
                 <label v-if="draft.course">{{ draft.course }}</label>
                 <span v-if="['expense', 'income', 'bill'].includes(draft.type) && categoryLabel(draft.category)" class="category-chip-wrap">
                   <button type="button" class="category-chip" :aria-expanded="categoryEditorId === draft.id" @click="toggleCategoryEditor(draft, $event)">{{ catInfo(draft.category).icon }} {{ categoryLabel(draft.category) }}</button>
@@ -191,8 +215,8 @@ const {
                   </span>
                 </span>
                 <label v-if="draft.dateRange && !draft.date">时间范围：{{ draft.dateRange }}</label>
-                <label v-if="draft.date"><input v-model="draft.date" type="date" aria-label="日期" /></label>
-                <button v-else type="button" class="add-field" @click="expandedId = draft.id">{{ ['event', 'countdown', 'bill'].includes(draft.type) ? '补充日期' : '添加日期' }}</button>
+                <label v-if="draft.date"><input v-model="draft.date" type="date" :aria-label="draft.type === 'externalExam' ? (draft.registerDeadline ? '报名截止日期' : '考试日期') : '日期'" /></label>
+                <button v-else type="button" class="add-field" @click="expandedId = draft.id">{{ ['event', 'countdown', 'externalExam', 'bill'].includes(draft.type) ? '补充日期' : '添加日期' }}</button>
                 <label v-if="draft.time"><input v-model="draft.time" type="time" aria-label="时间" /></label>
                 <label v-if="draft.endTime">至 {{ draft.endTime }}</label>
                 <label v-if="draft.location">地点：{{ draft.location }}</label>
@@ -225,9 +249,10 @@ const {
                   <option value="income">收入</option>
                   <option value="bill">固定账单</option>
                   <option value="countdown">重要日期</option>
+                  <option value="externalExam">校外考试</option>
                 </select></label>
-                <label>日期{{ ['todo', 'homework'].includes(draft.type) ? '（可选）' : '' }}<input :id="fieldId(draft, 'date')" v-model="draft.date" type="date" :aria-invalid="Boolean(issueFor(draft, 'date')) || undefined" :aria-describedby="fieldDescription(draft, 'date')" /><small v-if="issueFor(draft, 'date')" :id="fieldId(draft, 'date-error')" class="field-error">{{ issueFor(draft, 'date') }}</small></label>
-                <label>{{ draft.type === 'event' ? '开始时间' : '时间（可选）' }}<input :id="fieldId(draft, 'time')" v-model="draft.time" type="time" :aria-invalid="Boolean(issueFor(draft, 'time')) || undefined" :aria-describedby="fieldDescription(draft, 'time')" /><small v-if="issueFor(draft, 'time')" :id="fieldId(draft, 'time-error')" class="field-error">{{ issueFor(draft, 'time') }}</small></label>
+                <label>{{ draft.type === 'externalExam' ? (draft.registerDeadline ? '报名截止日期' : '考试日期') : ['todo', 'homework'].includes(draft.type) ? '日期（可选）' : '日期' }}<input :id="fieldId(draft, 'date')" v-model="draft.date" type="date" :aria-invalid="Boolean(issueFor(draft, 'date')) || undefined" :aria-describedby="fieldDescription(draft, 'date')" /><small v-if="issueFor(draft, 'date')" :id="fieldId(draft, 'date-error')" class="field-error">{{ issueFor(draft, 'date') }}</small></label>
+                <label>{{ draft.type === 'event' ? '开始时间' : draft.type === 'externalExam' ? '考试时间' : '时间（可选）' }}<input :id="fieldId(draft, 'time')" v-model="draft.time" type="time" :aria-invalid="Boolean(issueFor(draft, 'time')) || undefined" :aria-describedby="fieldDescription(draft, 'time')" /><small v-if="issueFor(draft, 'time')" :id="fieldId(draft, 'time-error')" class="field-error">{{ issueFor(draft, 'time') }}</small></label>
                 <label v-if="draft.type === 'event'">结束时间（可选）<input :id="fieldId(draft, 'endTime')" v-model="draft.endTime" type="time" :aria-invalid="Boolean(issueFor(draft, 'endTime')) || undefined" :aria-describedby="fieldDescription(draft, 'endTime')" /><small v-if="issueFor(draft, 'endTime')" :id="fieldId(draft, 'endTime-error')" class="field-error">{{ issueFor(draft, 'endTime') }}</small></label>
                 <label v-if="!isFinancial(draft)">地点（可选）<input v-model.trim="draft.location" placeholder="例如：教学楼 201" /></label>
                 <label v-if="!isFinancial(draft)">课程（可选）<input v-model="draft.course" :list="courseListId" @input="syncDraftCourse(draft)" /></label>
@@ -244,8 +269,8 @@ const {
         </section>
       </fieldset>
 
-        <p v-if="error" class="error" role="alert">{{ error }}</p>
-        <div class="footer">
+        <p v-if="mode === 'record' && error" class="error" role="alert">{{ error }}</p>
+        <div v-if="mode === 'record'" class="footer">
           <div class="save-feedback"><p v-if="feedback" class="success" role="status">{{ feedback }}</p><button v-if="lastSaved.length" type="button" class="undo-save" :disabled="saving" @click="undoLastSaved">撤销刚才保存</button><small v-if="hasDrafts && !feedback">{{ saving ? '正在保存，请稍候…' : `将保存 ${selectedDrafts.length} 项记录` }}</small></div>
           <div v-if="hasDrafts" class="save-actions">
             <ActionButton tone="primary" type="button" class="btn btn-primary" :disabled="saving || !selectedDrafts.length || listening || clipboardLoading" :busy="saving || undefined" kind="frequent" feedback="external" :show-error="false" :action="() => saveAll(false)">{{ saveLabel }}</ActionButton>
@@ -253,19 +278,26 @@ const {
           </div>
         </div>
 
-      <datalist :id="courseListId"><option v-for="course in courses" :key="course.id" :value="course.name" /></datalist>
+      <StudyQuestionMode v-else />
+      <datalist v-if="mode === 'record'" :id="courseListId"><option v-for="course in courses" :key="course.id" :value="course.name" /></datalist>
     </section>
   </Modal>
 </template>
 
 <style scoped>
 .quick-record{display:flex;flex-direction:column;gap:11px}
+.mode-switch{display:flex;gap:5px;padding:3px;border:1px solid var(--border);border-radius:var(--radius-pill);background:var(--bg-tint)}
+.mode-switch button{flex:1;min-height:38px;border:0;border-radius:var(--radius-pill);color:var(--ink-soft);background:transparent;font:inherit;font-size:var(--fs-12);touch-action:manipulation}
+.mode-switch button.on{color:var(--primary);background:var(--card);box-shadow:var(--shadow-sm);font-weight:var(--fw-750)}
 .entry-fields{display:flex;flex-direction:column;gap:11px;min-width:0;margin:0;padding:0;border:0}
 .entry-fields:disabled{cursor:progress}
 .compose-heading{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:6px;color:var(--text);font-size:var(--fs-13)}
 .compose-heading small{color:var(--ink-soft);font-size:var(--fs-11)}
 .input-wrap{display:flex;align-items:flex-end;gap:7px;padding:6px 5px 6px 12px;border:1px solid var(--border-strong);border-radius:var(--radius-12);background:var(--card)}
 .input-wrap:focus-within{border-color:var(--primary);box-shadow:0 0 0 3px var(--primary-soft)}
+.record-shortcuts{position:sticky;top:0;z-index:3;display:flex;align-items:center;flex-wrap:wrap;gap:6px;padding:6px 0;background:var(--card)}
+.record-shortcuts button{min-height:36px;padding:5px 10px;color:var(--primary);font-size:var(--fs-11);border:1px solid var(--border);border-radius:var(--radius-pill);background:var(--bg-tint);touch-action:manipulation}
+.record-shortcuts span{flex:1 1 100%;color:var(--ink-soft);font-size:var(--fs-11);line-height:1.5}
 .smart-input{flex:1;min-width:0;min-height:58px;max-height:220px;padding:9px 0;border:0;background:transparent;resize:none;line-height:1.5;font:inherit;color:var(--text)}
 .mic{display:inline-flex;align-items:center;justify-content:center;gap:5px;min-width:44px;height:44px;padding:0 12px;border:0;border-radius:var(--radius-10);background:var(--primary-soft);font-size:var(--fs-17);cursor:pointer;touch-action:manipulation}
 .mic.on{color:var(--on-danger,#fff);background:var(--danger)}

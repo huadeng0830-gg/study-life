@@ -3,7 +3,7 @@ import { isSupported, transcribe, voiceErrorMessage, VOICE_STATES } from './voic
 import { useQuickRecordAdapters } from './quickRecord/adapters.js'
 import { parseQuickRecord } from './quickRecord/parser.js'
 import { QUICK_ACTIONS, QUICK_RECORD_EXAMPLES, recordTypeMeta } from './quickRecord/types.js'
-import { FINANCIAL_RECORD_TYPES, quickRecordDraftText, reconcileQuickRecordDrafts, validateQuickRecord } from './quickRecord/workflow.js'
+import { FINANCIAL_RECORD_TYPES, quickRecordDraftText, quickRecordKeyAction, reconcileQuickRecordDrafts, validateQuickRecord } from './quickRecord/workflow.js'
 import { quickRecordDraftKey, readQuickRecordDraft, writeQuickRecordDraft } from './quickRecord/draftStorage.js'
 import { accountDataOwner } from './accountSyncIdentity.js'
 import { amountToCents, catInfo, categoriesForScope, classifyTransaction, rememberCategoryOverride } from './ledger.js'
@@ -59,6 +59,9 @@ export function useQuickRecordPanel(props, emit) {
   let voiceRunId = 0
   let clipboardRunId = 0
   let draftTimer = 0
+  let compositionTimer = 0
+  let compositionActive = false
+  let compositionPending = false
 
   const actions = computed(() => QUICK_ACTIONS.map((type) => ({ type, ...recordTypeMeta(type) })))
   const hasDrafts = computed(() => drafts.value.length > 0)
@@ -147,23 +150,72 @@ export function useQuickRecordPanel(props, emit) {
   }
 
   function onSmartInput(event) {
-    if (saving.value || event?.isComposing || event?.target?.composing) return
+    if (saving.value || compositionActive || compositionPending || event?.isComposing || event?.target?.composing) return
     autosize(inputEl.value)
     parse()
   }
 
+  function onCompositionStart() {
+    compositionActive = true
+    compositionPending = false
+    window.clearTimeout(compositionTimer)
+  }
+
+  function onCompositionEnd() {
+    compositionActive = false
+    compositionPending = true
+    window.clearTimeout(compositionTimer)
+    compositionTimer = window.setTimeout(() => {
+      compositionPending = false
+      autosize(inputEl.value)
+      parse()
+    }, 120)
+  }
+
+  function focusNextField() {
+    const fields = /** @type {(HTMLInputElement|HTMLSelectElement|HTMLTextAreaElement)[]} */ ([...document.querySelectorAll('.record-card input:not([type="checkbox"]), .record-card select, .record-card textarea')])
+      .filter((field) => !field.disabled && field.getClientRects().length)
+    const activeElement = document.activeElement
+    const index = activeElement ? fields.indexOf(activeElement) : -1
+    fields[(index + 1 + fields.length) % fields.length]?.focus()
+  }
+
   function onSmartKeydown(event) {
-    if (event.isComposing || event.keyCode === 229 || saving.value) return
-    if (event.shiftKey) return
-    // 手机上 Enter 只负责换行，避免拇指误触直接保存；桌面仍保留快速回车保存，
-    // Ctrl/Cmd + Enter 在两端都明确表示保存。
-    if (isSmallViewport() && !event.ctrlKey && !event.metaKey) return
+    if (saving.value || compositionActive || compositionPending) return
+    const action = quickRecordKeyAction(event, { multiLine: input.value.includes('\n'), smallViewport: isSmallViewport() })
+    if (action === 'ignore' || action === 'newline') return
+    if (action === 'original') {
+      event.preventDefault()
+      inputEl.value?.focus()
+      inputEl.value?.select()
+      return
+    }
+    if (action === 'next-field') {
+      if (!drafts.value.length) return
+      event.preventDefault()
+      focusNextField()
+      return
+    }
     event.preventDefault()
     saveAll()
   }
 
+  function insertSuggestion(text) {
+    if (saving.value || compositionActive || compositionPending) return
+    const element = inputEl.value
+    const start = element?.selectionStart ?? input.value.length
+    const end = element?.selectionEnd ?? start
+    input.value = `${input.value.slice(0, start)}${text}${input.value.slice(end)}`
+    parse()
+    nextTick(() => {
+      const cursor = start + text.length
+      element?.focus()
+      element?.setSelectionRange(cursor, cursor)
+    })
+  }
+
   function parse({ preserve = true } = {}) {
-    if (saving.value) return
+    if (saving.value || compositionActive || compositionPending) return
     error.value = ''
     categoryEditorId.value = ''
     const parsed = parseQuickRecord(input.value, {
@@ -657,6 +709,7 @@ export function useQuickRecordPanel(props, emit) {
     stopActiveVoice()
     window.clearTimeout(feedbackTimer)
     window.clearTimeout(resultAnnounceTimer)
+    window.clearTimeout(compositionTimer)
   })
 
   return {
@@ -695,7 +748,10 @@ export function useQuickRecordPanel(props, emit) {
     previewTypes,
     catInfo,
     onSmartInput,
+    onCompositionStart,
+    onCompositionEnd,
     onSmartKeydown,
+    insertSuggestion,
     chooseAction,
     chooseAuto,
     recentIcon,

@@ -47,6 +47,9 @@ describe('周回顾工作区的真实表单与样本状态', () => {
     await mountReview()
     expect(host.querySelectorAll('h1')).toHaveLength(1)
     expect(host.querySelector('#reflection-title').tagName).toBe('H2')
+    expect(host.querySelector('#last-year-empty-title').textContent).toBe('去年的今天还没有记录')
+    expect(host.querySelector('#last-year-empty-title').parentElement.textContent).toContain('0 条记录')
+    expect(host.querySelector('.last-year-card')).toBeNull()
     expect(host.querySelector('.review-analysis').open).toBe(false)
     expect(host.querySelector('.trend-chart')).toBeNull()
     expect(host.querySelector('.focus-hour-chart')).toBeNull()
@@ -55,6 +58,16 @@ describe('周回顾工作区的真实表单与样本状态', () => {
       expect(host.querySelector(`label[for="${input.id}"]`).textContent.trim()).toBe(input.getAttribute('aria-label'))
       for (const id of input.getAttribute('aria-describedby').split(' ')) expect(host.querySelector(`#${id}`)).toBeTruthy()
     }
+  })
+
+  it('有去年同期记录时只展示专注与完成待办两个数字和一句摘要', async () => {
+    stored('sl_focus_sessions', []).value = [{ id: 'fiction-last-year-focus', startedAt: '2025-10-08T09:00:00Z', actualFocusSeconds: 1500 }]
+    stored('sl_tasks', []).value = [{ id: 'fiction-last-year-task', completedAt: '2025-10-08T10:00:00Z', done: true }]
+    await mountReview()
+
+    expect(host.querySelector('.last-year-metrics').children).toHaveLength(2)
+    expect([...host.querySelectorAll('.last-year-metrics strong')].map((node) => node.textContent)).toEqual(['0.4', '1'])
+    expect(host.querySelector('.last-year-sentence').textContent).toContain('专注与完成待办')
   })
 
   it('有业务样本时展示完成率和专注分布，摘要按实体计算', async () => {

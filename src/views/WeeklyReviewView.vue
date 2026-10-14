@@ -15,7 +15,9 @@ import { policyDateTime, timestampOf } from '../composables/settingsPolicy.js'
 import { buildCompletionTrend, buildFocusHours, buildMoodFocusWeeks, buildRhythmWeeks, describeMoodFocus, scaleTrendGeometry } from '../composables/reviewCharts.js'
 import { createLedgerBaseConverter, normalizeLedgerFx, useLedgerFx } from '../composables/ledgerFx.js'
 import { isWeeklyReflectionWeekKey, normalizeWeeklyReflection, normalizeWeeklyReflections, WEEKLY_REFLECTIONS_KEY } from '../composables/weeklyReflections.js'
-import { appNow } from '../composables/timeContext.js'
+import { appNow, appToday, appTimezone } from '../composables/timeContext.js'
+import { readLunarAnniversaries } from '../composables/lunarAnniversaries.js'
+import { buildLastYearComparison } from '../composables/lastYearComparison.js'
 
 const tasks = useStoredRef('sl_tasks', [])
 const courses = useStoredRef('sl_courses', [])
@@ -69,6 +71,19 @@ const review = computed(() => selectWeeklyReview({
   moodLog: moodLog.value,
 }, appNow.value, {
   weekOffset: reviewOffset.value,
+  currencyBase: financeConfig.value.base,
+  convertAmount: (amount, currency) => financeConverter.value(amount, currency),
+}))
+
+const lastYearComparison = computed(() => buildLastYearComparison({
+  focusSessions: focusSessions.value,
+  tasks: tasks.value,
+  transactions: transactions.value,
+  moodLog: moodLog.value,
+  weeklyReflections: weeklyReflections.value,
+}, appToday.value, {
+  timezone: appTimezone.value,
+  lunarAnniversaries: readLunarAnniversaries(),
   currencyBase: financeConfig.value.base,
   convertAmount: (amount, currency) => financeConverter.value(amount, currency),
 }))
@@ -250,6 +265,25 @@ function saveReflectionNow() {
       </article>
     </section>
 
+    <Card v-if="lastYearComparison.hasRecords" role="region" aria-labelledby="last-year-title" class="card last-year-card">
+      <CardHeader class="section-head">
+        <div><p class="section-eyebrow">回望这一年</p><CardTitle as="h2" id="last-year-title">与去年同期的对照</CardTitle></div>
+      </CardHeader>
+      <CardContent>
+        <div class="last-year-metrics" aria-label="去年同期两项记录">
+          <div><strong>{{ lastYearComparison.focusHours.toFixed(1) }}</strong><span>小时专注</span></div>
+          <div><strong>{{ lastYearComparison.completedTasks }}</strong><span>件已完成待办</span></div>
+        </div>
+        <p class="last-year-sentence">{{ lastYearComparison.sentence }}</p>
+      </CardContent>
+    </Card>
+    <Empty v-else role="region" aria-labelledby="last-year-empty-title" class="last-year-empty">
+      <EmptyHeader>
+        <EmptyTitle id="last-year-empty-title">去年的今天还没有记录</EmptyTitle>
+        <EmptyDescription>那之后的几个月里，你又记下了 {{ lastYearComparison.subsequentRecordCount }} 条记录。</EmptyDescription>
+      </EmptyHeader>
+    </Empty>
+
     <div class="review-workspace">
     <Card role="region" aria-labelledby="reflection-title" class="card reflection-card">
       <CardHeader class="section-head reflection-head">
@@ -389,6 +423,14 @@ function saveReflectionNow() {
 .mood-segment.cloudy { background: var(--warning); }
 .mood-segment.rain { background: var(--primary); }
 .review-workspace { display: flex; flex-wrap: wrap; align-items: flex-start; gap: var(--space-4); }
+.last-year-card { width: 100%; padding-inline: 0; box-shadow: none; }
+.last-year-card .section-head { margin-bottom: 0; }
+.last-year-metrics { display: flex; flex-wrap: wrap; gap: clamp(24px, 8vw, 88px); }
+.last-year-metrics > div { display: flex; align-items: baseline; gap: 7px; }
+.last-year-metrics strong { color: var(--text); font-size: var(--fs-29); font-weight: var(--fw-800); font-variant-numeric: tabular-nums; }
+.last-year-metrics span, .last-year-sentence { color: var(--ink-soft); font-size: var(--fs-11-5); }
+.last-year-sentence { margin-top: 12px; line-height: 1.55; }
+.last-year-empty { min-height: 0; margin: 0; padding: 18px 20px; border: 1px dashed var(--border); border-radius: var(--radius-surface); background: var(--bg-tint); }
 .reflection-card { flex: 1.65 1 480px; }
 .next-week-card { flex: 1 1 300px; }
 .next-week-card, .reflection-card { min-width: 0; padding-inline: 0; box-shadow: none; }

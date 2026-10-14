@@ -15,6 +15,8 @@ export const SYNC_ENTITY_COLLECTIONS = Object.freeze({
   sl_focus_sessions: 'FocusSession',
   sl_course_checkins: 'CourseCheckin',
   sl_reminder_log: 'ReminderLog',
+  sl_notices: 'Notice',
+  sl_notice_sources: 'NoticeSource',
 })
 
 /** @type {Set<string>} */
@@ -27,6 +29,7 @@ const SYNC_SINGLETON_KEYS = new Set([
   'sl_ledger_fx', 'sl_ledger_budget', 'sl_festive_lunar', 'sl_ui_language', 'sl_high_contrast',
   'sl_archived_quick_notes', 'sl_navigation_mobile', 'sl_navigation_desktop',
   'sl_weekly_reflections',
+  'sl_data_health_settings',
 ])
 
 /**
