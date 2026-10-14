@@ -327,7 +327,7 @@ describe('campus-life Edge Function', () => {
     const owner = '20000001-0000-4000-8000-000000000001'
     const { handler, rows } = createEdge({
       notificationError: true,
-      tables: { platform_admins: [{ user_id: actor }] },
+      tables: { platform_admins: [{ user_id: actor, role: 'owner' }] },
       rpcResults: { campus_life_moderate_content: { id: '10000001-0000-4000-8000-000000000001', status: 'approved', ownerId: owner } },
     })
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})

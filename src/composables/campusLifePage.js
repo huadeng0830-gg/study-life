@@ -10,6 +10,7 @@ export function useCampusLifePage() {
   let generation = 0
   let ownerGeneration = 0
   let active = true
+  let lastRequest = null
   onScopeDispose(() => { active = false; generation += 1; ownerGeneration += 1 })
   watch(() => accountUser.value?.id || '', () => {
     generation += 1
@@ -18,8 +19,11 @@ export function useCampusLifePage() {
     error.value = ''
     notice.value = ''
     loading.value = false
+    const owner = ownerGeneration
+    if (lastRequest) void Promise.resolve().then(() => { if (active && owner === ownerGeneration) return load(lastRequest) })
   }, { flush: 'sync' })
   async function load(request, initial = null) {
+    lastRequest = request
     const revision = ++generation
     const userId = accountUser.value?.id || ''
     loading.value = true

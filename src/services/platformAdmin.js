@@ -10,6 +10,7 @@ const SAFE_MESSAGES = Object.freeze({
   origin_not_allowed: '当前访问来源未获授权。',
   not_found: '没有找到这个账号，请刷新列表。',
   state_changed: '账号状态已变化，请刷新后重试。',
+  reviewer_unverified: '对方需要先注册并验证邮箱，再授予审核权限。',
   operation_failed: '账号状态修改失败，请稍后重试。',
   place_not_found: '没有找到这个地点，请刷新审核队列。',
   place_state_changed: '地点内容或状态已变化，请刷新后重新检查。',

@@ -33,6 +33,7 @@ const serviceState = vi.hoisted(() => ({
     'submitLostFoundItem', 'submitLostFoundClaim', 'listLostFoundClaims', 'decideLostFoundClaim', 'campusEvents',
     'submitCampusEvent', 'registerCampusEvent', 'cancelCampusEventRegistration', 'campusGuides', 'submitCampusGuide',
     'listCampusMessages', 'sendCampusMessage', 'campusModerationQueue', 'decideCampusModeration', 'resolveCampusHelpDispute',
+    'campusGovernanceAccess', 'campusModerationHistory', 'campusMyReports', 'resolveCampusReport', 'withdrawCampusContent',
   ],
 }))
 
@@ -140,6 +141,68 @@ afterEach(() => {
   app = null
   host = null
   globalThis.localStorage.clear()
+})
+
+describe('校园治理工作台', () => {
+  const guide = { type: 'guide', item: { id: 'fictional-guide', title: '虚构指南', school: '虚构大学', campus: '东区', body: '待核对内容', revision: 1 } }
+  function reviewerQueue(items = [guide]) {
+    serviceState.responses.campusGovernanceAccess = { owner: false, reviewer: true, scope: { school: '虚构大学', campus: '东区' } }
+    serviceState.responses.campusModerationQueue = { items, total: items.length, counts: { guide: items.length } }
+  }
+  it('普通用户不能加载审核队列或授权界面', async () => {
+    serviceState.responses.campusGovernanceAccess = { owner: false, reviewer: false }
+    const { default: view } = await import('../src/views/campus/CampusGovernanceView.vue')
+    await mountView(view)
+    expect(host.textContent).toContain('当前账号没有审核权限')
+    expect(serviceState.calls.campusModerationQueue).toBeUndefined()
+    expect(host.textContent).not.toContain('审核人员与范围')
+  })
+  it('刷新传入页码，审核失败保留队列和处理依据', async () => {
+    reviewerQueue()
+    serviceState.responses.decideCampusModeration = async () => { throw new Error('虚构网络失败') }
+    const { default: view } = await import('../src/views/campus/CampusGovernanceView.vue')
+    await mountView(view)
+    await clickButton('刷新队列')
+    expect(serviceState.lastArgs).toEqual([0, { type: '' }])
+    await clickButton('退回修改')
+    expect(serviceState.calls.decideCampusModeration).toBeUndefined()
+    expect(host.querySelector('.campus-review-item')).toBeTruthy()
+    await typeInto('textarea', '请补充公开来源')
+    await clickButton('退回修改')
+    expect(host.textContent).toContain('虚构网络失败')
+    expect(host.querySelector('textarea').value).toBe('请补充公开来源')
+    expect(host.querySelector('.campus-review-item')).toBeTruthy()
+    expect(host.textContent).not.toContain('审核人员与范围')
+  })
+  it('举报下架须确认并携带原内容与举报两个版本', async () => {
+    reviewerQueue([{ type: 'report', item: { id: 'fictional-report', school: '虚构大学', target_type: 'guide', reason: 'inaccurate', revision: 3, target: { title: '虚构指南', body: '待核对正文', revision: 7 } } }])
+    const { default: view } = await import('../src/views/campus/CampusGovernanceView.vue')
+    await mountView(view)
+    await typeInto('textarea', '已核对公开资料，需要补正')
+    await clickButton('下架原内容')
+    expect(serviceState.calls.resolveCampusReport).toBeUndefined()
+    let request
+    serviceState.responses.resolveCampusReport = async (...args) => { request = args; return { notificationSent: true } }
+    serviceState.responses.campusModerationQueue = { items: [], total: 0 }
+    const confirm = [...document.querySelectorAll('button')].find(node => node.textContent.trim() === '确认下架')
+    expect(confirm).toBeTruthy()
+    confirm.click()
+    await settle()
+    expect(request).toEqual(['fictional-report', 'remove', '已核对公开资料，需要补正', 3, 7])
+    expect(host.textContent).toContain('处理结果已保存')
+    expect(host.querySelector('.campus-review-item')).toBeNull()
+  })
+  it('举报记录展示处理依据，且不会显示其他账号的旧记录', async () => {
+    serviceState.responses.campusMyReports = { reports: [{ id: 'fictional-report', target_type: 'guide', reason: 'inaccurate', status: 'resolved', detail: '虚构举报', resolution: '已下架等待补正', resolution_action: 'remove' }], total: 1 }
+    const { default: view } = await import('../src/views/campus/CampusReportsView.vue')
+    await mountView(view)
+    expect(host.textContent).toContain('已下架等待补正')
+    serviceState.responses.campusMyReports = { reports: [], total: 0 }
+    accountUser.value = { id: 'fictional-next-account' }
+    await settle()
+    expect(host.textContent).not.toContain('已下架等待补正')
+    expect(host.textContent).toContain('暂时没有举报记录')
+  })
 })
 
 describe('统一发布：本机草稿回灌不会让页面变白屏', () => {

@@ -2,6 +2,7 @@ import { campusLifeRequest } from './social.js'
 
 export const campusLifeSearch = (query) => campusLifeRequest('search', { query })
 export const campusLifeMine = () => campusLifeRequest('mine_list')
+export const withdrawCampusContent = (targetType, targetId, revision) => campusLifeRequest('content_withdraw', { targetType, targetId, revision })
 export const resubmitCampusContent = (targetType, targetId, revision, content) => campusLifeRequest('content_resubmit', { targetType, targetId, revision, content })
 export const campusLifeFavorites = () => campusLifeRequest('favorite_list')
 export const setCampusFavorite = (targetType, targetId, saved) => campusLifeRequest('favorite_set', { targetType, targetId, saved })
@@ -51,6 +52,10 @@ export const submitCampusGuide = (payload) => campusLifeRequest('guide_submit', 
 export const listCampusMessages = (targetType, targetId, recipientId) => campusLifeRequest('message_list', { targetType, targetId, recipientId })
 export const sendCampusMessage = (targetType, targetId, recipientId, body) => campusLifeRequest('message_send', { targetType, targetId, recipientId, body })
 
-export const campusModerationQueue = (page = 0) => campusLifeRequest('moderation_queue', { page })
+export const campusModerationQueue = (page = 0, filters = {}) => campusLifeRequest('moderation_queue', { page, ...filters })
+export const campusGovernanceAccess = () => campusLifeRequest('governance_access')
+export const campusModerationHistory = (page = 0) => campusLifeRequest('moderation_history', { page })
+export const campusMyReports = (page = 0) => campusLifeRequest('reports_mine', { page })
+export const resolveCampusReport = (reportId, decision, reason, revision, targetRevision) => campusLifeRequest('report_resolve', { reportId, decision, reason, revision, targetRevision })
 export const decideCampusModeration = (targetType, targetId, decision, reason = '', revision) => campusLifeRequest('moderation_decide', { targetType, targetId, decision, reason, revision })
 export const resolveCampusHelpDispute = (disputeId, taskStatus, reason) => campusLifeRequest('help_dispute_resolve', { disputeId, taskStatus, reason })

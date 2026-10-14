@@ -906,8 +906,8 @@ async function reportCampusPlace(userId: string, payload: any) {
   if (!place) throw new ApiError('not_found', '地点已更新或不在你的学校范围内。', 404)
   if (place.review_status !== 'approved') throw new ApiError('not_found', '地点尚未通过审核。', 404)
   if (place.owner_id === userId) throw new ApiError('invalid_input', '不能举报自己发布的地点。')
-  const { error } = await admin.from('campus_place_reports').insert({
-    place_id: placeId, reporter_id: userId, reason, detail: cleanText(payload.detail, 50, '补充说明'),
+  const { error } = await admin.from('campus_content_reports').insert({
+    target_type: 'place', target_id: placeId, reporter_id: userId, school, reason: reason === 'sensitive' ? 'privacy' : reason, detail: cleanText(payload.detail, 50, '补充说明'),
   })
   if (error?.code === '23505') throw new ApiError('already_reported', '你已经举报过这个地点。', 409)
   if (error) dbError(error)

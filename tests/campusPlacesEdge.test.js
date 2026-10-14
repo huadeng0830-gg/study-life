@@ -18,7 +18,7 @@ function edge({ tables = {} } = {}) {
       { user_id: other, nickname: '虚构好友', school: '虚构大学' },
     ],
     social_friendships: [], social_notifications: [], campus_place_invites: [],
-    campus_places: [], campus_place_ratings: [], campus_place_reports: [],
+    campus_places: [], campus_place_ratings: [], campus_place_reports: [], campus_content_reports: [],
     ...tables,
   }
   const primaryKeys = {
@@ -279,7 +279,8 @@ describe('校内地点 Edge 安全边界', () => {
     } })
     const response = await call(handler, 'campus_place_report', { placeId, reason: 'inaccurate', detail: '虚构地点信息有误' })
     expect(response.status).toBe(200)
-    expect(rows.campus_place_reports[0]).toMatchObject({ place_id: placeId, reporter_id: actor, reason: 'inaccurate', detail: '虚构地点信息有误' })
+    expect(rows.campus_content_reports[0]).toMatchObject({ target_type: 'place', target_id: placeId, reporter_id: actor, reason: 'inaccurate', detail: '虚构地点信息有误' })
+    expect(rows.campus_place_reports).toEqual([])
   })
 
   it('待审核地点不开放举报入口对应的服务端写入', async () => {
@@ -289,6 +290,7 @@ describe('校内地点 Edge 安全边界', () => {
     const response = await call(handler, 'campus_place_report', { placeId, reason: 'inaccurate', detail: '虚构地点信息有误' })
     expect(response.status).toBe(404)
     expect(rows.campus_place_reports).toEqual([])
+    expect(rows.campus_content_reports).toEqual([])
   })
 
   it('只向已添加好友发送用户确认的最小地点副本', async () => {

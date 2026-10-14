@@ -1,5 +1,6 @@
 <script setup>
-import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import CampusHome from '../components/CampusHome.vue'
 import { PLACE_CATEGORIES, PLACE_SCORE_FIELDS, PLACE_TYPES, PLACE_VALUE_OPTIONS, createPlaceId, toPlaceInvitePayload, toSchoolPlacePayload } from '../composables/placeModels.js'
 import {
@@ -18,6 +19,7 @@ import {
 
 const domain = useDomainCommands()
 const section = ref('home')
+const route = useRoute()
 const message = ref('')
 const searchQuery = ref('')
 const selectedCategory = ref('all')
@@ -576,6 +578,7 @@ function switchSection(next) {
   if (next === 'discover' && !sharedLoaded.value && !sharedLoading.value) void loadSharedPlaces()
   if (next === 'invites' && !placeInvitesLoaded.value) void loadPlaceInvites()
 }
+watch(() => route.query.section, value => { if (['home','discover','mine','invites','offers'].includes(String(value))) switchSection(String(value)) }, { immediate: true })
 
 function searchCampusPlaces(category = 'all') {
   selectedCategory.value = category

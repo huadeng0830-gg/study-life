@@ -19,6 +19,7 @@ import { currentVersionInfo } from '../composables/versionInfo.js'
 import { announce, announceAlert } from '../composables/liveRegion.js'
 import { silentErrors } from '../composables/globalError.js'
 import { platformAdminRequest } from '../services/platformAdmin.js'
+import CampusGovernanceEntry from '../components/campus/CampusGovernanceEntry.vue'
 import { useDomainCommands } from '../composables/domain/commands.js'
 import { setNoticeStatus } from '../composables/noticeArchive.js'
 import { animationsEnabled } from '../composables/motion.js'
@@ -452,11 +453,8 @@ onBeforeUnmount(() => {
       </button>
     </header>
 
-    <section class="admin-scope" aria-label="管理范围">
-      <span class="admin-scope-mark" aria-hidden="true">本</span>
-      <p><b>当前设备的个人工作台</b><span>记录默认保存在本机。登录后可选择同步到自己的账号；这里没有管理员角色或跨用户数据入口。</span></p>
-      <span class="admin-scope-tag">本机优先</span>
-    </section>
+    <section class="admin-scope" aria-label="管理范围"><span class="admin-scope-mark" aria-hidden="true">本</span><p><b>当前设备的个人工作台</b><span>个人记录默认保存在本机；校园事务根据登录账号的服务端授权开放。</span></p><span class="admin-scope-tag">本机优先</span></section>
+    <CampusGovernanceEntry />
 
     <div class="admin-layout">
       <div class="admin-primary-column">

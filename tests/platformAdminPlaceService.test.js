@@ -12,16 +12,17 @@ const nodeRequire = createRequire(import.meta.url)
 const source = readFileSync(new URL('../supabase/functions/platform-admin/index.ts', import.meta.url), 'utf8')
 const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
 
-function platformAdmin({ places = [], onInsert } = {}) {
+function platformAdmin({ places = [], onInsert, rpcError = null } = {}) {
   let handler
   const rows = {
-    platform_admins: [{ user_id: actor }],
+    platform_admins: [{ user_id: actor, role: 'owner' }],
     campus_places: places,
     campus_place_review_events: [],
     social_notifications: [],
   }
   let nextEventId = 0
   const admin = {
+    rpc: vi.fn(async () => ({ data: rpcError ? null : { id: placeId, status: 'approved', ownerId: actor }, error: rpcError })),
     auth: { getUser: vi.fn(async () => ({ data: { user: { id: actor, email: 'owner@example.test', email_confirmed_at: '2026-10-01T00:00:00Z' } }, error: null })) },
     from(table) {
       const filters = []
@@ -103,43 +104,40 @@ describe('platform-admin campus place service', () => {
     expect(body.data.places[0].id).toBe('place-51')
   })
 
-  it('blocks a review when the displayed content revision is stale', async () => {
+  it('maps a database revision conflict without sending a success notification', async () => {
     const { handler, rows } = platformAdmin({ places: [{
       id: placeId, review_status: 'pending', visibility: 'school', archived_at: null,
       review_revision: changedRevision,
-    }] })
+    }], rpcError: { message: 'CAMPUS_REVISION_CHANGED' } })
     const response = await call(handler, 'place_review', { placeId, expectedRevision: revision, decision: 'approved' })
     expect(response.status).toBe(409)
     expect(rows.campus_places[0].review_status).toBe('pending')
     expect(rows.campus_place_review_events).toEqual([])
   })
 
-  it('rejects a review if the submission changes after the initial lookup', async () => {
+  it('does not notify when the atomic review operation fails', async () => {
     const { handler, rows } = platformAdmin({
       places: [{
         id: placeId, owner_id: actor, review_status: 'pending', visibility: 'school', archived_at: null,
         review_revision: revision,
       }],
-      onInsert(table, _inserted, currentRows) {
-        if (table === 'campus_place_review_events') currentRows.campus_places[0].review_revision = changedRevision
-      },
+      rpcError: { message: 'database unavailable' },
     })
     const response = await call(handler, 'place_review', { placeId, expectedRevision: revision, decision: 'approved' })
-    expect(response.status).toBe(409)
+    expect(response.status).toBe(502)
     expect(rows.campus_places[0].review_status).toBe('pending')
-    expect(rows.campus_place_review_events[0]).toMatchObject({ content_revision: revision, outcome: 'failed' })
+    expect(rows.campus_place_review_events).toEqual([])
     expect(rows.social_notifications).toEqual([])
   })
 
   it('audits and conditionally approves the exact revision shown to the reviewer', async () => {
-    const { handler, rows } = platformAdmin({ places: [{
+    const { handler, rows, admin } = platformAdmin({ places: [{
       id: placeId, owner_id: actor, review_status: 'pending', visibility: 'school', archived_at: null,
       review_revision: revision,
     }] })
     const response = await call(handler, 'place_review', { placeId, expectedRevision: revision, decision: 'approved' })
     expect(response.status).toBe(200)
-    expect(rows.campus_places[0].review_status).toBe('approved')
-    expect(rows.campus_place_review_events[0]).toMatchObject({ content_revision: revision, decision: 'approved', outcome: 'succeeded' })
+    expect(admin.rpc).toHaveBeenCalledWith('campus_review_place', expect.objectContaining({ p_actor: actor, p_id: placeId, p_revision: revision, p_decision: 'approve' }))
     expect(rows.social_notifications[0]).toMatchObject({
       recipient_id: actor, actor_id: actor, kind: 'campus_place_reviewed', resource_id: placeId,
     })

@@ -1,6 +1,6 @@
 const MAX_BODY_BYTES = 8_192
 const MAX_REASON_LENGTH = 500
-const ACTIONS = new Set(['identity', 'overview', 'users_list', 'audit_list', 'user_suspend', 'user_restore', 'places_pending', 'place_review', 'place_review_audit'])
+const ACTIONS = new Set(['identity', 'overview', 'users_list', 'audit_list', 'user_suspend', 'user_restore', 'places_pending', 'place_review', 'place_review_audit', 'reviewers_list', 'reviewer_set'])
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 export class PlatformAdminError extends Error {
@@ -92,16 +92,31 @@ export function createPlatformAdminHandler({ service, allowedOrigins = [], logge
       const user = await service.authenticate(token)
       if (!user?.id) throw new PlatformAdminError('unauthorized', '登录已失效，请重新登录。', 401)
       if (!user.email_confirmed_at) throw new PlatformAdminError('email_verification_required', '请先完成邮箱验证。', 403)
-      if (!await service.isOwner(user.id)) throw new PlatformAdminError('forbidden', '当前账号没有平台管理权限。', 403)
+      const owner = await service.isOwner(user.id)
 
       const body = await readBody(request)
       if (typeof body.action !== 'string' || !ACTIONS.has(body.action)) throw new PlatformAdminError('invalid_input', '管理操作无效。')
       const payload = body.payload && typeof body.payload === 'object' && !Array.isArray(body.payload) ? body.payload : {}
+      if (body.action === 'identity') {
+        const delegated = !owner && service.reviewerAccess ? await service.reviewerAccess(user.id) : { reviewer: false, scope: null }
+        return json({ data: { owner, ...delegated, email: owner ? user.email || '' : '' } }, 200, corsOrigin)
+      }
+      if (!owner) throw new PlatformAdminError('forbidden', '当前账号没有平台管理权限。', 403)
       switch (body.action) {
         case 'identity':
           return json({ data: { owner: true, email: user.email || '' } }, 200, corsOrigin)
         case 'overview':
           return json({ data: await service.getOverview() }, 200, corsOrigin)
+        case 'reviewers_list':
+          return json({ data: await service.listReviewers({ page: positivePage(payload.page), userId: payload.userId ? requiredUuid(payload.userId, '审核账号') : '' }) }, 200, corsOrigin)
+        case 'reviewer_set': {
+          const userId = requiredUuid(payload.userId, '审核账号')
+          const school = requiredText(payload.school, '授权学校', 100)
+          const campus = typeof payload.campus === 'string' ? payload.campus.trim() : ''
+          const reason = requiredText(payload.reason, '授权说明')
+          if (campus.length > 100 || typeof payload.active !== 'boolean' || (payload.revision != null && (!Number.isSafeInteger(payload.revision) || payload.revision < 1))) throw new PlatformAdminError('invalid_input', '审核授权格式有误。')
+          return json({ data: await service.setReviewer({ actorId: user.id, userId, school, campus, active: payload.active, reason, revision: payload.revision ?? null }) }, 200, corsOrigin)
+        }
         case 'users_list': {
           const page = positivePage(payload.page)
           const query = typeof payload.query === 'string' ? payload.query.trim().slice(0, 120) : ''

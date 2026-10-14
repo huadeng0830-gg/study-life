@@ -115,6 +115,11 @@ function rating(value: unknown, label: string) {
 
 function dbError(error: any): never {
   const marker = String(error?.message || '')
+  if (/CAMPUS_FORBIDDEN|CAMPUS_SELF_REVIEW/.test(marker)) throw new ApiError('forbidden', '没有此范围的审核权限，或不能处理自己的内容与争议。', 403)
+  if (/CAMPUS_REVISION_CHANGED/.test(marker)) throw new ApiError('state_changed', '内容或授权已经变化，请刷新后重新核对。', 409)
+  if (/CAMPUS_NOT_FOUND/.test(marker)) throw new ApiError('not_found', '内容已不可用，请刷新列表。', 404)
+  if (/CAMPUS_USE_DISPUTE/.test(marker)) throw new ApiError('state_changed', '互助正在履行，请先通过互助争议流程处理。', 409)
+  if (/CAMPUS_INVALID_INPUT/.test(marker)) throw new ApiError('invalid_input', '请填写处理依据并检查操作选项。')
   if (/CAMPUS_RESUBMIT_INVALID/.test(marker)) throw new ApiError('invalid_input', '修改内容无效，请检查填写字段。')
   if (/CAMPUS_RESUBMIT_RELATION_INVALID/.test(marker)) throw new ApiError('not_found', '授课安排必须关联同校已审核的课程和教师。', 404)
   if (/CAMPUS_RESUBMIT_CONFLICT/.test(marker)) throw new ApiError('state_changed', '内容状态或版本已经变化，请刷新投稿记录后重试。', 409)
@@ -202,9 +207,21 @@ async function notify(recipientId: string, actorId: string, kind: string, resour
 }
 
 async function isPlatformOwner(userId: string) {
-  const { data, error } = await admin.from('platform_admins').select('user_id').eq('user_id', userId).maybeSingle()
+  const { data, error } = await admin.from('platform_admins').select('user_id').eq('role', 'owner').eq('user_id', userId).maybeSingle()
   if (error) dbError(error)
   return Boolean(data)
+}
+
+async function governanceAccess(userId: string) {
+  if (await isPlatformOwner(userId)) return { owner: true, reviewer: true, scope: null }
+  const grant = dataOrThrow(await admin.from('campus_reviewer_grants').select('school,campus').eq('user_id', userId).eq('active', true).maybeSingle())
+  return { owner: false, reviewer: Boolean(grant), scope: grant || null }
+}
+
+async function requireReviewer(userId: string) {
+  const access = await governanceAccess(userId)
+  if (!access.reviewer) throw new ApiError('forbidden', '当前账号没有校园审核权限，可由总管理员授权。', 403)
+  return access
 }
 
 async function enforceRateLimit(userId: string, category: string, limit: number, windowSeconds = 3600) {
@@ -293,7 +310,7 @@ async function listGuides(scope: { school: string; campus: string }) {
   return (dataOrThrow(result) || []).filter((row: any) => inScope(row, scope) && (!row.expires_on || row.expires_on >= today))
 }
 
-async function getMine(userId: string, scope: { school: string; campus: string }) {
+async function getMine(userId: string) {
   const tables = [
     ['teachers', 'campus_teachers'], ['courses', 'campus_courses'], ['assignments', 'campus_teaching_assignments'],
     ['listings', 'campus_market_listings'], ['helpTasks', 'campus_help_tasks'], ['shuttleRoutes', 'campus_shuttle_routes'],
@@ -305,7 +322,7 @@ async function getMine(userId: string, scope: { school: string; campus: string }
       .order(['shuttleCorrections', 'shuttleExceptions'].includes(key) ? 'created_at' : 'updated_at', { ascending: false }).limit(100)
     return [key, dataOrThrow(result) || []]
   }))
-  const reviewResult = await admin.from('campus_course_reviews').select('id,assignment_id,clarity,organization,learning,workload,assessment,note,review_status,review_reason,updated_at')
+  const reviewResult = await admin.from('campus_course_reviews').select('id,assignment_id,clarity,organization,learning,workload,assessment,note,review_status,review_reason,revision,updated_at')
     .eq('user_id', userId).order('updated_at', { ascending: false }).limit(100)
   const mine = Object.fromEntries(entries) as Record<string, any[]>
   const routes = mine.shuttleRoutes || []
@@ -322,7 +339,8 @@ async function getMine(userId: string, scope: { school: string; campus: string }
       departures: departures.filter((item: any) => item.route_id === route.id),
     }))
   }
-  return { ...mine, courseReviews: dataOrThrow(reviewResult) || [] }
+  const places = dataOrThrow(await admin.from('campus_places').select('id,name,review_status,review_reason,review_revision,updated_at').eq('owner_id', userId).eq('visibility', 'school').order('updated_at', { ascending: false }).limit(100)) || []
+  return { ...mine, places, courseReviews: dataOrThrow(reviewResult) || [] }
 }
 
 function requireObject(value: any, label: string) {
@@ -513,7 +531,7 @@ async function assertPublicTarget(targetType: string, targetId: string, scope: {
   const config = configs[targetType]
   if (!config) throw new ApiError('invalid_input', '内容类型无效。')
   const scopeColumns = targetType === 'course_review' ? 'assignment_id' : 'campus'
-  const result = await admin.from(config.table).select(`id,school,${scopeColumns},${config.statusField}${targetType === 'place' ? ',visibility,archived_at' : ''}`)
+  const result = await admin.from(config.table).select(`id,school,${scopeColumns},${targetType === 'course_review' ? 'user_id' : 'owner_id'},${config.statusField}${targetType === 'place' ? ',visibility,archived_at' : ''}`)
     .eq('id', targetId).maybeSingle()
   const row = dataOrThrow(result)
   if (row && targetType === 'course_review') {
@@ -548,10 +566,12 @@ async function createFavorite(user: any, payload: any, scope: { school: string; 
 async function submitReport(user: any, payload: any, scope: { school: string; campus: string }) {
   const targetType = enumValue(payload.targetType, ['place', 'teacher', 'course', 'course_review', 'market_listing', 'help_task', 'shuttle_route', 'lost_found', 'event', 'guide'] as const, '内容类型')
   const targetId = uuid(payload.targetId, '内容')
-  await assertPublicTarget(targetType, targetId, scope)
+  const target = await assertPublicTarget(targetType, targetId, scope)
+  if ((target.owner_id || target.user_id) === user.id) throw new ApiError('invalid_input', '自己的内容请在投稿记录中修改或撤回。')
   const reason = enumValue(payload.reason, ['inaccurate', 'privacy', 'abuse', 'prohibited', 'other'] as const, '举报原因')
-  const detail = publicText(payload.detail, 1000, '举报说明')
-  const result = await admin.from('campus_content_reports').insert({ reporter_id: user.id, school: scope.school, target_type: targetType, target_id: targetId, reason, detail }).select('id,status').single()
+  const detail = text(payload.detail, 1000, '举报说明')
+  const result = await admin.from('campus_content_reports').insert({ reporter_id: user.id, school: scope.school, campus: target.campus || '', target_type: targetType, target_id: targetId, reason, detail }).select('id,status').single()
+  if (result.error?.code === '23505') throw new ApiError('already_reported', '这条内容已有你的待处理举报，请到“我的举报”查看进度。', 409)
   return { report: dataOrThrow(result) }
 }
 
@@ -870,10 +890,10 @@ async function search(scope: { school: string; campus: string }, payload: any) {
 }
 
 async function moderationQueue(userId: string, payload: any) {
-  if (!await isPlatformOwner(userId)) throw new ApiError('forbidden', '当前账号没有校园内容审核权限。', 403)
+  await requireReviewer(userId)
   const page = Number.isInteger(Number(payload.page)) ? Math.max(0, Math.min(2000, Number(payload.page))) : 0
   const pageSize = 40
-  const result = dataOrThrow(await admin.rpc('campus_life_moderation_queue', { p_offset: page * pageSize, p_limit: pageSize })) || { items: [], hasMore: false }
+  const result = dataOrThrow(await admin.rpc('campus_governance_queue', { p_actor_id: userId, p_offset: page * pageSize, p_limit: pageSize, p_type: text(payload.type, 40, '内容分类'), p_school: text(payload.school, 100, '筛选学校') })) || { items: [], hasMore: false }
   const items = Array.isArray(result.items) ? result.items : []
   const routeIds = items.filter((entry: any) => entry.type === 'shuttle_route').map((entry: any) => entry.item?.id).filter(Boolean)
   if (routeIds.length) {
@@ -906,11 +926,24 @@ async function moderationQueue(userId: string, payload: any) {
       if (assignment) Object.assign(entry.item, { course_name: assignment.courseName, teacher_name: assignment.teacherName, term: assignment.term })
     }
   }
-  return { items, hasMore: Boolean(result.hasMore), page, pageSize }
+  return { items, hasMore: Boolean(result.hasMore), total: result.total || 0, counts: result.counts || {}, page, pageSize }
 }
 
 async function moderate(user: any, payload: any) {
-  if (!await isPlatformOwner(user.id)) throw new ApiError('forbidden', '当前账号没有校园内容审核权限。', 403)
+  await requireReviewer(user.id)
+  if (payload.targetType === 'report') {
+    const reportId = uuid(payload.targetId, '举报')
+    const report = dataOrThrow(await admin.from('campus_content_reports').select('revision').eq('id', reportId).maybeSingle())
+    if (!report) throw new ApiError('not_found', '举报已不可用。', 404)
+    const decision = enumValue(payload.decision, ['approve', 'dismiss'] as const, '举报处理')
+    const result = dataOrThrow(await admin.rpc('campus_resolve_report', { p_actor: user.id, p_report: reportId, p_decision: decision === 'approve' ? 'resolve' : 'dismiss', p_reason: text(payload.reason, 500, '处理依据', true), p_revision: payload.revision ?? report.revision, p_target_revision: null }))
+    return { item: result, notificationSent: true }
+  }
+  if (payload.targetType === 'place') {
+    const result = dataOrThrow(await admin.rpc('campus_review_place', { p_actor: user.id, p_id: uuid(payload.targetId, '地点'), p_decision: enumValue(payload.decision, ['approve', 'reject'] as const, '审核决定'), p_reason: text(payload.reason, 500, '审核说明'), p_revision: uuid(payload.revision, '地点版本') }))
+    const notificationSent = await notify(result.ownerId, user.id, 'campus_place_reviewed', result.id)
+    return { item: result, notificationSent }
+  }
   const targetType = enumValue(payload.targetType, [...Object.keys(PUBLIC_TABLES), 'report'] as const, '审核内容类型')
   if (targetType === 'help_dispute') throw new ApiError('invalid_input', '互助争议需要使用裁定流程处理。')
   const targetId = uuid(payload.targetId, '审核内容')
@@ -933,7 +966,7 @@ async function moderate(user: any, payload: any) {
 }
 
 async function resolveHelpDispute(user: any, payload: any) {
-  if (!await isPlatformOwner(user.id)) throw new ApiError('forbidden', '当前账号没有校园内容审核权限。', 403)
+  await requireReviewer(user.id)
   const disputeId = uuid(payload.disputeId, '互助争议')
   const taskStatus = enumValue(payload.taskStatus, ['completed', 'cancelled'] as const, '争议裁定')
   const reason = publicText(payload.reason, 1500, '裁定说明', true)
@@ -968,6 +1001,25 @@ async function resubmitContent(user: any, payload: any, scope: { school: string;
 
 async function handle(user: any, action: string, payload: any) {
   requireObject(payload, '请求')
+  if (action === 'mine_list') return getMine(user.id)
+  if (action === 'content_withdraw') {
+    return dataOrThrow(await admin.rpc('campus_withdraw_content', { p_actor: user.id, p_type: text(payload.targetType, 40, '内容类型', true), p_id: uuid(payload.targetId, '内容'), p_revision: String(payload.revision ?? '').slice(0,100) }))
+  }
+  if (action === 'governance_access') return governanceAccess(user.id)
+  if (action === 'reports_mine') {
+    const page = Math.max(0, Math.min(2000, Number.isSafeInteger(payload.page) ? payload.page : 0))
+    const result = await admin.from('campus_content_reports').select('id,target_type,target_id,school,campus,reason,detail,status,resolution,resolution_action,resolved_at,created_at', { count: 'exact' }).eq('reporter_id', user.id).order('created_at', { ascending: false }).range(page * 30, page * 30 + 29)
+    return { reports: dataOrThrow(result) || [], total: result.count || 0, page }
+  }
+  if (action === 'moderation_history') {
+    await requireReviewer(user.id)
+    return { events: dataOrThrow(await admin.rpc('campus_governance_history', { p_actor: user.id, p_offset: Math.max(0, Number(payload.page) || 0) * 30 })) || [] }
+  }
+  if (action === 'report_resolve') {
+    await requireReviewer(user.id)
+    const result = dataOrThrow(await admin.rpc('campus_resolve_report', { p_actor: user.id, p_report: uuid(payload.reportId, '举报'), p_decision: enumValue(payload.decision, ['remove', 'resolve', 'dismiss'] as const, '处理方式'), p_reason: text(payload.reason, 500, '处理依据', true), p_revision: Number(payload.revision), p_target_revision: payload.targetRevision == null ? null : String(payload.targetRevision).slice(0,100) }))
+    return result
+  }
   if (action === 'moderation_queue') return moderationQueue(user.id, payload)
   if (action === 'moderation_decide') return moderate(user, payload)
   if (action === 'help_dispute_resolve') return resolveHelpDispute(user, payload)
@@ -1016,7 +1068,6 @@ async function handle(user: any, action: string, payload: any) {
       return { registration: registration || { status: 'cancelled' } }
     }
     case 'guides_list': return { guides: await listGuides(scope) }
-    case 'mine_list': return getMine(user.id, scope)
     case 'favorite_set': return createFavorite(user, payload, scope)
     case 'favorite_list': return favoriteList(user, scope)
     case 'content_report': return submitReport(user, payload, scope)

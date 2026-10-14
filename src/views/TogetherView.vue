@@ -1,5 +1,6 @@
 <script setup>
 import ActionButton from '../components/ActionButton.vue'
+import { campusNotificationRoute } from '../composables/campusContentModel.js'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { createCollaborationContext } from '../composables/collaborationContext.js'
 import { accountOpen, accountUser } from '../composables/accountAuth.js'
@@ -8,7 +9,6 @@ import { announce as announceLive, announceAlert } from '../composables/liveRegi
 import { dateInZone, wallTimeToEpoch, zonedParts } from '../composables/zonedTime.js'
 import { ensureSocialScheduleReady, socialRequest, subscribeSocialNotifications } from '../services/social.js'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
-
 /** @typedef {{ userId?: string, nickname?: string, school?: string, [key: string]: any }} SocialProfile */
 /** @typedef {{ id?: string, profile?: SocialProfile, [key: string]: any }} SocialRecord */
 /** @typedef {{ id: string, status: string, activity_type: string, title: string, starts_at: string, ends_at: string, updated_at: string, location?: string, note?: string, self?: { role?: string }, peer?: { user_id?: string, profile?: SocialProfile, proposed_starts_at?: string, proposed_ends_at?: string }, [key: string]: any }} SocialInvitation */
@@ -32,7 +32,7 @@ const statusLabels = {
 }
 const notificationLabels = {
   friend_request: '向你发送了好友请求', friend_accepted: '接受了你的好友请求', friend_removed: '已将你从好友中移除',
-  invitation: '发来一条新邀约', invitation_updated: '更新了邀约', invitation_cancelled: '取消了一条邀约', invitation_expired: '一条邀约已过期', place_preset: '发来一份可拒收的地点预设；前往地点→好友预设查看', campus_place_reviewed: '地点审核已有结果；前往“校园 → 我的地点”查看意见', campus_content_reviewed: '校园内容审核已有结果；查看校园服务中的“我发布的”', campus_market_interest: '有人表达了二手商品联系意向', campus_help_application: '有人申请接手互助任务', campus_help_update: '互助任务或争议状态已更新', campus_lost_found_claim: '失物认领申请有更新', campus_event_update: '活动报名有更新', campus_private_message: '收到一条校园服务私信',
+  invitation: '发来一条新邀约', invitation_updated: '更新了邀约', invitation_cancelled: '取消了一条邀约', invitation_expired: '一条邀约已过期', place_preset: '发来一份可拒收的地点预设；前往地点→好友预设查看', campus_place_reviewed: '地点审核已有结果；前往“校园 → 我的地点”查看意见', campus_content_reviewed: '校园内容审核已有结果；查看我的投稿', campus_report_reviewed: '校园举报已有处理结果；查看我的举报', campus_market_interest: '有人表达了二手商品联系意向', campus_help_application: '有人申请接手互助任务', campus_help_update: '互助任务或争议状态已更新', campus_lost_found_claim: '失物认领申请有更新', campus_event_update: '活动报名有更新', campus_private_message: '收到一条校园服务私信',
 }
 const browserTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Shanghai'
 const timeZones = [...new Set([browserTimeZone, 'Asia/Shanghai', 'Asia/Tokyo', 'Asia/Hong_Kong', 'Asia/Singapore', 'UTC', 'Europe/London', 'America/Los_Angeles', 'America/New_York'])]
@@ -646,7 +646,7 @@ onBeforeUnmount(() => {
         <h2>暂时无法读取好友资料</h2><p>{{ pageError }}</p><button type="button" class="btn" @click="loadProfile()">重试</button>
       </section>
 
-      <section v-else-if="!hasProfile" class="together-card profile-setup">
+      <section v-else-if="!hasProfile && activeTab !== 'invitations'" class="together-card profile-setup">
         <div class="section-heading"><div><span class="eyebrow">首次设置</span><h2>先告诉好友怎么称呼你</h2></div><span class="privacy-chip">🔒 邮箱默认不被搜索</span></div>
         <p class="muted">昵称和学校仅展示给已添加的好友。学校和校区由你填写，仅用于筛选校园内容，不代表学校认证。请确认课表完整日期和学期结束日。</p>
         <form class="profile-grid" @submit.prevent="saveProfile">
@@ -795,11 +795,11 @@ onBeforeUnmount(() => {
           </section>
         </section>
 
-        <section v-else-if="activeTab === 'invitations' && hasProfile" class="invitation-page">
+        <section v-else-if="activeTab === 'invitations'" class="invitation-page">
           <div class="invitation-toolbar"><div><span class="eyebrow">实时通知</span><p class="muted">好友请求与邀约变化会即时显示。即将开始的已确认邀约会在这里提醒。</p></div><ActionButton tone="ghost" type="button" class="btn btn-ghost" :disabled="notificationsBusy || unreadCount === 0" :busy="notificationsBusy" kind="frequent" feedback="external" :show-error="false" :action="() => markNotificationsRead()">{{ notificationsBusy ? '正在更新…' : `全部标为已读${unreadCount ? `（${unreadCount}）` : ''}` }}</ActionButton></div>
           <section class="together-card notification-card"><div class="section-heading"><div><span class="eyebrow">消息</span><h2>通知</h2></div><button type="button" class="icon-button" aria-label="刷新通知" :disabled="notificationsBusy" @click="loadNotifications">↻</button></div>
             <p v-if="notificationsBusy" class="muted">正在读取通知…</p><p v-else-if="notificationsError" class="inline-error">{{ notificationsError }} <button type="button" class="text-button" @click="loadNotifications">重试</button></p>
-            <div v-else-if="notificationItems.length" class="notification-list"><article v-for="item in notificationItems" :key="item.id" class="notification-row" :class="{ unread: !item.read_at }"><span class="notification-dot"></span><div><b>{{ item.kind === 'campus_place_reviewed' ? '校园内容审核' : item.actor?.nickname || '三两事好友' }}</b><span>{{ notificationLabels[item.kind] || '有一条新通知' }}</span><small>{{ formatTime(item.created_at) }}</small></div></article></div>
+            <div v-else-if="notificationItems.length" class="notification-list"><article v-for="item in notificationItems" :key="item.id" class="notification-row" :class="{ unread: !item.read_at }"><span class="notification-dot"></span><div><b>{{ item.kind === 'campus_place_reviewed' ? '校园内容审核' : item.actor?.nickname || '三两事好友' }}</b><span>{{ notificationLabels[item.kind] || '有一条新通知' }}</span><small>{{ formatTime(item.created_at) }}</small><RouterLink v-if="campusNotificationRoute(item)" class="text-button" :to="campusNotificationRoute(item)">查看处理与详情</RouterLink></div></article></div>
             <p v-else class="muted empty-copy">还没有通知。</p>
           </section>
           <section class="together-card invitation-list-card"><div class="section-heading"><div><span class="eyebrow">共同日程</span><h2>邀约</h2></div><button type="button" class="icon-button" aria-label="刷新邀约" :disabled="invitationsBusy" @click="loadInvitations">↻</button></div>

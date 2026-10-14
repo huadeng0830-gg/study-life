@@ -6,6 +6,7 @@ import { Check, CheckCheck, FilePenLine, ShieldCheck, ChevronDown, ShoppingBag, 
 import { Button } from '../../components/ui/button'
 import { Field, FieldGroup, FieldLegend, FieldSet } from '../../components/ui/field'
 import CampusLifeLayout from '../../components/campus/CampusLifeLayout.vue'
+import CampusPublishPreview from '../../components/campus/CampusPublishPreview.vue'
 import { useCampusLifeDraft } from '../../composables/campusLifeDraft.js'
 import {
   campusCourses, campusLifeMine, campusShuttles, resubmitCampusContent, submitCampusCourse, submitCampusEvent,
@@ -45,7 +46,7 @@ const defaults = () => ({
   guide: { title: '', category: 'new_student', body: '', sourceType: 'student_experience', sourceUrl: '', expiresOn: '' },
 })
 const formDefaults = defaults()
-const { value: draft, clear: clearDraft, savedRevision } = useCampusLifeDraft('unified-publisher', { kind: 'market', forms: defaults() })
+const { value: draft, savedRevision } = useCampusLifeDraft('unified-publisher', { kind: 'market', forms: defaults() })
 if (!draft.value.forms || typeof draft.value.forms !== 'object' || Array.isArray(draft.value.forms)) draft.value.forms = formDefaults
 for (const item of options) if (!draft.value.forms[item.id]) draft.value.forms[item.id] = formDefaults[item.id]
 // The draft is restored from localStorage, so `kind` can name an option that no longer
@@ -200,7 +201,7 @@ async function publish() {
     else if (kind.value === 'guide') result = await submitCampusGuide(payload)
     if (result && generation === pageGeneration && owner === accountUser.value?.id) {
       message.value = editing.value ? '修改已重新提交审核。审核通过前不会出现在公开列表。' : '已提交审核。审核通过后才会出现在同校公开列表。'
-      clearDraft()
+      draft.value.forms[submittedKind] = defaults()[submittedKind]
       draft.value.kind = submittedKind
       editing.value = null
       if (kind.value === 'assignment') await loadChoices()
@@ -216,14 +217,14 @@ function kindChanged() {
 }
 function clearCurrentDraft() {
   const selectedKind = kind.value
-  clearDraft()
+  draft.value.forms[selectedKind] = defaults()[selectedKind]
   draft.value.kind = selectedKind
 }
 </script>
 
 <template>
   <CampusLifeLayout title="统一发布" description="分享闲置、互助、失物或校园经验，让有用的信息被同学看见。">
-    <template #default>
+    <template #default="{ profile }">
       <section v-if="!editing" class="campus-life-panel campus-publish-types">
         <FieldSet :disabled="saving">
           <FieldLegend>你想分享什么？</FieldLegend>
@@ -308,6 +309,7 @@ function clearCurrentDraft() {
             <Field class="span-all"><label>来源链接 HTTPS <input v-model="form.sourceUrl" type="url" maxlength="500" :required="form.sourceType === 'official_public'" /></label></Field>
             <p v-if="form.sourceType === 'student_experience'" class="span-all campus-life-inline-state">学生经验会明确标注为经验信息，不会包装成学校规定。</p>
           </template>
+          <CampusPublishPreview :form="form" :title="options.find(item => item.id === kind)?.title" :school="profile?.school" :campus="profile?.campus" />
           <div class="span-all campus-life-actions campus-publish-footer"><span><ShieldCheck aria-hidden="true" />审核通过后公开</span><Button variant="ghost" type="button" :disabled="saving" @click="clearCurrentDraft">清空当前草稿</Button><Button type="submit" :disabled="saving || (kind === 'assignment' && optionsLoading)"><FilePenLine data-icon="inline-start" />{{ saving ? '正在提交…' : '提交审核' }}</Button></div>
           </FieldGroup>
           </fieldset>

@@ -36,6 +36,8 @@ export const ROUTE_COMPONENT_NAMES = Object.freeze({
   '/campus/guides': 'CampusGuidesView',
   '/campus/publish': 'CampusPublishView',
   '/campus/mine': 'CampusMySubmissionsView',
+  '/campus/reports': 'CampusReportsView',
+  '/admin/campus': 'CampusGovernanceView',
   '/campus/moderation': 'CampusModerationView',
   '/review': 'WeeklyReviewView',
   '/together': 'TogetherView',
@@ -106,5 +108,7 @@ export const routes = [
   // 管理中心是本机数据与运行状态的入口，不进入可编辑的业务导航布局。
   { path: '/admin', name: 'admin-center', meta: { title: '管理中心' }, component: asyncRoute('/admin') },
   { path: '/platform-admin', name: 'platform-admin', meta: { title: '平台运维' }, component: asyncRoute('/platform-admin') },
+  { path: '/admin/campus', name: 'campus-governance', meta: { title: '校园审核工作台' }, component: asyncRoute('/admin/campus') },
+  { path: '/campus/reports', name: 'campus-reports', meta: { title: '我的举报' }, component: asyncRoute('/campus/reports') },
   { path: '/:pathMatch(.*)*', name: 'not-found', meta: { title: '页面不存在' }, component: NotFoundView },
 ]

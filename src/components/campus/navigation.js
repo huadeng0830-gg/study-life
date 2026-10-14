@@ -1,4 +1,4 @@
-import { BookOpen, Bus, CalendarDays, ClipboardList, Compass, GraduationCap, HandHelping, LayoutGrid, MapPin, NotebookPen, Search, ShoppingBag, Telescope } from '@lucide/vue'
+import { BookOpen, Bus, CalendarDays, ClipboardList, Compass, GraduationCap, HandHelping, LayoutGrid, MapPin, NotebookPen, Search, ShieldCheck, ShoppingBag, Telescope } from '@lucide/vue'
 
 export const campusNavigation = [
   { label: '校园总览', path: '/campus', icon: LayoutGrid, group: '发现校园' },
@@ -11,7 +11,9 @@ export const campusNavigation = [
   { label: '失物招领', path: '/campus/lost-found', icon: Telescope, group: '校园日常', detail: '寻找失物，核验后归还' },
   { label: '活动社团', path: '/campus/events', icon: CalendarDays, group: '校园日常', detail: '发现活动，安排课余时间' },
   { label: '我的投稿', path: '/campus/mine', icon: ClipboardList, group: '我的校园' },
+  { label: '我的举报', path: '/campus/reports', icon: ShieldCheck, group: '我的校园' },
   { label: '统一发布', path: '/campus/publish', icon: NotebookPen, group: '我的校园' },
+  { label: '管理中心', path: '/admin', icon: LayoutGrid, group: '我的校园' },
 ]
 export const campusGroups = [...new Set(campusNavigation.map((item) => item.group))]
 export { Compass, MapPin }

@@ -35,6 +35,24 @@ function request({ method = 'POST', body = {}, token = 'valid', origin = ALLOWED
 }
 
 describe('platform-admin function authorization boundary', () => {
+  it('exposes only delegated scope and denies reviewers access to account management and grants', async () => {
+    const delegated = makeHandler({ isOwner: vi.fn(async () => false), reviewerAccess: vi.fn(async () => ({ reviewer: true, scope: { school: '虚构大学', campus: '东区' } })), setReviewer: vi.fn(), listReviewers: vi.fn() })
+    const identity = await delegated.handler(request({ body: { action: 'identity' } }))
+    expect(await identity.json()).toEqual({ data: { owner: false, reviewer: true, scope: { school: '虚构大学', campus: '东区' }, email: '' } })
+    for (const action of ['users_list', 'reviewers_list', 'reviewer_set']) expect((await delegated.handler(request({ body: { action } }))).status).toBe(403)
+    expect(delegated.service.listUsers).not.toHaveBeenCalled()
+    expect(delegated.service.setReviewer).not.toHaveBeenCalled()
+  })
+
+  it('requires an explicit grant state, reason and valid revision before forwarding owner grants', async () => {
+    const { handler, service } = makeHandler({ setReviewer: vi.fn(async () => ({ active: true })) })
+    const payload = { userId: TARGET_ID, school: '虚构大学', campus: '东区', reason: '校园内容审核', active: true, revision: 2 }
+    for (const invalid of [{ active: 'true' }, { reason: ' ' }, { revision: 0 }, { school: '' }]) expect((await handler(request({ body: { action: 'reviewer_set', payload: { ...payload, ...invalid } } }))).status).toBe(400)
+    expect(service.setReviewer).not.toHaveBeenCalled()
+    expect((await handler(request({ body: { action: 'reviewer_set', payload } }))).status).toBe(200)
+    expect(service.setReviewer).toHaveBeenCalledWith({ actorId: OWNER.id, ...payload })
+  })
+
   it('requires a verified bearer session and owner membership before doing admin work', async () => {
     const { handler, service } = makeHandler()
     const missing = await handler(request({ token: '' }))
@@ -61,7 +79,7 @@ describe('platform-admin function authorization boundary', () => {
     expect(response.status).toBe(200)
     expect(response.headers.get('access-control-allow-origin')).toBe(ALLOWED_ORIGIN)
     expect(response.headers.get('cache-control')).toBe('no-store')
-    expect(await response.json()).toEqual({ data: { owner: true, email: OWNER.email } })
+    expect(await response.json()).toEqual({ data: { owner: true, reviewer: false, scope: null, email: OWNER.email } })
   })
 
   it('rejects unknown actions, invalid origins, oversized bodies and unsupported methods', async () => {

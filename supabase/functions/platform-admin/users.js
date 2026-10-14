@@ -1,4 +1,4 @@
-function publicAccount(user, admins) {
+export function publicAccount(user, admins) {
   const suspended = Boolean(user.banned_until && Date.parse(user.banned_until) > Date.now())
   return {
     id: user.id,
