@@ -8,7 +8,7 @@ export const RELEASE_UPDATES = Object.freeze([
     legacyVersion: '2026年10月14日-版本3',
     channel: 'stable',
     summary: '校园生活中心、地点目录与跨模块审核流程升级',
-    signature: 'b87af7cbb5',
+    signature: '72add44ef7',
     changes: {
       features: [
       '地点目录与教师课程、二手集市、校园互助、校车、失物招领、活动和校园指南',
@@ -35,6 +35,7 @@ export const RELEASE_UPDATES = Object.freeze([
       '修复投稿状态竞态、通知失败误报和班车投稿记录读取',
       'Supabase Edge 鉴权、RLS 与受限事务 RPC',
       '私信限定发布者与对应联系对象并清理账号切换缓存',
+      '为地点和校园业务表补齐外键索引',
     ],
   },
   {
@@ -87,7 +88,7 @@ export const RELEASE_CHANNEL = 'stable'
 export const LEGACY_RELEASE_VERSION = RELEASE_UPDATES[0].legacyVersion || RELEASE_UPDATES[0].version
 
 // 与第一条签名保持一致，交给 vite.config.js 校验源码一致性。
-export const RELEASE_SOURCE_SIGNATURE = 'b87af7cbb5'
+export const RELEASE_SOURCE_SIGNATURE = '72add44ef7'
 
 // 兼容旧引用：当前版本的更新说明。
 export const RELEASE_NOTES = RELEASE_UPDATES[0].notes

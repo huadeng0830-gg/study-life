@@ -18,6 +18,7 @@
 > - 修复投稿状态竞态、通知失败误报和班车投稿记录读取
 > - Supabase Edge 鉴权、RLS 与受限事务 RPC
 > - 私信限定发布者与对应联系对象并清理账号切换缓存
+> - 为地点和校园业务表补齐外键索引
 > [下载已发布的 Windows 安装包与版本说明](https://github.com/huadeng0830-gg/study-life/releases/latest)
 <!-- RELEASE_STATUS:END -->
 
