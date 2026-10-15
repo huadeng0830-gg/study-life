@@ -1,5 +1,6 @@
 import { computed, ref } from 'vue'
 import { newProjectId, uploadProjectDeliverableFile } from '../../services/projects.js'
+import { PROJECT_FILE_MAX_BYTES } from '../../services/projectFileLimits.js'
 
 function copyContent(content = {}) {
   return {
@@ -130,8 +131,8 @@ export function useProjectDeliverableEditor({ project, accountUser, projectReque
       error.value = '每个版本最多 10 个文件，请减少本次选择的文件数量。'
       return
     }
-    if (files.some((file) => file.size < 1 || file.size > 20 * 1024 * 1024)) {
-      error.value = '文件不能为空，单个文件不能超过 20 MB。'
+    if (files.some((file) => file.size < 1 || file.size > PROJECT_FILE_MAX_BYTES)) {
+      error.value = '文件不能为空，单个文件不能超过 5 MB。较大的文件请添加外部链接。'
       return
     }
     const isCurrent = capture()

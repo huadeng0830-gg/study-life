@@ -1,0 +1,15 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "study-life-public-api",
+  "main": "index.ts",
+  "compatibility_date": "2026-10-13",
+  "compatibility_flags": ["nodejs_compat"],
+  "workers_dev": true,
+  "preview_urls": false,
+  "observability": { "enabled": true, "head_sampling_rate": 0.01 },
+  "vars": {
+    "SUPABASE_URL": "https://your-project-ref.supabase.co",
+    "SUPABASE_PUBLISHABLE_KEY": "",
+    "ALLOWED_ORIGINS": "https://study-life.pages.dev,http://localhost:5173,http://127.0.0.1:5173"
+  }
+}

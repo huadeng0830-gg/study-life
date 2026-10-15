@@ -2,7 +2,16 @@ import { RETIRED_DATA_KEYS } from './retiredData.js'
 
 const DB_NAME = 'study-life-local-vault'
 const STORE_NAME = 'records'
-const DB_VERSION = 1
+/**
+ * 版本 2 起有真正的升级接缝（见 migrateVault）。
+ *
+ * 这个库同时存放三类记录：`sl_*` 的影子副本、`__restore_checkpoint_v1__:*`
+ * 和 `__pending_recovery_draft_v1__:*`。它们共用一个 store，也就共用一个版本号。
+ * 版本停在 1 的时候，任何一次记录结构或保留规则的调整都只能「改行为不改版本」，
+ * 老用户浏览器里那些对不上的记录就一直留到被某条读取路径撞上为止。
+ * 新增字段或调整保留规则时请同时 +1，并在 migrateVault 里补上这一步。
+ */
+const DB_VERSION = 2
 const DB_OPEN_TIMEOUT = 800
 const DB_REQUEST_TIMEOUT = 1200
 const RESTORE_CHECKPOINT_KEY = '__restore_checkpoint_v1__'
@@ -88,15 +97,58 @@ function openVault() {
       resolve(value)
     }
     const timer = window.setTimeout(() => finish(null), DB_OPEN_TIMEOUT)
-    request.onupgradeneeded = () => {
+    request.onupgradeneeded = (event) => {
       const db = request.result
       if (!db.objectStoreNames.contains(STORE_NAME)) db.createObjectStore(STORE_NAME, { keyPath: 'key' })
+      // 【这里绝不能向外抛】onupgradeneeded 里抛出的异常会中止整个 versionchange
+      // 事务，连带 request.onsuccess 不再触发，openVault 只能等超时 —— 安全副本
+      // 于是彻底不可用，而它的内容只是 localStorage 的冗余。所以连 event 本身
+      // 都不假设存在：旧实现只读 request.result，不碰 event。
+      try {
+        // 必须用这次升级自带的 transaction：versionchange 期间不允许再开新事务，
+        // db.transaction(...) 会抛错并连带中止整个升级。
+        migrateVault(db, Number(event?.oldVersion) || 0, request.transaction)
+      } catch {
+        // 迁移失败只影响这一次清理，不影响库能不能打开。
+      }
     }
     request.onsuccess = () => finish(request.result)
     request.onerror = () => finish(null)
     request.onblocked = () => finish(null)
   })
   return vaultPromise
+}
+
+/**
+ * IndexedDB 升级步骤。
+ *
+ * 每一步都必须幂等：同一个库可能被中断在任意一步之后，下次打开还会再跑一遍。
+ * 任何一步失败都不应阻断打开 —— 安全副本只是冗余，主数据在 localStorage，
+ * 因为一条清理脚本失败就把整个副本判为不可用，代价远大于收益。
+ */
+function migrateVault(db, oldVersion, transaction) {
+  if (oldVersion >= DB_VERSION) return
+  try {
+    if (oldVersion < 2 && transaction && db.objectStoreNames.contains(STORE_NAME)) {
+      // v1 → v2：清掉既不是影子副本、也不是保留记录的残键。
+      // 三条读取路径（managedKey / 恢复点 / 隔离草稿）都不会读它们，
+      // 所以这一步不丢任何读得到的东西，只是让 store 里「允许出现什么」变成
+      // 一条能被代码检查的规则，而不是一句约定。
+      const cursorRequest = transaction.objectStore(STORE_NAME).openCursor()
+      cursorRequest.onsuccess = () => {
+        const cursor = cursorRequest.result
+        if (!cursor) return
+        const key = typeof cursor.key === 'string' ? cursor.key : String(cursor.key)
+        if (!managedKey(key) && !key.startsWith(RESTORE_CHECKPOINT_KEY) && !key.startsWith(RECOVERY_DRAFT_PREFIX)) cursor.delete()
+        cursor.continue()
+      }
+      // 游标本身出错不能让升级事务失败：一次失败就会把整个库卡在旧版本，
+      // 下次打开再失败一次，最终安全副本彻底不可用。
+      cursorRequest.onerror = () => { try { transaction.abort?.() } catch { /* 已结束 */ } }
+    }
+  } catch {
+    // 迁移失败不影响打开：读取路径本来就只认上面三类键。
+  }
 }
 
 function requestResult(request) {
@@ -371,7 +423,14 @@ async function flushMirrorWrites() {
   }
 }
 
-/** Clear every managed-data shadow copy after an explicit local-data purge. */
+/**
+ * 清空整个安全副本库。
+ *
+ * 名字里只有「数据」，实际清掉的是**整个 store**：`sl_*` 影子副本、
+ * 恢复点和隔离恢复草稿一并消失。调用它就等于放弃本机恢复点 ——
+ * 这对退出账号和「清空本机数据」是对的，但对只想丢掉影子副本的场景是错的，
+ * 那类场景请走 `removeVaultKeys`。
+ */
 export async function clearDataVault() {
   mirrorGeneration += 1
   pendingMirrorWrites.clear()

@@ -5,10 +5,12 @@ import Modal from './Modal.vue'
 import AccountSyncPanel from './data/AccountSyncPanel.vue'
 import AccountPasswordForm from './account/AccountPasswordForm.vue'
 import AccountSessionActions from './account/AccountSessionActions.vue'
+import AccountCommunitySettings from './account/AccountCommunitySettings.vue'
+import { getAccountAuthOptions } from '../services/cloudConfig.js'
 import {
-  accountAuthError, accountAvailable, accountBusy, accountCallbackError, accountUser,
+  accountAuthError, accountAvailable, accountBusy, accountCallbackError, accountInitialSection, accountUser, hasVerifiedContactEmail,
   accountPasswordRecovery, finishAccountPasswordRecovery,
-  initializeAccountAuth, loginAccount, logoutAccount, normalizeAccountEmail,
+  initializeAccountAuth, loginAccount, loginAccountWithOAuth, logoutAccount, normalizeAccountEmail,
   registerAccount, requestAccountPasswordReset, resendAccountConfirmation, validateAccountForm,
 } from '../composables/accountAuth.js'
 import { announce, announceAlert } from '../composables/liveRegion.js'
@@ -17,10 +19,15 @@ import '../styles/shadcn.css'
 import { Alert, AlertDescription } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
 
 const DataManager = defineAsyncComponent(() => import('./DataManager.vue'))
 
 const props = defineProps({ open: Boolean })
+const authOptions = getAccountAuthOptions()
+const oauthProviders = window.studyLifeDesktop?.isDesktop ? [] : authOptions.providers
+const emailSignupEnabled = authOptions.emailSignup && authOptions.emailDelivery
+const passwordAccount = computed(() => !accountUser.value?.app_metadata?.providers?.length || accountUser.value.app_metadata.providers.includes('email'))
 const emit = defineEmits(['close'])
 // 账号面板的常见场景是已有账号登录；新用户仍可在同一屏切到注册。
 const mode = ref('login')
@@ -46,12 +53,20 @@ const submitting = ref(false)
 const summaryHeading = ref(/** @type {HTMLHeadingElement | null} */ (null))
 const formError = computed(() => feedbackError.value || accountCallbackError.value || accountAuthError.value)
 const busy = computed(() => accountBusy.value || submitting.value)
-const accountName = computed(() => accountUser.value?.email?.split('@')[0] || '三两事用户')
+const isWechatInternalAccount = computed(() => String(accountUser.value?.email || '').trim().toLowerCase().endsWith('@wechat.study-life.invalid'))
+const displayedAccountEmail = computed(() => isWechatInternalAccount.value ? '微信小程序账号' : accountUser.value?.email || '')
+const accountName = computed(() => isWechatInternalAccount.value ? '三两事微信用户' : accountUser.value?.email?.split('@')[0] || '三两事用户')
 const avatarText = computed(() => Array.from(accountName.value)[0]?.toUpperCase() || '我')
 const isEmailFlow = computed(() => mode.value === 'recovery' || mode.value === 'register')
 const recoveryHelp = window.studyLifeDesktop?.isDesktop
   ? '请在默认浏览器中打开邮件链接并设置新密码，再返回桌面版登录。'
   : '请检查垃圾邮件，并在发送邮件的同一浏览器中打开链接完成验证。'
+
+watch(() => props.open, (open) => {
+  if (!open) return
+  activeSection.value = accountInitialSection.value
+  accountInitialSection.value = 'overview'
+}, { immediate: true })
 
 // Keep the password form mounted until its success event is delivered, even
 // when the auth layer clears the recovery flag during the request's response.
@@ -97,6 +112,11 @@ function close() {
   // 上一次的红色提示，而且界面上没有任何"关掉它"的按钮。
   accountCallbackError.value = ''
   accountAuthError.value = ''
+  // 同理，「去验证邮箱」和「检查密码重设邮件」这两个中间页由模块级 ref 驱动。
+  // 之前不清，于是注册失败后关掉面板再打开，会直接落回验证页，而且重发按钮
+  // 还在冷却里 —— 用户看到的是一个他没退出的流程。
+  confirmationEmail.value = ''
+  recoveryEmail.value = ''
   emit('close')
 }
 
@@ -104,6 +124,9 @@ function close() {
 function clearFieldError(field) {
   if (errors.value[field]) errors.value = { ...errors.value, [field]: '' }
   feedbackError.value = ''
+  // 成功提示也要一起清。登录成功后顺手改一个字符，
+  // 「登录成功。」还挂在表单顶上，和正在输入的新内容对不上。
+  feedback.value = ''
 }
 
 async function focusInvalidField() {
@@ -200,11 +223,32 @@ async function signOut(scope = 'local') {
     confirmationEmail.value = ''
     recoveryEmail.value = ''
     clearPasswords()
-    feedback.value = result.warning || (scope === 'global'
-      ? '账号已退出所有设备，并清除了当前设备上的本机业务数据。'
-      : '账号已退出当前设备，并清除了本机业务数据。')
+    // 退出本身成功了，但清本机数据可能失败（常见于另一标签页还开着）。
+    // 那是**没有清干净**：上一账号的课程、待办、账本还留在本机上，
+    // 下一个人打开这台设备就能看到。必须走错误样式，不能挂在绿色 ✓ 上。
+    if (result.warning) {
+      feedbackError.value = result.warning
+    } else {
+      feedback.value = scope === 'global'
+        ? '账号已退出所有设备，并清除了当前设备上的本机业务数据。'
+        : '账号已退出当前设备，并清除了本机业务数据。'
+    }
     await nextTick()
     emailInput.value?.focus()
+  } finally { submitting.value = false }
+}
+
+async function signInWithProvider(provider) {
+  if (busy.value || !accountAvailable.value) return
+  clearPasswords()
+  feedback.value = ''
+  feedbackError.value = ''
+  accountCallbackError.value = ''
+  accountAuthError.value = ''
+  submitting.value = true
+  try {
+    const result = await loginAccountWithOAuth(provider)
+    if (!result.ok) feedbackError.value = result.message
   } finally { submitting.value = false }
 }
 
@@ -253,31 +297,36 @@ onBeforeUnmount(() => {
       <template v-if="accountUser">
         <section class="account-summary" aria-labelledby="account-summary-title">
           <span class="account-avatar" aria-hidden="true">{{ avatarText }}</span>
-          <div class="account-identity"><h3 id="account-summary-title" ref="summaryHeading" tabindex="-1">{{ accountName }}</h3><p class="account-email">{{ accountUser.email }}</p></div>
+          <div class="account-identity"><h3 id="account-summary-title" ref="summaryHeading" tabindex="-1">{{ accountName }}</h3><p class="account-email">{{ displayedAccountEmail }}</p></div>
           <Badge as="span" variant="outline" class="account-badge">已登录</Badge>
         </section>
           <div v-if="!accountPasswordRecovery" class="account-mode" role="group" aria-label="账号设置分区">
             <button type="button" class="btn" :class="{ 'btn-primary': activeSection === 'overview' }" :aria-pressed="activeSection === 'overview'" :disabled="busy" @click="activeSection = 'overview'">账号概览</button>
+            <button type="button" class="btn" :class="{ 'btn-primary': activeSection === 'profile' }" :aria-pressed="activeSection === 'profile'" :disabled="busy" @click="activeSection = 'profile'">个人资料</button>
+            <button type="button" class="btn" :class="{ 'btn-primary': activeSection === 'beans' }" :aria-pressed="activeSection === 'beans'" :disabled="busy" @click="activeSection = 'beans'">三两豆</button>
             <button type="button" class="btn" :class="{ 'btn-primary': activeSection === 'security' }" :aria-pressed="activeSection === 'security'" :disabled="busy" @click="activeSection = 'security'">账号安全</button>
           </div>
           <template v-if="activeSection === 'overview' && !accountPasswordRecovery">
             <section class="account-card" aria-labelledby="account-details-title">
               <h3 id="account-details-title">账号信息</h3>
               <dl class="account-details">
-                <div><dt>登录邮箱</dt><dd class="account-email">{{ accountUser.email }}</dd></div>
-                <div><dt>邮箱验证</dt><dd><Badge as="span" variant="outline" :class="accountUser.email_confirmed_at ? 'account-verified' : 'account-pending'">{{ accountUser.email_confirmed_at ? '已验证' : '尚未验证' }}</Badge></dd></div>
+                <div><dt>登录邮箱</dt><dd class="account-email">{{ displayedAccountEmail }}</dd></div>
+                <div><dt>邮箱验证</dt><dd><Badge as="span" variant="outline" :class="hasVerifiedContactEmail() ? 'account-verified' : 'account-pending'">{{ hasVerifiedContactEmail() ? '已验证' : isWechatInternalAccount ? '未绑定联系邮箱' : '尚未验证' }}</Badge></dd></div>
                 <div><dt>注册时间</dt><dd>{{ formatDate(accountUser.created_at) }}</dd></div>
                 <div><dt>最近登录</dt><dd>{{ formatDate(accountUser.last_sign_in_at) }}</dd></div>
               </dl>
-              <p class="account-help">邮箱用于登录和找回密码，请保持邮箱可正常收信。</p>
+              <p class="account-help">{{ passwordAccount ? '请妥善保管账号密码和登录邮箱。' : '通过第三方账号登录，请在对应平台管理登录安全。' }}</p>
             </section>
             <section class="account-card" aria-labelledby="account-data-title">
               <h3 id="account-data-title">数据与同步</h3>
               <AccountSyncPanel compact />
             </section>
           </template>
+          <section v-else-if="activeSection === 'profile' && !accountPasswordRecovery" class="account-card"><AccountCommunitySettings section="profile" /></section>
+          <section v-else-if="activeSection === 'beans' && !accountPasswordRecovery" class="account-card"><AccountCommunitySettings section="beans" /></section>
           <template v-else>
-            <div class="account-card"><AccountPasswordForm :recovery="accountPasswordRecovery" :reset-seconds="resendSeconds" @updated="passwordUpdated" @reset-request="sendRecoveryForUser" /></div>
+            <div v-if="passwordAccount || accountPasswordRecovery" class="account-card"><AccountPasswordForm :recovery="accountPasswordRecovery" :reset-seconds="resendSeconds" :reset-enabled="authOptions.emailDelivery" @updated="passwordUpdated" @reset-request="sendRecoveryForUser" /></div>
+            <p v-else class="account-help">请前往你的第三方登录平台管理密码与账号安全。</p>
             <button v-if="accountPasswordRecovery" type="button" class="btn btn-ghost" :disabled="busy" @click="leaveRecovery">稍后设置，返回账号</button>
             <template v-else>
               <p v-if="resendSeconds > 0" class="account-help">邮件发送冷却中，{{ resendSeconds }} 秒后可再次请求。</p>
@@ -289,13 +338,13 @@ onBeforeUnmount(() => {
       <section v-else-if="confirmationEmail" class="account-confirmation" aria-labelledby="account-confirmation-title">
         <h3 id="account-confirmation-title" ref="summaryHeading" tabindex="-1">验证邮箱</h3>
         <p>请在 <strong class="account-email">{{ confirmationEmail }}</strong> 中打开验证链接。</p>
-        <p class="account-help">没有收到邮件时，请检查垃圾邮件或稍后重新发送。</p>
-        <ActionButton tone="neutral" type="button" class="btn" :disabled="busy || resendSeconds > 0" :busy="busy" kind="important" feedback="external" :show-error="false" :action="() => resend()">
+        <p class="account-help">{{ authOptions.emailDelivery ? '没有收到邮件时，请检查垃圾邮件或稍后重新发送。' : '验证邮件暂时无法发送，请返回登录或联系管理员。' }}</p>
+        <ActionButton v-if="authOptions.emailDelivery" tone="neutral" type="button" class="btn" :disabled="busy || resendSeconds > 0" :busy="busy" kind="important" feedback="external" :show-error="false" :action="() => resend()">
           {{ resendSeconds > 0 ? resendSeconds + ' 秒后可重发' : '重新发送验证邮件' }}
         </ActionButton>
         <div class="account-links">
           <button type="button" class="btn btn-primary" :disabled="busy" @click="changeMode('login')">已验证，去登录</button>
-          <button type="button" class="btn" :disabled="busy" @click="changeMode('register')">更换邮箱</button>
+          <button v-if="emailSignupEnabled" type="button" class="btn" :disabled="busy" @click="changeMode('register')">更换邮箱</button>
         </div>
       </section>
 
@@ -314,9 +363,14 @@ onBeforeUnmount(() => {
             <CardDescription>{{ mode === 'recovery' ? '输入注册邮箱，我们会发送密码重设链接。' : mode === 'register' ? '注册后可在不同设备间同步课程、待办和日常记录。' : '登录后继续同步你的课程、待办与日常记录。' }}</CardDescription>
           </CardHeader>
           <CardContent class="account-auth-content">
+          <div v-if="mode !== 'recovery' && oauthProviders.length" class="account-oauth" aria-label="其他登录方式">
+            <Button v-for="provider in oauthProviders" :key="provider.id" type="button" variant="outline" :disabled="busy || !accountAvailable" @click="signInWithProvider(provider.id)">使用 {{ provider.label }} 登录</Button>
+            <p class="account-help">首次使用会创建账号；已有记录会按账号同步规则合并。</p>
+          </div>
+          <p v-if="!emailSignupEnabled && mode === 'login'" class="account-help">{{ oauthProviders.length ? '已有邮箱账号仍可在下方登录。' : '目前支持已有邮箱账号登录；不登录也可继续在本机使用。' }}</p>
           <div v-if="mode !== 'recovery'" class="account-mode" role="group" aria-label="账号操作">
             <button type="button" class="btn" :class="{ 'btn-primary': mode === 'login' }" :aria-pressed="mode === 'login'" :disabled="busy" @click="changeMode('login')">登录</button>
-            <button type="button" class="btn" :class="{ 'btn-primary': mode === 'register' }" :aria-pressed="mode === 'register'" :disabled="busy" @click="changeMode('register')">注册</button>
+            <button v-if="emailSignupEnabled" type="button" class="btn" :class="{ 'btn-primary': mode === 'register' }" :aria-pressed="mode === 'register'" :disabled="busy" @click="changeMode('register')">注册</button>
           </div>
           <form class="account-form" novalidate :aria-busy="busy" @submit.prevent="submit">
             <div class="account-field">
@@ -327,7 +381,7 @@ onBeforeUnmount(() => {
               <p v-if="errors.email" id="account-email-error" class="account-error">{{ errors.email }}</p>
             </div>
             <div v-if="mode !== 'recovery'" class="account-field">
-              <div class="account-field-heading"><label for="account-password">密码</label><button v-if="mode === 'login'" type="button" class="account-text-button" :disabled="busy || !accountAvailable" @click="changeMode('recovery')">忘记密码？</button></div>
+              <div class="account-field-heading"><label for="account-password">密码</label><button v-if="mode === 'login' && authOptions.emailDelivery" type="button" class="account-text-button" :disabled="busy || !accountAvailable" @click="changeMode('recovery')">忘记密码？</button></div>
               <!-- 【iOS 必须关掉自动大写与自动纠错】只给邮箱设了 autocapitalize="none"，
                    密码框用的是默认值。iOS Safari 会把首字母大写、还会跑拼写纠错，
                    于是用户照着原样输入却一直得到"邮箱或密码不正确"，极难自查。 -->
@@ -344,7 +398,7 @@ onBeforeUnmount(() => {
             <label v-if="mode !== 'recovery'" class="account-password-toggle"><input v-model="passwordVisible" type="checkbox" :disabled="busy || !accountAvailable" />显示密码</label>
             <ActionButton tone="primary" kind="important" feedback="external" :show-error="false" type="submit" class="btn btn-primary account-submit" :disabled="busy || !accountAvailable || (isEmailFlow && resendSeconds > 0)" :busy="busy">{{ busy ? '正在处理…' : isEmailFlow && resendSeconds > 0 ? resendSeconds + ' 秒后可发送' : mode === 'register' ? '创建账号' : mode === 'recovery' ? '发送重设邮件' : '登录' }}</ActionButton>
             <button v-if="mode === 'recovery'" type="button" class="btn btn-ghost" :disabled="busy" @click="changeMode('login')">返回登录</button>
-            <ActionButton tone="neutral" v-if="accountCallbackError && accountAvailable" type="button" class="btn" :disabled="busy || resendSeconds > 0" kind="important" feedback="external" :show-error="false" :action="() => resend()">{{ resendSeconds > 0 ? resendSeconds + ' 秒后可重发' : '重新发送验证邮件' }}</ActionButton>
+            <ActionButton tone="neutral" v-if="accountCallbackError && accountAvailable && authOptions.emailDelivery" type="button" class="btn" :disabled="busy || resendSeconds > 0" kind="important" feedback="external" :show-error="false" :action="() => resend()">{{ resendSeconds > 0 ? resendSeconds + ' 秒后可重发' : '重新发送验证邮件' }}</ActionButton>
           </form>
           </CardContent>
         </Card>
@@ -373,6 +427,7 @@ onBeforeUnmount(() => {
 .account-auth-header :deep([data-slot="card-title"]) { margin:0; color:var(--text); font-size:var(--fs-17); font-weight:var(--fw-750); }
 .account-auth-header :deep([data-slot="card-description"]) { color:var(--muted); font-size:var(--fs-13); line-height:1.55; }
 .account-auth-content { display:grid; gap:16px; padding:16px; }
+.account-oauth { display: flex; flex-direction: column; gap: 8px; }
 .account-form, .account-field, .account-confirmation { display: grid; gap: 8px; }
 .account-form { gap: 16px; }
 .account-field label { font-weight: var(--fw-600); }
@@ -386,8 +441,6 @@ onBeforeUnmount(() => {
 .account-success { color: var(--success); }
 .account-feedback { display:flex; align-items:flex-start; gap:9px; padding:12px; border:1px solid var(--border); background:var(--bg-tint); border-radius:var(--radius-8); font-size:var(--fs-13); }
 .account-feedback-icon { display:grid; width:20px; height:20px; flex:0 0 20px; place-items:center; border-radius:var(--radius-circle); font-size:var(--fs-12); font-weight:var(--fw-800); }
-.account-feedback.account-error { border-color:color-mix(in srgb, var(--danger) 26%, var(--border)); background:color-mix(in srgb, var(--danger) 7%, var(--card)); }
-.account-feedback.account-error .account-feedback-icon { color:var(--danger); background:color-mix(in srgb, var(--danger) 12%, var(--card)); }
 .account-feedback.account-success { border-color:color-mix(in srgb, var(--success) 24%, var(--border)); background:color-mix(in srgb, var(--success) 7%, var(--card)); }
 .account-feedback.account-success .account-feedback-icon { color:var(--success); background:color-mix(in srgb, var(--success) 12%, var(--card)); }
 .account-summary, .account-confirmation { padding: 16px; border: 1px solid var(--border); border-radius: var(--radius-12); background: var(--bg-tint); }

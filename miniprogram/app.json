@@ -1,0 +1,31 @@
+{
+  "pages": [
+    "pages/home/index",
+    "pages/campus/index",
+    "pages/directory/index",
+    "pages/feedback/index",
+    "pages/review/index",
+    "pages/account/index"
+  ],
+  "window": {
+    "navigationBarTitleText": "三两事",
+    "navigationBarBackgroundColor": "#f1f5f2",
+    "navigationBarTextStyle": "black",
+    "backgroundColor": "#f1f5f2",
+    "backgroundTextStyle": "light"
+  },
+  "tabBar": {
+    "color": "#596a64",
+    "selectedColor": "#067654",
+    "backgroundColor": "#fbfdfb",
+    "borderStyle": "white",
+    "list": [
+      { "pagePath": "pages/home/index", "text": "首页" },
+      { "pagePath": "pages/campus/index", "text": "校园" },
+      { "pagePath": "pages/feedback/index", "text": "建议" },
+      { "pagePath": "pages/account/index", "text": "我的账号" }
+    ]
+  },
+  "style": "v2",
+  "sitemapLocation": "sitemap.json"
+}

@@ -122,7 +122,7 @@ export function createBackupSnapshot(storage = browserStorage(), metadata = {}) 
   const unsavedKeys = metadata.unsavedKeys || getPendingPersistenceKeys()
   const snapshot = {
     app: 'study-life',
-    version: 16,
+    version: BACKUP_ARCHIVE_VERSION,
     schema: 'study-life.backup/v1',
     exportedAt: new Date().toISOString(),
     ownerId: ownerId || '',
@@ -226,9 +226,46 @@ function sanitizeWallpaperImages(value) {
   return entries.length ? Object.fromEntries(entries) : null
 }
 
+/** 导出使用的备份格式版本。与 SUPPORTED_BACKUP_VERSIONS 同源，不需要手动同步两处。 */
+export const BACKUP_ARCHIVE_VERSION = 16
+/** 可以恢复的历史版本。升版本时只要改 BACKUP_ARCHIVE_VERSION。 */
+export const SUPPORTED_BACKUP_VERSIONS = Object.freeze(Array.from({ length: BACKUP_ARCHIVE_VERSION }, (_, index) => index + 1))
+
+/**
+ * 数组字段的最小结构约定：元素必须是普通对象。
+ *
+ * 之前的导入校验只看 `Array.isArray(data[field])`，于是
+ * `tasks: [null, "随便写的", {}]` 这种文件能一路通过校验、被原样写进
+ * `sl_tasks`，直到某个页面读它时才在渲染过程中崩掉 —— 而那已经发生在
+ * 恢复之后，用户换不回原来的数据了。
+ *
+ * 只守「是对象」这一条，不要求 `id`：备份里各分区的身份键并不统一
+ * （账本分类用 `key`，课程和待办用 `id`），强行要求会把历史备份挡在门外。
+ * 字段缺失交给各分区自己的 normalize 处理。
+ */
+function malformedArrayField(data) {
+  for (const field of BACKUP_ARRAY_FIELDS) {
+    const value = data[field]
+    if (!Array.isArray(value)) continue
+    if (value.some((entry) => !entry || typeof entry !== 'object' || Array.isArray(entry))) {
+      return BACKUP_MODULES.find((item) => item.keys.includes(BACKUP_STORAGE_KEYS[field]))?.label || '记录'
+    }
+  }
+  return ''
+}
+
 /** 校验并归一化导入内容，同时保留原文件实际携带的字段供恢复流程使用。 */
 export async function parseBackupArchive(value) {
-  if (!value || value.app !== 'study-life' || ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16].includes(value.version) || !value.data) {
+  if (!value || value.app !== 'study-life' || !value.data) {
+    throw new Error('这不是有效的控制台备份文件')
+  }
+  // 来自更新版本的备份要单独说清楚。以前它落进上面的兜底分支，报的是
+  // 「这不是有效的控制台备份文件」——用户会以为文件坏了，于是去重装应用，
+  // 而真正需要做的只是升级应用。
+  if (!SUPPORTED_BACKUP_VERSIONS.includes(value.version)) {
+    if (Number.isInteger(value.version) && value.version > BACKUP_ARCHIVE_VERSION) {
+      throw new Error(`这份备份来自更新的版本（v${value.version}），请先升级应用再恢复。`)
+    }
     throw new Error('这不是有效的控制台备份文件')
   }
   if (value.version >= 7 && value.schema !== 'study-life.backup/v1') {
@@ -254,6 +291,8 @@ export async function parseBackupArchive(value) {
     const module = BACKUP_MODULES.find((item) => item.keys.includes(BACKUP_STORAGE_KEYS[field]))
     throw new Error(`备份中的${module?.label || '记录'}格式不正确，恢复已停止，请在原设备重新导出。`)
   }
+  const malformed = malformedArrayField(data)
+  if (malformed) throw new Error(`备份中的${malformed}里有格式不正确的条目，恢复已停止，请在原设备重新导出。`)
   if (data.moodLog !== null && data.moodLog !== undefined && (typeof data.moodLog !== 'object' || Array.isArray(data.moodLog))) {
     throw new Error('备份中的心情记录格式不正确，恢复已停止。')
   }

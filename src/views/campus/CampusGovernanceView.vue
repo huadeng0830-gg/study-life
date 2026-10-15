@@ -3,10 +3,12 @@ import { computed, reactive, ref, watch } from 'vue'
 import { accountOpen, accountUser } from '../../composables/accountAuth.js'
 import { useCampusGovernanceAccess } from '../../composables/campusGovernanceAccess.js'
 import { useCampusLifePage } from '../../composables/campusLifePage.js'
-import { campusContentLabels } from '../../composables/campusContentModel.js'
+import { CAMPUS_PAGE_SIZE, campusContentLabels, campusErrorMessage } from '../../composables/campusContentModel.js'
+import { campusDateTimeLabel } from '../../composables/campusFormatting.js'
 import { campusModerationQueue, campusModerationHistory, decideCampusModeration, resolveCampusReport, resolveCampusHelpDispute } from '../../services/campusLife.js'
 import CampusReviewItem from '../../components/campus/CampusReviewItem.vue'
 import CampusReviewerManager from '../../components/campus/CampusReviewerManager.vue'
+import CampusCommunityAdmin from '../../components/campus/CampusCommunityAdmin.vue'
 import CampusEmptyState from '../../components/campus/CampusEmptyState.vue'
 import CampusLoadingState from '../../components/campus/CampusLoadingState.vue'
 import { Alert, AlertTitle, AlertDescription } from '../../components/ui/alert'
@@ -58,7 +60,7 @@ async function decide({ entry, decision, reason }) {
     await refresh()
   } catch (cause) {
     if (generation !== actionGeneration) return
-    actionError.value = cause?.message || '处理没有保存，请重试。'
+    actionError.value = campusErrorMessage(cause, '处理没有保存，请重试。')
     if (cause?.code === 'forbidden') await refreshAccess()
   } finally { if (generation === actionGeneration) busy[key] = false }
 }
@@ -74,7 +76,7 @@ async function decide({ entry, decision, reason }) {
     <template v-else>
       <div class="campus-governance-scope"><Badge variant="secondary">{{ access.owner ? '总管理员' : '校园审核员' }}</Badge><span>{{ access.owner ? '全平台校园内容' : `${access.scope.school} · ${access.scope.campus || '全部校区'}` }}</span><RouterLink v-if="access.owner" to="/platform-admin">账号与平台运维</RouterLink></div>
       <Tabs v-model="tab" class="gap-5">
-        <TabsList class="w-full justify-start overflow-x-auto"><TabsTrigger value="queue">待处理 {{ readableCount }}</TabsTrigger><TabsTrigger value="history">处理记录</TabsTrigger><TabsTrigger v-if="access.owner" value="reviewers">审核人员</TabsTrigger></TabsList>
+        <TabsList class="w-full justify-start overflow-x-auto"><TabsTrigger value="queue">待处理 {{ readableCount }}</TabsTrigger><TabsTrigger value="history">处理记录</TabsTrigger><TabsTrigger v-if="access.owner" value="reviewers">审核人员</TabsTrigger><TabsTrigger v-if="access.owner" value="applications">审核员申请</TabsTrigger><TabsTrigger v-if="access.owner" value="audits">随机复核</TabsTrigger><TabsTrigger v-if="access.owner" value="feedback">反馈建议</TabsTrigger></TabsList>
         <TabsContent value="queue" class="flex flex-col gap-4">
           <section class="campus-life-panel"><div class="campus-governance-toolbar"><div><h2>审核与举报</h2><p>先核对正文和来源，再给出处理依据。课程的真实批评不能仅因负面评价而被删除。</p></div><Button variant="outline" :disabled="page.loading.value" @click="refresh()">刷新队列</Button></div><FieldGroup class="flex-row items-end gap-3"><Field><FieldLabel for="governance-type">内容分类</FieldLabel><NativeSelect id="governance-type" v-model="type"><NativeSelectOption value="">全部分类</NativeSelectOption><NativeSelectOption v-for="[value,label] in categoryOptions" :key="value" :value="value">{{ label }}{{ page.data.value?.counts?.[value] ? `（${page.data.value.counts[value]}）` : '' }}</NativeSelectOption></NativeSelect></Field><span class="campus-life-meta">{{ readableCount }} 条待处理</span></FieldGroup></section>
           <Alert v-if="actionError" variant="destructive" role="alert"><AlertTitle>本次操作未完成</AlertTitle><AlertDescription>{{ actionError }}</AlertDescription></Alert>
@@ -85,8 +87,11 @@ async function decide({ entry, decision, reason }) {
           <CampusReviewItem v-for="entry in page.data.value?.items || []" :key="keyOf(entry)" :entry="entry" :busy="busy[keyOf(entry)]" @decide="decide" />
           <nav v-if="pageIndex || page.data.value?.hasMore" class="campus-life-actions" aria-label="审核队列分页"><Button variant="outline" :disabled="page.loading.value || pageIndex === 0" @click="refresh(pageIndex - 1)">上一页</Button><span>第 {{ pageIndex + 1 }} 页</span><Button variant="outline" :disabled="page.loading.value || !page.data.value?.hasMore" @click="refresh(pageIndex + 1)">下一页</Button></nav>
         </TabsContent>
-        <TabsContent value="history" class="flex flex-col gap-4"><section class="campus-life-panel"><div class="campus-governance-toolbar"><div><h2>处理记录</h2><p>只展示授权范围内的审核结果；撤回授权不会删除历史记录。</p></div><Button variant="outline" :disabled="history.loading.value" @click="loadHistory()">刷新记录</Button></div><p v-if="history.error.value" role="alert" class="campus-life-inline-state error">{{ history.error.value }}</p><CampusLoadingState v-if="history.loading.value">正在读取处理记录…</CampusLoadingState><CampusEmptyState v-else-if="!history.data.value?.events?.length" title="当前范围暂无处理记录" action="" /><article v-for="event in history.data.value?.events || []" :key="event.id" class="campus-life-card"><div class="campus-life-meta"><Badge variant="outline">{{ campusContentLabels[event.target_type] || '校园内容' }}</Badge><span>{{ event.school }} · {{ event.campus || '全校区' }}</span><span>{{ String(event.created_at).slice(0,16).replace('T',' ') }}</span></div><b>{{ ({approved:'审核通过',active:'已公开',open:'已公开',rejected:'退回或下架',resolved:'举报已处理',dismissed:'举报不成立',completed:'任务完成',cancelled:'任务取消'})[event.to_status] || event.to_status }}</b><p>{{ event.reason || '审核通过，未补充说明。' }}</p></article><nav class="campus-life-actions" aria-label="处理记录分页"><Button variant="outline" :disabled="history.loading.value || !historyIndex" @click="loadHistory(historyIndex - 1)">上一页</Button><span>第 {{ historyIndex + 1 }} 页</span><Button variant="outline" :disabled="history.loading.value || (history.data.value?.events?.length || 0) < 30" @click="loadHistory(historyIndex + 1)">下一页</Button></nav></section></TabsContent>
+        <TabsContent value="history" class="flex flex-col gap-4"><section class="campus-life-panel"><div class="campus-governance-toolbar"><div><h2>处理记录</h2><p>只展示授权范围内的审核结果；撤回授权不会删除历史记录。</p></div><Button variant="outline" :disabled="history.loading.value" @click="loadHistory()">刷新记录</Button></div><p v-if="history.error.value" role="alert" class="campus-life-inline-state error">{{ history.error.value }}</p><CampusLoadingState v-if="history.loading.value">正在读取处理记录…</CampusLoadingState><CampusEmptyState v-else-if="!history.data.value?.events?.length" title="当前范围暂无处理记录" action="" /><article v-for="event in history.data.value?.events || []" :key="event.id" class="campus-life-card"><div class="campus-life-meta"><Badge variant="outline">{{ campusContentLabels[event.target_type] || '校园内容' }}</Badge><span>{{ event.school }} · {{ event.campus || '全校区' }}</span><span>{{ campusDateTimeLabel(event.created_at) }}</span></div><b>{{ ({approved:'审核通过',active:'已公开',open:'已公开',rejected:'退回或下架',resolved:'举报已处理',dismissed:'举报不成立',completed:'任务完成',cancelled:'任务取消'})[event.to_status] || event.to_status }}</b><p>{{ event.reason || '审核通过，未补充说明。' }}</p></article><nav class="campus-life-actions" aria-label="处理记录分页"><Button variant="outline" :disabled="history.loading.value || historyIndex === 0" @click="loadHistory(historyIndex - 1)">上一页</Button><span>第 {{ historyIndex + 1 }} 页</span><Button variant="outline" :disabled="history.loading.value || (history.data.value?.events?.length || 0) < CAMPUS_PAGE_SIZE" @click="loadHistory(historyIndex + 1)">下一页</Button></nav></section></TabsContent>
         <TabsContent v-if="access.owner" value="reviewers"><CampusReviewerManager /></TabsContent>
+        <TabsContent v-if="access.owner" value="applications"><CampusCommunityAdmin mode="applications" /></TabsContent>
+        <TabsContent v-if="access.owner" value="audits"><CampusCommunityAdmin mode="audits" /></TabsContent>
+        <TabsContent v-if="access.owner" value="feedback"><CampusCommunityAdmin mode="feedback" /></TabsContent>
       </Tabs>
     </template>
   </div>

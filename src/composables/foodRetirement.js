@@ -46,6 +46,13 @@ async function createRequiredBackup(exportBackup) {
   try {
     const backup = await exportBackup?.()
     if (!backup) throw new Error('未生成备份文件')
+    // 应急导出会如实报告自己漏掉了哪些键。之前这里只看「有没有返回对象」，
+    // 于是 `completeness.complete === false` 的残缺备份也算通过，
+    // 紧接着就把旧数据永久删除 —— 而那份文件根本救不回来。
+    if (backup.completeness && backup.completeness.complete === false) {
+      const missing = [...(backup.completeness.missingKeys || []), ...(backup.completeness.unreadableKeys || [])]
+      throw new Error(`备份内容不完整（${missing.join('、') || '部分键无法读取'}），清理已取消`)
+    }
     return { ok: true }
   } catch (error) {
     return { ok: false, error }

@@ -38,7 +38,7 @@ const sections = computed(() => {
       <select v-model="filter" aria-label="筛选可用功能"><option value="all">全部功能</option><option value="unpinned">{{ mode === 'mobile' ? '未添加' : '未固定' }}</option></select>
     </div>
     <label v-if="mode === 'desktop'" class="library-target"><span>添加到分组</span><select :value="targetGroup" :disabled="disabled" aria-label="添加功能的目标分组" @change="emit('update:targetGroup', $event.target.value)"><option v-for="group in groups" :key="group.id" :value="group.id">{{ group.label.trim() || '未命名分组' }}</option></select></label>
-    <p v-if="mode === 'mobile' && full" class="library-hint">自选位置已满，移除一个页面后即可添加。</p>
+    <p v-if="mode === 'mobile' && full" class="library-hint">手机底栏最多添加 5 个页面，移除一个后即可继续。</p>
     <div v-for="section in sections" :key="section.id" class="library-group">
       <h5>{{ section.label }}</h5>
       <div class="nav-feature-grid">

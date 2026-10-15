@@ -1,13 +1,18 @@
 <script setup>
-import { computed, onScopeDispose, ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { accountUser } from '../../composables/accountAuth.js'
 import { useRoute } from 'vue-router'
 import { Check, CheckCheck, FilePenLine, ShieldCheck, ChevronDown, ShoppingBag, HandHelping, Bus, Telescope, CalendarDays, BookOpen, GraduationCap, UserRound, Link, FileCheck, Clock } from '@lucide/vue'
 import { Button } from '../../components/ui/button'
 import { Field, FieldGroup, FieldLegend, FieldSet } from '../../components/ui/field'
 import CampusLifeLayout from '../../components/campus/CampusLifeLayout.vue'
+import CampusConfirmDialog from '../../components/campus/CampusConfirmDialog.vue'
 import CampusPublishPreview from '../../components/campus/CampusPublishPreview.vue'
+import { useCampusConfirm } from '../../composables/campusConfirm.js'
+import { campusErrorMessage } from '../../composables/campusContentModel.js'
+import { campusLocalDateTimeInput } from '../../composables/campusFormatting.js'
 import { useCampusLifeDraft } from '../../composables/campusLifeDraft.js'
+import { useCampusRequest } from '../../composables/campusRequest.js'
 import {
   campusCourses, campusLifeMine, campusShuttles, resubmitCampusContent, submitCampusCourse, submitCampusEvent,
   submitCampusGuide, submitCampusHelpTask, submitCampusMarketListing, submitCampusShuttleCorrection,
@@ -45,6 +50,8 @@ const defaults = () => ({
   event: { title: '', description: '', startsAt: '', endsAt: '', location: '', organizer: '', signupUrl: '', sourceUrl: '', capacity: '' },
   guide: { title: '', category: 'new_student', body: '', sourceType: 'student_experience', sourceUrl: '', expiresOn: '' },
 })
+const confirm = useCampusConfirm()
+const confirmRequest = confirm.pending
 const formDefaults = defaults()
 const { value: draft, savedRevision } = useCampusLifeDraft('unified-publisher', { kind: 'market', forms: defaults() })
 if (!draft.value.forms || typeof draft.value.forms !== 'object' || Array.isArray(draft.value.forms)) draft.value.forms = formDefaults
@@ -63,37 +70,36 @@ const optionsLoading = ref(false)
 const saving = ref(false)
 const error = ref('')
 const message = ref('')
-let pageGeneration = 0
-let choicesGeneration = 0
-onScopeDispose(() => { pageGeneration += 1; choicesGeneration += 1 })
+// 两条独立的守卫，不能合并：读选项（切类型就会重来）和提交（用户点下去之后
+// 不该因为一次后台刷新被作废）必须各走各的。useCampusRequest 已经把
+// 「代际自增 + 账号变更作废 + 卸载作废」这套写法收敛到一处。
+const page = useCampusRequest()
+const choices = useCampusRequest()
 
 async function loadChoices() {
-  const generation = ++choicesGeneration
-  const owner = accountUser.value?.id
+  const revision = choices.begin()
   optionsLoading.value = true
   try {
     if (kind.value === 'assignment') {
       const result = await campusCourses()
-      if (generation === choicesGeneration && owner === accountUser.value?.id) teachersCourses.value = result
+      if (choices.live(revision)) teachersCourses.value = result
     }
     if (['shuttle_correction', 'shuttle_exception'].includes(kind.value)) {
       const result = await campusShuttles()
-      if (generation === choicesGeneration && owner === accountUser.value?.id) shuttleRoutes.value = result.routes || []
+      if (choices.live(revision)) shuttleRoutes.value = result.routes || []
     }
-  } catch (cause) { if (generation === choicesGeneration && owner === accountUser.value?.id) error.value = cause?.message || '暂时无法读取已审核校园资料。' }
-  finally { if (generation === choicesGeneration && owner === accountUser.value?.id) optionsLoading.value = false }
+  } catch (cause) { if (choices.live(revision)) error.value = campusErrorMessage(cause, '暂时无法读取已审核校园资料。') }
+  finally { if (choices.live(revision)) optionsLoading.value = false }
 }
 const submissionKeys = {
   teacher: 'teachers', course: 'courses', assignment: 'assignments', market: 'listings', help: 'helpTasks',
   shuttle: 'shuttleRoutes', shuttle_correction: 'shuttleCorrections', shuttle_exception: 'shuttleExceptions',
   lost: 'lostFound', event: 'events', guide: 'guides',
 }
+// datetime-local 回填用的是同一套规则（campusFormatting 里那份），
+// 不再在这里手写一份偏移量修正 —— 漏一次就是活动时间差几个小时。
 function localDateTime(value) {
-  if (!value) return ''
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return ''
-  date.setMinutes(date.getMinutes() - date.getTimezoneOffset())
-  return date.toISOString().slice(0, 16)
+  return campusLocalDateTimeInput(value)
 }
 function prefillSubmission(type, item) {
   kind.value = type
@@ -115,8 +121,8 @@ function prefillSubmission(type, item) {
   editing.value = { type, id: item.id, revision: Number(item.revision) }
 }
 watch(() => [accountUser.value?.id || '', route.query.kind, route.query.editType, route.query.id], async () => {
-  const generation = ++pageGeneration
-  choicesGeneration += 1
+  const revision = page.begin()
+  choices.invalidate()
   editing.value = null
   teachersCourses.value = { courses: [], teachers: [], assignments: [], reviews: [] }
   shuttleRoutes.value = []
@@ -130,13 +136,13 @@ watch(() => [accountUser.value?.id || '', route.query.kind, route.query.editType
   if (submissionKeys[editType] && editId) {
     try {
       const mine = await campusLifeMine()
-      if (generation !== pageGeneration) return
+      if (!page.live(revision)) return
       const item = (mine[submissionKeys[editType]] || []).find((candidate) => candidate.id === editId)
       if (!item || (item.review_status || item.status) !== 'rejected' || !Number.isSafeInteger(Number(item.revision))) throw new Error('这条投稿已更新或不属于当前账号，请刷新投稿记录。')
       prefillSubmission(editType, item)
-    } catch (cause) { if (generation === pageGeneration) error.value = cause?.message || '暂时无法读取这条待修改投稿。' }
+    } catch (cause) { if (page.live(revision)) error.value = campusErrorMessage(cause, '暂时无法读取这条待修改投稿。') }
   }
-  if (generation === pageGeneration) await loadChoices()
+  if (page.live(revision)) await loadChoices()
 }, { immediate: true, flush: 'sync' })
 
 function splitRows(value, label) {
@@ -166,8 +172,7 @@ function localTimestamp(value) {
 
 async function publish() {
   if (saving.value) return
-  const generation = pageGeneration
-  const owner = accountUser.value?.id
+  const revision = page.begin()
   saving.value = true
   error.value = ''
   message.value = ''
@@ -199,21 +204,33 @@ async function publish() {
     else if (kind.value === 'lost') result = await submitLostFoundItem(payload)
     else if (kind.value === 'event') result = await submitCampusEvent(payload)
     else if (kind.value === 'guide') result = await submitCampusGuide(payload)
-    if (result && generation === pageGeneration && owner === accountUser.value?.id) {
+    if (result && page.live(revision)) {
       message.value = editing.value ? '修改已重新提交审核。审核通过前不会出现在公开列表。' : '已提交审核。审核通过后才会出现在同校公开列表。'
       draft.value.forms[submittedKind] = defaults()[submittedKind]
       draft.value.kind = submittedKind
       editing.value = null
       if (kind.value === 'assignment') await loadChoices()
     }
-  } catch (cause) { if (generation === pageGeneration && owner === accountUser.value?.id) error.value = cause?.message || '提交没有完成，请检查填写内容后重试。' }
-  finally { if (generation === pageGeneration && owner === accountUser.value?.id) saving.value = false }
+  } catch (cause) { if (page.live(revision)) error.value = campusErrorMessage(cause, '提交没有完成，请检查填写内容后重试。') }
+  finally { if (page.live(revision)) saving.value = false }
 }
 
 function kindChanged() {
   error.value = ''
   message.value = ''
   void loadChoices()
+}
+
+// 清空草稿要连本机存储一起抹掉，而且没有撤销、没有云端副本。
+// 「清空当前草稿」和它旁边的「提交审核」挨得很近，误触一次就是半篇表单。
+function askClearCurrentDraft() {
+  confirm.ask({
+    title: '清空当前这份草稿？',
+    message: `「${options.find((item) => item.id === kind.value)?.title || '当前表单'}」里已填的内容会被删除，无法恢复。其它发布类型的草稿不受影响。`,
+    confirmLabel: '清空这份草稿',
+    tone: 'danger',
+    onConfirm: clearCurrentDraft,
+  })
 }
 function clearCurrentDraft() {
   const selectedKind = kind.value
@@ -310,11 +327,12 @@ function clearCurrentDraft() {
             <p v-if="form.sourceType === 'student_experience'" class="span-all campus-life-inline-state">学生经验会明确标注为经验信息，不会包装成学校规定。</p>
           </template>
           <CampusPublishPreview :form="form" :title="options.find(item => item.id === kind)?.title" :school="profile?.school" :campus="profile?.campus" />
-          <div class="span-all campus-life-actions campus-publish-footer"><span><ShieldCheck aria-hidden="true" />审核通过后公开</span><Button variant="ghost" type="button" :disabled="saving" @click="clearCurrentDraft">清空当前草稿</Button><Button type="submit" :disabled="saving || (kind === 'assignment' && optionsLoading)"><FilePenLine data-icon="inline-start" />{{ saving ? '正在提交…' : '提交审核' }}</Button></div>
+          <div class="span-all campus-life-actions campus-publish-footer"><span><ShieldCheck aria-hidden="true" />审核通过后公开</span><Button variant="ghost" type="button" :disabled="saving" @click="askClearCurrentDraft">清空当前草稿</Button><Button type="submit" :disabled="saving || (kind === 'assignment' && optionsLoading)"><FilePenLine data-icon="inline-start" />{{ saving ? '正在提交…' : '提交审核' }}</Button></div>
           </FieldGroup>
           </fieldset>
         </form>
       </section>
+      <CampusConfirmDialog :request="confirmRequest" @confirm="confirm.confirm()" @close="confirm.close()" />
     </template>
   </CampusLifeLayout>
 </template>

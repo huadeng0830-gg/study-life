@@ -1,0 +1,11 @@
+{
+  "description": "三两事校园小程序（AppID 待配置）",
+  "packOptions": { "ignore": [{ "type": "folder", "value": "node_modules" }] },
+  "setting": { "urlCheck": true, "es6": true, "enhance": true, "postcss": true, "minified": true, "compileHotReLoad": true },
+  "compileType": "miniprogram",
+  "libVersion": "3.7.12",
+  "appid": "",
+  "projectname": "study-life-miniprogram",
+  "miniprogramRoot": "./",
+  "condition": {}
+}

@@ -7,9 +7,21 @@ import { accountSyncPreparing, accountSyncPreparationError } from '../../composa
 import { accountConflictKey, accountSyncConflicts, accountSyncError, accountSyncLastSyncedAt, accountSyncStatus, resolveAccountConflicts, syncAccountNow } from '../../composables/accountSyncState.js'
 import { announce, announceAlert } from '../../composables/liveRegion.js'
 import { localSafeMode } from '../../composables/localSafeMode.js'
+import { accountSyncUsage, formatSyncBytes } from '../../composables/accountSyncUsage.js'
 import '../../styles/shadcn.css'
 import { Badge } from '@/components/ui/badge'
-const props = defineProps({ sectionId: String, compact: Boolean })
+/**
+ * 这个面板同时挂在「我的账号 → 账号概览」和「数据管理」里。
+ *
+ * 两处**不会**同时存在：Modal 用 v-if="open" 渲染插槽，面板关闭时这里的实例
+ * 根本不会被创建；而唯一从账号面板打开数据管理的入口（AccountSessionActions 的
+ * 「导出备份」）位于「账号安全」分区，那时账号概览里的这个面板正落在
+ * v-else-if 分支之外。
+ *
+ * 如果将来加了一条能同时打开这两个弹窗的路径，两份实例会各自往 liveRegion
+ * 播报同一条状态，读屏用户就会听到两遍 —— 那时再在这里加限制。
+ */
+const props = defineProps({ compact: Boolean })
 /** @type {import('vue').Ref<Record<string, string>>} */
 const choices = ref({})
 const panelId = useId()
@@ -29,6 +41,7 @@ const statusText = computed(() => ({
   disabled: '未开启账号同步',
 }[accountSyncStatus.value] || '登录后自动同步'))
 const timeText = computed(() => accountSyncLastSyncedAt.value ? new Date(accountSyncLastSyncedAt.value).toLocaleString('zh-CN') : '')
+const usage = computed(() => accountUser.value?.id === accountSyncUsage.value.ownerId ? accountSyncUsage.value : null)
 
 /**
  * 把任意值安全地渲染成可读文本。
@@ -84,7 +97,7 @@ function toggleAccountSync() {
 </script>
 
 <template>
-  <section :id="props.sectionId" class="account-sync-panel" :class="{ compact: props.compact }" :aria-labelledby="headingId">
+  <section class="account-sync-panel" :class="{ compact: props.compact }" :aria-labelledby="headingId">
     <h4 :id="headingId">账号同步</h4>
     <p class="account-sync-intro">登录同一账号并开启同步后，课程、待办、账本等数据会在设备间同步。壁纸图片只保存在本机，可在导出备份时选择携带。</p>
     <template v-if="accountUser">
@@ -100,6 +113,8 @@ function toggleAccountSync() {
       </div>
       <Badge as="span" variant="outline" class="account-sync-status" :class="`is-${accountSyncStatus}`">{{ statusText }}</Badge>
       <small v-if="timeText">上次完成：{{ timeText }}</small>
+      <p v-if="usage && (usage.pulls || usage.pushes)" class="account-sync-intro">本次打开估算：已下载 {{ formatSyncBytes(usage.downloadedBytes) }}，已上传 {{ formatSyncBytes(usage.uploadedBytes) }}。最近快照 {{ formatSyncBytes(usage.snapshotBytes) }}。</p>
+      <p v-if="usage && usage.snapshotBytes >= 512 * 1024" class="account-sync-intro">记录较多，跨设备同步会使用更多流量。可以先导出备份，再整理不再需要的历史记录。</p>
       <p v-if="accountSyncError" class="account-sync-error">{{ accountSyncError }}</p>
       <p v-if="localSafeMode" class="account-sync-error">当前处于本机安全模式，同步已暂停。</p>
       <ActionButton tone="neutral" v-if="accountSyncViaAccount" type="button" class="btn" :disabled="busy || localSafeMode" :busy="busy" kind="task" feedback="external" :show-error="false" :action="() => synchronize()">{{ busy ? '正在同步…' : accountSyncPreparationError ? '重试账号同步' : '立即同步' }}</ActionButton>

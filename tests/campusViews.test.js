@@ -21,6 +21,7 @@ const serviceState = vi.hoisted(() => ({
   calls: {},
   responses: {},
   lastArgs: undefined,
+  accountSectionRequests: [],
   // 与 src/services/campusLife.js 的具名导出一一对应；少一个，对应用例就会静默失效。
   serviceNames: [
     'campusLifeSearch', 'campusLifeMine', 'resubmitCampusContent', 'campusLifeFavorites', 'setCampusFavorite',
@@ -55,6 +56,7 @@ vi.mock('../src/composables/accountAuth.js', async () => {
   return {
     accountUser: shallowRef({ id: '00000001-0000-4000-8000-000000000001' }),
     accountOpen: shallowRef(false),
+    openAccountSection: vi.fn((section) => { serviceState.accountSectionRequests.push(section) }),
     accountReady: shallowRef(true),
     accountBusy: shallowRef(false),
     accountAuthError: shallowRef(''),
@@ -72,6 +74,19 @@ vi.mock('../src/services/social.js', () => ({
     return {}
   }),
   campusLifeRequest: vi.fn(async () => ({})),
+}))
+
+vi.mock('../src/services/campusCommunity.js', () => ({
+  campusBeanWallet: vi.fn(async () => serviceState.responses.campusBeanWallet || {
+    wallet: { purchased: 0, contribution: 0, contributionDebt: 0 }, ledger: [],
+  }),
+  campusFeedbackPublicList: vi.fn(async () => serviceState.responses.campusFeedbackPublicList || { items: [] }),
+  myCampusFeedback: vi.fn(async () => ({ items: [] })),
+  submitCampusFeedback: vi.fn(async () => ({})),
+  applyCampusReviewer: vi.fn(async () => ({})),
+  myCampusReviewerApplication: vi.fn(async () => ({ application: null })),
+  replyToCampusReviewerApplication: vi.fn(async () => ({})),
+  campusFeedbackMessages: vi.fn(async () => ({ messages: [] })),
 }))
 
 let app = null
@@ -130,6 +145,7 @@ const stubChoices = {
 beforeEach(() => {
   serviceState.calls = {}
   serviceState.responses = {}
+  serviceState.accountSectionRequests = []
   serviceState.lastArgs = undefined
   globalThis.localStorage.clear()
   accountUser.value = { id: '00000001-0000-4000-8000-000000000001' }
@@ -226,7 +242,7 @@ describe('统一发布：本机草稿回灌不会让页面变白屏', () => {
     expect(JSON.parse(localStorage.getItem(draftKey())).forms.course.name).toBe('修改后的课程')
   })
 
-  it('切换发布类型后更新表单，清空草稿后清空当前输入', async () => {
+  it('切换发布类型后更新表单，清空草稿要确认后才清空', async () => {
     const { default: view } = await import('../src/views/campus/CampusPublishView.vue')
     await mountView(view)
     const choice = [...host.querySelectorAll('.campus-publish-choice')].find((node) => node.textContent.includes('课程资料'))
@@ -234,7 +250,14 @@ describe('统一发布：本机草稿回灌不会让页面变白屏', () => {
     await settle()
     expect(host.querySelector('.campus-life-form').textContent).toContain('课程名称')
     await typeInto('.campus-life-form input', '临时课程')
+
     await clickButton('清空当前草稿')
+    // 清空要连本机存储一起抹掉，且没有撤销。先弹确认，不直接清。
+    expect(host.querySelector('.campus-life-form input').value).toBe('临时课程')
+    const confirmButton = [...document.querySelectorAll('button')].find((node) => node.textContent.trim() === '清空这份草稿')
+    expect(confirmButton).toBeTruthy()
+    confirmButton.click()
+    await settle()
     expect(host.querySelector('.campus-life-form input').value).toBe('')
   })
 
@@ -434,6 +457,37 @@ describe('校车时刻：常规班次与特殊日期安排合并', () => {
 })
 
 describe('缺少学校时给出可执行的下一步', () => {
+  it('校园总览优先展示反馈、发布与治理入口，并提供校园服务分类', async () => {
+    serviceState.responses.campusBeanWallet = { wallet: { purchased: 0, contribution: 12, contributionDebt: 2 }, ledger: [] }
+    const { default: CampusHubView } = await import('../src/views/CampusHubView.vue')
+    await mountView(CampusHubView)
+
+    expect(host.querySelector('.campus-hub-hero h2')?.textContent).toContain('校园里要找的、想说的')
+    expect(host.querySelector('.campus-hub-feature.campus-hub-feature-feedback[href="/campus/feedback"]')?.textContent).toContain('反馈与建议')
+    expect(host.querySelector('.campus-hub-feature[href="/campus/publish"]')?.textContent).toContain('统一发布')
+    expect(host.querySelector('.campus-hub-service[href="/campus/places"]')?.textContent).toContain('校园地点')
+    expect(host.querySelector('.campus-hub-beans')?.textContent).toContain('12')
+    expect(host.querySelector('.campus-hub-beans')?.textContent).toContain('3 豆')
+    expect(host.querySelector('.campus-hub-beans')?.textContent).toContain('0–20 豆')
+    expect(host.querySelector('.campus-hub-beans')?.textContent).toContain('待抵扣 2 豆')
+    host.querySelector('.campus-hub-beans-account')?.click()
+    await settle()
+    expect(serviceState.accountSectionRequests).toEqual(['beans'])
+    expect(host.querySelector('.campus-life-quick-nav')).toBeNull()
+  })
+
+  it('公开建议明确展示管理员设置的解决奖励金额', async () => {
+    serviceState.responses.campusFeedbackPublicList = { items: [{
+      id: 'fictional-suggestion', category: 'campus', title: '改善校园指引', body: '建议补充校区指引信息。', status: 'resolved',
+      public_reply: '已补充指引。', public_reason: '', reward_beans: 8, reward_issued: true, created_at: '2026-10-15T02:00:00.000Z',
+    }] }
+    const { default: CampusFeedbackView } = await import('../src/views/campus/CampusFeedbackView.vue')
+    await mountView(CampusFeedbackView)
+
+    expect(host.querySelector('.feedback-row')?.textContent).toContain('管理员设置奖励 8 个贡献豆')
+    expect(host.querySelector('.feedback-row .admin-reply')?.textContent).toContain('已补充指引')
+  })
+
   it('个人资料没有学校时说明原因并给出填写入口', async () => {
     serviceState.responses.profileGet = { school: '', campus: '' }
 
@@ -452,6 +506,20 @@ describe('缺少学校时给出可执行的下一步', () => {
 
     expect(host.textContent).toContain('虚构大学')
     expect(host.textContent).not.toContain('请先在个人资料中填写')
+  })
+
+  it('在校园子页面顶部直接提供反馈、发布、总览和举报入口', async () => {
+    const { default: CampusLifeLayout } = await import('../src/components/campus/CampusLifeLayout.vue')
+    await mountView(CampusLifeLayout, { title: '校园指南' })
+
+    const quickLinks = [...host.querySelectorAll('.campus-life-quick-nav a')]
+    expect(quickLinks.map((link) => [link.textContent.replace(/\s+/g, ' ').trim(), link.getAttribute('href')]))
+      .toEqual([
+        ['反馈与建议查看公开进度', '/campus/feedback'],
+        ['统一发布分享校园信息', '/campus/publish'],
+        ['校园总览查找校园服务', '/campus'],
+        ['我的举报跟进处理结果', '/campus/reports'],
+      ])
   })
 })
 
@@ -482,7 +550,7 @@ describe('校园列表筛选与失败反馈', () => {
     await clickButton('清除筛选')
     expect(host.querySelectorAll('.campus-life-card')).toHaveLength(2)
   })
-  it('联系提交失败时保留错误和留言，重试读取后仍能继续编辑', async () => {
+  it('联系提交失败时保留错误和留言，可以原样再发一次', async () => {
     await mountMarket()
     serviceState.responses.createMarketInterest = () => { throw new Error('请稍后再试') }
     await clickButton('联系 / 表达意向')
@@ -490,9 +558,18 @@ describe('校园列表筛选与失败反馈', () => {
     host.querySelector('.campus-market-interest-form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
     await settle()
     expect(host.textContent).toContain('请稍后再试')
+    // 写失败不该触发重新读取：列表刚刚才是对的，没有坏到需要重读。
     expect(serviceState.calls.campusMarketListings).toBe(1)
-    await clickButton('重试')
+    // 列表也必须留在页面上。之前这条错误写进了读取错误槽，
+    // 整屏商品被顶成一条错误加一个「重试」——重试的是列表，不是这次失败的上报。
+    expect(host.querySelectorAll('.campus-life-card')).toHaveLength(2)
     expect(host.querySelector('.campus-market-interest-form textarea').value).toBe('在图书馆交接可以吗')
+    // 不再提供「重试」：重试这次发送的动作是再点一次发送。
+    expect([...host.querySelectorAll('button')].some((node) => node.textContent.trim() === '重试')).toBe(false)
+    serviceState.responses.createMarketInterest = async () => ({})
+    host.querySelector('.campus-market-interest-form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await settle()
+    expect(host.textContent).toContain('联系意向已发送')
   })
   it('学校资料请求乱序返回时，不覆盖新账号的学校', async () => {
     let resolveOld

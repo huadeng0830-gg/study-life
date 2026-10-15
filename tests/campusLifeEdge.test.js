@@ -333,6 +333,7 @@ describe('campus-life Edge Function', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const response = await call(handler, 'moderation_decide', {
       targetType: 'market_listing', targetId: '10000001-0000-4000-8000-000000000001', decision: 'approve', revision: 1,
+      reason: '内容信息符合校园审核规范。',
     })
     warn.mockRestore()
 

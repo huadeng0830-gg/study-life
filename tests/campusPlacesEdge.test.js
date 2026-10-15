@@ -125,6 +125,17 @@ const sharedPlace = (overrides = {}) => ({
 })
 
 describe('校内地点 Edge 安全边界', () => {
+  it('允许隔离体验分支读取校园用户资料', async () => {
+    const { handler } = edge()
+    const origin = 'https://codex-preview-1-4-0.study-life.pages.dev'
+    const response = await handler(new Request('https://fictional.example.invalid/functions/v1/campus-social', {
+      method: 'OPTIONS', headers: { Origin: origin },
+    }))
+
+    expect(response.status).toBe(200)
+    expect(response.headers.get('Access-Control-Allow-Origin')).toBe(origin)
+  })
+
   it('拒绝 private 地点发布，且不写入服务端表', async () => {
     const { handler, rows } = edge()
     const response = await call(handler, 'campus_place_publish', { place: sharedPlace({ visibility: 'private' }) })

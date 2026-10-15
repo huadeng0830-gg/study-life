@@ -10,7 +10,8 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 }
 const allowedOrigins = new Set([
-  'https://study-life.pages.dev', 'http://localhost:5173', 'http://127.0.0.1:5173',
+  'https://study-life.pages.dev', 'https://codex-preview-1-4-0.study-life.pages.dev',
+  'http://localhost:5173', 'http://127.0.0.1:5173',
   'http://localhost:4173', 'http://127.0.0.1:4173', 'app://study-life',
   ...(Deno.env.get('CAMPUS_SOCIAL_ALLOWED_ORIGINS') || '').split(',').map((origin) => origin.trim()).filter(Boolean),
 ])
@@ -160,7 +161,10 @@ async function authenticate(request: Request) {
   if (!token) throw new ApiError('unauthorized', '请先登录账号。', 401)
   const { data, error } = await admin.auth.getUser(token)
   if (error || !data?.user) throw new ApiError('unauthorized', '登录已失效，请重新登录。', 401)
-  if (!data.user.email_confirmed_at) throw new ApiError('email_verification_required', '请先完成邮箱验证，再发布或联系校园内容。', 403)
+  const email = String(data.user.email || '').trim().toLowerCase()
+  if (!data.user.email_confirmed_at || !email || email.endsWith('@wechat.study-life.invalid')) {
+    throw new ApiError('email_verification_required', '请先完成邮箱验证，再发布或联系校园内容。', 403)
+  }
   return data.user
 }
 

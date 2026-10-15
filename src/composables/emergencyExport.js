@@ -1,31 +1,32 @@
+import { BACKUP_STORAGE_KEYS } from './backupArchive.js'
 import { captureAccountDataIdentity } from './accountSyncIdentity.js'
 import { getPendingPersistenceKeys, readLatestStoredRaw } from './store/core.js'
 
 const BACKUP_SCHEMA = 'study-life.backup/v1'
 
-const BACKUP_FIELDS = Object.freeze({
-  sl_courses: 'courses', sl_exams: 'countdowns', sl_tasks: 'tasks', sl_events: 'events',
-  sl_quick_record_settings: 'quickRecordSettings', sl_capture_enabled: 'captureEnabled',
-  sl_focus_sessions: 'focusSessions', sl_focus_settings: 'focusSettings', sl_course_checkins: 'courseCheckins',
-  sl_course_templates: 'courseTemplates', sl_checklists: 'checklists', sl_bills: 'bills', sl_expenses: 'expenses',
-  sl_ledger_categories: 'ledgerCategories', sl_ledger_freq: 'ledgerFreq', sl_ledger_fx: 'ledgerFx',
-  sl_ledger_budget: 'ledgerBudget', sl_ledger_templates: 'ledgerTemplates', sl_timecfg: 'timeConfig', sl_semester: 'semester',
-  sl_schedule_exceptions: 'scheduleExceptions', sl_schedule_note: 'scheduleNote', sl_theme: 'theme', sl_custom_theme_color: 'customThemeColor',
-  sl_high_contrast: 'highContrast',
-  sl_navigation_mobile: 'mobileNavigation', sl_navigation_desktop: 'desktopNavigation',
-  sl_countdown_show_past: 'countdownShowPast', sl_ocr_vocabulary: 'ocrVocabulary', sl_appearance: 'appearance',
-  sl_wallpaper_config: 'wallpaperConfig', sl_auto_wallpaper_color: 'autoWallpaperColor', sl_wallpaper_accent: 'wallpaperAccent',
-  sl_performance_mode: 'performanceMode', sl_festive_config: 'festiveConfig', sl_festive_birthday_full: 'festiveBirthdayFull',
-  sl_festive_lunar: 'festiveLunar', sl_ui_language: 'uiLanguage',
-  sl_mood_log: 'moodLog', sl_reminder_log: 'reminderLog',
-  sl_focus_active: 'activeFocus', sl_task_center_log: 'taskCenterLog', sl_archived_quick_notes: 'archivedQuickNotes',
-  sl_notices: 'notices', sl_notice_sources: 'noticeSources',
-  sl_places: 'places', sl_place_visits: 'placeVisits', sl_place_offers: 'placeOffers',
-  sl_data_health_settings: 'dataHealthSettings',
-  // Retirement requires this archive before removing these legacy records.
-  // Keep their original export fields even though the current UI no longer restores them.
-  sl_food_places: 'foodPlaces', sl_food_history: 'foodHistory', sl_food_filters: 'foodFilters', sl_packages: 'packages',
+/**
+ * 只有应急导出会带、常规备份不带的键。
+ *
+ * 常规备份的文件→存储键映射只有一份，在 BACKUP_STORAGE_KEYS 里。这里不再抄第二份
+ * 完整表：抄一份就意味着新增一个备份字段时要记得改两处，而漏改的那一处会让
+ * 保存失败时导出的「应急备份」静默缺数据 —— 而那恰恰是用户最需要它完整的时候。
+ *
+ * 下面这几个键是刻意的例外：退休流程必须先拿到可恢复的副本，才能删除这些旧记录。
+ * 当前界面不再恢复它们，但删除之前的最后一版必须还在。
+ */
+const EMERGENCY_ONLY_FIELDS = Object.freeze({
+  sl_food_places: 'foodPlaces', sl_food_history: 'foodHistory',
+  sl_food_filters: 'foodFilters', sl_packages: 'packages',
 })
+
+/** 存储键 → 备份字段名。与 BACKUP_STORAGE_KEYS 严格取反，再并上退休专用键。 */
+const BACKUP_FIELDS = Object.freeze({
+  ...Object.fromEntries(Object.entries(BACKUP_STORAGE_KEYS).map(([field, key]) => [key, field])),
+  ...EMERGENCY_ONLY_FIELDS,
+})
+
+/** 导出用到的全部键；测试据此断言两张表没有分叉。 */
+export function emergencyBackupKeys() { return Object.keys(BACKUP_FIELDS) }
 
 function readLocalData() {
   const data = {}

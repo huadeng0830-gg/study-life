@@ -375,7 +375,7 @@ onBeforeUnmount(() => window.clearTimeout(searchTimer))
       <div v-if="access === 'owner'" class="ops-owner-chip">
         <span class="owner-mark" aria-hidden="true">所</span>
         <span><b>平台所有者</b><small>{{ ownerEmail }}</small></span>
-        <RouterLink class="ops-button ops-button-ghost" to="/campus/moderation">打开校园审核队列</RouterLink>
+        <RouterLink class="ops-button ops-button-ghost" to="/admin/campus">打开校园审核队列</RouterLink>
       </div>
     </header>
 

@@ -1,8 +1,20 @@
 import { computed, ref, shallowRef } from 'vue'
 import { ACCOUNT_STORAGE_KEY, getSupabaseClient, getSupabaseConfig, verifyAccountCurrentPassword } from '../services/supabase.js'
+import { getAccountAuthOptions } from '../services/cloudConfig.js'
+import { resetAccountSyncUsage } from './accountSyncUsage.js'
 
 export const accountOpen = ref(false)
+const accountSections = new Set(['overview', 'profile', 'beans', 'security'])
+export const accountInitialSection = ref('overview')
+export function openAccountSection(section = 'overview') {
+  accountInitialSection.value = accountSections.has(section) ? section : 'overview'
+  accountOpen.value = true
+}
 export const accountUser = shallowRef(/** @type {import('@supabase/supabase-js').User | null} */ (null))
+export function hasVerifiedContactEmail(user = accountUser.value) {
+  const email = String(user?.email || '').trim().toLowerCase()
+  return Boolean(user?.email_confirmed_at && email && !email.endsWith('@wechat.study-life.invalid'))
+}
 export const accountReady = ref(false)
 export const accountBusy = ref(false)
 export const accountAuthError = ref('')
@@ -71,7 +83,7 @@ export function accountErrorMessage(error) {
     signup_disabled: '当前暂未开放注册，请稍后再试。',
     email_provider_disabled: '邮箱注册暂时不可用，请稍后再试。',
     otp_expired: '邮件链接已过期，请重新发送邮件。',
-    access_denied: '邮件链接无效或已过期，请重新发送邮件。',
+    access_denied: '登录或验证链接无效或已过期，请重新发起操作。',
     same_password: '新密码不能与原密码相同。',
     current_password_required: '请输入当前密码，或通过邮箱重设密码。',
     current_password_mismatch: '当前密码不正确，请重新输入或通过邮箱重设。',
@@ -79,12 +91,12 @@ export function accountErrorMessage(error) {
     reauthentication_not_valid: '身份验证已失效，请重新发送密码重设邮件。',
     session_not_found: '登录状态已失效，请重新登录。',
     bad_jwt: '登录状态已失效，请重新登录。',
-    flow_state_not_found: '邮件链接无法在此设备验证，请在发送邮件的浏览器中打开，或重新发送邮件。',
-    flow_state_expired: '邮件链接已过期，请重新发送邮件。',
+    flow_state_not_found: '登录或验证链接无法在此设备验证，请在发起操作的同一浏览器中打开，或重新发起操作。',
+    flow_state_expired: '登录或验证链接已过期，请重新发起操作。',
   }
   if (messages[code]) return messages[code]
   if (error?.status === 429) return '操作过于频繁，请稍后再试。'
-  if (error?.name === 'AuthPKCECodeVerifierMissingError') return '请在发送邮件的浏览器中打开链接，或在此设备重新发送邮件。'
+  if (error?.name === 'AuthPKCECodeVerifierMissingError') return '请在发起登录或请求邮件的同一浏览器中打开链接，或在此设备重新发起操作。'
   if (error?.name === 'AuthRetryableFetchError' || error?.name === 'TypeError' || error?.name === 'AbortError') {
     return '无法连接账号服务，请检查网络后重试。'
   }
@@ -103,13 +115,21 @@ let authRevision = 0
 // 和"我真的按了按钮但没成功" —— 后者才值得在界面上留一条错误。
 const userAttempted = ref(false)
 
-/** 让后续的初始化失败可以在界面上显示（用户已明确表达过意图）。 */
+/**
+ * 测试专用：让后续的初始化失败可以在界面上显示。
+ *
+ * 生产路径不需要它——`accountAction` 在任何一次真实的注册/登录/重发/退出
+ * 之前就已经把 `userAttempted` 置为 true。导出它只是为了让
+ * accountAuth.test.js 能直接构造「用户已经表达过意图」这个前置条件，
+ * 而不必真的跑一遍注册流程。
+ */
 export function markAccountAttempted() { userAttempted.value = true }
-/** 复位（测试与"回到未操作"状态用）。 */
+/** 复位（仅测试使用）。 */
 export function resetAccountAttempted() { userAttempted.value = false }
 
 function acceptSession(session) {
   authRevision++
+  if (accountUser.value?.id !== session?.user?.id) resetAccountSyncUsage()
   accountUser.value = session?.user || null
   accountReady.value = true
   if (!session?.user || (recoveryUserId.value && recoveryUserId.value !== session.user.id)) setPasswordRecovery()
@@ -182,6 +202,7 @@ async function accountAction(action) {
 }
 
 export async function registerAccount({ email, password, confirmation }) {
+  if (!getAccountAuthOptions().emailSignup || !getAccountAuthOptions().emailDelivery) return { ok: false, message: '邮箱注册暂未开放，请使用其他登录方式或继续在本机使用。' }
   const errors = validateAccountForm({ email, password, confirmation })
   if (Object.keys(errors).length) return { ok: false, errors }
   const result = await accountAction((auth) => auth.signUp({
@@ -209,6 +230,7 @@ export async function loginAccount({ email, password }) {
 }
 
 export async function resendAccountConfirmation(email) {
+  if (!getAccountAuthOptions().emailDelivery) return { ok: false, message: '验证邮件暂时无法发送，请使用其他登录方式或联系管理员。' }
   const normalized = normalizeAccountEmail(email)
   if (validateAccountForm({ email: normalized }).email) return { ok: false, message: '请输入有效的邮箱地址。' }
   return accountAction((auth) => auth.resend({
@@ -261,6 +283,7 @@ export function accountPasswordRedirectUrl() {
 }
 
 export async function requestAccountPasswordReset(email) {
+  if (!getAccountAuthOptions().emailDelivery) return { ok: false, message: '密码重设邮件暂时无法发送，请使用原有登录方式或联系管理员。' }
   const normalized = normalizeAccountEmail(email)
   const errors = validateAccountForm({ email: normalized, mode: 'recovery' })
   if (errors.email) return { ok: false, errors, message: errors.email }
@@ -296,7 +319,14 @@ export async function updateAccountPassword({ password, confirmation, currentPas
   return { ok: true }
 }
 
-const CALLBACK_PARAMS = ['access_token', 'refresh_token', 'expires_in', 'expires_at', 'token_type', 'type', 'error', 'error_code', 'error_description', 'code', 'flow_id']
+export async function loginAccountWithOAuth(provider) {
+  if (!getAccountAuthOptions().providers.some(item => item.id === provider)) return { ok: false, message: '此登录方式暂未开放。' }
+  if (window.studyLifeDesktop?.isDesktop) return { ok: false, message: '请先在网页版使用第三方登录。' }
+  if (accountUser.value) return { ok: false, message: '请先退出当前账号，再使用其他账号登录。' }
+  return accountAction(auth => auth.signInWithOAuth({ provider, options: { redirectTo: accountRedirectUrl() } }))
+}
+
+const CALLBACK_PARAMS = ['access_token', 'refresh_token', 'provider_token', 'provider_refresh_token', 'expires_in', 'expires_at', 'token_type', 'type', 'error', 'error_code', 'error_description', 'code', 'flow_id']
 
 export function hasAccountCallback(href) {
   const url = new URL(href)

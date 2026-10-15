@@ -20,6 +20,7 @@ const corsHeaders = {
 }
 const allowedOrigins = new Set([
   'https://study-life.pages.dev',
+  'https://codex-preview-1-4-0.study-life.pages.dev',
   'http://localhost:5173',
   'http://127.0.0.1:5173',
   'http://localhost:4173',
@@ -144,8 +145,13 @@ function normalizeDeliverableContent(value: unknown, projectId: string, delivera
   return { summary, links, files }
 }
 
+function hasVerifiedEmail(user: any) {
+  const email = String(user?.email || '').trim().toLowerCase()
+  return Boolean(user?.email_confirmed_at && email && !email.endsWith('@wechat.study-life.invalid'))
+}
+
 function verified(user: any) {
-  if (!user?.email_confirmed_at) throw new ApiError('email_verification_required', '请先完成邮箱验证，再使用好友协作。', 403)
+  if (!hasVerifiedEmail(user)) throw new ApiError('email_verification_required', '请先完成邮箱验证，再使用好友协作。', 403)
 }
 
 async function authenticate(request: Request) {
@@ -1046,7 +1052,7 @@ async function handle(user: any, action: string, payload: any) {
       const targetId = assertUUID(payload.targetId, '成员')
       if (targetId === user.id) throw new ApiError('invalid_input', '不能邀请自己。')
       const { data, error } = await admin.auth.admin.getUserById(targetId)
-      if (error || !data?.user?.email_confirmed_at) throw new ApiError('invalid_member', '只能邀请已完成邮箱验证的账号。', 400)
+      if (error || !hasVerifiedEmail(data?.user)) throw new ApiError('invalid_member', '只能邀请已完成邮箱验证的账号。', 400)
       return projectDispatch(user.id, 'member_invite', { projectId: assertUUID(payload.projectId, '项目'), targetId })
     }
     case 'project_invites': return projectDispatch(user.id, 'invite_links', { projectId: assertUUID(payload.projectId, '项目') })

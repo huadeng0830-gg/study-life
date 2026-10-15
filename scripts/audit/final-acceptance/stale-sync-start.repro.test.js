@@ -9,7 +9,8 @@ vi.mock('../../../src/composables/accountLocalData.js', () => ({
   accountLocalSnapshot: (...args) => fake.read(...args), accountDefaultValues: () => ({}), ACCOUNT_DATA_LOCK: 'fictional-account-lock',
 }))
 vi.mock('../../../src/services/accountSync.js', () => ({ requestAccountSync: (...args) => fake.request(...args) }))
-vi.mock('../../../src/composables/accountSyncData.js', () => ({
+vi.mock('../../../src/composables/accountSyncData.js', async (importOriginal) => ({
+  ...await importOriginal(),
   SYNC_DEFAULTS: {}, SYNC_KEYS: [], assertValidSyncPayload: v => v, validateSyncPayload: v => v,
   cloneValue: v => v === undefined ? undefined : JSON.parse(JSON.stringify(v)),
 }))

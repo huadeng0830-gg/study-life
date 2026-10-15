@@ -10,7 +10,7 @@
  *
  * 【这里验什么】
  *   1. 静态层：`src/` 下不再有 `window.confirm(`；裸 `confirm(` 只允许出现在
- *      `ImageCropModal.vue` / `TimeWheelSheet.vue` 那两个**同名局部函数定义**处
+ *      `ImageCropModal.vue` / `TimeWheelSheet.vue` / `campusConfirm.js` 的**同名局部函数定义**处
  *      （它们遮蔽/无关乎 `window.confirm`，不该动）；
  *   2. 判别力自证：同一份判据喂给含 `window.confirm(` 的夹具必须命中，
  *      喂给"局部函数定义 + 别的裸调用"必须只报后者——否则这条守卫可能只是在断言空集；
@@ -339,7 +339,7 @@ const MIGRATED_FILES = [
   'views/ScheduleView.vue',
 ]
 
-const ALLOWED_LOCAL_CONFIRM = ['components/TimeWheelSheet.vue', 'components/schedule/ImageCropModal.vue']
+const ALLOWED_LOCAL_CONFIRM = ['components/TimeWheelSheet.vue', 'components/schedule/ImageCropModal.vue', 'composables/campusConfirm.js']
 
 describe('静态层：原生 confirm 已经全部退场', () => {
   it('扫描器自证：扫到的文件数与代码量都不是空的', () => {
@@ -354,9 +354,9 @@ describe('静态层：原生 confirm 已经全部退场', () => {
     expect(windowConfirmIssues(SOURCES)).toEqual([])
   })
 
-  it('裸 confirm( 只出现在两个同名局部函数的定义处', () => {
+  it('裸 confirm( 只出现在允许的同名局部函数定义处', () => {
     expect(bareConfirmIssues(SOURCES)).toEqual([])
-    // 正向锚定允许清单：这两个文件**确实**还定义着本地 confirm（不是靠"全仓都没有"过关）。
+    // 正向锚定允许清单：这些文件确实定义着本地 confirm，实际裸调用仍由前一条判据拒绝。
     expect(filesWithLocalConfirm(SOURCES)).toEqual([...ALLOWED_LOCAL_CONFIRM].sort())
   })
 

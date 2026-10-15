@@ -42,6 +42,8 @@ const session = { user }
 beforeEach(async () => {
   vi.resetModules()
   vi.clearAllMocks()
+  vi.stubEnv('VITE_ACCOUNT_EMAIL_SIGNUP_ENABLED', 'true')
+  vi.stubEnv('VITE_ACCOUNT_EMAIL_DELIVERY_ENABLED', 'true')
   localStorage.clear()
   sessionStorage.clear()
   vi.stubGlobal('indexedDB', fakeIndexedDB())
@@ -69,7 +71,7 @@ beforeEach(async () => {
   account = await import('../src/composables/accountAuth.js')
 })
 
-afterEach(() => vi.restoreAllMocks())
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs() })
 
 describe('邮箱注册与账号生命周期', () => {
   it('无效表单不会调用账号服务，登录兼容已有的较短密码', async () => {

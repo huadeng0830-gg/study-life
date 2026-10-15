@@ -2,15 +2,15 @@ import { watch } from 'vue'
 import { useStoredRef } from './store/index.js'
 import { desktopNavigationGroups, navigationRegistry } from '../router/navigation.js'
 
-export const MAX_MOBILE_NAV_ENTRIES = 5
 export const FIXED_MOBILE_NAV_ITEMS = 2 // 「快速记录」和「更多」始终保留。
-export const MAX_MOBILE_NAV_ITEMS = MAX_MOBILE_NAV_ENTRIES - FIXED_MOBILE_NAV_ITEMS
+export const MAX_MOBILE_NAV_ITEMS = 5
+export const MAX_MOBILE_NAV_ENTRIES = MAX_MOBILE_NAV_ITEMS + FIXED_MOBILE_NAV_ITEMS
 export const MAX_DESKTOP_NAV_GROUPS = 16
 export const MAX_NAV_GROUP_LABEL_LENGTH = 24
 export const MOBILE_NAVIGATION_KEY = 'sl_navigation_mobile'
 export const DESKTOP_NAVIGATION_KEY = 'sl_navigation_desktop'
 
-export const DEFAULT_MOBILE_NAVIGATION = Object.freeze(['today', 'tasks', 'schedule'])
+export const DEFAULT_MOBILE_NAVIGATION = Object.freeze(['today', 'tasks', 'places'])
 export const DEFAULT_DESKTOP_NAVIGATION = Object.freeze(desktopNavigationGroups.map((group) => Object.freeze({
   id: group.id,
   label: group.label,
@@ -37,6 +37,9 @@ export function navigationItem(id) {
 }
 
 export function normalizeMobileNavigation(value) {
+  if (Array.isArray(value) && JSON.stringify(value) === JSON.stringify(['today', 'tasks', 'schedule'])) {
+    return [...DEFAULT_MOBILE_NAVIGATION]
+  }
   if (!Array.isArray(value)) return [...DEFAULT_MOBILE_NAVIGATION]
   const seen = new Set()
   const result = []

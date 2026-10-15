@@ -117,6 +117,30 @@ describe('按账号自动同步与内容保护', () => {
     expect(await runAccountSync(), accountSyncError.value).toBe(true)
     expect(tasks().value.map((item) => item.id)).toEqual(['before-logout'])
   })
+  it('本地修改但服务端版本未变时复用已确认快照，省去完整下载', async () => {
+    const values = accountDefaultValues(); values.sl_tasks = [task('original', '初版')]
+    remote = envelope(values); remoteRevision = 3
+    expect(await boot(), accountSyncError.value).toBe(true)
+    fake.request.mockClear()
+    tasks().value = [...tasks().value, task('local-addition', '本机新增')]
+    expect(await runAccountSync(), accountSyncError.value).toBe(true)
+    expect(fake.request.mock.calls.map(([operation]) => operation)).toEqual(['probe', 'push'])
+    expect(remote.values.sl_tasks.map(item => item.id).sort()).toEqual(['local-addition', 'original'])
+  })
+  it('复用快照后发生 CAS 并发冲突，仍重新下载并合并其他设备更新', async () => {
+    tasks().value = [task('original', '初版')]
+    expect(await boot(), accountSyncError.value).toBe(true)
+    fake.request.mockClear()
+    tasks().value = [...tasks().value, task('local-addition', '本机新增')]
+    onPush = () => {
+      const values = clone(remote.values)
+      values.sl_tasks.push(task('remote-addition', '另一设备新增'))
+      remote = envelope(values); remoteRevision++
+    }
+    expect(await runAccountSync(), accountSyncError.value).toBe(true)
+    expect(fake.request.mock.calls.filter(([operation]) => operation === 'pull')).toHaveLength(1)
+    expect(remote.values.sl_tasks.map(item => item.id).sort()).toEqual(['local-addition', 'original', 'remote-addition'])
+  })
   it('CAS 拒绝后重新读取和合并，不覆盖其他设备的新改动', async () => {
     tasks().value = [task('local', '本机新增')]
     onPush = () => { const values = accountDefaultValues(); values.sl_tasks = [task('other', '并发新增')]; remote = envelope(values); remoteRevision = 1 }

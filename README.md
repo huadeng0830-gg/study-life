@@ -9,14 +9,12 @@
 [🌐 在线体验](https://study-life.pages.dev/) · [📦 GitHub](https://github.com/huadeng0830-gg/study-life)
 
 <!-- RELEASE_STATUS:START -->
-> **当前源码版本**：网页 / PWA `1.3.0` · Windows 桌面版 `1.3.0`
+> **当前源码版本**：网页 / PWA `1.7.0` · Windows 桌面版 `1.7.0`
 > **最近更新**：
-> - 新增校园审核工作台，统一处理投稿、举报与互助争议
-> - 总管理员可按学校和校区授权及撤销审核员
-> - 新增我的举报、处理反馈与作者撤回入口
-> - 发布前展示公开信息预览，各类草稿分别保留
-> - 审核失败保留填写内容，通知跳转至对应处理入口
-> - 数据库强制校验权限范围、自审限制及内容版本，举报下架与反馈事务保存
+> - 新增校园反馈、审核申请与贡献积分
+> - 优化账号同步、备份恢复与校园导航
+> - 修复同步启动竞态及多个校园页面状态问题
+> - 收紧微信内部账号与邮箱验证功能的服务端边界
 > [下载已发布的 Windows 安装包与版本说明](https://github.com/huadeng0830-gg/study-life/releases/latest)
 <!-- RELEASE_STATUS:END -->
 
@@ -65,7 +63,7 @@
 
 - **学习与生活一体化**：课程、作业、日程、考试、账单和清单共用一套数据关系。
 - **Local-first**：无需账号即可开始；核心数据保存在浏览器本地，并有 IndexedDB 设备内副本。
-- **可选邮箱账号**：桌面侧栏或手机“更多”中可注册、登录、找回与修改密码；账号概览展示邮箱与同步状态，退出前确认本机数据清理；账号由 Supabase Auth 管理，登录后自动合并同步记录，离线时继续本机使用。
+- **可选云端账号**：桌面侧栏或手机“更多”中可登录与管理账号；OAuth、邮箱注册和找回入口按服务实际可用能力开放。账号由 Supabase Auth 管理，登录后自动合并同步记录，离线时继续本机使用。
 - **自然语言快速录入**：一句“周五交高数作业”或“午饭 18 元”即可生成可修改的结构化草稿。
 - **通知理解与处理**：粘贴通知后展示“这是什么 / 讲什么 / 需要做什么 / 什么时候”，动态隐藏空字段；会议、考试、作业、缴费和普通公告分别推荐日程、作业、待办或仅保存。
 - **课程表导入更灵活**：图片 OCR、框选裁切、批量文字和 Excel 一键导入均提供确认预览，不直接覆盖正式数据。
@@ -293,7 +291,7 @@ npx wrangler pages deploy dist --project-name=study-life --branch=main
 
 邮箱账号、自动同步、好友课表与齐行项目协作运行在独立的 Supabase 项目中。数据库结构按时间顺序保存在 `supabase/migrations/`；2026-10-13 生产数据库已应用 14 条迁移，包括协作日历与任务依赖约束、成果提交草稿版本校验和平台管理权限表。Edge Function `campus-social` 保持 JWT 验证，同时处理好友和项目操作；`platform-admin` 提供所有者限定的账号运维入口。
 
-项目协作的 15 张表均开启 RLS，并撤销 `anon` 与 `authenticated` 的表权限；浏览器只能携带登录 JWT 调用 Edge Function，由服务端检查成员角色后使用 `service_role` 访问数据库。平台管理仅绑定一个已验证的所有者；后台可以读取认证邮箱和账号状态、暂停或恢复账号并记录原因，不提供个人同步快照或协作正文的读取入口。成果文件放在私有 `qixing-deliverables` Storage bucket，最大 20 MiB。不要把 `service_role` 密钥写入网页变量、客户端代码或仓库。
+项目协作的 15 张表均开启 RLS，并撤销 `anon` 与 `authenticated` 的表权限；浏览器只能携带登录 JWT 调用 Edge Function，由服务端检查成员角色后使用 `service_role` 访问数据库。平台管理仅绑定一个已验证的所有者；后台可以读取认证邮箱和账号状态、暂停或恢复账号并记录原因，不提供个人同步快照或协作正文的读取入口。成果文件放在私有 `qixing-deliverables` Storage bucket，新上传最大 5 MiB；已有附件保持可读。不要把 `service_role` 密钥写入网页变量、客户端代码或仓库。
 
 首次使用 Supabase CLI 时，先准备有权访问目标项目的账号和数据库密码；`supabase/config.toml` 已保留函数 JWT 设置：
 
@@ -307,6 +305,8 @@ npx supabase functions deploy campus-social --project-ref xyuwjmswqmxfwtyzakan
 发布顺序是先数据库迁移，再部署对应 Edge Function，最后发布 Cloudflare Pages 前端。新的项目协作功能需已验证的邮箱账号和网络连接；开放普通邮箱注册前，还要配置 Supabase Site URL、Redirect URLs 与自定义 SMTP。Supabase Auth 的泄露密码保护需要 Pro 或更高套餐；当前项目尚未完成该设置，正式开放注册前应在 Supabase Auth 密码安全设置中确认套餐并启用。
 
 平台运维访问、账号权限、操作审计和回退说明见 [`docs/platform-admin.md`](docs/platform-admin.md)。
+
+当前零费用组合为 Pages 静态前端、Workers 公开反馈缓存接口，以及 Supabase Postgres、Auth 和私有 Storage。账号同步继续通过 RLS 与既有 RPC；不额外引入 R2、Clerk、Resend、Turso 或 D1。选型依据见[免费架构研究](docs/research/zero-cost-cloud-architecture-2026-10-15.md)，部署现状、配置与回退步骤见[实施记录](docs/zero-cost-deployment.md)。
 
 ## 🧪 发布自检（scripts/audit/）
 

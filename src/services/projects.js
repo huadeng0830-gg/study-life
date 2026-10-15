@@ -1,7 +1,8 @@
 import { socialRequest } from './social.js'
-import { accountUser } from '../composables/accountAuth.js'
+import { accountUser, hasVerifiedContactEmail } from '../composables/accountAuth.js'
 import { getSupabaseClient } from './supabase.js'
 import { validDate } from '../composables/zonedTime.js'
+import { PROJECT_FILE_MAX_BYTES } from './projectFileLimits.js'
 
 const PROJECT_FILE_BUCKET = 'qixing-deliverables'
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -73,7 +74,7 @@ export async function projectRequest(action, payload = {}) {
 
 async function verifiedProjectFileClient() {
   const user = accountUser.value
-  if (!user?.id || !user.email_confirmed_at) throw new Error('请先登录并完成邮箱验证，再访问项目成果文件。')
+  if (!user?.id || !hasVerifiedContactEmail(user)) throw new Error('请先登录并完成邮箱验证，再访问项目成果文件。')
   const client = await getSupabaseClient()
   const { data, error } = await client.auth.getSession()
   if (error || data?.session?.user?.id !== user.id || accountUser.value?.id !== user.id) throw new Error('登录状态已变化，请重新打开项目。')
@@ -85,7 +86,7 @@ export async function uploadProjectDeliverableFile(projectId, deliverableId, fil
     throw new Error('文件或交付项信息无效。')
   }
   if (file.size < 1) throw new Error('成果文件不能为空。')
-  if (file.size > 20 * 1024 * 1024) throw new Error('单个成果文件不能超过 20 MB。')
+  if (file.size > PROJECT_FILE_MAX_BYTES) throw new Error('单个成果文件不能超过 5 MB。较大的文件可以在成果中添加外部链接。')
   const { client, userId } = await verifiedProjectFileClient()
   const safeName = String(file.name).normalize('NFKC').replace(/[^\p{L}\p{N}._-]+/gu, '_').replace(/\.{2,}/g, '_').slice(0, 120) || 'file'
   const objectId = newProjectId()

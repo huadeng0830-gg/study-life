@@ -1,5 +1,6 @@
 import { accountUser } from '../composables/accountAuth.js'
 import { getSupabaseClient } from './supabase.js'
+import { recordAccountSyncUsage } from '../composables/accountSyncUsage.js'
 
 function response(body, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
@@ -40,6 +41,7 @@ export async function requestAccountSync(operation, body, signal) {
     }).setHeader('Authorization', authorization).abortSignal(signal)
     if (error) return providerError(error, status)
     if (!stillSignedIn(userId)) return response({ error: '登录已变更，本次同步已取消。' }, 401)
+    if (data?.ok) recordAccountSyncUsage(userId, 'push', body.data)
     return response(data, data?.conflict ? 409 : 200)
   }
   const columns = operation === 'probe' ? 'revision,updated_at,device_name' : 'revision,updated_at,device_name,payload'
@@ -48,5 +50,6 @@ export async function requestAccountSync(operation, body, signal) {
     .eq('user_id', userId).setHeader('Authorization', authorization).abortSignal(signal).maybeSingle()
   if (error) return providerError(error, status)
   if (!stillSignedIn(userId)) return response({ error: '登录已变更，本次同步已取消。' }, 401)
+  recordAccountSyncUsage(userId, operation, operation === 'pull' ? data?.payload : null)
   return response(operation === 'probe' ? metadata(data) : { ...metadata(data), data: data?.payload ?? null })
 }

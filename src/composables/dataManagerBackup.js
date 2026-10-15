@@ -233,12 +233,22 @@ async function refreshRestoreCheckpoint() {
   restoreCheckpointLoading.value = true
   restoreCheckpointError.value = ''
   const identity = captureAccountDataIdentity()
-  restoreCheckpointLoad = getRestoreCheckpoint(identity.userId || identity.ownerId || 'guest')
+  const ownerId = identity.userId || identity.ownerId || 'guest'
+  restoreCheckpointLoad = getRestoreCheckpoint(ownerId)
     .then((value) => {
-      if (value && (value.version !== 1 || !value.backup?.data || !Array.isArray(value.selectedModules))) throw new Error('恢复点格式不正确')
-      restoreCheckpoint.value = value || null
+      if (!value) { restoreCheckpoint.value = null; return }
+      if (value.version !== 1 || !value.backup?.data || !Array.isArray(value.selectedModules)) {
+        // 损坏的恢复点如果不删掉，每次打开数据管理都会读到它、判定失败、
+        // 再报错一次 —— 用户永远看不到「尚无恢复点」以外的东西。
+        // 它只服务一次已经失败或已被取代的恢复，删掉没有代价。
+        void clearRestoreCheckpoint(ownerId).catch(() => {})
+        restoreCheckpoint.value = null
+        restoreCheckpointError.value = '上一个本机恢复点已损坏并被清除，可以重新导出备份。'
+        return
+      }
+      restoreCheckpoint.value = value
     })
-    .catch(() => { restoreCheckpointError.value = '本机恢复点暂时无法读取。请重试；仍可导出本机备份。' })
+    .catch(() => { restoreCheckpoint.value = null; restoreCheckpointError.value = '本机恢复点暂时无法读取。请重试；仍可导出本机备份。' })
     .finally(() => { restoreCheckpointLoading.value = false; restoreCheckpointLoad = null })
   return restoreCheckpointLoad
 }
@@ -266,7 +276,6 @@ const restoreBackupModules = computed(() => restoreBackupModuleLabels(restoreBac
 const restoreBackupPreviewModules = computed(() => restoreBackupModuleLabels(selectedBackup.value, {
   selectedModuleIds: restoreSelection.value,
 }))
-const restoreBackupPreviewOptions = computed(() => restoreBackupModuleOptions(selectedBackup.value))
 const restoreCheckpointModules = computed(() => restoreCheckpoint.value
   ? restoreBackupModuleLabels(restoreCheckpoint.value.backup, {
       selectedModuleIds: (restoreCheckpoint.value.selectedModules || []).filter((id) => id !== 'wallpapers'),
@@ -352,6 +361,28 @@ async function createRestoreCheckpoint(selectedModules, values) {
   }
 }
 
+/**
+ * 恢复点允许写回的存储键。
+ *
+ * `restoreBackupModuleOptions` 除了 BACKUP_MODULES 里的分区，还会生成一个
+ * `other`（其它本机设置）伪分区，收拢「这份备份带得走、但不属于任何已知分区」
+ * 的字段。只按 BACKUP_MODULES 过滤会把它的键整个漏掉 —— 于是用户只勾选
+ * 「其它本机设置」时，恢复点确实存了数据，恢复时却一个键都写不回去，
+ * 而界面上一切正常。
+ *
+ * 放宽 allowedKeys 本身是安全的：这里仍然要求键出现在 `storedValues` 里，
+ * 而 storedValues 就是当初按所选分区存下来的。
+ */
+function restoreAllowedStorageKeys(selectedModules) {
+  const selected = new Set(selectedModules)
+  const keys = new Set(BACKUP_MODULES.filter((mod) => selected.has(mod.key)).flatMap((mod) => mod.keys))
+  if (selected.has('other')) {
+    const categorized = new Set(BACKUP_MODULES.flatMap((mod) => mod.keys))
+    for (const key of Object.values(BACKUP_STORAGE_KEYS)) if (!categorized.has(key)) keys.add(key)
+  }
+  return keys
+}
+
 async function applyRestorePayload(backup, { fromCheckpoint = false } = {}) {
   if (backupBusy.value || fileChecking.value) return
   restoreError.value = ''
@@ -366,7 +397,7 @@ async function applyRestorePayload(backup, { fromCheckpoint = false } = {}) {
   const mutationVersions = Object.fromEntries(Object.keys(restoredValues).map((key) => [key, storedMutationVersion(key)]))
   if (fromCheckpoint && backup.storedValues) {
     const knownKeys = new Set(/** @type {string[]} */ (Object.values(BACKUP_STORAGE_KEYS)))
-    const allowedKeys = new Set(BACKUP_MODULES.filter((mod) => selectedModules.includes(mod.key)).flatMap((mod) => mod.keys))
+    const allowedKeys = restoreAllowedStorageKeys(selectedModules)
     for (const [key, value] of Object.entries(backup.storedValues)) {
       if (knownKeys.has(key) && allowedKeys.has(key)) restoredValues[key] = JSON.parse(JSON.stringify(value))
     }
@@ -527,6 +558,6 @@ function abortBackup() {
 export function useDataManagerBackup() {
   if (!backupProgress) backupProgress = useTaskProgress()
   return {
-    selectedBackup, selectedName, includeWallpapers, backupProgress, backupBusy, exporting, restoring, fileChecking, exportBackup, retryBackup, continueBackupResult, cancelBackup, abortBackup, selectFile, clearSelectedBackup, summary, restoreBackup, restoreSelection, restoreBackupTarget, crossAccountImportTarget, crossAccountImportMessage, restoreBackupModules, restoreBackupPreviewModules, restoreBackupPreviewOptions, restoreBackupMessage, restoreCheckpoint, restoreCheckpointLoading, restoreCheckpointError, restoreCheckpointModules, restoreCheckpointWallpapers, restoreCheckpointDate, restoreCheckpointMessage, refreshRestoreCheckpoint, applyRestoreBackup, applyRestoreCheckpoint, confirmCrossAccountImport,
+    selectedBackup, selectedName, includeWallpapers, backupProgress, backupBusy, exporting, restoring, fileChecking, exportBackup, retryBackup, continueBackupResult, cancelBackup, abortBackup, selectFile, clearSelectedBackup, summary, restoreBackup, restoreSelection, restoreBackupTarget, crossAccountImportTarget, crossAccountImportMessage, restoreBackupModules, restoreBackupPreviewModules, restoreBackupMessage, restoreCheckpoint, restoreCheckpointLoading, restoreCheckpointError, restoreCheckpointModules, restoreCheckpointWallpapers, restoreCheckpointDate, restoreCheckpointMessage, refreshRestoreCheckpoint, applyRestoreBackup, applyRestoreCheckpoint, confirmCrossAccountImport,
   }
 }

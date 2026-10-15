@@ -59,6 +59,7 @@ const SearchPanel = defineAsyncComponent(loadSearchPanel)
 const currentRoute = useRoute()
 const router = useRouter()
 const { desktopGroups: navGroups, bottomItems: mobileBottomItems, mobileBarItems,
+  isBottomItemActive: isMobileBottomItemActive,
   moreHasCurrentPage: mobileMoreHasCurrentPage, moreGroups: mobileMoreGroups,
   toggleGroup: toggleNavigationGroup } = useNavigationViewModel(currentRoute, accountLabel)
 const collapsed = ref(false)
@@ -455,6 +456,7 @@ function openMobileTool(key) {
           :to="item.path"
           class="mobile-nav-item"
           exact-active-class="active"
+          :class="{ active: isMobileBottomItemActive(item) }"
           :aria-label="item.mobileLabel || item.label"
           @pointerdown="warmRoute(item.path)"
         >

@@ -12,7 +12,7 @@
  * 【这里验什么】
  *   ① 静态层：`src/` 下 `window.prompt(` / `window.alert(` / `window.confirm(` 命中数必须为 0；
  *      **裸** `prompt(` / `alert(` / `confirm(` 调用同样为 0，但放行同名的局部函数**定义**
- *      （`TimeWheelSheet.vue` / `ImageCropModal.vue` 里那两个 `function confirm()` 与本类无关，
+ *      （`TimeWheelSheet.vue` / `ImageCropModal.vue` / `campusConfirm.js` 的 `function confirm()` 与本类无关，
  *      不该动——这条放行清单是正向锚定的，不是"全仓都没有"式过关）；
  *   ② 判别力自证：把改造**前**的写法喂给同一套扫描必须被抓出来（含裸 `alert(...)` 夹具、
  *      以及"注释里的字面量不算、未剥注释的同一份文本会命中"这一对）；
@@ -238,7 +238,7 @@ const promptBlockCount = (sources) =>
 const MIGRATED = ['views/LedgerView.vue']
 
 /** 仓库允许保留的本地同名函数定义（与 tests/confirmDialogMigration.test.js 的清单一致）。 */
-const ALLOWED_LOCAL_DEFINITIONS = ['components/TimeWheelSheet.vue', 'components/schedule/ImageCropModal.vue']
+const ALLOWED_LOCAL_DEFINITIONS = ['components/TimeWheelSheet.vue', 'components/schedule/ImageCropModal.vue', 'composables/campusConfirm.js']
 
 describe('静态层：原生弹窗已经全部退场', () => {
   it('扫描器自证：扫到的文件数与代码量都不是空的', () => {
@@ -253,9 +253,9 @@ describe('静态层：原生弹窗已经全部退场', () => {
     expect(windowDialogHits(SOURCES)).toEqual([])
   })
 
-  it('裸 prompt( / alert( / confirm( 只出现在两个同名局部函数的定义处', () => {
+  it('裸 prompt( / alert( / confirm( 只出现在允许的同名局部函数定义处', () => {
     expect(bareDialogIssues(SOURCES)).toEqual([])
-    // 正向锚定放行清单：这两个文件**确实**还定义着本地 confirm（不是靠"全仓都没有"过关）。
+    // 正向锚定放行清单：这些文件确实定义着本地 confirm，实际裸调用仍必须拒绝。
     expect(filesWithLocalDefinition(SOURCES)).toEqual([...ALLOWED_LOCAL_DEFINITIONS].sort())
   })
 

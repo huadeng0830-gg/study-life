@@ -27,6 +27,10 @@ beforeEach(() => {
   mocks.getClient.mockResolvedValue(mocks.client)
 })
 describe('project files and service errors', () => {
+  it('rejects new files over 5 MB before contacting storage', async () => {
+    await expect(uploadProjectDeliverableFile(projectId, deliverableId, { name: 'fictional-large.txt', size: 5 * 1024 * 1024 + 1 })).rejects.toThrow('5 MB')
+    expect(upload).not.toHaveBeenCalled()
+  })
   it('uploads a safe path for filenames with consecutive dots and preserves the visible name', async () => {
     const result = await uploadProjectDeliverableFile(projectId, deliverableId, new File(['fictional data'], 'fictional-report..txt'))
     expect(result.path).not.toContain('..')

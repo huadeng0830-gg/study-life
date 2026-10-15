@@ -5,7 +5,7 @@ import { accountSyncActive, assertAccountDataIdentity, captureAccountDataIdentit
 import { accountSyncViaAccount } from './accountSyncMode.js'
 import { accountDefaultValues, accountLocalSnapshot, ACCOUNT_DATA_LOCK, withAccountDataLock } from './accountLocalData.js'
 import { accountConflictKey, accountSyncConflicts, accountSyncError, accountSyncLastSyncedAt, accountSyncStatus } from './accountSyncState.js'
-import { SYNC_DEFAULTS, SYNC_KEYS, assertValidSyncPayload, cloneValue, validateSyncPayload } from './accountSyncData.js'
+import { MAX_SYNC_PAYLOAD_BYTES, SYNC_DEFAULTS, SYNC_KEYS, assertValidSyncPayload, cloneValue, validateSyncPayload } from './accountSyncData.js'
 import { buildEntityManifest, buildSyncManifest, hashSyncValue, mergeRestoreMarkers, stableEntityId, validateStableEntityIds, validateSyncManifest } from './syncMetadata.js'
 import { mergeSyncPayload } from './syncMerge.js'
 import { validateAndRepairRelations } from './syncIntegrity.js'
@@ -26,9 +26,9 @@ const BACKOFF = [5000, 15000, 30000, 60000, 300000]
 const FAILURE_GIVE_UP_AFTER = 8
 const FAILURE_IDLE_MS = 20 * 60 * 1000
 const AUTO_RESUME_BLOCKED_STATES = new Set(['error', 'conflict', 'paused', 'disabled', 'signed-out'])
-// 云端单条快照上限（见 supabase/migrations 的 account_snapshot_format 约束）。
 // 推送之前自己先量一次：超了就是本地数据问题，云端每次都会用同样的 400 拒回来。
-const ACCOUNT_PAYLOAD_LIMIT = 16 * 1024 * 1024
+// 上限只有一个来源（accountSyncData.MAX_SYNC_PAYLOAD_BYTES），和数据库约束同源。
+const ACCOUNT_PAYLOAD_LIMIT = MAX_SYNC_PAYLOAD_BYTES
 let owner = ''
 let generation = 0
 let running = null
@@ -208,7 +208,12 @@ async function cycle(id, revision, choices, assertLock = () => {}) {
       setState('synced')
       return true
     }
-    const remote = probe.exists ? await provider('pull', {}, id, revision) : probe
+    // Reuse the last acknowledged payload only when its server revision matches.
+    // Local edits still merge normally; CAS rejects races after this probe.
+    const cached = !choices && probe.exists && lastSuccessfulSync?.owner === id
+      && lastSuccessfulSync.revision === probe.revision && lastSuccessfulSync.data
+    const remote = cached ? { ...probe, data: cloneValue(cached) }
+      : probe.exists ? await provider('pull', {}, id, revision) : probe
     const local = await localValues()
     const cloudLocal = projectAccountSyncValues(local)
     assertCurrent(id, revision)
@@ -295,6 +300,7 @@ async function cycle(id, revision, choices, assertLock = () => {}) {
     // 这条优化把它永远冻在坏状态。版本号会 +1，这是有意的一次性修复开销。
     if (sequence !== localSequence) continue
     let acknowledged = remote
+    let acknowledgedData = remote.data
     if (!same) {
       const payload = { format: 'study-life-sync', version: 3, values, manifest }
       // 推送前先自己量一次大小。云端的 16MB 上限是一个**确定性**拒绝：
@@ -310,6 +316,7 @@ async function cycle(id, revision, choices, assertLock = () => {}) {
         expectedRevision: remote.revision ?? null, deviceName: '三两事设备' }, id, revision)
       if (acknowledged.conflict) { choices = null; continue }
       if (!acknowledged.ok || !Number.isSafeInteger(acknowledged.revision)) throw new Error('云端未确认同步版本，请稍后重试。')
+      acknowledgedData = payload
     }
     // 请求期间发生编辑时，只确认本机已提交且未被远端改写的基线部分；
     // 尚未应用的远端新增记录不能进入本机基线，否则会被误判为本机删除。
@@ -343,7 +350,7 @@ async function cycle(id, revision, choices, assertLock = () => {}) {
     accountSyncLastSyncedAt.value = nextMeta.lastSyncedAt
     accountSyncConflicts.value = []
     pendingSignature = ''
-    lastSuccessfulSync = { owner: id, revision: acknowledged.revision, localSequence: sequence }
+    lastSuccessfulSync = { owner: id, revision: acknowledged.revision, localSequence: sequence, data: cloneValue(acknowledgedData) }
     await clearPendingConflicts(id)
     failureCount = 0
     setState('synced')
