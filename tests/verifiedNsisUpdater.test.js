@@ -5,8 +5,11 @@ import verifiedModule from '../desktop-app/verifiedNsisUpdater.cjs'
 import controllerModule from '../desktop-app/updaterController.cjs'
 
 const require = createRequire(import.meta.url)
-const { NsisUpdater } = require('../desktop-app/node_modules/electron-updater/out/NsisUpdater.js')
-const { DownloadedUpdateHelper } = require('../desktop-app/node_modules/electron-updater/out/DownloadedUpdateHelper.js')
+// NsisUpdater contains Windows-only installer behavior; Linux runs the general
+// quality gate and Windows CI runs this suite with the real package installed.
+const { NsisUpdater, DownloadedUpdateHelper } = process.platform === 'win32'
+  ? require('../desktop-app/node_modules/electron-updater/out/NsisUpdater.js')
+  : {}
 const controllers = []
 const installer = 'C:\\fictional-fixture\\updates\\pending\\update.exe'
 function childProcess() { const child = new EventEmitter(); child.pid = 4242; child.unref = vi.fn(); return child }
@@ -34,7 +37,7 @@ async function fixture({ spawnInstaller = vi.fn(() => {
 }
 afterEach(() => { controllers.splice(0).forEach((controller) => controller.dispose()); vi.useRealTimers() })
 
-describe('已固定版本的真实 NsisUpdater 安装启动边界（进程为可控执行器）', () => {
+describe.skipIf(process.platform !== 'win32')('已固定版本的真实 NsisUpdater 安装启动边界（进程为可控执行器）', () => {
   it('进程有 pid 但未触发 spawn 时不能退出；启动后仍需重启验证版本', async () => {
     const child = childProcess()
     const { controller, updater, app, spawnInstaller } = await fixture({ spawnInstaller: vi.fn(() => child) })
