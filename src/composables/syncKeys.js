@@ -65,6 +65,36 @@ export const SYNC_KEYS = Object.keys(SYNC_DEFAULTS)
 const SYNC_KEY_SET = new Set(SYNC_KEYS)
 
 /**
+ * 被备份、但**刻意不同步**的键，以及理由。
+ *
+ * 这不是遗漏。把它们加进 SYNC_DEFAULTS 看起来"更完整"，实际会引入新问题：
+ *
+ *  - `sl_places` / `sl_place_visits` / `sl_place_offers`：地点记录里的到访、
+ *    优惠链接属于**个人上下文**，不上传。正因为它们留在本机，
+ *    `projectAccountSyncValues` 才要在快照发出前把 `sl_expenses` / `sl_notices`
+ *    里的 place 引用剥掉（见 placeModels.restoreLocalPlaceLinks）——
+ *    同步它们会同时让投影失效，并把这些个人记录送上云端。
+ *  - `sl_focus_active`：正在进行的专注计时。同步它等于让另一台设备冒出一段
+ *    不该存在的计时，而且这份状态在两台设备上会立刻分叉。专注记录本身
+ *    （`sl_focus_sessions`）是要同步的，正在计时的这件事不是。
+ *  - `sl_task_center_log`：快捷记录的操作日志，只用于本机的撤销与去重，
+ *    跨设备搬运没有意义，反而会让两台设备的撤销栈互相覆盖。
+ *
+ * 几者都仍然出现在 `BACKUP_STORAGE_KEYS` 里：备份是「把这台设备完整搬走」，
+ * 与「两台设备保持一致」是两个不同的问题，不该用同一张表回答。
+ *
+ * 这条列表由 tests/backupSyncKeyScopes.test.js 断言 —— 新增备份字段时，
+ * 它要么进 SYNC_DEFAULTS，要么在这里写明理由，不能默默两边都没有。
+ */
+export const BACKUP_ONLY_KEYS = Object.freeze({
+  sl_places: '地点资料含个人到访与优惠上下文，只留在本机',
+  sl_place_visits: '到访记录属于个人行为，不上传',
+  sl_place_offers: '优惠链接属于个人上下文，不上传',
+  sl_focus_active: '正在进行的专注计时，属于单台设备的瞬时状态',
+  sl_task_center_log: '快捷记录操作日志，仅用于本机撤销与去重',
+})
+
+/**
  * @param {string} key
  * @returns {boolean}
  */

@@ -115,6 +115,11 @@ const accountSyncNotice = computed(() => {
   if (accountSyncStatus.value === 'offline') return { title: '☁ 账号同步等待联网', body: '本机修改已保存，联网后会继续同步。' }
   if (accountSyncStatus.value === 'conflict') return { title: '☁ 账号同步需要确认', body: '请打开账号同步面板，选择冲突记录保留的版本。' }
   if (accountSyncStatus.value === 'error') return { title: '☁ 账号同步暂未完成', body: accountSyncError.value || '本机记录已保留，请稍后重试。' }
+  // 这两个状态以前只出现在账号面板里，外壳完全静默。手机上准备阶段可能要
+  // 等好几秒（账号本机副本最多重试三轮），用户在这段时间里看到的界面和
+  // 其它设备完全一样，却什么都不会同步 —— 于是以为同步坏了。
+  if (accountSyncStatus.value === 'preparing') return { title: '☁ 正在准备账号数据', body: '正在准备本机副本并检查其它设备的更新，请稍候。' }
+  if (accountSyncStatus.value === 'pending') return { title: '☁ 账号同步稍后完成', body: '本机修改已保存，等待下一次同步。' }
   return null
 })
 /* 五条外壳级提示的排队槽位（-1 = 当前不显示，0 起 = 第几个坑）与要预留的条数。

@@ -1,7 +1,7 @@
 {
   "name": "study-life",
   "private": true,
-  "version": "1.3.0",
+  "version": "1.7.0",
   "type": "module",
   "engines": {
     "node": ">=22"
@@ -18,7 +18,7 @@
     "typecheck": "vue-tsc --noEmit",
     "typecheck:ratchet": "node scripts/typecheck-ratchet.mjs",
     "typecheck:report": "node scripts/typecheck-ratchet.mjs --report",
-    "check": "npm run check:release-readme && npm run pages:verify-config && npm run lint && npm run typecheck && npm run typecheck:ratchet && npm test && npm run build",
+    "check": "npm run check:release-readme && npm run pages:verify-config && npm run worker:check && npm run lint && npm run typecheck && npm run typecheck:ratchet && npm test && npm run build",
     "release:bump": "node scripts/bump-release.mjs",
     "audit:contrast": "node scripts/audit-contrast.mjs",
     "audit:release": "node scripts/audit/release-integrity.mjs https://study-life.pages.dev",
@@ -35,6 +35,10 @@
     "supabase:verify-config": "node scripts/verify-supabase-config.mjs",
     "supabase:verify-bundle": "node scripts/verify-supabase-bundle.mjs",
     "pages:verify-config": "node scripts/verify-pages-config.mjs",
+    "worker:check": "node scripts/check-public-worker.mjs",
+    "worker:deploy": "node scripts/deploy-public-worker.mjs",
+    "storage:free-limit": "node scripts/configure-free-storage.mjs",
+    "auth:inspect": "node scripts/inspect-auth-capabilities.mjs",
     "check:release-readme": "node scripts/check-release-readme.mjs"
   },
   "dependencies": {

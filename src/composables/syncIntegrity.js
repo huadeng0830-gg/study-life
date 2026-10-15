@@ -1,4 +1,4 @@
-import { cloneSyncValue, SYNC_ENTITY_COLLECTIONS } from './syncMetadata.js'
+import { cloneSyncValue } from './syncMetadata.js'
 
 function hasId(index, id) { return id !== undefined && id !== null && index.has(String(id)) }
 function hasBillRelationId(value) { return typeof value === 'string' && value.startsWith('bill:') }
@@ -45,12 +45,4 @@ export function validateAndRepairRelations(values = {}) {
     })
   }
   return { values: next, issues }
-}
-
-export function validateSyncEntityShape(values = {}) {
-  const issues = []
-  for (const key of Object.keys(SYNC_ENTITY_COLLECTIONS)) {
-    if (values[key] !== undefined && !Array.isArray(values[key])) issues.push({ type: 'invalid-collection', key })
-  }
-  return issues
 }

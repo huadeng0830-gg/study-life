@@ -1,12 +1,14 @@
 export function publicAccount(user, admins) {
   const suspended = Boolean(user.banned_until && Date.parse(user.banned_until) > Date.now())
+  const email = String(user.email || '').trim().toLowerCase()
+  const emailVerifiedAt = email.endsWith('@wechat.study-life.invalid') ? null : user.email_confirmed_at || null
   return {
     id: user.id,
     email: user.email || '',
     createdAt: user.created_at || null,
     lastSignInAt: user.last_sign_in_at || null,
-    emailVerifiedAt: user.email_confirmed_at || null,
-    status: suspended ? 'suspended' : user.email_confirmed_at ? 'active' : 'unverified',
+    emailVerifiedAt,
+    status: suspended ? 'suspended' : emailVerifiedAt ? 'active' : 'unverified',
     platformOwner: admins.has(user.id),
   }
 }

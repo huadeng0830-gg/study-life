@@ -3,11 +3,22 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { platformAdminRequest } from '../../services/platformAdmin.js'
 import { accountUser } from '../../composables/accountAuth.js'
 import { useCampusLifePage } from '../../composables/campusLifePage.js'
+import { campusErrorMessage } from '../../composables/campusContentModel.js'
 import { Button } from '../ui/button'
 import { Input } from '../ui/input'
 import { Field, FieldGroup, FieldLabel, FieldDescription } from '../ui/field'
 import { NativeSelect, NativeSelectOption } from '../ui/native-select'
 import Modal from '../Modal.vue'
+
+/**
+ * 审核员列表每页条数。
+ *
+ * 由 platform-admin 的 listReviewers 在服务端写死为 25，和校园审核队列的
+ * CAMPUS_PAGE_SIZE(30) 是两个不同接口各自的取值。写死在这里是为了和
+ * `index * PAGE_SIZE >= total` 的翻页判断对上 —— 改成 30 会让最后一页永远
+ * 点不动，或者跳过一部分记录。
+ */
+const REVIEWER_PAGE_SIZE = 25
 const page = useCampusLifePage()
 const search = ref('')
 const candidates = ref([])
@@ -36,7 +47,7 @@ async function findAccounts() {
   try {
     const result = await platformAdminRequest('users_list', { query: search.value.trim(), page: 1 })
     if (revision === generation) candidates.value = (result.users || []).filter((user) => !user.platformOwner)
-  } catch (cause) { if (revision === generation) error.value = cause.message }
+  } catch (cause) { if (revision === generation) error.value = campusErrorMessage(cause, '账号列表暂时无法读取。') }
   finally { if (revision === generation) searching.value = false }
 }
 async function chooseAccount(value) {
@@ -51,7 +62,7 @@ async function chooseAccount(value) {
     if (revision !== generation) return
     currentGrant.value = result.reviewers?.[0] || null
     school.value = currentGrant.value?.school || ''; campus.value = currentGrant.value?.campus || ''
-  } catch (cause) { if (revision === generation) error.value = cause.message }
+  } catch (cause) { if (revision === generation) error.value = campusErrorMessage(cause, '该账号的审核授权暂时无法读取。') }
   finally { if (revision === generation) searching.value = false }
 }
 async function save(active = true, grant = null) {
@@ -70,7 +81,7 @@ async function save(active = true, grant = null) {
     reason.value = ''
     await refresh()
     if (!grant && selected.value) currentGrant.value = { user_id: selected.value, school: school.value, campus: campus.value, active, revision: (target?.revision || 0) + 1 }
-  } catch (cause) { if (revision === generation) error.value = cause.message }
+  } catch (cause) { if (revision === generation) error.value = campusErrorMessage(cause, active ? '审核授权没有保存，请重试。' : '审核权限没有撤销，请重试。') }
   finally { if (revision === generation || revision + 1 === generation) saving.value = false }
 }
 onMounted(() => { void refresh() })
@@ -92,7 +103,7 @@ onMounted(() => { void refresh() })
     <p v-else-if="search && !searching" class="campus-life-meta">账号注册并完成邮箱验证后，可以授予审核权限。总管理员账号不在此列表中。</p>
     <p v-if="error || page.error.value" role="alert" class="campus-life-inline-state error">{{ error || page.error.value }} <button class="text-button" @click="refresh()">刷新授权记录</button></p><p v-if="feedback" role="status" class="campus-life-inline-state campus-life-success">{{ feedback }}</p>
     <div class="campus-reviewer-list"><article v-for="grant in page.data.value?.reviewers || []" :key="grant.user_id" class="campus-reviewer-row"><div><b>{{ grant.email }}</b><p>{{ grant.school }} · {{ grant.campus || '全部校区' }} · {{ grant.active ? '授权中' : '已撤销' }}</p></div><Button v-if="grant.active" variant="outline" :disabled="saving" @click="revokeTarget = grant; reason = ''">撤销权限</Button></article></div>
-    <div v-if="page.data.value?.total > 25" class="campus-life-actions"><Button variant="outline" :disabled="page.loading.value || index === 1" @click="refresh(index - 1)">上一页</Button><span>第 {{ index }} 页</span><Button variant="outline" :disabled="page.loading.value || index * 25 >= page.data.value.total" @click="refresh(index + 1)">下一页</Button></div>
+    <div v-if="page.data.value?.total > REVIEWER_PAGE_SIZE" class="campus-life-actions"><Button variant="outline" :disabled="page.loading.value || index === 1" @click="refresh(index - 1)">上一页</Button><span>第 {{ index }} 页</span><Button variant="outline" :disabled="page.loading.value || index * REVIEWER_PAGE_SIZE >= page.data.value.total" @click="refresh(index + 1)">下一页</Button></div>
     <Modal v-if="revokeTarget" :open="true" title="撤销审核权限" @close="!saving && (revokeTarget = null)"><p>撤销 {{ revokeTarget.email }} 的校园审核权限。此操作会保留过往审核记录。</p><Field><FieldLabel for="revoke-reason">撤销原因</FieldLabel><Input id="revoke-reason" v-model="reason" maxlength="500" :disabled="saving" /></Field><template #foot><div class="campus-life-actions"><Button variant="outline" :disabled="saving" @click="revokeTarget = null">取消</Button><Button variant="destructive" :disabled="saving || !reason.trim()" @click="save(false, revokeTarget)">确认撤销</Button></div></template></Modal>
   </section>
 </template>

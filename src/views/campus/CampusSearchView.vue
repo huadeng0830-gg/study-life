@@ -1,20 +1,24 @@
 <script setup>
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import CampusLifeLayout from '../../components/campus/CampusLifeLayout.vue'
-import CampusEmptyState from '../../components/campus/CampusEmptyState.vue'
-import CampusLoadingState from '../../components/campus/CampusLoadingState.vue'
+import CampusStateBlock from '../../components/campus/CampusStateBlock.vue'
+import { campusContentLabel, campusContentRoute } from '../../composables/campusContentModel.js'
 import { useCampusLifePage } from '../../composables/campusLifePage.js'
 import { campusLifeSearch } from '../../services/campusLife.js'
 
 const page = useCampusLifePage()
 const query = ref('')
 const searched = ref(false)
-const labels = { place: '校园地点', teacher: '教师资料', course: '课程', market_listing: '二手集市', help_task: '校园互助', shuttle_route: '校车线路', lost_found: '失物招领', event: '活动', guide: '校园指南' }
-const routeFor = { place: '/campus', teacher: '/campus/courses', course: '/campus/courses', market_listing: '/campus/market', help_task: '/campus/help', shuttle_route: '/campus/shuttle', lost_found: '/campus/lost-found', event: '/campus/events', guide: '/campus/guides' }
+const results = computed(() => page.data.value?.results || [])
+
 async function search() {
-  if (!query.value.trim()) { page.error.value = '请输入要查找的内容。'; return }
+  const term = query.value.trim()
+  // 空查询是本地判断，没必要发一次请求。但它也不是读取失败，
+  // 所以走 actionError —— 不该把结果区整个换成错误态。
+  if (!term) { page.reportFailure('请输入要查找的内容。'); return }
+  page.reportFailure('')
   searched.value = true
-  await page.load(() => campusLifeSearch(query.value.trim()))
+  await page.load(() => campusLifeSearch(term))
 }
 </script>
 
@@ -23,11 +27,27 @@ async function search() {
     <template #default>
       <section class="campus-life-panel">
         <form class="campus-life-search" role="search" aria-label="校园全站搜索" @submit.prevent="search"><label class="sr-only" for="campus-global-search">搜索校园内容</label><input id="campus-global-search" v-model="query" type="search" maxlength="100" placeholder="搜课程、活动、地点或校园服务" /><button class="btn btn-primary" type="submit" :disabled="page.loading.value">{{ page.loading.value ? '搜索中…' : '搜索' }}</button></form>
-        <p v-if="page.error.value" class="campus-life-inline-state error" role="alert">{{ page.error.value }}</p>
-        <CampusLoadingState v-else-if="page.loading.value">正在搜索当前学校和校区…</CampusLoadingState>
-        <CampusEmptyState v-else-if="searched && !page.data.value?.results?.length" title="没有找到相关内容" description="试试更短的关键词。审核中的投稿暂时不会出现在结果中。" />
-        <div v-else-if="page.data.value?.results?.length" class="campus-search-results" aria-label="搜索结果"><p class="campus-life-result-count" role="status">找到 {{ page.data.value.results.length }} 条相关内容</p><article v-for="item in page.data.value.results" :key="`${item.type}:${item.id}`" class="campus-search-result"><div><span class="campus-life-tag">{{ labels[item.type] || '校园内容' }}</span><h2>{{ item.title }}</h2><p>{{ item.detail || '暂无补充说明。' }}</p><small v-if="item.campus">{{ item.campus }}</small></div><RouterLink class="btn btn-ghost" :to="routeFor[item.type] || '/campus'">查看{{ labels[item.type] || '内容' }}</RouterLink></article></div>
-        <CampusEmptyState v-else title="校园里，有什么想找的？" description="输入课程、物品、活动或地点名称，搜索同校已审核的公开信息。" />
+        <!-- `loaded` 让重新搜索时保留上一次的结果：旧模板只看 page.loading，
+             每敲一次搜索就闪一下空白，用户以为功能坏了。 -->
+        <CampusStateBlock
+          :loading="page.loading.value"
+          :loaded="Boolean(page.data.value)"
+          :error="page.error.value"
+          :empty="!results.length"
+          loading-text="正在搜索当前学校和校区…"
+          :empty-title="searched ? '没有找到相关内容' : '校园里，有什么想找的？'"
+          :empty-description="searched ? '试试更短的关键词。审核中的投稿暂时不会出现在结果中。' : '输入课程、物品、活动或地点名称，搜索同校已审核的公开信息。'"
+          @retry="search()"
+        >
+          <div class="campus-search-results" aria-label="搜索结果">
+            <p class="campus-life-result-count" role="status">找到 {{ results.length }} 条相关内容</p>
+            <article v-for="item in results" :key="`${item.type}:${item.id}`" class="campus-search-result">
+              <div><span class="campus-life-tag">{{ campusContentLabel(item.type) }}</span><h2>{{ item.title }}</h2><p>{{ item.detail || '暂无补充说明。' }}</p><small v-if="item.campus">{{ item.campus }}</small></div>
+              <RouterLink class="btn btn-ghost" :to="campusContentRoute(item.type)">查看{{ campusContentLabel(item.type) }}</RouterLink>
+            </article>
+          </div>
+        </CampusStateBlock>
+        <p v-if="page.actionError.value" class="campus-life-inline-state error" role="alert">{{ page.actionError.value }}</p>
       </section>
     </template>
   </CampusLifeLayout>

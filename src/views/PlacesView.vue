@@ -591,7 +591,8 @@ function searchCampusPlaces(category = 'all') {
   <div class="page places-page">
     <header class="page-head">
       <div class="page-head-main">
-        <h1 class="page-title">校园生活</h1>
+        <RouterLink class="text-button" to="/campus">校园总览</RouterLink>
+        <h1 class="page-title">校园地点</h1>
         <p class="page-desc">查找并共建校园地点信息。地点资料提交审核后公开；到访日期、消费金额和私人备注始终留在本机。</p>
       </div>
       <div v-if="section !== 'home'" class="page-actions">

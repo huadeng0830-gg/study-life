@@ -114,23 +114,6 @@ function mergeSingleton(key, local, remote, baseManifest, legacy) {
   return { status: MERGE_STATUS.conflict, conflict: true }
 }
 
-export function mergeEntity(base, local, remote, options = {}) {
-  if (options.entityType) {
-    return mergeOneEntity({
-      base,
-      local,
-      remote,
-      localTombstone: options.localTombstone,
-      remoteTombstone: options.remoteTombstone,
-      restoreMarker: options.restoreMarker,
-      localDeleted: Boolean(options.localDeleted),
-      remoteDeleted: Boolean(options.remoteDeleted),
-      legacy: options.legacy,
-    })
-  }
-  return mergeSingleton(options.key || '', local, remote, base || {}, options.legacy)
-}
-
 export function mergeSyncPayload({ baseManifest = null, localValues = {}, remoteValues = {}, localTombstones = [], remoteTombstones = [], remoteRestoreMarkers = [], keys = Object.keys(remoteValues), legacy = false } = {}) {
   const merged = cloneSyncValue(localValues) || {}
   const conflicts = []

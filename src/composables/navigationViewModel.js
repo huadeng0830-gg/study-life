@@ -13,7 +13,11 @@ export function useNavigationViewModel(currentRoute, accountLabel) {
   })))
   const bottomItems = computed(() => visibleNavigationItems(mobileNavigation.value, accountUser.value))
   const mobileBarItems = computed(() => bottomItems.value.length + FIXED_MOBILE_NAV_ITEMS)
-  const moreHasCurrentPage = computed(() => !bottomItems.value.some((item) => item.path === currentRoute.path))
+  function isBottomItemActive(item) {
+    const currentPath = currentRoute.path
+    return item.path === currentPath || (item.path === '/campus' && currentPath.startsWith('/campus/'))
+  }
+  const moreHasCurrentPage = computed(() => !bottomItems.value.some(isBottomItemActive))
   const moreGroups = computed(() => {
     const bottomIds = new Set(bottomItems.value.map((item) => item.id))
     const groups = new Map()
@@ -53,6 +57,7 @@ export function useNavigationViewModel(currentRoute, accountLabel) {
     desktopGroups,
     bottomItems,
     mobileBarItems,
+    isBottomItemActive,
     moreHasCurrentPage,
     moreGroups,
     toggleGroup,

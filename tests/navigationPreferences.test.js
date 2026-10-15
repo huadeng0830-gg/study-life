@@ -36,11 +36,18 @@ describe('navigation registry and saved layouts', () => {
 
   it('deduplicates mobile entries, caps the list, preserves an intentional empty list, and repairs stale IDs', () => {
     expect(normalizeMobileNavigation(['today', 'today', 'missing', 'schedule', 'events', 'projects', 'tasks']))
-      .toEqual(['today', 'schedule', 'events'])
+      .toEqual(['today', 'schedule', 'events', 'projects', 'tasks'])
     expect(normalizeMobileNavigation(['projects', 'tasks', 'today', 'schedule']))
-      .toEqual(['projects', 'tasks', 'today'])
+      .toEqual(['projects', 'tasks', 'today', 'schedule'])
+    expect(normalizeMobileNavigation(['projects', 'tasks', 'today', 'schedule', 'course', 'events']))
+      .toEqual(['projects', 'tasks', 'today', 'schedule', 'course'])
     expect(normalizeMobileNavigation([])).toEqual([])
     expect(normalizeMobileNavigation(['removed-page'])).toEqual([...DEFAULT_MOBILE_NAVIGATION])
+  })
+
+  it('upgrades the untouched previous mobile default to include the campus hub', () => {
+    expect(normalizeMobileNavigation(['today', 'tasks', 'schedule'])).toEqual(['today', 'tasks', 'places'])
+    expect(normalizeMobileNavigation(['today', 'schedule', 'events'])).toEqual(['today', 'schedule', 'events'])
   })
 
   it('filters unknown and repeated desktop route IDs and falls back when every pinned page is stale', () => {
@@ -86,8 +93,8 @@ describe('navigation registry and saved layouts', () => {
     try {
       expect(document.querySelectorAll('.mobile-nav > a, .mobile-nav > button')).toHaveLength(5)
       expect(document.querySelector('.mobile-nav a[href="#/tasks"]')).toBeTruthy()
-      expect(document.querySelector('.mobile-nav a[href="#/schedule"] small')?.textContent).toBe('课表')
-      expect(document.querySelector('.mobile-nav a[href="#/schedule"]')?.getAttribute('aria-label')).toBe('课表')
+      expect(document.querySelector('.mobile-nav a[href="#/campus"] small')?.textContent).toBe('校园')
+      expect(document.querySelector('.mobile-nav a[href="#/campus"]')?.getAttribute('aria-label')).toBe('校园')
       const quickRecordAction = document.querySelector('.mobile-nav .capture-trigger')
       expect(quickRecordAction).toBeTruthy()
       quickRecordAction.click()
@@ -110,6 +117,13 @@ describe('navigation registry and saved layouts', () => {
       expect(document.querySelectorAll('.mobile-nav-preview-item')).toHaveLength(5)
       expect(document.querySelector('.mobile-nav-preview-item.capture small')?.textContent).toBe('快速记录')
       expect(document.querySelector('[aria-label="移除快速记录"]')).toBeNull()
+      for (let index = 0; index < 2; index += 1) {
+        const addButton = [...document.querySelectorAll('.nav-pin-button')].find((button) => !button.disabled && button.textContent.trim() === '添加')
+        expect(addButton).toBeTruthy()
+        addButton.click()
+        await settle()
+      }
+      expect(document.querySelectorAll('.mobile-nav-preview-item')).toHaveLength(7)
       expect([...document.querySelectorAll('.nav-pin-button')].every((button) => button.disabled)).toBe(true)
 
       const dragHandle = document.querySelector('.navigation-edit-row .nav-drag-handle')
@@ -138,7 +152,9 @@ describe('navigation registry and saved layouts', () => {
         else delete document.elementFromPoint
       }
       expect([...document.querySelectorAll('.navigation-edit-row .nav-item-name')].map((item) => item.textContent))
-        .toEqual(['待办', '今天', '课表'])
+        .toEqual(expect.arrayContaining(['待办', '今天', '校园']))
+      expect([...document.querySelectorAll('.navigation-edit-row .nav-item-name')].slice(0, 3).map((item) => item.textContent))
+        .toEqual(['待办', '今天', '校园'])
 
       document.querySelector('[aria-label="移除今天"]').click()
       document.querySelector('.nav-save').click()
@@ -163,23 +179,23 @@ describe('navigation registry and saved layouts', () => {
     }
   }, 30000)
 
-  it('keeps quick record and more available with empty or restored four-page layouts', async () => {
+  it('keeps quick record and more available with empty or restored five-page layouts', async () => {
     const { mountApp, settle } = await import('./helpers/mountApp.js')
     const app = await mountApp({ hash: '/' })
     try {
-      for (const layout of [[], ['projects', 'tasks', 'today', 'schedule']]) {
+      for (const layout of [[], ['projects', 'tasks', 'today', 'schedule', 'course', 'events']]) {
         await restoreStoredValues({ [MOBILE_NAVIGATION_KEY]: layout })
         await settle()
         const entries = [...document.querySelectorAll('.mobile-nav > a, .mobile-nav > button')]
-        expect(entries.length).toBe(layout.length ? 5 : 2)
+        expect(entries.length).toBe(layout.length ? 7 : 2)
         expect(entries.slice(-2).map((entry) => entry.querySelector('small').textContent))
           .toEqual(['快速记录', '更多'])
-        expect(mobileNavigation.value).toEqual(layout.slice(0, 3))
+        expect(mobileNavigation.value).toEqual(layout.slice(0, 5))
       }
       document.querySelector('.more-trigger').click()
       await settle()
       expect([...document.querySelectorAll('.mobile-more-item small')].some((item) => item.textContent === '快速记录')).toBe(false)
-      expect(document.querySelector('.mobile-more-item[href="#/schedule"]')).toBeTruthy()
+      expect(document.querySelector('.mobile-more-item[href="#/events"]')).toBeTruthy()
     } finally {
       app.unmount()
     }

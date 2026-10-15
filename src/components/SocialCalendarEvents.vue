@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onActivated, onBeforeUnmount, onDeactivated, ref, watch } from 'vue'
 import { accountUser } from '../composables/accountAuth.js'
+import { hasVerifiedContactEmail } from '../composables/accountVerification.js'
 import { appNow } from '../composables/timeContext.js'
 import { dateInZone } from '../composables/zonedTime.js'
 import { socialRequest, subscribeSocialNotifications } from '../services/social.js'
@@ -39,7 +40,7 @@ function startsSoon(item) {
 async function load(token = requestGeneration) {
   if (!active || token !== requestGeneration) return
   const user = accountUser.value
-  if (!user?.id || !user.email_confirmed_at) { items.value = []; return }
+  if (!user?.id || !hasVerifiedContactEmail(user)) { items.value = []; return }
   loading.value = true
   error.value = ''
   try {
@@ -62,7 +63,7 @@ async function setup(userId) {
   items.value = []
   error.value = ''
   loading.value = false
-  if (!userId || !accountUser.value?.email_confirmed_at) return
+  if (!userId || !hasVerifiedContactEmail()) return
   await load(token)
   if (!active || token !== requestGeneration) return
   try {
@@ -74,7 +75,7 @@ async function setup(userId) {
   }
 }
 
-watch(() => [accountUser.value?.id || '', Boolean(accountUser.value?.email_confirmed_at)], ([userId]) => { if (active) void setup(userId) }, { immediate: true })
+watch(() => [accountUser.value?.id || '', hasVerifiedContactEmail()], ([userId]) => { if (active) void setup(userId) }, { immediate: true })
 onActivated(() => { active = true; void setup(accountUser.value?.id || '') })
 onDeactivated(() => { active = false; requestGeneration++; stopRealtime?.(); stopRealtime = null })
 onBeforeUnmount(() => { active = false; requestGeneration++; stopRealtime?.(); stopRealtime = null })

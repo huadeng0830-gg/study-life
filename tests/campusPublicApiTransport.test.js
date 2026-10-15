@@ -1,0 +1,35 @@
+// @vitest-environment happy-dom
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+const legacy = vi.hoisted(() => vi.fn())
+vi.mock('../src/services/social.js', () => ({ campusCommunityRequest: legacy }))
+import { campusFeedbackPublicList, myCampusFeedback } from '../src/services/campusCommunity.js'
+beforeEach(() => {
+  vi.stubEnv('VITE_PUBLIC_API_URL', 'https://public.example.invalid')
+  vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: { items: [], total: 0, limit: 30, offset: 0 } }))))
+  Object.defineProperty(navigator, 'onLine', { configurable: true, value: true })
+  legacy.mockReset().mockResolvedValue({ items: [] })
+})
+afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals() })
+describe('public Worker transport', () => {
+  it('sends public filters without cookies or account authorization', async () => {
+    expect((await campusFeedbackPublicList({ status: 'resolved', limit: 10, author_id: 'not-allowed' })).items).toEqual([])
+    const [url, options] = fetch.mock.calls[0]
+    expect(url.href).toBe('https://public.example.invalid/v1/feedback?status=resolved&limit=10')
+    expect(options.credentials).toBe('omit')
+    expect(options.headers).toBeUndefined()
+    expect(legacy).not.toHaveBeenCalled()
+  })
+  it('keeps private routes on the existing authenticated service and supports rollback', async () => {
+    await myCampusFeedback()
+    expect(legacy).toHaveBeenCalledWith('mine')
+    expect(fetch).not.toHaveBeenCalled()
+    vi.stubEnv('VITE_PUBLIC_API_URL', '')
+    await campusFeedbackPublicList({ limit: 10 })
+    expect(legacy).toHaveBeenCalledWith('public_list', { limit: 10 })
+  })
+  it('does not double-call the legacy service when the Worker fails', async () => {
+    fetch.mockResolvedValueOnce(new Response('unavailable', { status: 503 }))
+    await expect(campusFeedbackPublicList()).rejects.toThrow('公开建议')
+    expect(legacy).not.toHaveBeenCalled()
+  })
+})

@@ -20,7 +20,9 @@ function selectAll() { restoreSelection.value = [...allIds.value] }
       <label v-for="row in rows" :key="row.id" class="restore-row" :class="{ selected: restoreSelection.includes(row.id) }"><input v-model="restoreSelection" type="checkbox" :value="row.id" :disabled="backupBusy" /><span class="restore-row-copy"><b>{{ row.label }}</b><span class="restore-comparison"><span>备份：{{ row.backupText }}</span><span>本机：{{ row.localText }}</span></span><small v-if="row.backupDetail">{{ row.backupDetail }}</small><small v-if="row.clearsRecords" class="empty-warning">备份中的{{ row.clearedLabels }}为空，恢复后会清空对应记录。</small></span></label>
       <label v-if="summary.wallpapers" class="restore-row" :class="{ selected: restoreSelection.includes('wallpapers') }"><input v-model="restoreSelection" type="checkbox" value="wallpapers" :disabled="backupBusy" /><span class="restore-row-copy"><b>壁纸图片</b><span>备份中有 {{ summary.wallpapers }} 张图片，将替换本机壁纸。</span></span></label>
     </fieldset>
-    <p v-if="clearedRows.length" class="preview-warning" role="status">已选范围含空记录：{{ clearedRows.map(row => row.label).join('、') }}。请确认这是你要恢复的内容。</p>
+    <!-- 这条警告在破坏性确认框**之前**就要被读出来，所以用 alert 而不是 status：
+         role="status" 是礼貌播报，读屏用户往往在按下「恢复」之后才听到它。 -->
+    <p v-if="clearedRows.length" class="preview-warning" role="alert">已选范围含空记录：{{ clearedRows.map(row => row.label).join('、') }}。恢复后会清空本机对应的记录，请确认这是你要恢复的内容。</p>
     <p class="restore-preview-note">所选内容会覆盖本机对应数据。恢复前自动保存本机恢复点，未勾选的分区保持原样；已开启账号同步时，恢复结果也会同步到其它设备。</p>
     <div class="preview-footer"><span v-if="!restoreSelection.length">请至少选择一个分区</span><button type="button" class="btn btn-primary" :disabled="backupBusy || !restoreSelection.length" @click="restoreBackup">恢复所选 {{ restoreSelection.length }} 个分区</button></div>
   </div>

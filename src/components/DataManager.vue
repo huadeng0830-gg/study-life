@@ -8,6 +8,7 @@ import RestoreSection from './data/RestoreSection.vue'
 import AccountSyncPanel from './data/AccountSyncPanel.vue'
 import DataOverview from './data/DataOverview.vue'
 import RestorePreview from './data/RestorePreview.vue'
+import PurgeSection from './data/PurgeSection.vue'
 import { backupReminderTitle, needsBackup } from '../composables/backupReminder.js'
 import { animationsEnabled } from '../composables/motion.js'
 import { backupError, backupMessage, backupWarning, restoreError } from '../composables/dataManagerFeedback.js'
@@ -187,6 +188,8 @@ defineExpose({ exportBackup })
         <div class="account-sync-icon" aria-hidden="true">↔</div>
         <AccountSyncPanel compact />
       </section>
+
+      <PurgeSection @export="exportBackup" />
 
       <p class="local-note">
         清除浏览器网站数据，或删除 iPhone 桌面应用，可能同时清空本机记录与恢复点。请把备份文件保存在应用之外。

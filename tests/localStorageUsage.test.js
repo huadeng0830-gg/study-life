@@ -13,7 +13,7 @@ function storageOf(entries) {
 describe('本机业务存储用量估算', () => {
   it('只统计 sl_ 键并返回字符数与上限比例', () => {
     expect(measureLocalBusinessStorage(storageOf({ sl_tasks: '[1,2]', theme: 'dark' }))).toEqual({
-      chars: 13, keyCount: 1, percent: 0, warning: false,
+      chars: 13, bytes: 26, keyCount: 1, percent: 0, warning: false, estimated: true,
     })
   })
 

@@ -1,4 +1,5 @@
 import { accountUser } from '../composables/accountAuth.js'
+import { hasVerifiedContactEmail } from '../composables/accountVerification.js'
 import { accountSyncStatus, syncAccountNow } from '../composables/accountSyncState.js'
 import { accountSyncViaAccount } from '../composables/accountSyncMode.js'
 import { getSupabaseClient } from './supabase.js'
@@ -15,7 +16,7 @@ export class SocialError extends Error {
 function signedInUser({ requireVerified = true, area = '好友协作' } = {}) {
   const user = accountUser.value
   if (!user?.id) throw new SocialError('signed_out', `请先登录账号，再使用${area}。`, 401)
-  if (requireVerified && !user.email_confirmed_at) throw new SocialError('email_verification_required', `请先完成邮箱验证，再使用${area}。`, 403)
+  if (requireVerified && !hasVerifiedContactEmail(user)) throw new SocialError('email_verification_required', `请先完成邮箱验证，再使用${area}。`, 403)
   return user
 }
 
@@ -41,7 +42,7 @@ function messageFor(code, fallback, action = '') {
   if (action.startsWith('campus_life_')) {
     const campusMessages = {
       private_contact_not_allowed: '公开内容或私信不能包含个人联系方式、取件码或宿舍房间号。',
-      profile_required: '请先在“一起约”的资料设置中填写学校；校园归属是自填信息，不代表学校认证。',
+        profile_required: '请先在“我的账号”填写学校资料；校园归属是自填信息，不代表学校认证。',
       campus_required: '请先填写学校和当前校区，再浏览该校园内容。',
       event_full: '活动名额已满。',
       event_closed: '活动已截止或暂不可报名。',
@@ -110,6 +111,26 @@ export function socialRequest(action, payload = {}) {
 
 export function campusLifeRequest(action, payload = {}) {
   return requestFunction('campus-life', action, payload, { area: '校园服务', messageAction: `campus_life_${action}` })
+}
+
+// Public feedback can be read before login. The function still verifies every
+// mutation itself; this helper sends the current session only when one exists.
+export async function campusCommunityRequest(action, payload = {}) {
+  if (!navigator.onLine) throw new SocialError('offline', '当前离线，操作尚未保存；联网后请重试。', 0)
+  const client = await getSupabaseClient()
+  const { data: authData, error: authError } = await client.auth.getSession()
+  if (authError) throw new SocialError('unauthorized', '登录状态无法读取，请重新登录。', 401)
+  const session = authData?.session
+  const callerId = accountUser.value?.id || ''
+  const headers = session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}
+  const { data, error } = await client.functions.invoke('campus-community', { body: { action, payload }, headers })
+  if (callerId && accountUser.value?.id !== callerId) throw new SocialError('account_changed', '登录账号已切换，本次操作已取消。', 401)
+  if (error) {
+    const detail = await parseFunctionError(error)
+    throw new SocialError(detail.code, messageFor(detail.code, detail.message, `campus_community_${action}`), detail.status)
+  }
+  if (!data || typeof data !== 'object' || !('data' in data)) throw new SocialError('service_unavailable', '服务没有返回有效结果，请稍后重试。', 503)
+  return data.data
 }
 
 export function listCampusPlaces() { return socialRequest('campus_places_list') }

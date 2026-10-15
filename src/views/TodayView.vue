@@ -2,6 +2,7 @@
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { accountUser } from '../composables/accountAuth.js'
+import { hasVerifiedContactEmail } from '../composables/accountVerification.js'
 import {
   MAX_WEEK,
   dayName,
@@ -48,7 +49,7 @@ import { recordStartupTiming, reportStartupAssetSummary, startupNow } from '../c
 // Keep campus-social utilities out of the initial home route for guests and until
 // a verified user's calendar section approaches the viewport.
 const SocialCalendarEvents = defineAsyncComponent(() => import('../components/SocialCalendarEvents.vue'))
-const canShowSocialCalendar = computed(() => Boolean(accountUser.value?.id && accountUser.value?.email_confirmed_at))
+const canShowSocialCalendar = computed(() => Boolean(accountUser.value?.id && hasVerifiedContactEmail()))
 const socialCalendarAnchor = ref(null)
 const shouldLoadSocialCalendar = ref(false)
 let socialCalendarObserver = null

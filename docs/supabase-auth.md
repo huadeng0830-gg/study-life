@@ -1,6 +1,6 @@
 # Supabase 账号与自动同步
 
-学习生活台支持邮箱注册、密码登录、验证邮件重发、密码找回与修改、恢复登录状态，以及退出当前设备或所有设备。桌面侧栏和手机“更多”菜单都有“我的账号”入口。
+学习生活台支持密码登录、按配置开放 OAuth、邮箱注册与邮件恢复、恢复登录状态，以及退出当前设备或所有设备。桌面侧栏和手机“更多”菜单都有“我的账号”入口。当前零费用配置保留已有账号的密码登录，默认关闭尚未就绪的邮件注册、验证邮件重发和密码找回入口。
 
 账号是可选功能。未登录时可继续使用本机数据；登录后，同一账号的课程、待办、日程、账本、笔记、专注记录及同步设置自动合并到其他设备。首次登录会保留并合并当前设备的访客记录，内容冲突时先逐项确认。
 
@@ -23,6 +23,9 @@
 
 - VITE_SUPABASE_URL：独立 study-life 项目的 API URL。
 - VITE_SUPABASE_PUBLISHABLE_KEY：该项目的 publishable key。
+- VITE_ACCOUNT_OAUTH_PROVIDERS：逗号分隔的 `github` / `google`；仅在 Supabase 对应提供方已配置并验收后填写，默认留空。
+- VITE_ACCOUNT_EMAIL_SIGNUP_ENABLED 与 VITE_ACCOUNT_EMAIL_DELIVERY_ENABLED：默认均为 `false`。只有发信域名、SMTP 与真实送达已经验证后才开放；注册需要两个开关同时开启。
+- VITE_PUBLIC_API_URL：可选的公开反馈 Worker HTTPS origin；留空继续使用原公开查询接口。它不承载账号同步或私有数据。
 
 重启 Vite。前端只接受 publishable key 或兼容的 anon key，拒绝 secret 与 service_role key。真实环境文件已被 Git 忽略，示例文件只保留占位符。
 
@@ -38,7 +41,9 @@ GitHub Actions 的网页构建、Windows 桌面打包和桌面 Release 使用仓
 
 网页使用 PKCE，桌面版使用 implicit flow；兼容已有邮件中的隐式令牌。邮件回调在 Hash Router 创建前通过 SDK 交换会话，再移除地址中的令牌、一次性 code 与错误详情。密码恢复根据已验证的回调与 SDK 的 `PASSWORD_RECOVERY` 事件进入新密码表单；过期或失效链接提供可读提示。
 
-密码重设同样依赖服务端邮件发送配置。此轮只完善客户端认证与交互，没有修改 SMTP、邮箱验证开关或生产 Auth 设置；真实邮件送达仍需完成邮件服务配置后验收。桌面版重设邮件的重定向白名单需要包含 `https://study-life.pages.dev/`。
+密码重设同样依赖服务端邮件发送配置。当前没有修改 SMTP 或服务端邮箱验证开关；客户端用能力开关隐藏尚未可用的入口。真实邮件送达仍需完成邮件服务配置后验收。桌面版重设邮件的重定向白名单需要包含 `https://study-life.pages.dev/`。
+
+GitHub OAuth 的控制台回调地址是 `https://<project-ref>.supabase.co/auth/v1/callback`，不是 Pages 地址。OAuth App 的 Client Secret 只填 Supabase 控制台，不进入聊天、仓库或 `VITE_` 变量。2026-10-15 已读回 GitHub 提供方开启，并验证 Supabase 授权入口的 302、客户端标识格式、回调地址和 `user:email` 请求范围；本地及 Pages 生产构建已配置 `VITE_ACCOUNT_OAUTH_PROVIDERS=github`。完整账号登录和令牌交换仍需在新前端发布后验收；无需购买域名或接入另一套认证系统。
 
 ## 数据库与访问控制
 
@@ -48,6 +53,8 @@ GitHub Actions 的网页构建、Windows 桌面打包和桌面 Release 使用仓
 - RLS 与表权限限制用户只能读取和更新 auth.uid() 对应的快照，匿名访问禁止。
 - write_account_sync_snapshot 是 security invoker RPC；账号归属由服务端会话确定，首次写入与后续写入都通过预期版本检查，过期提交返回冲突供客户端重新合并。
 - 数据库约束检查格式、必需字段与 16 MiB 大小上限。
+
+账号同步保留版本探测和冲突协议。同一会话已确认的远端版本未变化时，本机修改可复用内存中的已确认快照，减少重复整包下载；版本变化时仍重新读取。数据管理显示本次会话的有效载荷字节估算和大快照提示；这些数字不包含全部网络、压缩和其他 API 开销，不能用作厂商账单计量。
 
 账号快照通过 HTTPS 传输，以 JSON 保存在 Supabase 数据库，使用登录权限和 RLS 隔离；账号同步未实现端到端加密。
 

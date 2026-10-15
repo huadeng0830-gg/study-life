@@ -26,7 +26,7 @@ const source = readFileSync(new URL('../supabase/functions/campus-life/index.ts'
 const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
 const migration = readFileSync(new URL('../supabase/migrations/20261014134335_campus_life_domains.sql', import.meta.url), 'utf8')
 
-function createEdge({ user = { id: actor, email_confirmed_at: '2026-10-01T00:00:00Z' }, tables = {}, notificationError = false, rpcResults = {} } = {}) {
+function createEdge({ user = { id: actor, email: 'student@example.test', email_confirmed_at: '2026-10-01T00:00:00Z' }, tables = {}, notificationError = false, rpcResults = {} } = {}) {
   let handler
   const appliedFilters = []
   const rows = Object.fromEntries(Object.entries({ ...rowsByDefault, ...tables }).map(([name, values]) => [name, values.map((item) => ({ ...item }))]))
@@ -172,7 +172,7 @@ describe('campus-life Edge Function', () => {
     const otherApplicant = '40000001-0000-4000-8000-000000000001'
     const listingId = '10000001-0000-4000-8000-000000000001'
     const { handler, rows } = createEdge({
-      user: { id: applicant, email_confirmed_at: '2026-10-01T00:00:00Z' },
+      user: { id: applicant, email: 'applicant@example.test', email_confirmed_at: '2026-10-01T00:00:00Z' },
       tables: {
         social_profiles: [{ user_id: applicant, school: '虚构大学', campus: '东区' }],
         campus_market_interests: [
@@ -333,6 +333,7 @@ describe('campus-life Edge Function', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const response = await call(handler, 'moderation_decide', {
       targetType: 'market_listing', targetId: '10000001-0000-4000-8000-000000000001', decision: 'approve', revision: 1,
+      reason: '内容信息符合校园审核规范。',
     })
     warn.mockRestore()
 

@@ -3,6 +3,8 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { accountUser } from '../../composables/accountAuth.js'
 import { createScrollLock, initialFocusTarget, isTopOverlay, overlayStackRevision, overlayZIndexFor, pushOverlay, removeOverlay, topOverlay, trapTabKey } from '../../composables/overlayStack.js'
 import { listCampusMessages, sendCampusMessage } from '../../services/campusLife.js'
+import { campusErrorMessage } from '../../composables/campusContentModel.js'
+import { campusMonthDayTimeLabel } from '../../composables/campusFormatting.js'
 import { RefreshCw, Send, X } from '@lucide/vue'
 import { Button } from '../ui/button'
 
@@ -86,7 +88,7 @@ async function load() {
       if (generation === requestGeneration && key === currentKey() && messageList.value) messageList.value.scrollTop = messageList.value.scrollHeight
     }
   } catch (cause) {
-    if (generation === requestGeneration && key === currentKey()) error.value = cause?.message || '暂时无法读取私信。'
+    if (generation === requestGeneration && key === currentKey()) error.value = campusErrorMessage(cause, '暂时无法读取私信。')
   } finally {
     if (generation === requestGeneration && key === currentKey()) loading.value = false
   }
@@ -102,14 +104,15 @@ async function send() {
     draft.value = ''
     await load()
   } catch (cause) {
-    if (key === currentKey()) error.value = cause?.message || '私信没有发送。'
+    if (key === currentKey()) error.value = campusErrorMessage(cause, '私信没有发送。')
   } finally {
     if (key === currentKey()) sending.value = false
   }
 }
+// 这一处的代际判断是有意保留的：除了账号切换，还要挡「同一个账号换了一个
+// 收信人」的迟到响应，所以除了计数还要比对 currentKey()。比其它校园文件更严。
 function timeLabel(value) {
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? '' : new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).format(date)
+  return campusMonthDayTimeLabel(value)
 }
 watch(() => [accountUser.value?.id || '', props.targetType, props.targetId, props.recipientId], () => {
   requestGeneration += 1

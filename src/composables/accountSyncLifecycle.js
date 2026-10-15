@@ -43,6 +43,10 @@ export function startAccountSyncLifecycle() {
     const stopped = engine?.stopAccountSync()
     accountSyncPreparing.value = Boolean(id && viaAccount)
     accountSyncPreparationError.value = ''
+    // 状态变了，上一轮的错误就不该继续挂在面板上。之前这一行只写 status，
+    // accountSyncError 还留着上一轮的内容：账号切换或重新打开同步之后，
+    // 「正在准备账号数据…」和一条红色失败原因会同时出现。
+    accountSyncError.value = ''
     accountSyncStatus.value = !viaAccount && id ? 'disabled' : id ? 'preparing' : 'signed-out'
     // current 也要核对 viaAccount：开关是在一次准备**进行中**被拨动的，
     // 那条旧链路不能因为 id 没变就以为自己仍然有效。

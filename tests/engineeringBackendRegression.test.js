@@ -25,7 +25,7 @@ describe('collaboration requests keep the identity that authorized the action', 
   let client
   beforeEach(() => {
     vi.clearAllMocks()
-    account.value = { id: 'fictional-account-a', email_confirmed_at: '2026-10-01T00:00:00Z' }
+    account.value = { id: 'fictional-account-a', email: 'first@example.test', email_confirmed_at: '2026-10-01T00:00:00Z' }
     client = {
       auth: { getSession: vi.fn(async () => ({ data: { session: { user: { id: account.value.id }, access_token: 'fictional-session-a' } }, error: null })) },
       functions: { invoke: vi.fn(async () => ({ data: { data: { ok: true } }, error: null })) },
@@ -37,7 +37,7 @@ describe('collaboration requests keep the identity that authorized the action', 
   it('binds the checked JWT while the SDK lazily sends a project mutation', async () => {
     let effectiveToken
     client.functions.invoke.mockImplementation(async (_name, options) => {
-      account.value = { id: 'fictional-account-b', email_confirmed_at: '2026-10-01T00:00:00Z' }
+      account.value = { id: 'fictional-account-b', email: 'second@example.test', email_confirmed_at: '2026-10-01T00:00:00Z' }
       effectiveToken = options.headers?.Authorization || 'Bearer fictional-session-b'
       return { data: { data: { ok: true } }, error: null }
     })

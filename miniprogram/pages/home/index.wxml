@@ -1,0 +1,7 @@
+<view class="page">
+  <view class="hero"><text class="eyebrow">STUDY LIFE · 校园共建</text><text class="hero-title">让校园生活
+更清楚一点</text><text class="hero-copy">课程、出行、互助、指南和校园建议，来自同校同学的真实经验。</text><button class="primary" bindtap="openCampus">进入校园</button></view>
+  <view class="section-heading"><text>常用入口</text><text class="muted">一起完善校园信息</text></view>
+  <view class="link-list"><button class="link-row" bindtap="openCampus"><text><text class="link-title">校园服务</text><text class="link-note">课程、集市、互助与校园指南</text></text><text class="arrow">›</text></button><button class="link-row" bindtap="openFeedback"><text><text class="link-title">反馈与建议</text><text class="link-note">查看公开进度，也可以匿名提交</text></text><text class="arrow">›</text></button><button class="link-row" bindtap="openReview"><text><text class="link-title">校园审核</text><text class="link-note">审核员处理校园投稿和举报</text></text><text class="arrow">›</text></button><button class="link-row" bindtap="openAccount"><text><text class="link-title">我的账号</text><text class="link-note">资料、审核申请和三两豆账本</text></text><text class="arrow">›</text></button></view>
+  <view class="footnote">学校与校区由用户填写，不代表官方身份认证。涉及付费的功能尚未开放。</view>
+</view>

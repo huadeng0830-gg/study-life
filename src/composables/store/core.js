@@ -680,9 +680,12 @@ export async function restoreStoredValues(values, { markChanged = true, assertBe
     if (markChanged && entries.some(([key]) => isSyncKey(key))) notifyLocalChanged()
     for (const [key] of entries) {
       conflictedStorageKeys.delete(key)
-      markPersistenceSuccess(key, 'local')
-      if (mirrored) markPersistenceSuccess(key, 'mirror')
-      else setPersistenceWriteState(key, 'saved', 'local')
+      markPersistenceSuccess(key, mirrored ? 'mirror' : 'local')
+      // 安全副本没写成时要说出来。之前这里无条件标成 saved，
+      // 于是恢复完成后界面显示一切正常，而安全副本还停留在恢复前的内容：
+      // 用户一旦清掉浏览器网站数据，initializeDataVault 会拿这份过期副本
+      // 把旧数据灌回来，把刚恢复的内容顶掉，而且没有任何提示。
+      if (!mirrored) reportPersistenceFailure(new Error('安全副本未能更新'), key, 'mirror')
     }
     markPersistenceSuccess('restore', 'local')
     markPersistenceSuccess('restore', 'rollback')

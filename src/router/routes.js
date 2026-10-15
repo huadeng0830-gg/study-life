@@ -25,7 +25,8 @@ export const ROUTE_COMPONENT_NAMES = Object.freeze({
   '/events': 'EventsView',
   '/lists': 'ListsView',
   '/bills': 'LedgerView',
-  '/campus': 'PlacesView',
+  '/campus': 'CampusHubView',
+  '/campus/places': 'PlacesView',
   '/campus/search': 'CampusSearchView',
   '/campus/courses': 'CampusCoursesView',
   '/campus/market': 'CampusMarketplaceView',
@@ -37,8 +38,8 @@ export const ROUTE_COMPONENT_NAMES = Object.freeze({
   '/campus/publish': 'CampusPublishView',
   '/campus/mine': 'CampusMySubmissionsView',
   '/campus/reports': 'CampusReportsView',
+  '/campus/feedback': 'CampusFeedbackView',
   '/admin/campus': 'CampusGovernanceView',
-  '/campus/moderation': 'CampusModerationView',
   '/review': 'WeeklyReviewView',
   '/together': 'TogetherView',
   '/projects': 'ProjectsView',
@@ -88,6 +89,7 @@ export const routes = [
   { path: '/lists', name: 'lists', meta: { title: '清单', navigation: { id: 'lists', icon: '☑️', groupId: 'other', groupLabel: '其他', defaultDesktop: true, shortcut: 5 } }, component: asyncRoute('/lists') },
   { path: '/bills', name: 'bills', meta: { title: '账本', navigation: { id: 'bills', icon: '📒', groupId: 'other', groupLabel: '其他', defaultDesktop: true, shortcut: 6 } }, component: asyncRoute('/bills') },
   { path: '/campus', name: 'campus', meta: { title: '校园', navigation: { id: 'places', icon: '📍', mobileLabel: '校园', groupId: 'campus', groupLabel: '校园', defaultDesktop: true } }, component: asyncRoute('/campus') },
+  { path: '/campus/places', name: 'campus-places', meta: { title: '校园地点' }, component: asyncRoute('/campus/places') },
   { path: '/campus/search', name: 'campus-search', meta: { title: '校园全站搜索' }, component: asyncRoute('/campus/search') },
   { path: '/campus/courses', name: 'campus-courses', meta: { title: '老师与课程' }, component: asyncRoute('/campus/courses') },
   { path: '/campus/market', name: 'campus-market', meta: { title: '校园二手集市' }, component: asyncRoute('/campus/market') },
@@ -98,8 +100,7 @@ export const routes = [
   { path: '/campus/guides', name: 'campus-guides', meta: { title: '校园指南与经验' }, component: asyncRoute('/campus/guides') },
   { path: '/campus/publish', name: 'campus-publish', meta: { title: '统一发布' }, component: asyncRoute('/campus/publish') },
   { path: '/campus/mine', name: 'campus-mine', meta: { title: '我的校园投稿' }, component: asyncRoute('/campus/mine') },
-  { path: '/campus/moderation', name: 'campus-moderation', meta: { title: '校园内容审核' }, component: asyncRoute('/campus/moderation') },
-  { path: '/places', redirect: '/campus' },
+  { path: '/places', redirect: '/campus/places' },
   { path: '/review', name: 'review', meta: { title: '回顾', navigation: { id: 'review', icon: '↺', groupId: 'other', groupLabel: '其他', defaultDesktop: true, shortcut: 8 } }, component: asyncRoute('/review') },
   // Keep old bookmarks usable after the standalone Notes page was retired.
   { path: '/notes', redirect: '/' },
@@ -109,6 +110,10 @@ export const routes = [
   { path: '/admin', name: 'admin-center', meta: { title: '管理中心' }, component: asyncRoute('/admin') },
   { path: '/platform-admin', name: 'platform-admin', meta: { title: '平台运维' }, component: asyncRoute('/platform-admin') },
   { path: '/admin/campus', name: 'campus-governance', meta: { title: '校园审核工作台' }, component: asyncRoute('/admin/campus') },
+  // 「校园内容审核」曾经和「校园审核工作台」是同一个组件挂在两条路由上，
+  // 名称、页面标题、路由名各不相同。保留旧地址作为重定向，书签和外部链接不会失效。
+  { path: '/campus/moderation', redirect: '/admin/campus' },
   { path: '/campus/reports', name: 'campus-reports', meta: { title: '我的举报' }, component: asyncRoute('/campus/reports') },
+  { path: '/campus/feedback', name: 'campus-feedback', meta: { title: '反馈与建议' }, component: asyncRoute('/campus/feedback') },
   { path: '/:pathMatch(.*)*', name: 'not-found', meta: { title: '页面不存在' }, component: NotFoundView },
 ]

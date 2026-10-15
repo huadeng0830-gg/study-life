@@ -4,6 +4,7 @@ import { campusNotificationRoute } from '../composables/campusContentModel.js'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { createCollaborationContext } from '../composables/collaborationContext.js'
 import { accountOpen, accountUser } from '../composables/accountAuth.js'
+import { hasVerifiedContactEmail } from '../composables/accountVerification.js'
 import { formatDateTime } from '../composables/intlFormatters.js'
 import { announce as announceLive, announceAlert } from '../composables/liveRegion.js'
 import { dateInZone, wallTimeToEpoch, zonedParts } from '../composables/zonedTime.js'
@@ -34,22 +35,17 @@ const notificationLabels = {
   friend_request: '向你发送了好友请求', friend_accepted: '接受了你的好友请求', friend_removed: '已将你从好友中移除',
   invitation: '发来一条新邀约', invitation_updated: '更新了邀约', invitation_cancelled: '取消了一条邀约', invitation_expired: '一条邀约已过期', place_preset: '发来一份可拒收的地点预设；前往地点→好友预设查看', campus_place_reviewed: '地点审核已有结果；前往“校园 → 我的地点”查看意见', campus_content_reviewed: '校园内容审核已有结果；查看我的投稿', campus_report_reviewed: '校园举报已有处理结果；查看我的举报', campus_market_interest: '有人表达了二手商品联系意向', campus_help_application: '有人申请接手互助任务', campus_help_update: '互助任务或争议状态已更新', campus_lost_found_claim: '失物认领申请有更新', campus_event_update: '活动报名有更新', campus_private_message: '收到一条校园服务私信',
 }
-const browserTimeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Shanghai'
-const timeZones = [...new Set([browserTimeZone, 'Asia/Shanghai', 'Asia/Tokyo', 'Asia/Hong_Kong', 'Asia/Singapore', 'UTC', 'Europe/London', 'America/Los_Angeles', 'America/New_York'])]
 const durationChoices = [90, 120, 180]
-const context = createCollaborationContext(() => [accountUser.value?.id || '', Boolean(accountUser.value?.email_confirmed_at)], { onError: (error) => announce('error', error.message) })
+const context = createCollaborationContext(() => [accountUser.value?.id || '', hasVerifiedContactEmail()], { onError: (error) => announce('error', error.message) })
 const activeTab = ref('time')
 const pageLoading = context.state(false)
 const pageError = context.state('')
 const notice = context.state(null)
 const profile = context.state(null)
-const profileEditorOpen = ref(false)
 const friendRemovalTarget = context.state(null)
 const invitationCancellationTarget = context.state(null)
 const invitationFilter = context.state('action')
 const profileLoading = context.state(false)
-const profileSaving = context.state(false)
-const profileDraft = context.state(blankProfile)
 const friendLoading = context.state(false)
 const friendsError = context.state('')
 const friends = context.state(/** @type {SocialRecord[]} */ ([]))
@@ -86,7 +82,7 @@ const proposalDays = ref(7)
 const proposalMinMinutes = ref(90)
 const proposalLoading = context.state(false)
 const actionBusy = context.state('')
-const timezone = computed(() => profile.value?.timezone || profileDraft.value.timezone || 'Asia/Shanghai')
+const timezone = computed(() => profile.value?.timezone || 'Asia/Shanghai')
 const hasProfile = computed(() => Boolean(profile.value?.nickname && profile.value?.scheduleCompleteThrough && profile.value?.semesterEnd))
 const selectedFriend = computed(() => friends.value.find((item) => item.profile?.userId === selectedFriendId.value)?.profile || null)
 const intervals = computed(() => availability.value?.intervals || [])
@@ -124,19 +120,11 @@ const visibleInvitations = computed(() => sortedInvitations.value.filter((invite
   if (invitationFilter.value === 'history') return ['declined', 'cancelled', 'expired'].includes(invite.status)
   return true
 }))
-const canUseSocial = computed(() => Boolean(accountUser.value?.email_confirmed_at))
-const emailDiscoverabilityDisabled = computed(() => !accountUser.value?.email_confirmed_at)
+const canUseSocial = computed(() => hasVerifiedContactEmail())
 let proposalGeneration = 0
 let availabilityGeneration = 0
 let stopRealtime = null
 let realtimeTimer = 0
-
-function blankProfile() {
-  return {
-    nickname: '', school: '', campus: '', emailDiscoverable: false, timezone: browserTimeZone, scheduleCompleteThrough: '', semesterEnd: '',
-    availabilityPreferences: { startTime: '09:00', endTime: '22:00', minimumMinutes: 90, classBufferMinutes: 30, includeWeekends: true },
-  }
-}
 
 function announce(kind, text) {
   notice.value = text ? { kind, text } : null
@@ -146,13 +134,6 @@ function announce(kind, text) {
 }
 function applyProfile(value) {
   profile.value = value || null
-  const fallback = blankProfile()
-  profileDraft.value = {
-    ...fallback,
-    ...(value || {}),
-    availabilityPreferences: { ...fallback.availabilityPreferences, ...(value?.availabilityPreferences || {}) },
-  }
-  profileEditorOpen.value = !value
 }
 
 function localInputFor(epoch, zone) {
@@ -210,7 +191,6 @@ function resetAccountData() {
   inviteType.value = 'meal'
   proposalDays.value = 7
   proposalMinMinutes.value = 90
-  profileEditorOpen.value = false
   proposalGeneration++
   stopRealtime?.()
   stopRealtime = null
@@ -298,33 +278,7 @@ async function onAccountChanged(userId) {
   if (token()) pageLoading.value = false
 }
 
-watch(() => [accountUser.value?.id || '', Boolean(accountUser.value?.email_confirmed_at)], ([userId]) => { void onAccountChanged(userId) }, { immediate: true })
-
-async function saveProfile() {
-  if (profileSaving.value) return
-  const token = context.capture()
-  profileSaving.value = true
-  announce('', '')
-  try {
-    const result = await socialRequest('profile_save', {
-      nickname: profileDraft.value.nickname,
-      school: profileDraft.value.school,
-      campus: profileDraft.value.campus,
-      emailDiscoverable: emailDiscoverabilityDisabled.value ? false : profileDraft.value.emailDiscoverable,
-      timezone: profileDraft.value.timezone,
-      scheduleCompleteThrough: profileDraft.value.scheduleCompleteThrough,
-      semesterEnd: profileDraft.value.semesterEnd,
-      availabilityPreferences: profileDraft.value.availabilityPreferences,
-    })
-    if (!token()) return
-    applyProfile(result.profile)
-    clearAvailability()
-    announce('success', '资料和可约偏好已保存。')
-    await loadFriends(token)
-  } catch (error) {
-    if (token()) announce('error', error.message)
-  } finally { if (token()) profileSaving.value = false }
-}
+watch(() => [accountUser.value?.id || '', hasVerifiedContactEmail()], ([userId]) => { void onAccountChanged(userId) }, { immediate: true })
 
 async function searchByEmail() {
   if (searchBusy.value || !searchEmail.value.trim()) return
@@ -647,49 +601,12 @@ onBeforeUnmount(() => {
       </section>
 
       <section v-else-if="!hasProfile && activeTab !== 'invitations'" class="together-card profile-setup">
-        <div class="section-heading"><div><span class="eyebrow">首次设置</span><h2>先告诉好友怎么称呼你</h2></div><span class="privacy-chip">🔒 邮箱默认不被搜索</span></div>
-        <p class="muted">昵称和学校仅展示给已添加的好友。学校和校区由你填写，仅用于筛选校园内容，不代表学校认证。请确认课表完整日期和学期结束日。</p>
-        <form class="profile-grid" @submit.prevent="saveProfile">
-          <label>昵称 <input v-model="profileDraft.nickname" maxlength="32" autocomplete="nickname" required placeholder="好友看到的称呼" /></label>
-          <label>学校（选填） <input v-model="profileDraft.school" maxlength="100" placeholder="可留空" /></label>
-          <label>当前校区（选填） <input v-model="profileDraft.campus" maxlength="100" placeholder="用于筛选校园信息" /></label>
-          <label>时区
-            <select v-model="profileDraft.timezone"><option v-for="zone in timeZones" :key="zone" :value="zone">{{ zone }}</option></select>
-          </label>
-          <label>课表已确认完整至
-            <input v-model="profileDraft.scheduleCompleteThrough" type="date" required />
-            <small>只有覆盖到已确认完整日期的范围才会参与匹配。</small>
-          </label>
-          <label>本学期结束日期
-            <input v-model="profileDraft.semesterEnd" type="date" required />
-            <small>结束日期之后不再按每周课表推算课程；日程和考试仍会计入占用时间。</small>
-          </label>
-          <fieldset class="preference-fieldset">
-            <legend>可约时间偏好</legend>
-            <div class="profile-grid profile-grid-inner">
-              <label>每天从 <input v-model="profileDraft.availabilityPreferences.startTime" type="time" required /></label>
-              <label>到 <input v-model="profileDraft.availabilityPreferences.endTime" type="time" required /></label>
-              <label>最短活动时长
-                <select v-model.number="profileDraft.availabilityPreferences.minimumMinutes"><option :value="90">90 分钟</option><option :value="120">2 小时</option><option :value="180">3 小时</option></select>
-              </label>
-              <label>课程前后缓冲
-                <select v-model.number="profileDraft.availabilityPreferences.classBufferMinutes"><option :value="0">不额外缓冲</option><option :value="15">15 分钟</option><option :value="30">30 分钟</option><option :value="45">45 分钟</option><option :value="60">1 小时</option></select>
-              </label>
-              <label class="weekend-option"><input v-model="profileDraft.availabilityPreferences.includeWeekends" type="checkbox" /> 周末也可约</label>
-            </div>
-          </fieldset>
-          <label class="discover-option"><input v-model="profileDraft.emailDiscoverable" type="checkbox" :disabled="emailDiscoverabilityDisabled" /> 允许好友用完整邮箱精确搜索我
-            <small v-if="emailDiscoverabilityDisabled">完成邮箱验证后可以开启。完整邮箱始终不会展示给其他人。</small>
-            <small v-else>默认关闭；关闭时，搜索结果不会说明账号是否存在。</small>
-          </label>
-          <div class="form-actions"><ActionButton tone="primary" kind="frequent" feedback="external" :show-error="false" class="btn btn-primary" type="submit" :disabled="profileSaving" :busy="profileSaving">{{ profileSaving ? '正在保存…' : '保存资料与偏好' }}</ActionButton><span v-if="profileSaving" class="muted">正在写入账号资料…</span></div>
-        </form>
+        <div class="section-heading"><div><span class="eyebrow">首次设置</span><h2>先完成账号资料</h2></div><span class="privacy-chip">🔒 邮箱默认不被搜索</span></div>
+        <p class="muted">个人资料、学校范围和可约时间统一在“我的账号”维护，设置完成后即可回来添加好友与查找共同时间。</p>
+        <button type="button" class="btn btn-primary" @click="accountOpen = true">前往我的账号设置</button>
       </section>
 
-        <section v-if="profile && hasProfile" class="profile-summary">
-          <div><b>{{ profile.nickname }}</b><span v-if="profile.school"> · {{ profile.school }}</span><small>课表确认至 {{ profile.scheduleCompleteThrough }} · 学期至 {{ profile.semesterEnd }} · {{ profile.timezone }}</small></div>
-          <button type="button" class="text-button" aria-controls="together-profile-editor" :aria-expanded="profileEditorOpen" @click="activeTab = 'friends'; profileEditorOpen = true">资料与偏好</button>
-        </section>
+        <section v-if="profile && hasProfile" class="profile-summary"><div><b>账号资料已就绪</b><small>个人资料与可约偏好已统一移至“我的账号”。</small></div><button type="button" class="text-button" @click="accountOpen = true">打开我的账号</button></section>
 
         <section v-if="!canUseSocial" class="together-card state-card">
           <h2>完成邮箱验证后即可开始</h2><p>邮箱验证前可以设置本人的昵称和课表范围；搜索好友、匹配时间和收发邀约需要已验证账号。</p>
@@ -716,9 +633,9 @@ onBeforeUnmount(() => {
             </div>
             <div class="availability-actions"><span class="muted">按日期排列，近期且满足最短活动时长的时段优先显示。</span><ActionButton tone="primary" type="button" class="btn btn-primary" :disabled="!selectedFriendId || availabilityBusy" :busy="availabilityBusy" kind="task" feedback="external" :show-error="false" :action="() => queryAvailability(availabilityDays)">{{ availabilityBusy ? '正在核对双方课表…' : '查找共同时间' }}</ActionButton></div>
             <div v-if="availabilityBusy" class="state-card loading-card" aria-live="polite">正在同步并计算共同空闲时间…</div>
-            <div v-else-if="availabilityError" class="state-card error-card" role="alert"><h3>暂时没有可用结果</h3><p>{{ availabilityError }}</p><div class="state-actions"><ActionButton tone="neutral" type="button" class="btn" kind="task" feedback="external" :show-error="false" :action="() => queryAvailability(availabilityDays)">重试</ActionButton><button v-if="availability?.known" type="button" class="text-button" @click="activeTab = 'friends'; profileEditorOpen = true">调整时间偏好</button></div></div>
+            <div v-else-if="availabilityError" class="state-card error-card" role="alert"><h3>暂时没有可用结果</h3><p>{{ availabilityError }}</p><div class="state-actions"><ActionButton tone="neutral" type="button" class="btn" kind="task" feedback="external" :show-error="false" :action="() => queryAvailability(availabilityDays)">重试</ActionButton><button v-if="availability?.known" type="button" class="text-button" @click="accountOpen = true">调整时间偏好</button></div></div>
             <div v-else-if="availability?.known && !intervals.length" class="state-card empty-state">
-              <div class="empty-symbol">☁</div><h3>这段范围内暂时没有合适的连续空闲</h3><p>可以扩大搜索范围，或调整双方每天可约时段、周末和课程缓冲偏好。</p><div class="state-actions"><ActionButton tone="primary" v-if="availabilityDays < 30" type="button" class="btn btn-primary" kind="task" feedback="external" :show-error="false" :action="() => queryAvailability(availabilityDays === 7 ? 14 : 30)">扩大到未来 {{ availabilityDays === 7 ? 14 : 30 }} 天</ActionButton><button type="button" class="btn btn-ghost" @click="activeTab = 'friends'; profileEditorOpen = true">调整时间偏好</button></div>
+              <div class="empty-symbol">☁</div><h3>这段范围内暂时没有合适的连续空闲</h3><p>可以扩大搜索范围，或调整双方每天可约时段、周末和课程缓冲偏好。</p><div class="state-actions"><ActionButton tone="primary" v-if="availabilityDays < 30" type="button" class="btn btn-primary" kind="task" feedback="external" :show-error="false" :action="() => queryAvailability(availabilityDays === 7 ? 14 : 30)">扩大到未来 {{ availabilityDays === 7 ? 14 : 30 }} 天</ActionButton><button type="button" class="btn btn-ghost" @click="accountOpen = true">调整时间偏好</button></div>
             </div>
             <div v-else-if="groupedIntervals.length" class="interval-groups">
               <section v-for="group in groupedIntervals" :key="group.label" class="interval-day"><h3>{{ group.label }}</h3>
@@ -778,20 +695,8 @@ onBeforeUnmount(() => {
           </section>
 
           <section class="together-card profile-preferences-card">
-            <div class="section-heading"><div><span class="eyebrow">隐私设置</span><h2>我的资料与可约偏好</h2></div><button type="button" class="text-button" aria-controls="together-profile-editor" :aria-expanded="profileEditorOpen" @click="profileEditorOpen = !profileEditorOpen">{{ profileEditorOpen ? '收起' : '修改' }}</button></div>
-            <p class="muted">邮箱发现默认关闭。公开主页和完整邮箱展示均不提供；学校与校区由你填写，仅用于校园内容筛选，不是官方身份认证。</p>
-            <form v-if="profileEditorOpen" id="together-profile-editor" class="profile-grid" @submit.prevent="saveProfile">
-              <label>昵称 <input v-model="profileDraft.nickname" maxlength="32" required /></label><label>学校（选填） <input v-model="profileDraft.school" maxlength="100" /></label><label>当前校区（选填） <input v-model="profileDraft.campus" maxlength="100" /></label>
-              <label>时区 <select v-model="profileDraft.timezone"><option v-for="zone in timeZones" :key="zone" :value="zone">{{ zone }}</option></select></label>
-              <label>课表确认完整至 <input v-model="profileDraft.scheduleCompleteThrough" type="date" required /></label>
-              <label>本学期结束日期 <input v-model="profileDraft.semesterEnd" type="date" required /></label>
-              <label>每天开始 <input v-model="profileDraft.availabilityPreferences.startTime" type="time" required /></label><label>每天结束 <input v-model="profileDraft.availabilityPreferences.endTime" type="time" required /></label>
-              <label>最短活动时长 <select v-model.number="profileDraft.availabilityPreferences.minimumMinutes"><option :value="90">90 分钟</option><option :value="120">2 小时</option><option :value="180">3 小时</option></select></label>
-              <label>课程缓冲 <select v-model.number="profileDraft.availabilityPreferences.classBufferMinutes"><option :value="0">0 分钟</option><option :value="15">15 分钟</option><option :value="30">30 分钟</option><option :value="45">45 分钟</option><option :value="60">60 分钟</option></select></label>
-              <label class="weekend-option"><input v-model="profileDraft.availabilityPreferences.includeWeekends" type="checkbox" /> 周末也可约</label>
-              <label class="discover-option"><input v-model="profileDraft.emailDiscoverable" type="checkbox" :disabled="emailDiscoverabilityDisabled" /> 允许使用完整邮箱精确搜索我<small>不会公开邮箱；关闭时不会泄露账号是否存在。</small></label>
-              <div class="form-actions"><ActionButton tone="primary" kind="frequent" feedback="external" :show-error="false" class="btn btn-primary" type="submit" :disabled="profileSaving" :busy="profileSaving">{{ profileSaving ? '正在保存…' : '保存设置' }}</ActionButton></div>
-            </form>
+            <div class="section-heading"><div><span class="eyebrow">账号设置</span><h2>资料与可约偏好</h2></div><button type="button" class="text-button" @click="accountOpen = true">打开我的账号</button></div>
+            <p class="muted">昵称、学校与校区、邮箱发现、课表范围和可约时段都在“我的账号”统一管理。学校和校区由你填写，仅用于校园筛选，不代表官方身份认证。</p>
           </section>
         </section>
 

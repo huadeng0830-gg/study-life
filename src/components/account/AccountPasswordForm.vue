@@ -4,7 +4,7 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { accountBusy, accountUser, updateAccountPassword, validateAccountPassword } from '../../composables/accountAuth.js'
 import { announceAlert } from '../../composables/liveRegion.js'
 
-const props = defineProps({ recovery: Boolean, resetSeconds: { type: Number, default: 0 } })
+const props = defineProps({ recovery: Boolean, resetSeconds: { type: Number, default: 0 }, resetEnabled: { type: Boolean, default: true } })
 const emit = defineEmits(['updated', 'reset-request'])
 const currentPassword = ref('')
 const password = ref('')
@@ -91,7 +91,7 @@ async function submit() {
       <label class="account-password-toggle"><input v-model="visible" type="checkbox" :disabled="busy" />显示密码</label>
       <p v-if="error" class="account-error">{{ error }}</p>
       <ActionButton tone="primary" kind="important" feedback="external" :show-error="false" type="submit" class="btn btn-primary" :disabled="busy" :busy="busy">{{ submitting ? '正在保存…' : '保存新密码' }}</ActionButton>
-      <button v-if="!recovery" type="button" class="btn btn-ghost" :disabled="busy || resetSeconds > 0" @click="emit('reset-request')">{{ resetSeconds > 0 ? resetSeconds + ' 秒后可重发邮件' : '忘记当前密码？通过邮箱重设' }}</button>
+      <button v-if="!recovery && resetEnabled" type="button" class="btn btn-ghost" :disabled="busy || resetSeconds > 0" @click="emit('reset-request')">{{ resetSeconds > 0 ? resetSeconds + ' 秒后可重发邮件' : '忘记当前密码？通过邮箱重设' }}</button>
     </form>
   </section>
 </template>

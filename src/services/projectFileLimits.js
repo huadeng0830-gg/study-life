@@ -1,0 +1,2 @@
+export const PROJECT_FILE_MAX_BYTES = 5 * 1024 * 1024
+export const PROJECT_FILE_MAX_LABEL = '5 MB'

@@ -40,7 +40,7 @@ watch(() => [accountUser.value?.id, props.entry.item.id, props.entry.item.revisi
 function decide(decision) {
   if (props.busy) return
   error.value = ''
-  if (decision !== 'approve' && !reason.value.trim()) { error.value = '请先填写处理依据，方便相关同学理解结果。'; return }
+  if (!reason.value.trim()) { error.value = '请填写审核依据；写明结论理由后，审核贡献豆才会计入。'; return }
   if (decision === 'remove' && !confirmRemove.value) { confirmRemove.value = true; return }
   emit('decide', { entry: props.entry, decision, reason: reason.value.trim() })
 }
@@ -54,7 +54,7 @@ function decide(decision) {
     <pre class="campus-review-detail">{{ details }}</pre>
     <a v-if="source" :href="source" target="_blank" rel="noopener noreferrer">核对公开来源</a>
     <p v-if="entry.item.review_reason" class="campus-life-inline-state">此前审核意见：{{ entry.item.review_reason }}</p>
-    <Field><FieldLabel :for="'review-reason-' + entry.item.id">{{ entry.type === 'help_dispute' ? '裁定依据' : '处理依据' }}</FieldLabel><textarea :id="'review-reason-' + entry.item.id" v-model="reason" maxlength="500" :disabled="busy" :aria-invalid="Boolean(error)" placeholder="说明核查事实、需要修改的内容或处理依据；通过投稿时可留空" /></Field>
+    <Field><FieldLabel :for="'review-reason-' + entry.item.id">{{ entry.type === 'help_dispute' ? '裁定依据' : '处理依据' }}</FieldLabel><textarea :id="'review-reason-' + entry.item.id" v-model="reason" maxlength="500" :disabled="busy" :aria-invalid="Boolean(error)" placeholder="说明核查事实、来源和处理依据；审核结论需要留档" /></Field>
     <p v-if="error" role="alert" class="campus-life-inline-state error">{{ error }}</p>
     <div class="campus-life-actions">
       <template v-if="isReport"><Button :disabled="busy || !content" variant="destructive" @click="decide('remove')">下架原内容</Button><Button :disabled="busy" variant="outline" @click="decide('resolve')">已核实处理</Button><Button :disabled="busy" variant="ghost" @click="decide('dismiss')">举报不成立</Button></template>

@@ -1,5 +1,177 @@
 [
   {
+    "version": "1.7.0",
+    "legacyVersion": "2026年10月15日-版本7",
+    "channel": "stable",
+    "publishedAt": null,
+    "title": "三两事 1.7.0",
+    "summary": "新增校园反馈、审核申请与贡献积分",
+    "changes": {
+      "features": [
+        "新增校园反馈、审核申请与贡献积分"
+      ],
+      "improvements": [
+        "优化账号同步、备份恢复与校园导航"
+      ],
+      "fixes": [
+        "修复同步启动竞态及多个校园页面状态问题"
+      ],
+      "security": [
+        "收紧微信内部账号与邮箱验证功能的服务端边界"
+      ],
+      "breaking": []
+    },
+    "notes": [
+      "新增校园反馈、审核申请与贡献积分",
+      "完善校园内容审核、申诉与好友协作",
+      "优化账号同步、备份恢复与校园导航",
+      "修复同步启动竞态及多个校园页面状态问题",
+      "收紧微信内部账号与邮箱验证功能的服务端边界"
+    ],
+    "releaseUrl": "https://github.com/huadeng0830-gg/study-life/releases"
+  },
+  {
+    "version": "1.6.0",
+    "legacyVersion": "2026年10月15日-版本6",
+    "channel": "stable",
+    "publishedAt": null,
+    "title": "三两事 1.6.0",
+    "summary": "账号登录、同步用量和成果附件优化",
+    "changes": {
+      "features": [
+        "账号可按配置使用 GitHub 或 Google 登录"
+      ],
+      "improvements": [
+        "同步增加本次会话用量估算并减少重复下载",
+        "成果附件新上传限制为 5 MB，支持大文件外部链接"
+      ],
+      "fixes": [
+        "邮件服务尚未配置时隐藏不可用的注册和找回入口"
+      ],
+      "security": [],
+      "breaking": []
+    },
+    "notes": [
+      "账号可按配置使用 GitHub 或 Google 登录",
+      "同步增加本次会话用量估算并减少重复下载",
+      "成果附件新上传限制为 5 MB，支持大文件外部链接",
+      "邮件服务尚未配置时隐藏不可用的注册和找回入口"
+    ],
+    "releaseUrl": "https://github.com/huadeng0830-gg/study-life/releases"
+  },
+  {
+    "version": "1.5.0",
+    "legacyVersion": "2026年10月15日-版本5",
+    "channel": "stable",
+    "publishedAt": null,
+    "title": "三两事 1.5.0",
+    "summary": "公开三两豆余额、获取规则与建议奖励",
+    "changes": {
+      "features": [
+        "公开三两豆余额、获取规则与建议奖励"
+      ],
+      "improvements": [
+        "手机导航最多自选五个页面"
+      ],
+      "fixes": [],
+      "security": [],
+      "breaking": []
+    },
+    "notes": [
+      "公开三两豆余额、获取规则与建议奖励",
+      "手机导航最多自选五个页面"
+    ],
+    "releaseUrl": "https://github.com/huadeng0830-gg/study-life/releases"
+  },
+  {
+    "version": "1.4.2",
+    "legacyVersion": "2026年10月15日-版本4",
+    "channel": "stable",
+    "publishedAt": null,
+    "title": "三两事 1.4.2",
+    "summary": "修正校园子页底栏选中状态并保持校园主入口清晰",
+    "changes": {
+      "features": [],
+      "improvements": [
+        "修正校园子页底栏选中状态并保持校园主入口清晰"
+      ],
+      "fixes": [],
+      "security": [],
+      "breaking": []
+    },
+    "notes": [
+      "修正校园子页底栏选中状态并保持校园主入口清晰"
+    ],
+    "releaseUrl": "https://github.com/huadeng0830-gg/study-life/releases"
+  },
+  {
+    "version": "1.4.1",
+    "legacyVersion": "2026年10月15日-版本3",
+    "channel": "stable",
+    "publishedAt": null,
+    "title": "三两事 1.4.1",
+    "summary": "重构校园总览并前置反馈与建议、发布、投稿和举报入口",
+    "changes": {
+      "features": [],
+      "improvements": [
+        "重构校园总览并前置反馈与建议、发布、投稿和举报入口",
+        "手机默认导航加入校园，原地点页与旧书签继续可用"
+      ],
+      "fixes": [],
+      "security": [],
+      "breaking": []
+    },
+    "notes": [
+      "重构校园总览并前置反馈与建议、发布、投稿和举报入口",
+      "手机默认导航加入校园，原地点页与旧书签继续可用"
+    ],
+    "releaseUrl": "https://github.com/huadeng0830-gg/study-life/releases"
+  },
+  {
+    "version": "1.4.0",
+    "legacyVersion": "2026年10月15日-版本2",
+    "channel": "stable",
+    "publishedAt": null,
+    "title": "三两事 1.4.0",
+    "summary": "增加三两豆双账本、审核贡献奖励与错判复核回收",
+    "changes": {
+      "features": [
+        "增加三两豆双账本、审核贡献奖励与错判复核回收",
+        "新增匿名公开建议、站内联系和管理员处理奖励",
+        "增加微信小程序首发工程，覆盖账号、校园、审核与建议"
+      ],
+      "improvements": [
+        "个人资料与校园可约偏好统一移至我的账号",
+        "管理中心新增审核员申请、补充材料、随机抽查和建议处理",
+        "申请人可在站内回应补充材料要求",
+        "统一校园建议和审核管理的可访问命名与移动端断点"
+      ],
+      "fixes": [
+        "并发审核下严格遵守每日奖励上限并准确统计抽查新增记录",
+        "修正小程序刷新登录后邮箱验证状态丢失"
+      ],
+      "security": [
+        "审核奖励和贡献豆抵扣由服务端事务记账",
+        "微信身份哈希与小程序密钥留在服务端，合并冲突时回滚并要求复核"
+      ],
+      "breaking": []
+    },
+    "notes": [
+      "增加三两豆双账本、审核贡献奖励与错判复核回收",
+      "新增匿名公开建议、站内联系和管理员处理奖励",
+      "增加微信小程序首发工程，覆盖账号、校园、审核与建议",
+      "个人资料与校园可约偏好统一移至我的账号",
+      "管理中心新增审核员申请、补充材料、随机抽查和建议处理",
+      "申请人可在站内回应补充材料要求",
+      "统一校园建议和审核管理的可访问命名与移动端断点",
+      "并发审核下严格遵守每日奖励上限并准确统计抽查新增记录",
+      "修正小程序刷新登录后邮箱验证状态丢失",
+      "审核奖励和贡献豆抵扣由服务端事务记账",
+      "微信身份哈希与小程序密钥留在服务端，合并冲突时回滚并要求复核"
+    ],
+    "releaseUrl": "https://github.com/huadeng0830-gg/study-life/releases"
+  },
+  {
     "version": "1.3.0",
     "legacyVersion": "2026年10月15日-版本1",
     "channel": "stable",

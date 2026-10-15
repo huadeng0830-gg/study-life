@@ -5,3 +5,11 @@ verify_jwt = true
 
 [functions.platform-admin]
 verify_jwt = true
+
+# Public suggestion browsing is handled by the function's explicit per-action
+# authentication checks; writes always validate a Supabase user token server-side.
+[functions.campus-community]
+verify_jwt = false
+
+[functions.wechat-auth]
+verify_jwt = false

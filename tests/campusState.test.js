@@ -30,7 +30,57 @@ describe('campus asynchronous account isolation', () => {
     const action = page.act(() => pending.promise)
     accountUser.value = { id: 'other-account' }
     pending.resolve({ saved: true })
-    expect(await action).toBeNull()
+    // act() 报告的是「这次操作对当前界面还算不算数」，而不是服务端返回了什么。
+    // 账号切换后它必须报告失败，即使服务端其实已经写入了。
+    expect(await action).toBe(false)
+    expect(page.notice.value).toBe('')
+  })
+  it('reports a successful action even when the server returns nothing', async () => {
+    const page = scope.run(useCampusLifePage)
+    // 多个 campus 变更接口成功时 resolve undefined。旧的 act() 直接透传返回值，
+    // 调用方的 `if (result)` 会误判成失败：提示成功但表单不关闭、列表不刷新。
+    await expect(page.act(async () => undefined, '已提交。')).resolves.toBe(true)
+    expect(page.notice.value).toBe('已提交。')
+    // 同样地，0 / false / '' 也不能被当成失败。
+    await expect(page.act(async () => 0)).resolves.toBe(true)
+    await expect(page.act(async () => '')).resolves.toBe(true)
+    expect(page.error.value).toBe('')
+  })
+  it('reports a failed action as false and surfaces the server message', async () => {
+    const page = scope.run(useCampusLifePage)
+    await expect(page.act(async () => { throw new Error('请稍后再试') })).resolves.toBe(false)
+    // 写失败落在 actionError，不落在 error：error 会把整张列表换成错误态，
+    // 而列表此时并没有坏。
+    expect(page.actionError.value).toBe('请稍后再试')
+    expect(page.error.value).toBe('')
+    expect(page.notice.value).toBe('')
+  })
+  it('keeps a failed write out of the read-error slot', async () => {
+    const page = scope.run(useCampusLifePage)
+    await page.load(async () => ({ rows: [1, 2, 3] }))
+    await page.act(async () => { throw new Error('添加到日程失败') })
+    expect(page.error.value).toBe('')
+    expect(page.data.value.rows).toHaveLength(3)
+    expect(page.actionError.value).toBe('添加到日程失败')
+  })
+  it('routes a local failure through actionError so the list survives', async () => {
+    const page = scope.run(useCampusLifePage)
+    await page.load(async () => ({ rows: [1] }))
+    // 校园活动页曾把「加不进本机日程」写进读取错误槽，结果整屏活动列表
+    // 被一条本地错误顶掉，还只剩一个没有意义的「重试」。
+    page.reportFailure('这条活动缺少完整的开始或结束时间。')
+    expect(page.error.value).toBe('')
+    expect(page.actionError.value).toContain('缺少完整')
+    expect(page.data.value.rows).toHaveLength(1)
+  })
+  it('keeps a success banner across the refresh that follows it', async () => {
+    const page = scope.run(useCampusLifePage)
+    await page.load(async () => ({ rows: [1] }))
+    await page.act(async () => {}, '内容已撤回。')
+    await page.load(async () => ({ rows: [1] }))
+    // 动作之后一定会跟一次刷新；刷新若清掉提示，用户永远看不到自己刚做的操作。
+    expect(page.notice.value).toBe('内容已撤回。')
+    page.dismissNotice()
     expect(page.notice.value).toBe('')
   })
   it('discards a request result after unmount', async () => {

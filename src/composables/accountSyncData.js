@@ -8,7 +8,14 @@ import { normalizeDataHealthThresholds } from './dataHealthReport.js'
 
 export { SYNC_DEFAULTS, SYNC_KEYS, isSyncKey }
 
-/** @type {number} */
+/**
+ * 云端单条快照上限。
+ *
+ * 必须和 supabase/migrations 里 `account_sync_snapshots` 的
+ * `octet_length(payload::text) <= 16777216` 保持一致。这个数字之前在
+ * accountSyncData 和 accountSyncEngine 里各写了一遍，只改其中一处，
+ * 客户端就会拿着自己以为的尺寸去推一个云端一定会用 400 拒回来的包。
+ */
 export const MAX_SYNC_PAYLOAD_BYTES = 16 * 1024 * 1024
 /** @type {number} */
 export const MAX_SYNC_COLLECTION_ITEMS = 100000

@@ -91,7 +91,10 @@ export function createPlatformAdminHandler({ service, allowedOrigins = [], logge
       if (!token) throw new PlatformAdminError('unauthorized', '登录已失效，请重新登录。', 401)
       const user = await service.authenticate(token)
       if (!user?.id) throw new PlatformAdminError('unauthorized', '登录已失效，请重新登录。', 401)
-      if (!user.email_confirmed_at) throw new PlatformAdminError('email_verification_required', '请先完成邮箱验证。', 403)
+      const email = String(user.email || '').trim().toLowerCase()
+      if (!user.email_confirmed_at || !email || email.endsWith('@wechat.study-life.invalid')) {
+        throw new PlatformAdminError('email_verification_required', '请先完成邮箱验证。', 403)
+      }
       const owner = await service.isOwner(user.id)
 
       const body = await readBody(request)

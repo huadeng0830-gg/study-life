@@ -4,6 +4,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const adapter = vi.hoisted(() => ({ getSupabaseClient: vi.fn(), getSupabaseConfig: vi.fn(), verifyAccountCurrentPassword: vi.fn() }))
 vi.mock('../src/services/supabase.js', () => adapter)
+vi.mock('../src/services/campusCommunity.js', () => ({
+  campusBeanWallet: vi.fn().mockResolvedValue({ wallet: { purchased: 0, contribution: 0, contributionDebt: 0 }, ledger: [] }),
+}))
 
 function fakeIndexedDB() {
   const databases = new Map()
@@ -44,6 +47,8 @@ const session = { user }
 beforeEach(async () => {
   vi.resetModules()
   vi.clearAllMocks()
+  vi.stubEnv('VITE_ACCOUNT_EMAIL_SIGNUP_ENABLED', 'true')
+  vi.stubEnv('VITE_ACCOUNT_EMAIL_DELIVERY_ENABLED', 'true')
   localStorage.clear()
   sessionStorage.clear()
   vi.stubGlobal('indexedDB', fakeIndexedDB())
@@ -78,6 +83,7 @@ afterEach(() => {
   vi.useRealTimers()
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
+  vi.unstubAllEnvs()
 })
 
 async function mountPanel(withDataModal = false) {
@@ -113,6 +119,30 @@ async function click(text) {
 }
 
 describe('注册面板的实际表单行为', () => {
+  it('按部署能力展示 OAuth，隐藏未配置的邮箱注册与恢复', async () => {
+    vi.stubEnv('VITE_ACCOUNT_EMAIL_SIGNUP_ENABLED', 'false')
+    vi.stubEnv('VITE_ACCOUNT_EMAIL_DELIVERY_ENABLED', 'false')
+    vi.stubEnv('VITE_ACCOUNT_OAUTH_PROVIDERS', 'github')
+    client.auth.signInWithOAuth = vi.fn().mockResolvedValue({ data: {}, error: { code: 'provider_disabled' } })
+    await mountPanel()
+    expect(document.body.textContent).not.toContain('忘记密码？')
+    expect([...document.querySelectorAll('button')].some(button => button.textContent.trim() === '注册')).toBe(false)
+    await click('使用 GitHub 登录')
+    await vi.waitFor(() => expect(client.auth.signInWithOAuth).toHaveBeenCalledTimes(1))
+    expect(document.querySelector('#account-email')).toBeTruthy()
+  })
+  it('从校园三两豆入口打开账号面板时直接显示余额账本', async () => {
+    client.auth.getSession.mockResolvedValue({ data: { session }, error: null })
+    account.accountInitialSection.value = 'beans'
+    const { default: AccountPanel } = await import('../src/components/AccountPanel.vue')
+    host = document.createElement('div')
+    document.body.appendChild(host)
+    app = createApp(AccountPanel, { open: true })
+    app.mount(host)
+    await vi.waitFor(() => expect(document.querySelector('.account-community-settings h3')?.textContent).toContain('余额与变动记录'))
+    expect([...document.querySelectorAll('.account-mode button')].find(button => button.getAttribute('aria-pressed') === 'true')?.textContent.trim()).toBe('三两豆')
+  })
+
   it('从数据管理打开账号面板时，各弹窗有独立且正确的读屏标题', async () => {
     await mountPanel(true)
     const dialogs = [...document.querySelectorAll('[role="dialog"]')]

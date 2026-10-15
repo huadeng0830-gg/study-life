@@ -1,13 +1,20 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import CampusEmptyState from '../../components/campus/CampusEmptyState.vue'
-import CampusLoadingState from '../../components/campus/CampusLoadingState.vue'
 import CampusLifeLayout from '../../components/campus/CampusLifeLayout.vue'
 import CampusContentActions from '../../components/campus/CampusContentActions.vue'
+import CampusStateBlock from '../../components/campus/CampusStateBlock.vue'
+import CampusStatusMessages from '../../components/campus/CampusStatusMessages.vue'
+import { campusDateLabel } from '../../composables/campusFormatting.js'
 import { useCampusLifePage } from '../../composables/campusLifePage.js'
+import { useCampusBusyKeys } from '../../composables/campusRequest.js'
 import { campusShuttles, submitCampusShuttleCorrection, submitCampusShuttleException } from '../../services/campusLife.js'
 
 const page = useCampusLifePage()
+// 每条线路一份「提交中」。之前是一个全局 busy：在 1 号线送审纠错时，
+// 2 号线的表单也跟着变灰，用户以为那条线路也提交过了。
+const busy = useCampusBusyKeys()
+const isCorrecting = (id) => busy.busy(`correction:${id}`)
+const isSubmittingException = (id) => busy.busy(`exception:${id}`)
 function localDate(value = new Date()) {
   const year = value.getFullYear()
   const month = String(value.getMonth() + 1).padStart(2, '0')
@@ -20,7 +27,6 @@ const correctionRoute = ref('')
 const correction = ref({ detail: '', sourceUrl: '' })
 const exceptionRoute = ref('')
 const exception = ref({ serviceDate: localDate(), exceptionType: 'suspended', departureTime: '', direction: 'outbound', note: '', sourceUrl: '' })
-const busy = ref(false)
 const now = ref(Date.now())
 let clockTimer = 0
 
@@ -88,17 +94,22 @@ function nextTrip(route, direction) { return tripFor(route, direction).next }
 function exceptionsFor(route) { return (page.data.value?.exceptions || []).filter((item) => item.route_id === route.id && item.service_date === selectedDate.value) }
 function exceptionLabel(item) { return ({ suspended: '停运覆盖', additional: '加班车', changed: '调整班次' })[item.exception_type] || '特殊安排' }
 
+// 纠错与特殊班次提交的是「某条线路在某天的运行事实」，所以提交成功后
+// 顺带把运行日期切到这条安排适用的那天，用户立刻能在页面上看到自己提交的内容。
 async function submitCorrection(route) {
-  busy.value = true
-  const result = await page.act(() => submitCampusShuttleCorrection(route.id, correction.value.detail, correction.value.sourceUrl), '纠错内容已送审，不会直接覆盖现有时刻表。')
-  busy.value = false
-  if (result) { correctionRoute.value = ''; correction.value = { detail: '', sourceUrl: '' } }
+  await busy.run(`correction:${route.id}`, async () => {
+    const ok = await page.act(() => submitCampusShuttleCorrection(route.id, correction.value.detail, correction.value.sourceUrl), '纠错内容已送审，不会直接覆盖现有时刻表。')
+    if (ok) { correctionRoute.value = ''; correction.value = { detail: '', sourceUrl: '' } }
+  })
 }
 async function submitException(route) {
-  busy.value = true
-  const result = await page.act(() => submitCampusShuttleException({ routeId: route.id, ...exception.value }), '特殊日期班次已提交审核。')
-  busy.value = false
-  if (result) exceptionRoute.value = ''
+  await busy.run(`exception:${route.id}`, async () => {
+    const ok = await page.act(() => submitCampusShuttleException({ routeId: route.id, ...exception.value }), '特殊日期班次已提交审核。')
+    if (ok) {
+      exceptionRoute.value = ''
+      exception.value = { ...exception.value, serviceDate: selectedDate.value }
+    }
+  })
 }
 </script>
 
@@ -112,12 +123,21 @@ async function submitException(route) {
       </section>
       <section class="campus-life-panel">
         <div class="campus-shuttle-heading"><div><h2>线路与班次</h2><p>更新时间和来源随线路展示；过期或日期不适用时不会计算“下一班”。</p></div><RouterLink class="btn btn-primary" to="/campus/publish?kind=shuttle">提交线路</RouterLink></div>
-        <CampusLoadingState v-if="page.loading.value && !page.data.value">正在读取校车时刻表…</CampusLoadingState>
-        <p v-else-if="page.error.value" class="campus-life-inline-state error" role="alert">{{ page.error.value }} <button class="text-button" type="button" @click="refresh">重试</button></p>
-        <CampusEmptyState v-else-if="!routes.length" title="还没有已核实的校车线路" description="有学校或运营方公开时刻表时，可以提交线路供同校同学查阅。" action="提交校车线路" to="/campus/publish?kind=shuttle" />
-        <div v-else class="campus-shuttle-routes">
+        <CampusStateBlock
+          :loading="page.loading.value"
+          :loaded="Boolean(page.data.value)"
+          :error="page.error.value"
+          :empty="!routes.length"
+          loading-text="正在读取校车时刻表…"
+          empty-title="还没有已核实的校车线路"
+          empty-description="有学校或运营方公开时刻表时，可以提交线路供同校同学查阅。"
+          empty-action="提交校车线路"
+          empty-to="/campus/publish?kind=shuttle"
+          @retry="refresh()"
+        >
+          <div class="campus-shuttle-routes">
           <article v-for="route in routes" :key="route.id" class="campus-shuttle-route campus-life-card">
-            <div class="campus-life-meta"><span class="campus-life-tag">计划班次</span><span v-if="route.campus">{{ route.campus }}</span><span>更新时间：{{ route.updated_at.slice(0, 10) }}</span></div>
+            <div class="campus-life-meta"><span class="campus-life-tag">计划班次</span><span v-if="route.campus">{{ route.campus }}</span><span>更新时间：{{ campusDateLabel(route.updated_at) }}</span></div>
             <h3>{{ route.name }}</h3><a :href="route.source_url" target="_blank" rel="noopener noreferrer">查看公开时刻表来源</a>
             <p v-if="!applicable(route)" class="campus-life-inline-state">该日期超出线路生效期，时刻表待核实。</p>
             <div v-else class="campus-shuttle-directions">
@@ -130,13 +150,14 @@ async function submitException(route) {
             <div v-if="exceptionsFor(route).length" class="campus-shuttle-exceptions"><b>该日期的特殊安排</b><p v-for="item in exceptionsFor(route)" :key="item.id">{{ exceptionLabel(item) }}<template v-if="item.departure_time"> · {{ item.departure_time.slice(0,5) }}</template><template v-if="item.note"> · {{ item.note }}</template></p></div>
             <CampusContentActions target-type="shuttle_route" :target-id="route.id" />
             <div class="campus-life-actions"><button class="btn btn-ghost" type="button" @click="correctionRoute = correctionRoute === route.id ? '' : route.id">提交纠错</button><button class="btn btn-ghost" type="button" @click="exceptionRoute = exceptionRoute === route.id ? '' : route.id">提交特殊日期安排</button></div>
-            <form v-if="correctionRoute === route.id" class="campus-shuttle-form" @submit.prevent="submitCorrection(route)"><label>纠错内容<textarea v-model="correction.detail" maxlength="1500" required /></label><label>来源 HTTPS 链接<input v-model="correction.sourceUrl" type="url" maxlength="500" /></label><button class="btn btn-primary" type="submit" :disabled="busy">送审纠错</button></form>
-            <form v-if="exceptionRoute === route.id" class="campus-shuttle-form" @submit.prevent="submitException(route)"><label>适用日期<input v-model="exception.serviceDate" type="date" required /></label><label>类型<select v-model="exception.exceptionType"><option value="suspended">临时停运</option><option value="additional">加班车</option><option value="changed">调整班次</option></select></label><label>方向<select v-model="exception.direction"><option value="outbound">去程</option><option value="inbound">返程</option></select></label><label v-if="exception.exceptionType !== 'suspended'">发车时间<input v-model="exception.departureTime" type="time" required /></label><label>说明<input v-model="exception.note" maxlength="300" /></label><label>官方来源 HTTPS 链接<input v-model="exception.sourceUrl" type="url" maxlength="500" required /></label><button class="btn btn-primary" type="submit" :disabled="busy">送审特殊安排</button></form>
+            <form v-if="correctionRoute === route.id" class="campus-shuttle-form" @submit.prevent="submitCorrection(route)"><label>纠错内容<textarea v-model="correction.detail" maxlength="1500" required /></label><label>来源 HTTPS 链接<input v-model="correction.sourceUrl" type="url" maxlength="500" /></label><button class="btn btn-primary" type="submit" :disabled="isCorrecting(route.id)">{{ isCorrecting(route.id) ? '正在送审…' : '送审纠错' }}</button></form>
+            <form v-if="exceptionRoute === route.id" class="campus-shuttle-form" @submit.prevent="submitException(route)"><label>适用日期<input v-model="exception.serviceDate" type="date" required /></label><label>类型<select v-model="exception.exceptionType"><option value="suspended">临时停运</option><option value="additional">加班车</option><option value="changed">调整班次</option></select></label><label>方向<select v-model="exception.direction"><option value="outbound">去程</option><option value="inbound">返程</option></select></label><label v-if="exception.exceptionType !== 'suspended'">发车时间<input v-model="exception.departureTime" type="time" required /></label><label>说明<input v-model="exception.note" maxlength="300" /></label><label>官方来源 HTTPS 链接<input v-model="exception.sourceUrl" type="url" maxlength="500" required /></label><button class="btn btn-primary" type="submit" :disabled="isSubmittingException(route.id)">{{ isSubmittingException(route.id) ? '正在送审…' : '送审特殊安排' }}</button></form>
           </article>
-        </div>
+          </div>
+        </CampusStateBlock>
       </section>
+      <CampusStatusMessages :notice="page.notice.value" :error="page.actionError.value" />
       <p class="campus-life-inline-state">班次来自用户提交的公开来源并经平台审核。日期规则可能不完整，请在特殊时期核对来源链接；浏览器没有获得推送权限时不发送提醒。</p>
-      <p v-if="page.notice.value" class="campus-life-inline-state campus-life-success" role="status">{{ page.notice.value }}</p>
     </template>
   </CampusLifeLayout>
 </template>

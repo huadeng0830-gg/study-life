@@ -27,7 +27,7 @@ async function mount() {
 }
 function button(text) { return [...host.querySelectorAll('button')].find((node) => node.textContent.trim() === text) }
 beforeEach(() => {
-  stubs.user.value = { id: 'fictional-account-a', email_confirmed_at: '2026-01-01' }
+  stubs.user.value = { id: 'fictional-account-a', email: 'first@example.test', email_confirmed_at: '2026-01-01' }
   stubs.subscribe.mockReset().mockResolvedValue(() => {})
   stubs.request.mockReset().mockImplementation(async (action) => {
     if (action === 'profile_get') return { profile: PROFILE }
@@ -49,7 +49,7 @@ describe('engineering audit: social account lifecycle', () => {
     expect(button('查找共同时间')).toBeTruthy()
     button('查找共同时间').click(); await flush()
     expect(resolveAvailability).toBeTypeOf('function')
-    stubs.user.value = { id: 'fictional-account-b', email_confirmed_at: '2026-01-01' }
+    stubs.user.value = { id: 'fictional-account-b', email: 'second@example.test', email_confirmed_at: '2026-01-01' }
     await flush()
     resolveAvailability({ known: true, intervals: [{ startsAt: '2026-10-10T01:00:00Z', endsAt: '2026-10-10T03:00:00Z' }] })
     await flush()
@@ -63,7 +63,7 @@ describe('engineering audit: social account lifecycle', () => {
       ? new Promise((resolve) => { resolveOldSubscription = resolve }) : Promise.resolve(currentStop))
     await mount()
     expect(resolveOldSubscription).toBeTypeOf('function')
-    stubs.user.value = { id: 'fictional-account-b', email_confirmed_at: '2026-01-01' }
+    stubs.user.value = { id: 'fictional-account-b', email: 'second@example.test', email_confirmed_at: '2026-01-01' }
     await flush()
     resolveOldSubscription(oldStop); await flush()
     expect(oldStop).toHaveBeenCalledOnce()
@@ -79,7 +79,7 @@ describe('engineering audit: social account lifecycle', () => {
     expect(remove).toBeTruthy()
     remove.click(); await flush()
     expect(document.querySelector('.overlay')).toBeTruthy()
-    stubs.user.value = { id: 'fictional-account-b', email_confirmed_at: '2026-01-01' }
+    stubs.user.value = { id: 'fictional-account-b', email: 'second@example.test', email_confirmed_at: '2026-01-01' }
     await flush()
     expect(document.querySelector('.overlay')).toBeNull()
   })

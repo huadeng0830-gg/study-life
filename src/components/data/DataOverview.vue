@@ -1,7 +1,8 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { lastBackupAt, needsBackup } from '../../composables/backupReminder.js'
 import { formatDataSize } from '../../composables/dataManagerInventory.js'
+import { readStorageQuota } from '../../composables/localStorageUsage.js'
 import { formatAppDate } from '../../composables/timeContext.js'
 import '../../styles/shadcn.css'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -19,6 +20,14 @@ defineEmits(['refresh'])
 const headingTag = computed(() => ({ 2: 'h2', 3: 'h3', 4: 'h4' }[props.headingLevel] || 'h3'))
 const backupDate = computed(() => lastBackupAt.value ? formatAppDate(lastBackupAt.value, { withWeekday: false }) : '')
 const issueLabels = computed(() => [...new Set(props.inventory?.issues.map((issue) => issue.label) || [])].join('、'))
+
+// 浏览器给出的真实配额（含 IndexedDB 里的壁纸与恢复点）；拿不到就退回文本估算。
+const quota = ref(null)
+onMounted(async () => { quota.value = await readStorageQuota() })
+const storageWarning = computed(() => quota.value?.warning ?? props.inventory?.usage.warning)
+const storageNote = computed(() => quota.value
+  ? `浏览器报告已用 ${quota.value.percent}%（${formatDataSize(quota.value.usage)} / ${formatDataSize(quota.value.quota)}），包含壁纸与恢复点。`
+  : `本浏览器未提供存储配额，以上为文本数据估算；壁纸图片和恢复点另占空间。`)
 </script>
 
 <template>
@@ -32,15 +41,15 @@ const issueLabels = computed(() => [...new Set(props.inventory?.issues.map((issu
     <p v-if="error" class="overview-error" role="alert">{{ error }}</p>
     <div v-if="inventory" class="overview-metrics">
       <div><span>记录总量</span><b>{{ inventory.issues.length ? '至少 ' : '' }}{{ inventory.recordCount.toLocaleString() }}<small>项</small></b><span>分布在 {{ inventory.modules.filter(module => module.recordCount > 0).length }} 个分区</span></div>
-      <div><span>本机文本占用</span><b>{{ formatDataSize(inventory.usage.chars * 2) }}</b><span :class="{ 'overview-warning': inventory.usage.warning }">约占常见上限 {{ inventory.usage.percent }}%</span></div>
+      <div><span>本机文本占用</span><b>{{ formatDataSize(inventory.usage.bytes) }}</b><span :class="{ 'overview-warning': storageWarning }">{{ quota ? `占浏览器存储 ${quota.percent}%` : `估算约占常见上限 ${inventory.usage.percent}%` }}</span></div>
       <div><span>上次导出备份</span><b class="backup-date">{{ backupDate || '尚未备份' }}</b><span :class="{ 'overview-warning': needsBackup }">{{ needsBackup ? '建议导出一份新备份' : '近期已导出，请保管好文件' }}</span></div>
     </div>
     <p v-if="issueLabels" class="overview-error" role="alert">{{ issueLabels }}中有数据无法读取，统计未包含这些内容。导出时会保留原始数据并提示问题。</p>
-    <p v-if="inventory?.usage.warning" class="overview-warning storage-warning" role="alert">本机文本存储已接近常见浏览器上限，建议先导出备份，再整理不需要的历史记录。</p>
+    <p v-if="storageWarning" class="overview-warning storage-warning" role="alert">本机存储已接近浏览器配额，建议先导出备份，再整理不需要的历史记录与壁纸。</p>
     <details v-if="inventory && showModuleDetails" class="inventory-details">
       <summary>查看各分区的数据量</summary>
       <ul><li v-for="module in inventory.modules" :key="module.id"><div><b>{{ module.label }}</b><span>{{ module.hasIssue ? '部分数据无法读取' : module.detail || module.text }}</span></div><span class="module-size">{{ formatDataSize(module.bytes) }}</span></li></ul>
-      <p>占用按本机文本估算；壁纸图片和恢复点另占空间。账号资料、项目协作与成果文件由账号保存，不包含在本机 JSON 备份中。</p>
+      <p>{{ storageNote }}账号资料、项目协作与成果文件由账号保存，不包含在本机 JSON 备份中。</p>
     </details>
       </CardContent>
     </Card>

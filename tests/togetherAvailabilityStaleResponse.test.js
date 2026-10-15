@@ -30,7 +30,7 @@ const stubs = vi.hoisted(() => ({
 
 vi.mock('../src/composables/accountAuth.js', async () => {
   const { ref } = await import('vue')
-  stubs.accountUser = ref({ id: 'user-1', email_confirmed_at: '2026-01-01' })
+  stubs.accountUser = ref({ id: 'user-1', email: 'first@example.test', email_confirmed_at: '2026-01-01' })
   stubs.accountOpen = ref(false)
   return { accountUser: stubs.accountUser, accountOpen: stubs.accountOpen }
 })
@@ -106,7 +106,7 @@ const FRIENDS = new Map([
 ])
 
 beforeEach(() => {
-  stubs.accountUser.value = { id: 'user-1', email_confirmed_at: '2026-01-01' }
+  stubs.accountUser.value = { id: 'user-1', email: 'first@example.test', email_confirmed_at: '2026-01-01' }
   socialRequest.mockReset()
   ensureSocialScheduleReady.mockClear()
   subscribeSocialNotifications.mockClear()

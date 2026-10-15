@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-function fakeIndexedDB({ deferTaskRead = false } = {}) {
+function fakeIndexedDB({ deferTaskRead = false, oldVersion = 0 } = {}) {
   const records = new Map()
   let storeCreated = false
   let deferredReadUsed = false
@@ -13,7 +13,9 @@ function fakeIndexedDB({ deferTaskRead = false } = {}) {
     deferredReadStarted,
     releaseDeferredRead() { finishDeferredRead?.() },
     open: () => {
-      const request = { result: null, onsuccess: null, onupgradeneeded: null }
+      // 真实的 IDBOpenDBRequest 同时带 event.oldVersion 和 request.transaction；
+      // 升级逻辑要依赖这两者，所以桩件也必须提供，否则升级路径永远走不到。
+      const request = { result: null, onsuccess: null, onupgradeneeded: null, transaction: null }
       const db = {
         objectStoreNames: { contains: () => storeCreated },
         createObjectStore: () => { storeCreated = true },
@@ -42,13 +44,32 @@ function fakeIndexedDB({ deferTaskRead = false } = {}) {
               queueMicrotask(() => { result.result = [...records.keys()]; result.onsuccess?.() })
               return result
             },
+            // 升级游标：只走一遍，把既不是影子副本也不是保留记录的残键删掉。
+            openCursor: () => {
+              const keys = [...records.keys()]
+              const result = { result: null, onsuccess: null, onerror: null }
+              let index = -1
+              const step = () => queueMicrotask(() => {
+                index += 1
+                if (index >= keys.length) { result.result = null; result.onsuccess?.(); return }
+                const key = keys[index]
+                result.result = { key, delete: () => { records.delete(key) }, continue: step }
+                result.onsuccess?.()
+              })
+              step()
+              return result
+            },
           })
           return tx
         },
       }
       request.result = db
       queueMicrotask(() => {
-        if (!storeCreated) request.onupgradeneeded?.()
+        if (!storeCreated) {
+          request.transaction = db.transaction()
+          request.onupgradeneeded?.({ oldVersion, newVersion: 2 })
+          request.transaction = null
+        }
         request.onsuccess?.()
       })
       return request
@@ -106,6 +127,27 @@ describe('账号隔离的未保存草稿恢复', () => {
     const afterRestart = await vault.restorePendingRecoveryDrafts('fictional-a')
     expect(afterRestart.conflicts).toEqual(['sl_tasks'])
     expect(indexedDB.records.size).toBe(1)
+  })
+})
+
+describe('安全副本升级接缝', () => {
+  it('从 v1 升上来时清掉残键，但保留影子副本与隔离草稿', async () => {
+    vi.resetModules()
+    const indexedDB = fakeIndexedDB({ oldVersion: 1 })
+    vi.stubGlobal('indexedDB', indexedDB)
+    localStorage.clear()
+    const vault = await import('../src/composables/dataVault.js')
+
+    // 升级前库里已经有的三类记录，外加一条谁也不认的残键。
+    indexedDB.records.set('__restore_checkpoint_v1__:fictional-a', { key: '__restore_checkpoint_v1__:fictional-a' })
+    indexedDB.records.set('早期格式留下的残键', { key: '早期格式留下的残键' })
+
+    await vault.savePendingRecoveryDraft('fictional-a', 'sl_tasks', '[{"id":"a"}]', 'token-a', '[]')
+
+    // 三条读取路径都认的键必须留下；残键被清掉。
+    expect(indexedDB.records.has('早期格式留下的残键')).toBe(false)
+    expect(indexedDB.records.has('__restore_checkpoint_v1__:fictional-a')).toBe(true)
+    expect(await vault.getPendingRecoveryDrafts('fictional-a')).toMatchObject([{ key: 'sl_tasks' }])
   })
 })
 

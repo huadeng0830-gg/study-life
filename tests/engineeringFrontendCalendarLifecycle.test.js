@@ -20,7 +20,7 @@ async function mount() {
   app.mount(host); await flush()
 }
 beforeEach(() => {
-  stubs.user.value = { id: 'fictional-account-a', email_confirmed_at: '2026-01-01' }
+  stubs.user.value = { id: 'fictional-account-a', email: 'first@example.test', email_confirmed_at: '2026-01-01' }
   stubs.request.mockReset().mockImplementation(async (action) => action === 'profile_get'
     ? { profile: { timezone: 'Asia/Shanghai' } } : { invitations: [] })
   stubs.subscribe.mockReset().mockResolvedValue(() => {})
@@ -34,7 +34,7 @@ describe('engineering audit: calendar account lifecycle', () => {
     stubs.subscribe.mockImplementation((id) => id === 'fictional-account-a'
       ? new Promise((resolve) => { resolveOld = resolve }) : Promise.resolve(currentStop))
     await mount()
-    stubs.user.value = { id: 'fictional-account-b', email_confirmed_at: '2026-01-01' }; await flush()
+    stubs.user.value = { id: 'fictional-account-b', email: 'second@example.test', email_confirmed_at: '2026-01-01' }; await flush()
     resolveOld(oldStop); await flush()
     expect(oldStop).toHaveBeenCalledOnce()
     expect(currentStop).not.toHaveBeenCalled()
@@ -63,7 +63,7 @@ describe('engineering audit: calendar account lifecycle', () => {
     stubs.user.value = { id: 'fictional-account-a' }
     await mount()
     expect(stubs.request).not.toHaveBeenCalled()
-    stubs.user.value = { id: 'fictional-account-a', email_confirmed_at: '2026-01-01' }; await flush()
+    stubs.user.value = { id: 'fictional-account-a', email: 'first@example.test', email_confirmed_at: '2026-01-01' }; await flush()
     expect(stubs.request).toHaveBeenCalledWith('invitations_list')
   })
 })
