@@ -4,8 +4,10 @@
 // 内部继续按短名调用，也保持 './availability.js' 这个入口对既有引用可用。
 // 单一实现很重要：时区逻辑错一位就是"偶尔差一小时"，两份实现迟早漂移。
 import { dateInZone, formatter, validClock, validDate, wallTimeToEpoch, zonedParts } from '../../../src/composables/zonedTime.js'
+import { normalizeAvailabilityPreferences } from '../../../src/composables/availabilityPreferences.js'
 
 export { dateInZone, wallTimeToEpoch, zonedParts }
+export { normalizeAvailabilityPreferences }
 
 const DAY_MS = 24 * 60 * 60 * 1000
 const MINUTE_MS = 60 * 1000
@@ -165,7 +167,7 @@ function courseBlocksForDate(values, profile, preferences, date) {
         || !Number.isInteger(startWeek) || !Number.isInteger(endWeek) || startWeek < 1 || endWeek < startWeek || endWeek > 25
         || !['all', 'odd', 'even', undefined, null, ''].includes(course.weekType)
         || typeof course.start !== 'string' || typeof course.end !== 'string') return { ok: false, blocks: [] }
-    if (exception?.type !== 'off' && date <= profile.semester_end && week >= 1
+    if (exception?.type !== 'off' && week >= 1
         && courseDay === day && courseIsOn(course, week) && !hidden.has(String(course.id))) selected.push(course)
   }
   const present = new Set(selected.map((course) => String(course.id)))
@@ -231,22 +233,15 @@ function eventBlocksForDate(values, profile, date) {
 }
 
 function normalizedPreferences(profile) {
-  const prefs = profile.availability_preferences || {}
-  const startTime = validClock(prefs.startTime ?? '09:00')
-  const endTime = validClock(prefs.endTime ?? '22:00')
-  const minimumMinutes = Number(prefs.minimumMinutes ?? 90)
-  const classBufferMinutes = Number(prefs.classBufferMinutes ?? 30)
-  if (startTime === null || endTime === null || endTime <= startTime
-      || !Number.isInteger(minimumMinutes) || minimumMinutes < 30 || minimumMinutes > 720
-      || !Number.isInteger(classBufferMinutes) || classBufferMinutes < 0 || classBufferMinutes > 180) return null
-  return { startTime, endTime, minimumMinutes, classBufferMinutes, includeWeekends: prefs.includeWeekends !== false }
+  const prefs = normalizeAvailabilityPreferences(profile.availability_preferences || {})
+  return prefs ? { ...prefs, startTime: validClock(prefs.startTime), endTime: validClock(prefs.endTime) } : null
 }
 
 export function userFreeIntervals({ snapshot, profile, confirmedInvitations = [] }, range) {
   const start = Number(range?.start); const end = Number(range?.end)
   if (!profile || !snapshot?.payload?.values || !Number.isFinite(snapshot.revision)
       || !Number.isFinite(start) || !Number.isFinite(end) || end <= start
-      || end - start > 32 * DAY_MS || !validDate(profile.semester_end)) return { known: false, intervals: [], revision: snapshot?.revision ?? null }
+      || end - start > 32 * DAY_MS) return { known: false, intervals: [], revision: snapshot?.revision ?? null }
   let zone
   try { formatter(profile.timezone || 'Asia/Shanghai').format(new Date(start)); zone = profile.timezone || 'Asia/Shanghai' } catch { return { known: false, intervals: [], revision: snapshot.revision } }
   const values = snapshot.payload.values
@@ -259,9 +254,6 @@ export function userFreeIntervals({ snapshot, profile, confirmedInvitations = []
   const preferences = normalizedPreferences(profile)
   if (!preferences) return { known: false, intervals: [], revision: snapshot.revision }
   const lastDate = dateInZone(end - 1, zone)
-  if (!validDate(profile.schedule_complete_through) || profile.schedule_complete_through < lastDate) {
-    return { known: false, intervals: [], revision: snapshot.revision }
-  }
   const firstDate = addDate(dateInZone(start, zone), -1)
   const afterLastDate = addDate(lastDate, 1)
   const busy = []
@@ -280,7 +272,7 @@ export function userFreeIntervals({ snapshot, profile, confirmedInvitations = []
   const daily = []
   for (let date = firstDate; date < afterLastDate; date = addDate(date, 1)) {
     const weekday = new Date(`${date}T00:00:00Z`).getUTCDay()
-    if (!preferences.includeWeekends && (weekday === 0 || weekday === 6)) continue
+    if (!preferences.weekdays.includes((weekday + 6) % 7)) continue
     const s = wallTimeToEpoch(date, `${pad(Math.floor(preferences.startTime / 60))}:${pad(preferences.startTime % 60)}`, zone, 'start')
     const e = wallTimeToEpoch(date, `${pad(Math.floor(preferences.endTime / 60))}:${pad(preferences.endTime % 60)}`, zone, 'end')
     if (s !== null && e !== null && e > s) daily.push({ start: s, end: e })

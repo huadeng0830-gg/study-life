@@ -47,6 +47,7 @@ function createEdge({ user = { id: actor, email: 'student@example.test', email_c
       let input = null
       let single = false
       let rowLimit = Infinity
+      let rowOffset = 0
       const orders = []
       const query = {
         select(columns = '*') { selected = columns; return query },
@@ -55,12 +56,28 @@ function createEdge({ user = { id: actor, email: 'student@example.test', email_c
         is(key, value) { appliedFilters.push({ table, op: 'is', key, value }); filters.push((row) => row[key] === value); return query },
         gte(key, value) { filters.push((row) => row[key] >= value); return query },
         or(expression) {
+          if (expression.startsWith('expires_on.is.null,')) {
+            const today = expression.split('expires_on.gte.')[1]
+            filters.push((row) => row.expires_on == null || row.expires_on >= today)
+            return query
+          }
+          if (expression.includes('.imatch.')) {
+            const clauses = [...expression.matchAll(/(\w+)\.imatch\."((?:\\.|[^"\\])*)"/g)]
+            if (!clauses.length) throw new Error('Malformed quoted search expression')
+            filters.push((row) => clauses.some(([, key, value]) => {
+              const pattern = value.replace(/\\(.)/gs, '$1')
+              if (!pattern.startsWith('***=')) throw new Error('Search must use literal patterns')
+              return String(row[key] || '').toLocaleLowerCase('zh-CN').includes(pattern.slice(4).toLocaleLowerCase('zh-CN'))
+            }))
+            return query
+          }
           const pairs = [...expression.matchAll(/and\(sender_id\.eq\.([^,]+),recipient_id\.eq\.([^\)]+)\)/g)]
           filters.push((row) => pairs.some((pair) => row.sender_id === pair[1] && row.recipient_id === pair[2]))
           return query
         },
         order(key, { ascending = true } = {}) { orders.push({ key, ascending }); return query },
         limit(value) { rowLimit = value; return query },
+        range(start, end) { rowOffset = start; rowLimit = end - start + 1; return query },
         maybeSingle() { single = true; return query },
         single() { single = true; return query },
         insert(value) { operation = 'insert'; input = value; return query },
@@ -89,13 +106,13 @@ function createEdge({ user = { id: actor, email: 'student@example.test', email_c
                 if (compared) return ascending ? compared : -compared
               }
               return 0
-            }).slice(0, rowLimit)
+            }).slice(rowOffset, rowOffset + rowLimit)
             if (operation === 'update') found.forEach((row) => Object.assign(row, input))
             const projected = selected === '*' ? found : found.map((row) => Object.fromEntries(selected.split(',').map((key) => [key, row[key]])))
             result = single ? (projected[0] || null) : projected
           }
           const error = notificationError && table === 'social_notifications' ? { code: 'XX000', message: 'notification unavailable' } : null
-          return Promise.resolve({ data: result, error }).then(resolve, reject)
+          return Promise.resolve({ data: result, count: rows[table].filter((row) => filters.every((matches) => matches(row))).length, error }).then(resolve, reject)
         },
       }
       return query
@@ -121,6 +138,64 @@ async function call(handler, action, payload = {}) {
 }
 
 describe('campus-life Edge Function', () => {
+  it('loads only the requested submission domain and validates domain names', async () => {
+    const { handler, admin } = createEdge()
+    const result = await call(handler, 'mine_list', { domains: ['listings'] })
+    expect(result.status).toBe(200)
+    expect(Object.keys((await result.json()).data)).toEqual(['listings'])
+    expect(admin.from.mock.calls.map(([name]) => name)).not.toContain('campus_course_reviews')
+    expect((await call(handler, 'mine_list', { domains: ['social_profiles'] })).status).toBe(400)
+  })
+  it('finds old content beyond the first hundred rows and keeps search public and scoped', async () => {
+    const old = Array.from({ length: 110 }, (_, i) => ({ id: `row-${String(i).padStart(3, '0')}`, school: '虚构大学', campus: '东区', title: i === 109 ? '想找的教材' : '其他书籍', status: 'active', description: '', owner_id: actor }))
+    const { handler } = createEdge({ tables: { campus_market_listings: [...old,
+      { ...old[109], id: 'cross-school', school: '另一所大学' },
+      { ...old[109], id: 'cross-campus', campus: '西区' },
+      { ...old[109], id: 'pending', status: 'pending_review' },
+    ] } })
+    const response = await call(handler, 'search', { query: '想找的', type: 'market_listing' })
+    const { data } = await response.json()
+    expect(response.status).toBe(200)
+    expect(data.results).toEqual([{ id: 'row-109', type: 'market_listing', title: '想找的教材', detail: '', campus: '东区' }])
+    expect(data.hasMore).toBe(false)
+  })
+  it.each(['100%', 'a_b', 'C*', '引号",status.eq.pending_review', '路径\\', '(?i).*'])('treats search metacharacters literally: %s', async (query) => {
+    const listing = { school: '虚构大学', campus: '东区', status: 'active', description: '' }
+    const { handler } = createEdge({ tables: { campus_market_listings: [{ ...listing, id: 'match', title: query }, { ...listing, id: 'no-match', title: 'unrelated' }] } })
+    const response = await call(handler, 'search', { query, type: 'market_listing' })
+    expect((await response.json()).data.results.map((row) => row.id)).toEqual(['match'])
+  })
+  it('paginates matched search results deterministically without duplicates', async () => {
+    const { handler } = createEdge({ tables: { campus_market_listings: Array.from({ length: 65 }, (_, i) => ({ id: String(i).padStart(3, '0'), school: '虚构大学', campus: '东区', title: '教材', status: 'active' })) } })
+    const first = (await (await call(handler, 'search', { query: '教材', type: 'market_listing' })).json()).data
+    const second = (await (await call(handler, 'search', { query: '教材', type: 'market_listing', page: 1 })).json()).data
+    expect(first.results).toHaveLength(30)
+    expect(second.results).toHaveLength(30)
+    expect(first.hasMore).toBe(true)
+    expect(second.results.some((row) => first.results.some((before) => before.id === row.id))).toBe(false)
+  })
+  it('excludes cancelled events, expired guides, and private or archived places from search', async () => {
+    const base = { school: '虚构大学', campus: '东区', review_status: 'approved' }
+    const { handler } = createEdge({ tables: {
+      campus_events: [{ ...base, id: 'cancelled', title: '共同关键词', status: 'cancelled', ends_at: '2099-01-01T00:00:00Z' }],
+      campus_guides: [{ ...base, id: 'expired', title: '共同关键词', body: '', expires_on: '2000-01-01' }],
+      campus_places: [{ ...base, id: 'private', name: '共同关键词', visibility: 'private', archived_at: null }, { ...base, id: 'archived', name: '共同关键词', visibility: 'school', archived_at: '2026-01-01' }],
+      campus_courses: [], campus_teachers: [], campus_shuttle_routes: [],
+    } })
+    const response = await call(handler, 'search', { query: '共同关键词' })
+    expect((await response.json()).data.results).toEqual([])
+  })
+  it('returns twenty market rows per page and searches before paging', async () => {
+    const { handler } = createEdge({ tables: { campus_market_listings: Array.from({ length: 100 }, (_, i) => ({ id: String(i).padStart(3, '0'), school: '虚构大学', campus: '东区', title: '教材' + i, listing_type: 'sale', category: 'textbook', status: 'active', created_at: '2026-10-10' })) } })
+    const first = (await (await call(handler, 'market_list')).json()).data
+    const second = (await (await call(handler, 'market_list', { page: 1 })).json()).data
+    expect(first.listings).toHaveLength(20)
+    expect(first.total).toBe(100)
+    expect(second.page).toBe(1)
+    expect(new Set([...first.listings, ...second.listings].map((row) => row.id)).size).toBe(40)
+    const match = (await (await call(handler, 'market_list', { query: '教材0' })).json()).data
+    expect(match.listings.map((row) => row.title)).toEqual(['教材0'])
+  })
   it('filters public records using the authenticated profile school and campus and omits owner ids', async () => {
     const { handler } = createEdge()
     const response = await call(handler, 'market_list', { school: '另一所大学', campus: '西区' })

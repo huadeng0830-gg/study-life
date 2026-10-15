@@ -91,7 +91,7 @@ async function listPublic(payload: any) {
     .select('id,category,title,body,status,public_reply,public_reason,reward_beans,reward_issued,created_at,updated_at', { count: 'exact' })
     .eq('visibility', 'public')
   if (['pending', 'processing', 'resolved', 'not_adopted'].includes(payload.status)) query = query.eq('status', payload.status)
-  const { data, count, error } = await query.order('updated_at', { ascending: false }).range(offset, offset + limit - 1)
+  const { data, count, error } = await query.order('updated_at', { ascending: false }).order('id', { ascending: true }).range(offset, offset + limit - 1)
   if (error) throw error
   return { items: data || [], total: count || 0, offset, limit }
 }

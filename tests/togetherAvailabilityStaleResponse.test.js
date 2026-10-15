@@ -137,6 +137,25 @@ describe('一起约共同时间查询不会串到别的好友', () => {
   function queryButton() {
     return [...host.querySelectorAll('button')].find((node) => node.textContent.includes('查找共同时间'))
   }
+  it('uses both friends minimum duration and disables shorter invitation presets', async () => {
+    const original = socialRequest.getMockImplementation()
+    socialRequest.mockImplementation((action, payload) => action === 'availability_query'
+      ? Promise.resolve({ known: true, minimumMinutes: 120, intervals: [intervalAt(1)] })
+      : original(action, payload))
+    await mountView()
+    await pickFriend(FRIEND_A)
+    queryButton().click()
+    await flush()
+    const choose = [...host.querySelectorAll('button')].find((node) => node.textContent.includes('选择这个时段'))
+    expect(choose).toBeTruthy()
+    choose.click()
+    await nextTick()
+    const short = [...host.querySelectorAll('.duration-chip')].find((node) => node.textContent.trim() === '90 分钟')
+    expect(short.disabled).toBe(true)
+    const start = host.querySelector('.invite-time-grid input').value
+    const end = host.querySelectorAll('.invite-time-grid input')[1].value
+    expect(Date.parse(end) - Date.parse(start)).toBe(120 * 60000)
+  })
 
   it('查询途中切换好友，旧响应不覆盖当前好友的结果', async () => {
     await mountView()

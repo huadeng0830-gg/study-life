@@ -49,17 +49,22 @@ export function useCampusRequest() {
 export function useCampusBusyKeys() {
   // reactive Map: templates read `busy(id)` on every render and must see flips.
   const keys = reactive(new Map())
+  function reset() { keys.clear() }
+  watch(() => accountUser.value?.id || '', reset, { flush: 'sync' })
+  onScopeDispose(reset)
 
   function busy(key) { return keys.has(key) }
 
   async function run(key, task) {
     if (keys.has(key)) return false
-    keys.set(key, true)
+    const token = Symbol()
+    keys.set(key, token)
     try {
       await task()
       return true
     } finally {
-      keys.delete(key)
+      // An old account's completion must not unlock the new account's row.
+      if (keys.get(key) === token) keys.delete(key)
     }
   }
 

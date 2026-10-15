@@ -7,6 +7,7 @@ import {
   intersectIntervals,
   mutualFreeIntervals,
   userFreeIntervals,
+  normalizeAvailabilityPreferences,
 } from './availability.js'
 import { normalizeTaskWorkCheckpoint } from '../../../src/composables/tasks/taskWorkProgress.js'
 import { PLACE_CATEGORIES, PLACE_TYPES, normalizePlaceRecord } from '../../../src/composables/placeModels.js'
@@ -169,7 +170,7 @@ function dbError(error: any): never {
     ['SOCIAL_RATE_LIMIT', 'rate_limited', '操作太频繁了，请稍后再试。', 429],
     ['SOCIAL_EMAIL_VERIFICATION_REQUIRED', 'email_verification_required', '请先完成邮箱验证，再使用好友协作。', 403],
     ['SOCIAL_TARGET_NOT_FOUND', 'not_found', '没有找到可添加的用户。对方可能未注册、未验证邮箱或关闭了邮箱发现。', 404],
-    ['SOCIAL_SCHEDULE_UNKNOWN', 'schedule_unknown', '暂时无法确认双方的课表范围，请检查双方的课表完整日期后重试。', 409],
+    ['SOCIAL_SCHEDULE_UNKNOWN', 'schedule_unknown', '暂时无法读取双方课表，请检查账号同步状态后重试。', 409],
     ['SOCIAL_SCHEDULE_STALE', 'schedule_changed', '课表刚刚发生了变化，请刷新共同时间后重试。', 409],
     ['SOCIAL_INVITATION_CONFLICT', 'conflict', '这个时间已有新的安排，请刷新后重新选择。', 409],
     ['SOCIAL_FRIENDSHIP_REQUIRED', 'friendship_required', '只能向已添加的好友发起邀约。', 403],
@@ -357,11 +358,8 @@ function friendView(profile: any) {
 async function requireProfiles(userIds: string[]) {
   const profiles = await getProfiles(userIds)
   const byId = new Map(profiles.map((profile: any) => [profile.user_id, profile]))
-  if (userIds.some((id) => !byId.has(id))) throw new ApiError('profile_required', '双方都需要先设置昵称并确认课表完整日期。', 409)
+  if (userIds.some((id) => !byId.has(id))) throw new ApiError('profile_required', '双方都需要先设置昵称。', 409)
   const ordered = userIds.map((id) => byId.get(id))
-  if (ordered.some((profile: any) => !profile.schedule_complete_through || !profile.semester_end)) {
-    throw new ApiError('profile_required', '双方都需要设置课表完整日期和学期结束日。', 409)
-  }
   return ordered
 }
 
@@ -470,7 +468,7 @@ async function checkInterval(userIds: string[], startText: string, endText: stri
   if (!range) throw new ApiError('invalid_input', '邀约时间无效或超过 12 小时。')
   const loaded = await loadPair(userIds, range)
   const result = mutualFreeIntervals(loaded.pair[0], loaded.pair[1], range)
-  if (!result.known) throw new ApiError('schedule_unknown', '请先确认双方课表完整日期覆盖这次邀约时间。', 409)
+  if (!result.known) throw new ApiError('schedule_unknown', '暂时无法读取双方课表，请完成账号同步后重新查找共同时间。', 409)
   if (range.end - range.start < result.minimumMinutes * 60_000) {
     throw new ApiError('invalid_input', `邀约时长至少需要 ${result.minimumMinutes} 分钟。`)
   }
@@ -571,35 +569,11 @@ async function saveProfile(user: any, payload: any) {
   const timezone = cleanText(payload.timezone || 'Asia/Shanghai', 64, '时区', true)
   try { new Intl.DateTimeFormat('en-US', { timeZone: timezone }).format(new Date()) } catch { throw new ApiError('invalid_input', '请选择有效的时区。') }
   if (payload.emailDiscoverable === true) verified(user)
-  const complete = String(payload.scheduleCompleteThrough || '')
-  const semesterEnd = String(payload.semesterEnd || '')
-  const completeMs = DATE_RE.test(complete) ? Date.parse(`${complete}T00:00:00Z`) : Number.NaN
-  if (!Number.isFinite(completeMs) || new Date(completeMs).toISOString().slice(0, 10) !== complete) {
-    throw new ApiError('invalid_input', '请选择有效的课表完整日期。')
-  }
-  const semesterEndMs = DATE_RE.test(semesterEnd) ? Date.parse(`${semesterEnd}T00:00:00Z`) : Number.NaN
-  if (!Number.isFinite(semesterEndMs) || new Date(semesterEndMs).toISOString().slice(0, 10) !== semesterEnd) {
-    throw new ApiError('invalid_input', '请选择有效的学期结束日期。')
-  }
-  const raw = payload.availabilityPreferences || {}
-  const start = String(raw.startTime || '09:00')
-  const end = String(raw.endTime || '22:00')
-  const parseMinutes = (value: string) => {
-    const match = /^(\d{2}):(\d{2})$/.exec(value)
-    return match && Number(match[1]) <= 23 && Number(match[2]) <= 59 ? Number(match[1]) * 60 + Number(match[2]) : -1
-  }
-  const minimum = Number(raw.minimumMinutes ?? 90)
-  const buffer = Number(raw.classBufferMinutes ?? 30)
-  if (parseMinutes(start) < 0 || parseMinutes(end) <= parseMinutes(start)
-      || !Number.isInteger(minimum) || minimum < 30 || minimum > 720
-      || !Number.isInteger(buffer) || buffer < 0 || buffer > 180) throw new ApiError('invalid_input', '可约时间偏好不正确。')
+  const preferences = normalizeAvailabilityPreferences(payload.availabilityPreferences || {})
+  if (!preferences) throw new ApiError('invalid_input', '可约时间偏好不正确。')
   const row = {
     user_id: userId, nickname, school, campus, email_discoverable: payload.emailDiscoverable === true,
-    timezone, schedule_complete_through: complete, semester_end: semesterEnd,
-    availability_preferences: {
-      startTime: start, endTime: end, minimumMinutes: minimum, classBufferMinutes: buffer,
-      includeWeekends: raw.includeWeekends !== false,
-    },
+    timezone, availability_preferences: preferences,
     updated_at: new Date().toISOString(),
   }
   const { data, error } = await admin.from('social_profiles').upsert(row, { onConflict: 'user_id' }).select(SAFE_PROFILE_FIELDS).single()

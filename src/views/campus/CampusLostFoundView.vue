@@ -33,7 +33,7 @@ watch(() => accountUser.value?.id, () => { claimTarget.value = ''; privateEviden
 
 async function refresh() {
   return page.load(async () => {
-    const [publicResult, claimResult, mineResult] = await Promise.all([campusLostFound(), listLostFoundClaims(), campusLifeMine()])
+    const [publicResult, claimResult, mineResult] = await Promise.all([campusLostFound(), listLostFoundClaims(), campusLifeMine({ domains: ["lostFound"] })])
     return { items: publicResult.items || [], claims: claimResult.claims || [], ownClaims: claimResult.ownClaims || [], mine: mineResult.lostFound || [] }
   })
 }

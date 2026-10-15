@@ -60,7 +60,7 @@ function messageFor(code, fallback, action = '') {
     not_found: '内容已更新，请刷新后查看。',
     rate_limited: '操作太频繁了，请稍后再试。',
     duplicate_place: '相同校区和区域已有同名地点，请先检查现有资料。',
-    schedule_unknown: '暂时无法确认双方的课表范围，请检查双方的课表完整日期和账号同步状态。',
+    schedule_unknown: '暂时无法读取双方的课表，请检查账号同步状态后重试。',
     schedule_changed: '课表或可约偏好刚刚发生变化，请刷新共同时间后重试。',
     conflict: '所选时间已不再空闲，请刷新后重新选择。',
     friendship_required: '只能与已添加的好友匹配共同时间。',

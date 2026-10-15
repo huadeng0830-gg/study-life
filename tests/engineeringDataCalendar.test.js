@@ -9,7 +9,7 @@ describe('共享日历日期校验', () => {
   it.each(['2024-02-29', '2026-02-28', '2026-04-30', '0099-12-31'])('保留合法日期 %s', (value) => {
     expect(validDate(value)).toBe(true)
   })
-  it('无效的课表覆盖日期不会给出已知空闲时间', () => {
+  it('不再使用旧课表覆盖日期阻止空闲匹配', () => {
     const result = userFreeIntervals({
       profile: {
         user_id: 'fictional-calendar-member',
@@ -20,6 +20,7 @@ describe('共享日历日期校验', () => {
       },
       snapshot: { revision: 1, payload: { values: { sl_courses: [], sl_events: [], sl_exams: [] } } },
     }, { start: Date.UTC(2026, 3, 10), end: Date.UTC(2026, 3, 11) })
-    expect(result).toMatchObject({ known: false, intervals: [] })
+    expect(result.known).toBe(true)
+    expect(result.intervals.length).toBeGreaterThan(0)
   })
 })

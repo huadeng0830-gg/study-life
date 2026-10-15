@@ -4,6 +4,36 @@
 // RELEASE_UPDATES 仅保留最近 3 条内置说明，完整的简短发布历史保存在 release-history.json。
 export const RELEASE_UPDATES = Object.freeze([
   {
+    version: '1.8.0',
+    legacyVersion: '2026年10月15日-版本8',
+    channel: 'stable',
+    summary: '校园集市支持紧凑浏览、分类排序和分页',
+    signature: 'e0577a69ee',
+    changes: {
+      features: [],
+      improvements: [
+      '校园集市支持紧凑浏览、分类排序、分页和筛选清除',
+      '校园搜索改为数据库筛选并优化投稿按需读取',
+      '简化可约设置，默认包含周末并支持选填星期',
+      '统一校园发布校验并完善账号切换与草稿保护',
+      ],
+      fixes: [
+      '修复手机端审核申请表单重叠和公开建议加载问题',
+      '修复双方邀约最短时长校验不一致',
+      ],
+      security: [],
+      breaking: [],
+    },
+    notes: [
+      '校园集市支持紧凑浏览、分类排序、分页和筛选清除',
+      '校园搜索改为数据库筛选并优化投稿按需读取',
+      '简化可约设置，默认包含周末并支持选填星期',
+      '统一校园发布校验并完善账号切换与草稿保护',
+      '修复手机端审核申请表单重叠和公开建议加载问题',
+      '修复双方邀约最短时长校验不一致',
+    ],
+  },
+  {
     version: '1.7.0',
     legacyVersion: '2026年10月15日-版本7',
     channel: 'stable',
@@ -59,38 +89,16 @@ export const RELEASE_UPDATES = Object.freeze([
       '邮件服务尚未配置时隐藏不可用的注册和找回入口',
     ],
   },
-  {
-    version: '1.5.0',
-    legacyVersion: '2026年10月15日-版本5',
-    channel: 'stable',
-    summary: '公开三两豆余额、获取规则与建议奖励',
-    signature: '6ec39d73a1',
-    changes: {
-      features: [
-      '公开三两豆余额、获取规则与建议奖励',
-      ],
-      improvements: [
-      '手机导航最多自选五个页面',
-      ],
-      fixes: [],
-      security: [],
-      breaking: [],
-    },
-    notes: [
-      '公开三两豆余额、获取规则与建议奖励',
-      '手机导航最多自选五个页面',
-    ],
-  },
 ])
 
 // SemVer 是面向用户和发布的正式版本。日期式标识只用于旧网页客户端的升级兼容。
-export const APP_VERSION = '1.7.0'
+export const APP_VERSION = '1.8.0'
 export const RELEASE_VERSION = APP_VERSION
 export const RELEASE_CHANNEL = 'stable'
 export const LEGACY_RELEASE_VERSION = RELEASE_UPDATES[0].legacyVersion || RELEASE_UPDATES[0].version
 
 // 与第一条签名保持一致，交给 vite.config.js 校验源码一致性。
-export const RELEASE_SOURCE_SIGNATURE = '106cd651fd'
+export const RELEASE_SOURCE_SIGNATURE = 'e0577a69ee'
 
 // 兼容旧引用：当前版本的更新说明。
 export const RELEASE_NOTES = RELEASE_UPDATES[0].notes

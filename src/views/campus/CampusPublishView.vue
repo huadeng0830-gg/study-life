@@ -11,49 +11,20 @@ import CampusPublishPreview from '../../components/campus/CampusPublishPreview.v
 import { useCampusConfirm } from '../../composables/campusConfirm.js'
 import { campusErrorMessage } from '../../composables/campusContentModel.js'
 import { campusLocalDateTimeInput } from '../../composables/campusFormatting.js'
+import { campusPublicationOptions as options, campusPublicationDefaults as defaults, buildCampusPublication } from '../../composables/campusPublication.js'
+import { submitCampusPublication } from '../../services/campusPublication.js'
 import { useCampusLifeDraft } from '../../composables/campusLifeDraft.js'
 import { useCampusRequest } from '../../composables/campusRequest.js'
-import {
-  campusCourses, campusLifeMine, campusShuttles, resubmitCampusContent, submitCampusCourse, submitCampusEvent,
-  submitCampusGuide, submitCampusHelpTask, submitCampusMarketListing, submitCampusShuttleCorrection,
-  submitCampusShuttleException, submitCampusShuttleRoute, submitCampusTeacher, submitLostFoundItem,
-  submitCampusTeachingAssignment,
-} from '../../services/campusLife.js'
+import { campusCourses, campusLifeMine, campusShuttles } from '../../services/campusLife.js'
 
-const options = [
-  { id: 'teacher', title: '教师资料线索', note: '仅提交公开资料来源，审核后再建立档案。' },
-  { id: 'course', title: '课程资料', note: '课程、院系与公开来源。' },
-  { id: 'assignment', title: '授课安排', note: '把已审核的教师、课程和学期关联起来。' },
-  { id: 'market', title: '二手出售 / 求购 / 赠送', note: '线下校园安全地点交易；平台不收款。' },
-  { id: 'help', title: '校园互助', note: '不公开取件码、手机号、房间号或证件信息。' },
-  { id: 'shuttle', title: '校车线路与班次', note: '必须提供公开来源；人工审核后展示。' },
-  { id: 'shuttle_correction', title: '校车线路纠错', note: '说明错误并提供可核实来源。' },
-  { id: 'shuttle_exception', title: '校车特殊日期安排', note: '只提交有公开来源的临时班次变化。' },
-  { id: 'lost', title: '失物招领', note: '敏感号码与可识别信息不要写进公开描述。' },
-  { id: 'event', title: '活动 / 社团活动', note: '未验证组织方不会显示学校官方标识。' },
-  { id: 'guide', title: '校园指南 / 经验', note: '标明官方来源或学生经验，并设置有效期。' },
-]
 const primaryKinds = ['market', 'help', 'lost', 'event', 'guide', 'shuttle']
 const shortTitles = { market: '二手集市', help: '校园互助', lost: '失物招领', event: '活动 / 社团', guide: '校园指南', shuttle: '校车线路' }
 const optionIcons = { teacher: UserRound, course: GraduationCap, assignment: Link, market: ShoppingBag, help: HandHelping, shuttle: Bus, shuttle_correction: FileCheck, shuttle_exception: Clock, lost: Telescope, event: CalendarDays, guide: BookOpen }
 const route = useRoute()
-const defaults = () => ({
-  teacher: { name: '', department: '', researchDirections: '', officialIntro: '', sourceUrl: '' },
-  course: { name: '', department: '', description: '', sourceUrl: '' },
-  assignment: { courseId: '', teacherId: '', term: '', sourceUrl: '' },
-  market: { listingType: 'sale', category: 'textbook', title: '', description: '', condition: '', price: '', meetupArea: '' },
-  help: { taskType: 'parcel', title: '', description: '', pickupArea: '', deliveryArea: '', deadline: '' },
-  shuttle: { name: '', sourceUrl: '', effectiveFrom: '', effectiveTo: '', stopsText: '', departuresText: '' },
-  shuttle_correction: { routeId: '', detail: '', sourceUrl: '' },
-  shuttle_exception: { routeId: '', serviceDate: '', exceptionType: 'suspended', departureTime: '', direction: 'outbound', note: '', sourceUrl: '' },
-  lost: { mode: 'lost', category: 'electronics', title: '', description: '', approximateLocation: '', occurredAt: '' },
-  event: { title: '', description: '', startsAt: '', endsAt: '', location: '', organizer: '', signupUrl: '', sourceUrl: '', capacity: '' },
-  guide: { title: '', category: 'new_student', body: '', sourceType: 'student_experience', sourceUrl: '', expiresOn: '' },
-})
 const confirm = useCampusConfirm()
 const confirmRequest = confirm.pending
 const formDefaults = defaults()
-const { value: draft, savedRevision } = useCampusLifeDraft('unified-publisher', { kind: 'market', forms: defaults() })
+const { value: draft, savedRevision, saveError } = useCampusLifeDraft('unified-publisher', { kind: 'market', forms: defaults() })
 if (!draft.value.forms || typeof draft.value.forms !== 'object' || Array.isArray(draft.value.forms)) draft.value.forms = formDefaults
 for (const item of options) if (!draft.value.forms[item.id]) draft.value.forms[item.id] = formDefaults[item.id]
 // The draft is restored from localStorage, so `kind` can name an option that no longer
@@ -68,6 +39,8 @@ const shuttleRoutes = ref([])
 const editing = ref(null)
 const optionsLoading = ref(false)
 const saving = ref(false)
+const editingLoading = ref(false)
+const editingLoadFailed = ref(false)
 const error = ref('')
 const message = ref('')
 // 两条独立的守卫，不能合并：读选项（切类型就会重来）和提交（用户点下去之后
@@ -124,6 +97,8 @@ watch(() => [accountUser.value?.id || '', route.query.kind, route.query.editType
   const revision = page.begin()
   choices.invalidate()
   editing.value = null
+  editingLoading.value = false
+  editingLoadFailed.value = false
   teachersCourses.value = { courses: [], teachers: [], assignments: [], reviews: [] }
   shuttleRoutes.value = []
   saving.value = false
@@ -134,44 +109,20 @@ watch(() => [accountUser.value?.id || '', route.query.kind, route.query.editType
   const editType = String(route.query.editType || '')
   const editId = String(route.query.id || '')
   if (submissionKeys[editType] && editId) {
+    editingLoading.value = true
     try {
-      const mine = await campusLifeMine()
+      const mine = await campusLifeMine({ domains: [submissionKeys[editType]] })
       if (!page.live(revision)) return
       const item = (mine[submissionKeys[editType]] || []).find((candidate) => candidate.id === editId)
       if (!item || (item.review_status || item.status) !== 'rejected' || !Number.isSafeInteger(Number(item.revision))) throw new Error('这条投稿已更新或不属于当前账号，请刷新投稿记录。')
       prefillSubmission(editType, item)
-    } catch (cause) { if (page.live(revision)) error.value = campusErrorMessage(cause, '暂时无法读取这条待修改投稿。') }
+    } catch (cause) { if (page.live(revision)) { editingLoadFailed.value = true; error.value = campusErrorMessage(cause, '暂时无法读取这条待修改投稿。') } }
   }
-  if (page.live(revision)) await loadChoices()
+  if (page.live(revision)) { editingLoading.value = false; await loadChoices() }
 }, { immediate: true, flush: 'sync' })
 
-function splitRows(value, label) {
-  return String(value || '').split('\n').map((row) => row.trim()).filter(Boolean).map((row, index) => {
-    const parts = row.split('|').map((part) => part.trim())
-    if (parts.length < 2) throw new Error(`${label}第 ${index + 1} 行请按“字段|字段”填写。`)
-    return parts
-  })
-}
-
-function shuttlePayload() {
-  const stops = splitRows(form.value.stopsText, '站点').map(([direction, name]) => ({ direction, name }))
-  const departures = splitRows(form.value.departuresText, '班次').map(([direction, day, time, stopName = '']) => ({ direction, serviceDay: day, time, stopName }))
-  return { ...form.value, stops, departures }
-}
-
-function priceInCents(value) {
-  if (value === '') return null
-  const price = Number(value)
-  if (!Number.isFinite(price) || price < 0 || price > 1000000) throw new Error('价格需在 0 至 1,000,000 元之间。')
-  return Math.round(price * 100)
-}
-
-function localTimestamp(value) {
-  return value ? new Date(value).toISOString() : ''
-}
-
 async function publish() {
-  if (saving.value) return
+  if (saving.value || editingLoading.value || editingLoadFailed.value) return
   const revision = page.begin()
   saving.value = true
   error.value = ''
@@ -179,32 +130,10 @@ async function publish() {
   try {
     const submittedKind = kind.value
     const values = { ...form.value }
-    let result
-    let payload
-    if (kind.value === 'teacher') payload = values
-    else if (kind.value === 'course') payload = values
-    else if (kind.value === 'assignment') payload = values
-    else if (kind.value === 'market') payload = { ...values, priceCents: priceInCents(values.price) }
-    else if (kind.value === 'help') payload = { ...values, deadline: localTimestamp(values.deadline) }
-    else if (kind.value === 'shuttle') payload = shuttlePayload()
-    else if (kind.value === 'shuttle_correction') payload = { ...values }
-    else if (kind.value === 'shuttle_exception') payload = { ...values }
-    else if (kind.value === 'lost') payload = { ...values, occurredAt: values.occurredAt }
-    else if (kind.value === 'event') payload = { ...values, startsAt: localTimestamp(values.startsAt), endsAt: localTimestamp(values.endsAt) }
-    else if (kind.value === 'guide') payload = values
-    if (editing.value) result = await resubmitCampusContent(editing.value.type, editing.value.id, editing.value.revision, payload)
-    else if (kind.value === 'teacher') result = await submitCampusTeacher(payload)
-    else if (kind.value === 'course') result = await submitCampusCourse(payload)
-    else if (kind.value === 'assignment') result = await submitCampusTeachingAssignment(payload)
-    else if (kind.value === 'market') result = await submitCampusMarketListing(payload)
-    else if (kind.value === 'help') result = await submitCampusHelpTask(payload)
-    else if (kind.value === 'shuttle') result = await submitCampusShuttleRoute(payload)
-    else if (kind.value === 'shuttle_correction') result = await submitCampusShuttleCorrection(payload.routeId, payload.detail, payload.sourceUrl)
-    else if (kind.value === 'shuttle_exception') result = await submitCampusShuttleException(payload)
-    else if (kind.value === 'lost') result = await submitLostFoundItem(payload)
-    else if (kind.value === 'event') result = await submitCampusEvent(payload)
-    else if (kind.value === 'guide') result = await submitCampusGuide(payload)
-    if (result && page.live(revision)) {
+    const edit = editing.value ? { ...editing.value } : null
+    const payload = buildCampusPublication(submittedKind, values)
+    await submitCampusPublication(submittedKind, payload, edit)
+    if (page.live(revision)) {
       message.value = editing.value ? '修改已重新提交审核。审核通过前不会出现在公开列表。' : '已提交审核。审核通过后才会出现在同校公开列表。'
       draft.value.forms[submittedKind] = defaults()[submittedKind]
       draft.value.kind = submittedKind
@@ -252,11 +181,12 @@ function clearCurrentDraft() {
         <p class="campus-publish-type-note">{{ options.find((item) => item.id === kind)?.note }}</p>
       </section>
       <section class="campus-life-panel">
-        <div class="campus-publish-form-heading"><div><h2>{{ editing ? '修改并重新提交' : options.find((item) => item.id === kind)?.title }}</h2><p>{{ editing ? '修改后会进入新一轮审核。' : '填写下方信息，审核通过后分享给同校同学。' }}</p></div><span class="campus-publish-save-note" role="status"><CheckCheck aria-hidden="true" />{{ !accountUser ? '登录后可保存草稿' : savedRevision ? '草稿已保存在本机' : '按账号保存本机草稿' }}</span></div>
+        <div class="campus-publish-form-heading"><div><h2>{{ editing ? '修改并重新提交' : options.find((item) => item.id === kind)?.title }}</h2><p>{{ editing ? '修改后会进入新一轮审核。' : '填写下方信息，审核通过后分享给同校同学。' }}</p></div><span class="campus-publish-save-note" role="status"><CheckCheck aria-hidden="true" />{{ saveError || (!accountUser ? '登录后可保存草稿' : savedRevision ? '草稿已保存在本机' : '按账号保存本机草稿') }}</span></div>
         <p v-if="error" class="campus-life-inline-state error" role="alert">{{ error }}</p>
+        <RouterLink v-if="editingLoadFailed" class="text-button" to="/campus/mine">返回我的投稿，重新打开后编辑</RouterLink>
         <p v-if="message" class="campus-life-inline-state campus-life-success" role="status">{{ message }}</p>
         <form class="campus-publish-form" @submit.prevent="publish">
-          <fieldset :disabled="saving" class="campus-publish-fieldset">
+          <fieldset :disabled="saving || editingLoading || editingLoadFailed" class="campus-publish-fieldset">
           <FieldGroup class="campus-life-form grid grid-cols-1 min-[760px]:grid-cols-2 gap-5">
           <template v-if="kind === 'teacher'">
             <Field><label>教师姓名 <input v-model="form.name" maxlength="100" required /></label></Field><Field><label>院系 <input v-model="form.department" maxlength="120" /></label></Field>
@@ -327,7 +257,7 @@ function clearCurrentDraft() {
             <p v-if="form.sourceType === 'student_experience'" class="span-all campus-life-inline-state">学生经验会明确标注为经验信息，不会包装成学校规定。</p>
           </template>
           <CampusPublishPreview :form="form" :title="options.find(item => item.id === kind)?.title" :school="profile?.school" :campus="profile?.campus" />
-          <div class="span-all campus-life-actions campus-publish-footer"><span><ShieldCheck aria-hidden="true" />审核通过后公开</span><Button variant="ghost" type="button" :disabled="saving" @click="askClearCurrentDraft">清空当前草稿</Button><Button type="submit" :disabled="saving || (kind === 'assignment' && optionsLoading)"><FilePenLine data-icon="inline-start" />{{ saving ? '正在提交…' : '提交审核' }}</Button></div>
+          <div class="span-all campus-life-actions campus-publish-footer"><span><ShieldCheck aria-hidden="true" />审核通过后公开</span><Button variant="ghost" type="button" :disabled="saving" @click="askClearCurrentDraft">清空当前草稿</Button><Button type="submit" :disabled="saving || editingLoading || (kind === 'assignment' && optionsLoading)"><FilePenLine data-icon="inline-start" />{{ saving ? '正在提交…' : '提交审核' }}</Button></div>
           </FieldGroup>
           </fieldset>
         </form>

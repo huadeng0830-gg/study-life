@@ -17,7 +17,7 @@ watch(() => accountUser.value?.id, () => {
 }, { flush: 'sync' })
 async function refresh() {
   return page.load(async () => {
-    const [directory, mine] = await Promise.all([campusCourses(), campusLifeMine()])
+    const [directory, mine] = await Promise.all([campusCourses(), campusLifeMine({ domains: ["courseReviews"] })])
     return { ...directory, mine: mine.courseReviews || [] }
   })
 }

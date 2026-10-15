@@ -33,18 +33,23 @@ export function useCampusLifeDraft(domain, fallback) {
   const key = computed(() => ownerId.value ? `${PREFIX}:${ownerId.value}:${domain}` : '')
   const value = ref(parseDraft(key.value, fallback))
   const serial = ref(0)
+  const saveError = ref('')
 
   const stopOwner = watch(() => accountUser.value?.id || '', (next) => {
     ownerId.value = next
     value.value = parseDraft(key.value, fallback)
+    serial.value = 0
+    saveError.value = ''
   }, { flush: 'sync' })
   const stopValue = watch(value, (next) => {
     const store = storage()
-    if (!key.value || !store) return
+    if (!key.value) return
+    if (!store) { saveError.value = '本机存储不可用，离开页面前请保留已填写的内容。'; return }
     try {
       store.setItem(key.value, JSON.stringify(next))
       serial.value += 1
-    } catch { /* Draft persistence is best-effort; the form remains usable. */ }
+      saveError.value = ''
+    } catch { saveError.value = '草稿暂未保存到本机，离开页面前请保留已填写的内容。' }
   }, { deep: true, flush: 'sync' })
 
   function clear() {
@@ -52,5 +57,5 @@ export function useCampusLifeDraft(domain, fallback) {
     value.value = copy(fallback)
   }
   onScopeDispose(() => { stopOwner(); stopValue() })
-  return { value, clear, savedRevision: serial }
+  return { value, clear, savedRevision: serial, saveError }
 }

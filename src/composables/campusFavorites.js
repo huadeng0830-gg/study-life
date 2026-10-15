@@ -1,5 +1,6 @@
 import { computed, ref, watch } from 'vue'
 import { accountUser } from './accountAuth.js'
+import { campusErrorMessage } from './campusContentModel.js'
 import { campusLifeFavorites, setCampusFavorite } from '../services/campusLife.js'
 
 const rows = ref([])
@@ -9,10 +10,12 @@ let currentUser = ''
 let request = null
 let loadedUser = ''
 let generation = 0
+const mutations = new Map()
 
 watch(() => accountUser.value?.id || '', (userId) => {
   currentUser = userId
   generation += 1
+  mutations.clear()
   rows.value = []
   request = null
   loadedUser = ''
@@ -33,7 +36,7 @@ async function load() {
     rows.value = result.favorites || []; loadedUser = userId
     return rows.value
   }).catch((cause) => {
-    if (currentUser === userId && generation === revision) error.value = cause?.message || '收藏状态暂时无法读取。'
+    if (currentUser === userId && generation === revision) error.value = campusErrorMessage(cause, '收藏状态暂时无法读取。')
     return []
   }).finally(() => {
     if (currentUser === userId && generation === revision) loading.value = false
@@ -45,7 +48,16 @@ async function load() {
 
 export function useCampusFavorites() {
   const set = computed(() => new Set(rows.value.map((item) => `${item.target_type}:${item.target_id}`)))
-  async function toggle(targetType, targetId) {
+  function toggle(targetType, targetId) {
+    const key = `${targetType}:${targetId}`
+    if (mutations.has(key)) return mutations.get(key)
+    const pending = changeFavorite(targetType, targetId).finally(() => {
+      if (mutations.get(key) === pending) mutations.delete(key)
+    })
+    mutations.set(key, pending)
+    return pending
+  }
+  async function changeFavorite(targetType, targetId) {
     const userId = currentUser
     const revision = generation
     if (!userId) throw new Error('请先登录账号再收藏。')

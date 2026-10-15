@@ -35,7 +35,7 @@ const notificationLabels = {
   friend_request: '向你发送了好友请求', friend_accepted: '接受了你的好友请求', friend_removed: '已将你从好友中移除',
   invitation: '发来一条新邀约', invitation_updated: '更新了邀约', invitation_cancelled: '取消了一条邀约', invitation_expired: '一条邀约已过期', place_preset: '发来一份可拒收的地点预设；前往地点→好友预设查看', campus_place_reviewed: '地点审核已有结果；前往“校园 → 我的地点”查看意见', campus_content_reviewed: '校园内容审核已有结果；查看我的投稿', campus_report_reviewed: '校园举报已有处理结果；查看我的举报', campus_market_interest: '有人表达了二手商品联系意向', campus_help_application: '有人申请接手互助任务', campus_help_update: '互助任务或争议状态已更新', campus_lost_found_claim: '失物认领申请有更新', campus_event_update: '活动报名有更新', campus_private_message: '收到一条校园服务私信',
 }
-const durationChoices = [90, 120, 180]
+const durationChoices = [30, 60, 90, 120, 180]
 const context = createCollaborationContext(() => [accountUser.value?.id || '', hasVerifiedContactEmail()], { onError: (error) => announce('error', error.message) })
 const activeTab = ref('time')
 const pageLoading = context.state(false)
@@ -83,7 +83,7 @@ const proposalMinMinutes = ref(90)
 const proposalLoading = context.state(false)
 const actionBusy = context.state('')
 const timezone = computed(() => profile.value?.timezone || 'Asia/Shanghai')
-const hasProfile = computed(() => Boolean(profile.value?.nickname && profile.value?.scheduleCompleteThrough && profile.value?.semesterEnd))
+const hasProfile = computed(() => Boolean(profile.value?.nickname))
 const selectedFriend = computed(() => friends.value.find((item) => item.profile?.userId === selectedFriendId.value)?.profile || null)
 const intervals = computed(() => availability.value?.intervals || [])
 const foundFriend = computed(() => friends.value.find((item) => item.profile?.userId === foundProfile.value?.userId)?.profile || null)
@@ -148,10 +148,11 @@ function epochFromInput(value, edge) {
 
 const inviteStartEpoch = computed(() => epochFromInput(inviteStartInput.value, 'start'))
 const inviteEndEpoch = computed(() => epochFromInput(inviteEndInput.value, 'end'))
+const mutualMinimumMinutes = computed(() => Math.max(30, Number(profile.value?.availabilityPreferences?.minimumMinutes) || 30, Number(availability.value?.minimumMinutes) || 30))
 const inviteRangeValid = computed(() => Boolean(selectedSlot.value && inviteStartEpoch.value !== null && inviteEndEpoch.value !== null
   && inviteStartEpoch.value >= Date.parse(selectedSlot.value.startsAt)
   && inviteEndEpoch.value <= Date.parse(selectedSlot.value.endsAt)
-  && inviteEndEpoch.value - inviteStartEpoch.value >= (profile.value?.availabilityPreferences?.minimumMinutes || 90) * 60_000))
+  && inviteEndEpoch.value - inviteStartEpoch.value >= mutualMinimumMinutes.value * 60_000))
 const canSubmitInvitation = computed(() => inviteRangeValid.value && inviteTitle.value.trim().length > 0)
 
 function formatTime(iso) {
@@ -374,7 +375,7 @@ async function queryAvailability(days = availabilityDays.value) {
     const result = await socialRequest('availability_query', { friendId, days })
     if (!isCurrentRequest()) return
     availability.value = result
-    if (!result.known) availabilityError.value = '暂时无法确认双方在这段日期内的课表是否完整。请检查课表完整日期和同步状态。'
+    if (!result.known) availabilityError.value = '暂时无法读取双方的课表。请检查账号同步状态后重试。'
     else if (!result.intervals?.length) availabilityError.value = ''
   } catch (error) {
     if (isCurrentRequest()) availabilityError.value = error.message
@@ -403,7 +404,7 @@ function chooseSlot(slot) {
   inviteLocation.value = ''
   inviteNote.value = ''
   const length = Date.parse(slot.endsAt) - Date.parse(slot.startsAt)
-  const preference = profile.value?.availabilityPreferences?.minimumMinutes || 90
+  const preference = mutualMinimumMinutes.value
   const duration = durationChoices.find((item) => item >= preference && item * 60_000 <= length) || preference
   const start = Date.parse(slot.startsAt)
   const end = start + duration * 60_000
@@ -412,7 +413,7 @@ function chooseSlot(slot) {
 }
 
 function chooseDuration(minutes) {
-  if (!selectedSlot.value || minutes * 60_000 > Date.parse(selectedSlot.value.endsAt) - Date.parse(selectedSlot.value.startsAt)) return
+  if (!selectedSlot.value || minutes < mutualMinimumMinutes.value || minutes * 60_000 > Date.parse(selectedSlot.value.endsAt) - Date.parse(selectedSlot.value.startsAt)) return
   let start = inviteStartEpoch.value ?? Date.parse(selectedSlot.value.startsAt)
   const rangeEnd = Date.parse(selectedSlot.value.endsAt)
   if (start + minutes * 60_000 > rangeEnd) start = rangeEnd - minutes * 60_000
@@ -512,7 +513,7 @@ async function openProposalPicker(invite) {
     if (!token() || proposalToken !== proposalGeneration || proposalInviteId.value !== invite.id) return
     const result = await socialRequest('availability_query', { friendId, days: 7 })
     if (!token() || proposalToken !== proposalGeneration || proposalInviteId.value !== invite.id) return
-    if (!result.known) throw new Error('双方课表范围尚不完整，暂时无法提出改约。')
+    if (!result.known) throw new Error('双方课表暂时无法读取，请同步后重试。')
     proposalMinMinutes.value = result.minimumMinutes || 90
     proposalOptions.value = (result.intervals || []).map((item) => ({ startsAt: item.startsAt, endsAt: new Date(Math.min(Date.parse(item.endsAt), Date.parse(item.startsAt) + proposalMinMinutes.value * 60_000)).toISOString() }))
   } catch (error) { if (token() && proposalToken === proposalGeneration) announce('error', error.message) }
@@ -532,7 +533,7 @@ async function expandProposalDays(days) {
     if (!token() || proposalToken !== proposalGeneration || proposalInviteId.value !== invite.id) return
     const result = await socialRequest('availability_query', { friendId: invite.peer.user_id, days })
     if (!token() || proposalToken !== proposalGeneration || proposalInviteId.value !== invite.id) return
-    if (!result.known) throw new Error('双方课表范围尚不完整，暂时无法提出改约。')
+    if (!result.known) throw new Error('双方课表暂时无法读取，请同步后重试。')
     proposalMinMinutes.value = result.minimumMinutes || 90
     proposalOptions.value = (result.intervals || []).map((item) => ({ startsAt: item.startsAt, endsAt: new Date(Math.min(Date.parse(item.endsAt), Date.parse(item.startsAt) + proposalMinMinutes.value * 60_000)).toISOString() }))
   } catch (error) { if (token() && proposalToken === proposalGeneration) announce('error', error.message) }
@@ -609,7 +610,7 @@ onBeforeUnmount(() => {
         <section v-if="profile && hasProfile" class="profile-summary"><div><b>账号资料已就绪</b><small>个人资料与可约偏好已统一移至“我的账号”。</small></div><button type="button" class="text-button" @click="accountOpen = true">打开我的账号</button></section>
 
         <section v-if="!canUseSocial" class="together-card state-card">
-          <h2>完成邮箱验证后即可开始</h2><p>邮箱验证前可以设置本人的昵称和课表范围；搜索好友、匹配时间和收发邀约需要已验证账号。</p>
+          <h2>完成邮箱验证后即可开始</h2><p>邮箱验证前可以设置本人的昵称和可约偏好；搜索好友、匹配时间和收发邀约需要已验证账号。</p>
           <button type="button" class="btn" @click="accountOpen = true">打开账号设置</button>
         </section>
 
@@ -631,11 +632,11 @@ onBeforeUnmount(() => {
             <div class="section-heading availability-heading"><div><span class="eyebrow">{{ selectedFriend ? `和 ${selectedFriend.nickname}` : '好友课表' }}</span><h2>找一段都方便的时间</h2></div>
               <label class="range-select">搜索范围 <select v-model.number="availabilityDays" :disabled="availabilityBusy"><option :value="7">未来 7 天</option><option :value="14">未来 14 天</option><option :value="30">未来 30 天</option></select></label>
             </div>
-            <div class="availability-actions"><span class="muted">按日期排列，近期且满足最短活动时长的时段优先显示。</span><ActionButton tone="primary" type="button" class="btn btn-primary" :disabled="!selectedFriendId || availabilityBusy" :busy="availabilityBusy" kind="task" feedback="external" :show-error="false" :action="() => queryAvailability(availabilityDays)">{{ availabilityBusy ? '正在核对双方课表…' : '查找共同时间' }}</ActionButton></div>
+            <div class="availability-actions"><span class="muted">含周末，按双方各自设置的星期和时段筛选。每次邀请需对方同意后才加入日程。</span><ActionButton tone="primary" type="button" class="btn btn-primary" :disabled="!selectedFriendId || availabilityBusy" :busy="availabilityBusy" kind="task" feedback="external" :show-error="false" :action="() => queryAvailability(availabilityDays)">{{ availabilityBusy ? '正在核对双方课表…' : '查找共同时间' }}</ActionButton></div>
             <div v-if="availabilityBusy" class="state-card loading-card" aria-live="polite">正在同步并计算共同空闲时间…</div>
             <div v-else-if="availabilityError" class="state-card error-card" role="alert"><h3>暂时没有可用结果</h3><p>{{ availabilityError }}</p><div class="state-actions"><ActionButton tone="neutral" type="button" class="btn" kind="task" feedback="external" :show-error="false" :action="() => queryAvailability(availabilityDays)">重试</ActionButton><button v-if="availability?.known" type="button" class="text-button" @click="accountOpen = true">调整时间偏好</button></div></div>
             <div v-else-if="availability?.known && !intervals.length" class="state-card empty-state">
-              <div class="empty-symbol">☁</div><h3>这段范围内暂时没有合适的连续空闲</h3><p>可以扩大搜索范围，或调整双方每天可约时段、周末和课程缓冲偏好。</p><div class="state-actions"><ActionButton tone="primary" v-if="availabilityDays < 30" type="button" class="btn btn-primary" kind="task" feedback="external" :show-error="false" :action="() => queryAvailability(availabilityDays === 7 ? 14 : 30)">扩大到未来 {{ availabilityDays === 7 ? 14 : 30 }} 天</ActionButton><button type="button" class="btn btn-ghost" @click="accountOpen = true">调整时间偏好</button></div>
+              <div class="empty-symbol">☁</div><h3>这段范围内暂时没有合适的连续空闲</h3><p>可以扩大搜索范围，或调整双方的可约星期、每天时段和课程缓冲。</p><div class="state-actions"><ActionButton tone="primary" v-if="availabilityDays < 30" type="button" class="btn btn-primary" kind="task" feedback="external" :show-error="false" :action="() => queryAvailability(availabilityDays === 7 ? 14 : 30)">扩大到未来 {{ availabilityDays === 7 ? 14 : 30 }} 天</ActionButton><button type="button" class="btn btn-ghost" @click="accountOpen = true">调整时间偏好</button></div>
             </div>
             <div v-else-if="groupedIntervals.length" class="interval-groups">
               <section v-for="group in groupedIntervals" :key="group.label" class="interval-day"><h3>{{ group.label }}</h3>
@@ -650,14 +651,14 @@ onBeforeUnmount(() => {
             <form v-if="composerOpen && selectedSlot" class="invite-composer" @submit.prevent="createInvitation">
               <div class="section-heading"><div><span class="eyebrow">邀约给 {{ selectedFriend?.nickname }}</span><h3>设置具体时间</h3></div><button type="button" class="text-button" @click="composerOpen = false">收起</button></div>
               <div class="duration-picks" aria-label="快捷活动时长">
-                <button v-for="minutes in durationChoices" :key="minutes" type="button" class="duration-chip" :disabled="minutes * 60_000 > Date.parse(selectedSlot.endsAt) - Date.parse(selectedSlot.startsAt)" @click="chooseDuration(minutes)">{{ minutes === 90 ? '90 分钟' : `${minutes / 60} 小时` }}</button>
+                <button v-for="minutes in durationChoices" :key="minutes" type="button" class="duration-chip" :disabled="minutes < mutualMinimumMinutes || minutes * 60_000 > Date.parse(selectedSlot.endsAt) - Date.parse(selectedSlot.startsAt)" @click="chooseDuration(minutes)">{{ minutes % 60 ? `${minutes} 分钟` : `${minutes / 60} 小时` }}</button>
               </div>
               <div class="profile-grid invite-time-grid"><label>开始 <input v-model="inviteStartInput" type="datetime-local" required :min="localInputFor(Date.parse(selectedSlot.startsAt), timezone)" :max="localInputFor(Date.parse(selectedSlot.endsAt), timezone)" /></label><label>结束 <input v-model="inviteEndInput" type="datetime-local" required :min="inviteStartInput" :max="localInputFor(Date.parse(selectedSlot.endsAt), timezone)" /></label></div>
               <p class="muted">时间不能超出共同空闲区间。确认时会再次检查双方的课表版本与冲突。</p>
               <div class="profile-grid invite-details-grid"><label>活动
                 <select v-model="inviteType"><option value="meal">一起吃饭</option><option value="movie">看电影</option><option value="sports">运动</option><option value="outing">逛逛</option><option value="custom">自定义</option></select>
               </label><label>标题 <input v-model="inviteTitle" maxlength="80" required :placeholder="activityLabels[inviteType]" /></label><label>地点（选填） <input v-model="inviteLocation" maxlength="160" placeholder="例如：学校附近" /></label><label>备注（选填） <input v-model="inviteNote" maxlength="500" placeholder="补充说明" /></label></div>
-              <div v-if="selectedSlot && !inviteRangeValid" class="inline-error">请将邀约时间设在双方空闲范围内，时长至少 {{ profile?.availabilityPreferences?.minimumMinutes || 90 }} 分钟。</div>
+              <div v-if="selectedSlot && !inviteRangeValid" class="inline-error">请将邀约时间设在双方空闲范围内，时长至少 {{ mutualMinimumMinutes }} 分钟。</div>
               <div class="form-actions"><ActionButton tone="primary" kind="important" feedback="external" :show-error="false" class="btn btn-primary" type="submit" :disabled="!canSubmitInvitation || inviteBusy" :busy="inviteBusy">{{ inviteBusy ? '正在核对并发送…' : '确认并发送邀约' }}</ActionButton><span class="muted">失败时不会显示已发送，也不会留下未保存的邀约。</span></div>
             </form>
           </section>
@@ -696,7 +697,7 @@ onBeforeUnmount(() => {
 
           <section class="together-card profile-preferences-card">
             <div class="section-heading"><div><span class="eyebrow">账号设置</span><h2>资料与可约偏好</h2></div><button type="button" class="text-button" @click="accountOpen = true">打开我的账号</button></div>
-            <p class="muted">昵称、学校与校区、邮箱发现、课表范围和可约时段都在“我的账号”统一管理。学校和校区由你填写，仅用于校园筛选，不代表官方身份认证。</p>
+            <p class="muted">昵称、学校与校区、邮箱发现和可约偏好都在“我的账号”统一管理。学校和校区由你填写，仅用于校园筛选，不代表官方身份认证。</p>
           </section>
         </section>
 

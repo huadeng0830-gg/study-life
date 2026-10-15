@@ -43,7 +43,7 @@ import { campusErrorMessage } from './campusContentModel.js'
  * make 「已提交审核。」 vanish the instant it appeared. The notice instead lives
  * until the next action or until the view unmounts.
  */
-export function useCampusLifePage() {
+export function useCampusLifePage({ reloadOnAccountChange = true } = {}) {
   const data = ref(null)
   const loading = ref(false)
   const error = ref('')
@@ -56,6 +56,7 @@ export function useCampusLifePage() {
   let ownerGeneration = 0
   let active = true
   let lastRequest = null
+  let actionGeneration = 0
   onScopeDispose(() => { active = false; generation += 1; ownerGeneration += 1 })
 
   function currentUser() { return accountUser.value?.id || '' }
@@ -73,7 +74,7 @@ export function useCampusLifePage() {
     const owner = ownerGeneration
     // Re-read for the newly signed-in account. `lastRequest` is the reason the
     // page can be rebuilt from scratch instead of each view re-wiring a watcher.
-    if (lastRequest) void Promise.resolve().then(() => { if (active && owner === ownerGeneration) return load(lastRequest) })
+    if (lastRequest && reloadOnAccountChange) void Promise.resolve().then(() => { if (active && owner === ownerGeneration) return load(lastRequest) })
   }, { flush: 'sync' })
 
   async function load(request, initial = null) {
@@ -101,6 +102,7 @@ export function useCampusLifePage() {
 
   /** Runs a mutation. Resolves `true` when it succeeded and the screen is still live. */
   async function act(task, successText = '操作已完成。') {
+    const action = ++actionGeneration
     const owner = ownerGeneration
     const userId = currentUser()
     notice.value = ''
@@ -108,10 +110,10 @@ export function useCampusLifePage() {
     try {
       await task()
       if (!isLiveWrite(owner, userId)) return false
-      notice.value = successText
+      if (action === actionGeneration) { notice.value = successText; actionError.value = '' }
       return true
     } catch (cause) {
-      if (isLiveWrite(owner, userId)) actionError.value = campusErrorMessage(cause, '操作没有完成，请重试。')
+      if (isLiveWrite(owner, userId) && action === actionGeneration) { actionError.value = campusErrorMessage(cause, '操作没有完成，请重试。'); notice.value = '' }
       return false
     }
   }
@@ -121,8 +123,8 @@ export function useCampusLifePage() {
    * local schedule, for instance. Routed to `actionError` rather than `error`
    * so a local failure never blanks a list that is still perfectly readable.
    */
-  function report(message) { notice.value = message; actionError.value = '' }
-  function reportFailure(message) { actionError.value = message; notice.value = '' }
+  function report(message) { actionGeneration += 1; notice.value = message; actionError.value = '' }
+  function reportFailure(message) { actionGeneration += 1; actionError.value = message; notice.value = '' }
 
   /** Clears a previous success banner without touching the current list. */
   function dismissNotice() { notice.value = '' }

@@ -33,3 +33,26 @@ export function averageCampusRating(reviews, fields = ['clarity', 'organization'
   const scores = validReviews.flat()
   return { count: validReviews.length, scoreCount: scores.length, average: scores.length ? scores.reduce((sum, score) => sum + score, 0) / scores.length : null, lowSample: validReviews.length < 10 }
 }
+
+// Explicit public projections: searching never loads owners, messages, claims,
+// registrations, reviews or shuttle child tables.
+export const campusSearchSources = [
+  { type: 'course', table: 'campus_courses', title: 'name', details: ['department', 'description'], statusField: 'review_status', statuses: ['approved'] },
+  { type: 'teacher', table: 'campus_teachers', title: 'name', details: ['department', 'research_directions'], statusField: 'review_status', statuses: ['approved'] },
+  { type: 'place', table: 'campus_places', title: 'name', details: ['place_type', 'area', 'description'], statusField: 'review_status', statuses: ['approved'] },
+  { type: 'market_listing', table: 'campus_market_listings', title: 'title', details: ['description'], statusField: 'status', statuses: ['active', 'reserved'] },
+  { type: 'help_task', table: 'campus_help_tasks', title: 'title', details: ['description'], statusField: 'status', statuses: ['open'] },
+  { type: 'shuttle_route', table: 'campus_shuttle_routes', title: 'name', details: ['source_url'], statusField: 'status', statuses: ['approved'] },
+  { type: 'lost_found', table: 'campus_lost_found_items', title: 'title', details: ['description'], statusField: 'status', statuses: ['open', 'claim_pending'] },
+  { type: 'event', table: 'campus_events', title: 'title', details: ['description'], statusField: 'review_status', statuses: ['approved'] },
+  { type: 'guide', table: 'campus_guides', title: 'title', details: ['body'], statusField: 'review_status', statuses: ['approved'] },
+]
+
+/** PostgreSQL's ***= regex director treats the remaining term literally.
+ * imatch avoids LIKE wildcard aliases; only PostgREST quoted-value escaping is
+ * required. User input cannot become a regex or add filter expressions.
+ */
+export function campusSearchFilter(fields, term) {
+  const literal = ('***=' + term).replace(/\\/g, '\\\\').replace(/"/g, '\\"')
+  return fields.map((field) => field + '.imatch."' + literal + '"').join(',')
+}

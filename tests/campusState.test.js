@@ -9,6 +9,9 @@ import { accountUser } from '../src/composables/accountAuth.js'
 import { campusLifeFavorites, setCampusFavorite } from '../src/services/campusLife.js'
 import { useCampusFavorites } from '../src/composables/campusFavorites.js'
 import { useCampusLifePage } from '../src/composables/campusLifePage.js'
+import { useCampusBusyKeys } from '../src/composables/campusRequest.js'
+import { useCampusConfirm } from '../src/composables/campusConfirm.js'
+import { useCampusLifeDraft } from '../src/composables/campusLifeDraft.js'
 
 let scope
 let owner = 0
@@ -17,6 +20,66 @@ beforeEach(() => { vi.resetAllMocks(); accountUser.value = { id: `fictional-${++
 afterEach(() => scope.stop())
 
 describe('campus asynchronous account isolation', () => {
+  it('only lets the latest action update feedback, while earlier successes still refresh', async () => {
+    const page = scope.run(useCampusLifePage)
+    const earlier = deferred()
+    const first = page.act(() => earlier.promise, '旧操作')
+    await page.act(async () => {}, '新操作')
+    earlier.reject(new Error('较早的失败'))
+    expect(await first).toBe(false)
+    expect(page.notice.value).toBe('新操作')
+    expect(page.actionError.value).toBe('')
+  })
+  it('deduplicates row actions and never unlocks a new account from an old completion', async () => {
+    const rows = scope.run(useCampusBusyKeys)
+    const old = deferred(), next = deferred()
+    const first = rows.run('same-row', () => old.promise)
+    const duplicate = vi.fn()
+    expect(await rows.run('same-row', duplicate)).toBe(false)
+    expect(duplicate).not.toHaveBeenCalled()
+    accountUser.value = { id: 'other-account' }
+    const second = rows.run('same-row', () => next.promise)
+    old.resolve()
+    await first
+    expect(rows.busy('same-row')).toBe(true)
+    next.resolve()
+    await second
+    expect(rows.busy('same-row')).toBe(false)
+  })
+  it('drops a confirmation and its captured action when the account changes', async () => {
+    const dialog = scope.run(useCampusConfirm)
+    const mutate = vi.fn()
+    dialog.ask({ title: '确认操作', onConfirm: mutate })
+    accountUser.value = { id: 'other-account' }
+    await dialog.confirm()
+    expect(dialog.pending.value).toBeNull()
+    expect(mutate).not.toHaveBeenCalled()
+  })
+  it('exposes draft storage failure and recovers on a later save', () => {
+    const draft = scope.run(() => useCampusLifeDraft('test-storage', { title: '' }))
+    const store = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('quota') })
+    draft.value.value.title = '虚构草稿'
+    expect(draft.saveError.value).toContain('暂未保存')
+    expect(draft.savedRevision.value).toBe(0)
+    store.mockRestore()
+    draft.value.value.title = '下一份虚构草稿'
+    expect(draft.saveError.value).toBe('')
+    expect(draft.savedRevision.value).toBe(1)
+  })
+  it('coalesces favorites across consumers for the same target', async () => {
+    const first = scope.run(useCampusFavorites), second = scope.run(useCampusFavorites)
+    campusLifeFavorites.mockResolvedValue({ favorites: [] })
+    await first.load()
+    const pending = deferred()
+    setCampusFavorite.mockReturnValue(pending.promise)
+    const one = first.toggle('course', 'fixture-course')
+    const two = second.toggle('course', 'fixture-course')
+    expect(setCampusFavorite).toHaveBeenCalledTimes(1)
+    pending.resolve()
+    expect(await one).toBe(true)
+    expect(await two).toBe(true)
+    expect(second.favorites.value.size).toBe(1)
+  })
   it('finishes anonymous loading and exposes the login error', async () => {
     accountUser.value = null
     const page = scope.run(useCampusLifePage)

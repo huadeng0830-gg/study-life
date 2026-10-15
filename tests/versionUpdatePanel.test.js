@@ -129,7 +129,10 @@ describe('版本与更新面板', () => {
       history.open = true
       history.dispatchEvent(new Event('toggle'))
       await nextTick()
-      expect(history.querySelectorAll('li')).toHaveLength(PREVIOUS_RELEASE_GROUPS[0].notes.length)
+      const release = PREVIOUS_RELEASE_GROUPS[0]
+      const categorized = Object.values(release.changes).flat()
+      const notes = categorized.length ? categorized : release.notes
+      expect([...history.querySelectorAll('li')].map((item) => item.textContent)).toEqual([...notes])
     }
     document.querySelector('.release-notes .btn').click()
     await nextTick()

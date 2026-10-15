@@ -1,7 +1,7 @@
 import { campusLifeRequest } from './social.js'
 
-export const campusLifeSearch = (query) => campusLifeRequest('search', { query })
-export const campusLifeMine = () => campusLifeRequest('mine_list')
+export const campusLifeSearch = (query, filters = {}) => campusLifeRequest('search', { ...filters, query })
+export const campusLifeMine = (filters = {}) => campusLifeRequest('mine_list', filters)
 export const withdrawCampusContent = (targetType, targetId, revision) => campusLifeRequest('content_withdraw', { targetType, targetId, revision })
 export const resubmitCampusContent = (targetType, targetId, revision, content) => campusLifeRequest('content_resubmit', { targetType, targetId, revision, content })
 export const campusLifeFavorites = () => campusLifeRequest('favorite_list')
@@ -14,7 +14,7 @@ export const submitCampusCourse = (payload) => campusLifeRequest('course_submit'
 export const submitCampusTeachingAssignment = (payload) => campusLifeRequest('assignment_submit', payload)
 export const submitCampusCourseReview = (payload) => campusLifeRequest('course_review_submit', payload)
 
-export const campusMarketListings = () => campusLifeRequest('market_list')
+export const campusMarketListings = (filters = {}) => campusLifeRequest('market_list', filters)
 export const submitCampusMarketListing = (payload) => campusLifeRequest('market_submit', payload)
 export const createMarketInterest = (listingId, message = '') => campusLifeRequest('market_interest_create', { listingId, message })
 export const listMarketInterests = () => campusLifeRequest('market_interest_list')

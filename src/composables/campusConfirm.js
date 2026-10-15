@@ -1,4 +1,5 @@
-import { ref } from 'vue'
+import { onScopeDispose, ref, watch } from 'vue'
+import { accountUser } from './accountAuth.js'
 
 /**
  * Confirmation for campus actions that cannot be undone.
@@ -42,6 +43,9 @@ export function useCampusConfirm() {
   }
 
   function close() { pending.value = null }
+  // A confirmation captures an account's target and action in its closure.
+  watch(() => accountUser.value?.id || '', close, { flush: 'sync' })
+  onScopeDispose(close)
 
   async function confirm() {
     // Clear before awaiting: the dialog must close the moment it is accepted,

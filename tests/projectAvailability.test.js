@@ -27,10 +27,11 @@ describe('齐行跨时区空闲时间计算', () => {
     expect(shanghai.intervals).not.toEqual(losAngeles.intervals)
   })
 
-  it('个人课表未覆盖查询范围时返回未知，供前端改用手动确认', () => {
+  it('旧课表覆盖日期不再限制查询；空课表默认可邀请', () => {
     const member = scheduleFor('user-1', 'Asia/Shanghai')
     member.profile.schedule_complete_through = '2026-10-08'
     const result = userFreeIntervals(member, { start: Date.UTC(2026, 9, 8), end: Date.UTC(2026, 9, 11) })
-    expect(result).toMatchObject({ known: false, intervals: [] })
+    expect(result.known).toBe(true)
+    expect(result.intervals.length).toBeGreaterThan(0)
   })
 })

@@ -1,6 +1,6 @@
 /// <reference types="jsr:@supabase/functions-js/edge-runtime.d.ts" />
 import { createClient } from 'npm:@supabase/supabase-js@2.117.2'
-import { campusScopeMatches, canTransitionCampusHelp, containsPrivateCampusDetails } from './rules.js'
+import { campusScopeMatches, canTransitionCampusHelp, containsPrivateCampusDetails, campusSearchSources, campusSearchFilter } from './rules.js'
 
 const supabaseUrl = Deno.env.get('SUPABASE_URL') || ''
 const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || ''
@@ -262,11 +262,26 @@ async function listCourses(scope: { school: string; campus: string }) {
   return { courses, teachers, assignments: visibleAssignments, reviews }
 }
 
-async function listMarket(scope: { school: string; campus: string }) {
+async function listMarket(scope: { school: string; campus: string }, payload: any = {}) {
   const columns = 'id,school,campus,listing_type,category,title,description,condition,price_cents,meetup_area,status,created_at,updated_at'
-  const active = await queryRows('campus_market_listings', columns, scope, 'status', 'active')
-  const reserved = await queryRows('campus_market_listings', columns, scope, 'status', 'reserved')
-  return [...active, ...reserved].sort((a: any, b: any) => String(b.updated_at).localeCompare(String(a.updated_at)))
+  const page = payload.page === undefined ? 0 : Number(payload.page)
+  if (!Number.isSafeInteger(page) || page < 0 || page > 2000) throw new ApiError('invalid_input', '页码无效。')
+  const pageSize = 20
+  const term = text(payload.query, 100, '搜索内容')
+  const listingType = text(payload.listingType, 20, '发布方式')
+  const category = text(payload.category, 30, '物品分类')
+  if (listingType && !['sale', 'wanted', 'free'].includes(listingType)) throw new ApiError('invalid_input', '发布方式无效。')
+  if (category && !['textbook', 'electronics', 'living', 'sports', 'dorm', 'clothing', 'instrument', 'other'].includes(category)) throw new ApiError('invalid_input', '物品分类无效。')
+  const sort = enumValue(payload.sort || 'newest', ['newest', 'price_asc', 'price_desc'] as const, '排序方式')
+  let query = scopeQuery(admin.from('campus_market_listings').select(columns, { count: 'exact' })
+    .eq('school', scope.school).in('status', ['active', 'reserved']), scope)
+  if (term) query = query.or(campusSearchFilter(['title', 'description', 'condition', 'meetup_area'], term))
+  if (listingType) query = query.eq('listing_type', listingType)
+  if (category) query = query.eq('category', category)
+  query = sort === 'newest' ? query.order('created_at', { ascending: false }) : query.order('price_cents', { ascending: sort === 'price_asc', nullsFirst: false })
+  const result = await query.order('id', { ascending: false }).range(page * pageSize, page * pageSize + pageSize)
+  const rows = (dataOrThrow(result) || []).filter((row: any) => inScope(row, scope))
+  return { listings: rows.slice(0, pageSize), page, pageSize, total: result.count, hasMore: rows.length > pageSize }
 }
 
 async function listHelp(scope: { school: string; campus: string }) {
@@ -314,20 +329,24 @@ async function listGuides(scope: { school: string; campus: string }) {
   return (dataOrThrow(result) || []).filter((row: any) => inScope(row, scope) && (!row.expires_on || row.expires_on >= today))
 }
 
-async function getMine(userId: string) {
+async function getMine(userId: string, payload: any = {}) {
   const tables = [
     ['teachers', 'campus_teachers'], ['courses', 'campus_courses'], ['assignments', 'campus_teaching_assignments'],
     ['listings', 'campus_market_listings'], ['helpTasks', 'campus_help_tasks'], ['shuttleRoutes', 'campus_shuttle_routes'],
     ['shuttleCorrections', 'campus_shuttle_corrections'], ['shuttleExceptions', 'campus_shuttle_exceptions'],
     ['lostFound', 'campus_lost_found_items'], ['events', 'campus_events'], ['guides', 'campus_guides'],
   ] as const
-  const entries = await Promise.all(tables.map(async ([key, table]) => {
+  const domains = payload.domains
+  const allowed = [...tables.map(([key]) => key), 'places', 'courseReviews']
+  if (domains !== undefined && (!Array.isArray(domains) || domains.length > allowed.length || domains.some((key: any) => !allowed.includes(key)))) throw new ApiError('invalid_input', '投稿分类无效。')
+  const wants = (key: string) => domains === undefined || domains.includes(key)
+  const entries = await Promise.all(tables.filter(([key]) => wants(key)).map(async ([key, table]) => {
     const result = await admin.from(table).select('*').eq('owner_id', userId)
       .order(['shuttleCorrections', 'shuttleExceptions'].includes(key) ? 'created_at' : 'updated_at', { ascending: false }).limit(100)
     return [key, dataOrThrow(result) || []]
   }))
-  const reviewResult = await admin.from('campus_course_reviews').select('id,assignment_id,clarity,organization,learning,workload,assessment,note,review_status,review_reason,revision,updated_at')
-    .eq('user_id', userId).order('updated_at', { ascending: false }).limit(100)
+  const reviewResult = wants('courseReviews') ? await admin.from('campus_course_reviews').select('id,assignment_id,clarity,organization,learning,workload,assessment,note,review_status,review_reason,revision,updated_at')
+    .eq('user_id', userId).order('updated_at', { ascending: false }).limit(100) : null
   const mine = Object.fromEntries(entries) as Record<string, any[]>
   const routes = mine.shuttleRoutes || []
   if (routes.length) {
@@ -343,8 +362,9 @@ async function getMine(userId: string) {
       departures: departures.filter((item: any) => item.route_id === route.id),
     }))
   }
-  const places = dataOrThrow(await admin.from('campus_places').select('id,name,review_status,review_reason,review_revision,updated_at').eq('owner_id', userId).eq('visibility', 'school').order('updated_at', { ascending: false }).limit(100)) || []
-  return { ...mine, places, courseReviews: dataOrThrow(reviewResult) || [] }
+  if (wants('places')) mine.places = dataOrThrow(await admin.from('campus_places').select('id,name,review_status,review_reason,review_revision,updated_at').eq('owner_id', userId).eq('visibility', 'school').order('updated_at', { ascending: false }).limit(100)) || []
+  if (reviewResult) mine.courseReviews = dataOrThrow(reviewResult) || []
+  return mine
 }
 
 function requireObject(value: any, label: string) {
@@ -872,25 +892,31 @@ async function favoriteList(user: any, scope: { school: string; campus: string }
 }
 
 async function search(scope: { school: string; campus: string }, payload: any) {
-  const needle = publicText(payload.query, 100, '搜索内容', true).toLocaleLowerCase('zh-CN')
-  const [courseData, market, help, shuttles, lostFound, events, guides, placeResult] = await Promise.all([
-    listCourses(scope), listMarket(scope), listHelp(scope), listShuttles(scope), listLostFound(scope), listEvents(scope), listGuides(scope),
-    scopeQuery(admin.from('campus_places').select('id,school,campus,name,place_type,area,description,review_status,visibility,archived_at')
-      .eq('school', scope.school).eq('review_status', 'approved').eq('visibility', 'school').is('archived_at', null), scope).limit(100),
-  ])
-  const places = (dataOrThrow(placeResult) || []).filter((item: any) => inScope(item, scope))
-  const rows: any[] = [
-    ...courseData.courses.map((item: any) => ({ id: item.id, type: 'course', title: item.name, detail: item.department, campus: item.campus })),
-    ...courseData.teachers.map((item: any) => ({ id: item.id, type: 'teacher', title: item.name, detail: [item.department, item.research_directions].filter(Boolean).join(' · '), campus: item.campus })),
-    ...places.map((item: any) => ({ id: item.id, type: 'place', title: item.name, detail: [item.place_type, item.area, item.description].filter(Boolean).join(' · '), campus: item.campus })),
-    ...market.map((item: any) => ({ id: item.id, type: 'market_listing', title: item.title, detail: item.description, campus: item.campus })),
-    ...help.map((item: any) => ({ id: item.id, type: 'help_task', title: item.title, detail: item.description, campus: item.campus })),
-    ...shuttles.routes.map((item: any) => ({ id: item.id, type: 'shuttle_route', title: item.name, detail: item.source_url, campus: item.campus })),
-    ...lostFound.map((item: any) => ({ id: item.id, type: 'lost_found', title: item.title, detail: item.description, campus: item.campus })),
-    ...events.map((item: any) => ({ id: item.id, type: 'event', title: item.title, detail: item.description, campus: item.campus })),
-    ...guides.map((item: any) => ({ id: item.id, type: 'guide', title: item.title, detail: item.body, campus: item.campus })),
-  ]
-  return { results: rows.filter((row) => `${row.title} ${row.detail} ${row.campus}`.toLocaleLowerCase('zh-CN').includes(needle)).slice(0, 60) }
+  const term = text(payload.query, 100, '搜索内容', true)
+  const type = text(payload.type, 40, '搜索分类')
+  if (type && !campusSearchSources.some((source) => source.type === type)) throw new ApiError('invalid_input', '搜索分类无效。')
+  const page = payload.page === undefined ? 0 : Number(payload.page)
+  if (!Number.isSafeInteger(page) || page < 0 || page > 2000) throw new ApiError('invalid_input', '搜索页码无效。')
+  // Each category has a bounded page. Filtering expands it to 30 results.
+  // Match in the database before pagination; never truncate before matching.
+  const pageSize = type ? 30 : 6
+  const now = new Date().toISOString()
+  const groups = await Promise.all(campusSearchSources.filter((source) => !type || source.type === type).map(async (source) => {
+    const fields = [source.title, ...source.details, 'campus']
+    let query = scopeQuery(admin.from(source.table).select(['id', 'school', ...fields].join(','))
+      .eq('school', scope.school).in(source.statusField, source.statuses), scope)
+      .or(campusSearchFilter(fields, term))
+    if (source.type === 'place') query = query.eq('visibility', 'school').is('archived_at', null)
+    if (source.type === 'event') query = query.eq('status', 'published').gte('ends_at', now)
+    if (source.type === 'guide') query = query.or('expires_on.is.null,expires_on.gte.' + now.slice(0, 10))
+    const found = (dataOrThrow(await query.order('id', { ascending: true }).range(page * pageSize, page * pageSize + pageSize)) || [])
+      .filter((row: any) => inScope(row, scope))
+    return {
+      hasMore: found.length > pageSize,
+      results: found.slice(0, pageSize).map((row: any) => ({ id: row.id, type: source.type, title: row[source.title], detail: source.details.map((key) => row[key]).filter(Boolean).join(' · '), campus: row.campus })),
+    }
+  }))
+  return { results: groups.flatMap((group) => group.results), hasMore: groups.some((group) => group.hasMore), page, pageSize }
 }
 
 async function moderationQueue(userId: string, payload: any) {
@@ -1005,7 +1031,7 @@ async function resubmitContent(user: any, payload: any, scope: { school: string;
 
 async function handle(user: any, action: string, payload: any) {
   requireObject(payload, '请求')
-  if (action === 'mine_list') return getMine(user.id)
+  if (action === 'mine_list') return getMine(user.id, payload)
   if (action === 'content_withdraw') {
     return dataOrThrow(await admin.rpc('campus_withdraw_content', { p_actor: user.id, p_type: text(payload.targetType, 40, '内容类型', true), p_id: uuid(payload.targetId, '内容'), p_revision: String(payload.revision ?? '').slice(0,100) }))
   }
@@ -1042,7 +1068,7 @@ async function handle(user: any, action: string, payload: any) {
     case 'content_resubmit': return resubmitContent(user, payload, scope)
     case 'course_review_submit': return submitCourseReview(user, payload, scope)
     case 'courses_list': return listCourses(scope)
-    case 'market_list': return { listings: await listMarket(scope) }
+    case 'market_list': return listMarket(scope, payload)
     case 'market_interest_create': return interestCreate(user, payload, scope)
     case 'market_interest_list': return listMarketInterests(user, scope)
     case 'market_interest_decide': return decideMarketInterest(user, payload)

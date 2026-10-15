@@ -80,11 +80,11 @@ vi.mock('../src/services/campusCommunity.js', () => ({
   campusBeanWallet: vi.fn(async () => serviceState.responses.campusBeanWallet || {
     wallet: { purchased: 0, contribution: 0, contributionDebt: 0 }, ledger: [],
   }),
-  campusFeedbackPublicList: vi.fn(async () => serviceState.responses.campusFeedbackPublicList || { items: [] }),
+  campusFeedbackPublicList: vi.fn(async (filters) => typeof serviceState.responses.campusFeedbackPublicList === 'function' ? serviceState.responses.campusFeedbackPublicList(filters) : serviceState.responses.campusFeedbackPublicList || { items: [] }),
   myCampusFeedback: vi.fn(async () => ({ items: [] })),
   submitCampusFeedback: vi.fn(async () => ({})),
   applyCampusReviewer: vi.fn(async () => ({})),
-  myCampusReviewerApplication: vi.fn(async () => ({ application: null })),
+  myCampusReviewerApplication: vi.fn(async () => typeof serviceState.responses.myCampusReviewerApplication === 'function' ? serviceState.responses.myCampusReviewerApplication() : { application: null }),
   replyToCampusReviewerApplication: vi.fn(async () => ({})),
   campusFeedbackMessages: vi.fn(async () => ({ messages: [] })),
 }))
@@ -149,6 +149,45 @@ beforeEach(() => {
   serviceState.lastArgs = undefined
   globalThis.localStorage.clear()
   accountUser.value = { id: '00000001-0000-4000-8000-000000000001' }
+})
+
+describe('校园长期使用流程', () => {
+  it('审核申请和公开建议同时读取时，不会互相作废而一直加载', async () => {
+    let finish
+    serviceState.responses.campusFeedbackPublicList = () => new Promise((resolve) => { finish = resolve })
+    const { default: view } = await import('../src/views/campus/CampusFeedbackView.vue')
+    await mountView(view)
+    finish({ items: [{ id: 'fixture', title: '较晚返回的公开建议', body: '虚构公开建议内容', status: 'pending', category: 'campus' }], total: 1 })
+    await settle()
+    expect(host.textContent).toContain('较晚返回的公开建议')
+    expect(host.textContent).not.toContain('正在读取公开建议')
+  })
+  it('公开建议按20条翻页，切换状态后回到第一页', async () => {
+    const requests = []
+    serviceState.responses.campusFeedbackPublicList = (filters) => { requests.push(filters); return { items: [], total: 100 } }
+    const { default: view } = await import('../src/views/campus/CampusFeedbackView.vue')
+    await mountView(view)
+    await clickButton('下一页')
+    expect(requests.at(-1)).toMatchObject({ limit: 20, offset: 20 })
+    await clickButton('已解决')
+    expect(requests.at(-1)).toMatchObject({ status: 'resolved', offset: 0 })
+  })
+  it('昵称即可保存资料，不要求日期，并默认允许周末', async () => {
+    serviceState.responses.profileGet = { nickname: '虚构同学', school: '虚构大学', timezone: 'Asia/Shanghai' }
+    const { socialRequest } = await import('../src/services/social.js')
+    socialRequest.mockClear()
+    const { default: view } = await import('../src/components/account/AccountCommunitySettings.vue')
+    await mountView(view, { section: 'profile' })
+    expect(host.querySelectorAll('input[type=date]')).toHaveLength(0)
+    expect(host.querySelectorAll('.invitation-weekdays input:checked')).toHaveLength(7)
+    host.querySelector('form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await settle()
+    const payload = socialRequest.mock.calls.find(([name]) => name === 'profile_save')[1]
+    expect(payload).not.toHaveProperty('semesterEnd')
+    expect(payload).not.toHaveProperty('scheduleCompleteThrough')
+    expect(payload.availabilityPreferences.weekdays).toEqual([0, 1, 2, 3, 4, 5, 6])
+    expect(host.textContent).toContain('已保存')
+  })
 })
 
 afterEach(() => {

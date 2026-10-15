@@ -7,8 +7,11 @@ import controllerModule from '../desktop-app/updaterController.cjs'
 const require = createRequire(import.meta.url)
 // NsisUpdater contains Windows-only installer behavior; Linux runs the general
 // quality gate and Windows CI runs this suite with the real package installed.
-const { NsisUpdater, DownloadedUpdateHelper } = process.platform === 'win32'
+const { NsisUpdater } = process.platform === 'win32'
   ? require('../desktop-app/node_modules/electron-updater/out/NsisUpdater.js')
+  : {}
+const { DownloadedUpdateHelper } = process.platform === 'win32'
+  ? require('../desktop-app/node_modules/electron-updater/out/DownloadedUpdateHelper.js')
   : {}
 const controllers = []
 const installer = 'C:\\fictional-fixture\\updates\\pending\\update.exe'

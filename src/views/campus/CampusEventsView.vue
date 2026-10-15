@@ -1,18 +1,21 @@
 <script setup>
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, watch } from 'vue'
+import { accountUser } from '../../composables/accountAuth.js'
 import CampusLifeLayout from '../../components/campus/CampusLifeLayout.vue'
 import CampusContentActions from '../../components/campus/CampusContentActions.vue'
 import CampusStateBlock from '../../components/campus/CampusStateBlock.vue'
 import CampusStatusMessages from '../../components/campus/CampusStatusMessages.vue'
 import { campusWeekdayDateTimeLabel } from '../../composables/campusFormatting.js'
 import { useCampusLifePage } from '../../composables/campusLifePage.js'
+import { useCampusBusyKeys } from '../../composables/campusRequest.js'
 import { useDomainCommands } from '../../composables/domain/commands.js'
 import { cancelCampusEventRegistration, campusEvents, registerCampusEvent } from '../../services/campusLife.js'
 
 const page = useCampusLifePage()
 const domain = useDomainCommands()
-const busyId = ref('')
+const actions = useCampusBusyKeys()
 const addedIds = ref(new Set())
+watch(() => accountUser.value?.id, () => { addedIds.value = new Set() }, { flush: 'sync' })
 async function refresh() { return page.load(async () => (await campusEvents()).events || []) }
 onMounted(() => { void refresh() })
 
@@ -23,16 +26,16 @@ function timeInput(value) {
   return { date: `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`, time: `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}` }
 }
 async function register(event) {
-  busyId.value = event.id
-  const ok = await page.act(() => registerCampusEvent(event.id), '报名已确认。')
-  busyId.value = ''
-  if (ok) await refresh()
+  await actions.run(event.id, async () => {
+    const ok = await page.act(() => registerCampusEvent(event.id), '报名已确认。')
+    if (ok) await refresh()
+  })
 }
 async function cancel(event) {
-  busyId.value = event.id
-  const ok = await page.act(() => cancelCampusEventRegistration(event.id), '已取消报名。')
-  busyId.value = ''
-  if (ok) await refresh()
+  await actions.run(event.id, async () => {
+    const ok = await page.act(() => cancelCampusEventRegistration(event.id), '已取消报名。')
+    if (ok) await refresh()
+  })
 }
 async function addToCalendar(event) {
   const start = timeInput(event.starts_at)
@@ -73,7 +76,7 @@ async function addToCalendar(event) {
               <div class="campus-life-meta"><span v-if="event.location">地点：{{ event.location }}</span><span v-if="event.organizer">组织方：{{ event.organizer }}（未验证官方身份）</span><span v-if="event.capacity">报名 {{ event.registeredCount }} / {{ event.capacity }}</span></div>
               <a v-if="event.signup_url" :href="event.signup_url" target="_blank" rel="noopener noreferrer">查看外部报名方式</a><a v-if="event.source_url" :href="event.source_url" target="_blank" rel="noopener noreferrer">查看活动来源</a>
               <CampusContentActions target-type="event" :target-id="event.id" />
-              <div class="campus-life-actions"><button v-if="event.isRegistered" class="btn btn-ghost" type="button" :disabled="busyId === event.id" @click="cancel(event)">取消报名</button><button v-else class="btn btn-primary" type="button" :disabled="busyId === event.id || (event.capacity && event.registeredCount >= event.capacity)" @click="register(event)">{{ event.capacity && event.registeredCount >= event.capacity ? '名额已满' : '确认报名' }}</button><button class="btn btn-ghost" type="button" :disabled="addedIds.has(event.id) || domain.events.value.some((item) => item.id === `campus-event:${event.id}`)" @click="addToCalendar(event)">{{ addedIds.has(event.id) || domain.events.value.some((item) => item.id === `campus-event:${event.id}`) ? '已在本机日程' : '添加到本机日程' }}</button></div>
+              <div class="campus-life-actions"><button v-if="event.isRegistered" class="btn btn-ghost" type="button" :disabled="actions.busy(event.id)" @click="cancel(event)">取消报名</button><button v-else class="btn btn-primary" type="button" :disabled="actions.busy(event.id) || (event.capacity && event.registeredCount >= event.capacity)" @click="register(event)">{{ event.capacity && event.registeredCount >= event.capacity ? '名额已满' : '确认报名' }}</button><button class="btn btn-ghost" type="button" :disabled="addedIds.has(event.id) || domain.events.value.some((item) => item.id === `campus-event:${event.id}`)" @click="addToCalendar(event)">{{ addedIds.has(event.id) || domain.events.value.some((item) => item.id === `campus-event:${event.id}`) ? '已在本机日程' : '添加到本机日程' }}</button></div>
             </article>
           </div>
         </CampusStateBlock>

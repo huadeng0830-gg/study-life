@@ -1,14 +1,20 @@
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
+import { accountUser } from '../../composables/accountAuth.js'
 import CampusLifeLayout from '../../components/campus/CampusLifeLayout.vue'
 import CampusStateBlock from '../../components/campus/CampusStateBlock.vue'
 import { campusContentLabel, campusContentRoute } from '../../composables/campusContentModel.js'
 import { useCampusLifePage } from '../../composables/campusLifePage.js'
 import { campusLifeSearch } from '../../services/campusLife.js'
 
-const page = useCampusLifePage()
+const page = useCampusLifePage({ reloadOnAccountChange: false })
 const query = ref('')
 const searched = ref(false)
+const category = ref('')
+const searchTypes = ['place', 'course', 'teacher', 'market_listing', 'help_task', 'shuttle_route', 'lost_found', 'event', 'guide']
+const submitted = ref({ term: '', type: '' })
+const currentPage = computed(() => page.data.value?.page || 0)
+watch(() => accountUser.value?.id, () => { query.value = ''; category.value = ''; searched.value = false; submitted.value = { term: '', type: '' } }, { flush: 'sync' })
 const results = computed(() => page.data.value?.results || [])
 
 async function search() {
@@ -18,8 +24,13 @@ async function search() {
   if (!term) { page.reportFailure('请输入要查找的内容。'); return }
   page.reportFailure('')
   searched.value = true
-  await page.load(() => campusLifeSearch(term))
+  await runSearch(term, category.value, 0)
 }
+async function runSearch(term, type, index) {
+  const result = await page.load(() => campusLifeSearch(term, { type, page: index }))
+  if (result) submitted.value = { term, type }
+}
+function changePage(index) { return runSearch(submitted.value.term, submitted.value.type, index) }
 </script>
 
 <template>
@@ -27,6 +38,7 @@ async function search() {
     <template #default>
       <section class="campus-life-panel">
         <form class="campus-life-search" role="search" aria-label="校园全站搜索" @submit.prevent="search"><label class="sr-only" for="campus-global-search">搜索校园内容</label><input id="campus-global-search" v-model="query" type="search" maxlength="100" placeholder="搜课程、活动、地点或校园服务" /><button class="btn btn-primary" type="submit" :disabled="page.loading.value">{{ page.loading.value ? '搜索中…' : '搜索' }}</button></form>
+        <label class="campus-search-category">搜索范围 <select v-model="category"><option value="">全部分类</option><option v-for="type in searchTypes" :key="type" :value="type">{{ campusContentLabel(type) }}</option></select></label>
         <!-- `loaded` 让重新搜索时保留上一次的结果：旧模板只看 page.loading，
              每敲一次搜索就闪一下空白，用户以为功能坏了。 -->
         <CampusStateBlock
@@ -40,13 +52,14 @@ async function search() {
           @retry="search()"
         >
           <div class="campus-search-results" aria-label="搜索结果">
-            <p class="campus-life-result-count" role="status">找到 {{ results.length }} 条相关内容</p>
+            <p class="campus-life-result-count" role="status">“{{ submitted.term }}” · 本页 {{ results.length }} 条相关内容<span v-if="page.data.value?.hasMore"> · 还有更多结果</span></p>
             <article v-for="item in results" :key="`${item.type}:${item.id}`" class="campus-search-result">
               <div><span class="campus-life-tag">{{ campusContentLabel(item.type) }}</span><h2>{{ item.title }}</h2><p>{{ item.detail || '暂无补充说明。' }}</p><small v-if="item.campus">{{ item.campus }}</small></div>
               <RouterLink class="btn btn-ghost" :to="campusContentRoute(item.type)">查看{{ campusContentLabel(item.type) }}</RouterLink>
             </article>
           </div>
         </CampusStateBlock>
+        <nav v-if="page.data.value && (currentPage || page.data.value.hasMore)" class="campus-life-actions" aria-label="搜索结果分页"><button class="btn btn-ghost" type="button" :disabled="page.loading.value || !currentPage" @click="changePage(currentPage - 1)">上一页</button><span>第 {{ currentPage + 1 }} 页</span><button class="btn btn-ghost" type="button" :disabled="page.loading.value || !page.data.value.hasMore" @click="changePage(currentPage + 1)">下一页</button></nav>
         <p v-if="page.actionError.value" class="campus-life-inline-state error" role="alert">{{ page.actionError.value }}</p>
       </section>
     </template>

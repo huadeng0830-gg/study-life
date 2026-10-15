@@ -35,12 +35,14 @@ function startEdge({ meetings = [], participantError = null } = {}) {
       const field = (row, key) => key.split('.').reduce((value, part) => value?.[part], row)
       const query = {
         select(columns) { joined = columns.includes('slot:'); return query },
+        upsert(row) { const existing = rows[table].find((item) => item.user_id === row.user_id); if (existing) Object.assign(existing, row); else rows[table].push(row); filters.push((item) => item.user_id === row.user_id); return query },
         eq(key, value) { filters.push((row) => field(row, key) === value); return query },
         in(key, values) { filters.push((row) => values.includes(row[key])); return query },
         gte(key, value) { filters.push((row) => field(row, key) >= value); return query },
         lt(key, value) { filters.push((row) => field(row, key) < value); return query },
         limit(value) { limit = value; return query },
         maybeSingle() { single = true; return query },
+        single() { single = true; return query },
         then(resolve, reject) {
           const selected = rows[table].map((row) => joined ? { ...row, slot: rows[table === 'team_project_meeting_participants' ? 'team_project_meetings' : 'social_invitations'].find((item) => item.id === (row.meeting_id || row.invitation_id)) } : row)
           const data = selected.filter((row) => filters.every((filter) => filter(row)))
@@ -61,7 +63,7 @@ function startEdge({ meetings = [], participantError = null } = {}) {
     },
     exports: {}, Date, Request, Response, Headers, TextEncoder, TextDecoder, console, crypto,
   }, { filename: 'campus-social/index.ts' })
-  return { handler, admin }
+  return { handler, admin, rows }
 }
 function request(action, payload = {}) {
   return new Request('https://fictional.example.invalid/functions/v1/campus-social', { method: 'POST', headers: { Authorization: 'Bearer fictional-token', 'Content-Type': 'application/json', Origin: 'http://localhost:4173' }, body: JSON.stringify({ action, payload }) })
@@ -72,6 +74,23 @@ afterEach(() => { vi.useRealTimers() })
 
 describe('real Edge handler enforces calendar and request boundaries', () => {
   const confirmed = { id: meeting, starts_at: '2026-10-12T01:00:00Z', ends_at: '2026-10-12T02:00:00Z', status: 'confirmed' }
+  it('saves a profile without coverage dates, with all weekdays including weekends by default', async () => {
+    const { handler, rows } = startEdge()
+    const response = await handler(request('profile_save', { nickname: '虚构同学', timezone: 'Asia/Shanghai' }))
+    expect(response.status).toBe(200)
+    expect(rows.social_profiles[0].availability_preferences.weekdays).toEqual([0, 1, 2, 3, 4, 5, 6])
+    expect(rows.social_profiles[0].availability_preferences.classBufferMinutes).toBe(0)
+  })
+  it('matches empty schedules on weekends when both profiles have no coverage dates', async () => {
+    const { handler, rows } = startEdge()
+    rows.social_profiles.forEach((profile) => { profile.schedule_complete_through = null; profile.semester_end = null })
+    const response = await handler(request('availability_query', { friendId: peer, days: 7 }))
+    expect(response.status).toBe(200)
+    const { data } = await response.json()
+    expect(data.known).toBe(true)
+    const weekend = data.intervals.some((slot) => [0, 6].includes(new Date(Date.parse(slot.startsAt) + 8 * 3600000).getUTCDay()))
+    expect(weekend).toBe(true)
+  })
 
   it('excludes confirmed project meetings from friend availability', async () => {
     const { handler } = startEdge({ meetings: [confirmed] })
