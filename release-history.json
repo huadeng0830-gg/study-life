@@ -5,7 +5,7 @@
     "channel": "stable",
     "publishedAt": null,
     "title": "三两事 1.7.0",
-    "summary": "新增校园反馈、审核申请与贡献积分",
+    "summary": "校园协作与账号安全更新",
     "changes": {
       "features": [
         "新增校园反馈、审核申请与贡献积分"
