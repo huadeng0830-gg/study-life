@@ -65,9 +65,11 @@ beforeEach(async () => {
   await nextTick()
 })
 
-afterEach(() => {
+afterEach(async () => {
   app?.unmount()
   host?.remove()
+  const { clearAnnouncement } = await import('../src/composables/liveRegion.js')
+  clearAnnouncement()
 })
 
 describe('重要日期与待办交互', () => {
