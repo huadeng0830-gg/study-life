@@ -7,8 +7,8 @@ export const RELEASE_UPDATES = Object.freeze([
     version: '1.7.0',
     legacyVersion: '2026年10月15日-版本7',
     channel: 'stable',
-    summary: '新增校园反馈、审核申请与贡献积分',
-    signature: '4ebda450de',
+    summary: '校园协作与账号安全更新',
+    signature: '106cd651fd',
     changes: {
       features: [
       '新增校园反馈、审核申请与贡献积分',
@@ -90,7 +90,7 @@ export const RELEASE_CHANNEL = 'stable'
 export const LEGACY_RELEASE_VERSION = RELEASE_UPDATES[0].legacyVersion || RELEASE_UPDATES[0].version
 
 // 与第一条签名保持一致，交给 vite.config.js 校验源码一致性。
-export const RELEASE_SOURCE_SIGNATURE = '4ebda450de'
+export const RELEASE_SOURCE_SIGNATURE = '106cd651fd'
 
 // 兼容旧引用：当前版本的更新说明。
 export const RELEASE_NOTES = RELEASE_UPDATES[0].notes
