@@ -8,11 +8,12 @@ import AccountSessionActions from './account/AccountSessionActions.vue'
 import AccountCommunitySettings from './account/AccountCommunitySettings.vue'
 import { getAccountAuthOptions } from '../services/cloudConfig.js'
 import {
-  accountAuthError, accountAvailable, accountBusy, accountCallbackError, accountInitialSection, accountUser, hasVerifiedContactEmail,
+  accountAuthError, accountAvailable, accountBusy, accountCallbackError, accountInitialSection, accountUser,
   accountPasswordRecovery, finishAccountPasswordRecovery,
   initializeAccountAuth, loginAccount, loginAccountWithOAuth, logoutAccount, normalizeAccountEmail,
   registerAccount, requestAccountPasswordReset, resendAccountConfirmation, validateAccountForm,
 } from '../composables/accountAuth.js'
+import { hasVerifiedContactEmail } from '../composables/accountVerification.js'
 import { announce, announceAlert } from '../composables/liveRegion.js'
 import { useAccountEmailCooldown } from '../composables/accountEmailCooldown.js'
 import '../styles/shadcn.css'

@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { accountOpen, accountUser, hasVerifiedContactEmail } from '../../composables/accountAuth.js'
+import { accountOpen, accountUser } from '../../composables/accountAuth.js'
+import { hasVerifiedContactEmail } from '../../composables/accountVerification.js'
 import { campusFeedbackPublicList, myCampusFeedback, submitCampusFeedback, applyCampusReviewer, myCampusReviewerApplication, replyToCampusReviewerApplication, campusFeedbackMessages } from '../../services/campusCommunity.js'
 import { Button } from '../../components/ui/button'
 import { Badge } from '../../components/ui/badge'

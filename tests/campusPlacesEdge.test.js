@@ -26,7 +26,7 @@ function edge({ tables = {} } = {}) {
     campus_place_invites: ['id'], social_friendships: ['user_low', 'user_high'],
   }
   const admin = {
-    auth: { getUser: vi.fn(async () => ({ data: { user: { id: actor, email_confirmed_at: '2026-10-01T00:00:00Z' } }, error: null })) },
+    auth: { getUser: vi.fn(async () => ({ data: { user: { id: actor, email: 'student@example.test', email_confirmed_at: '2026-10-01T00:00:00Z' } }, error: null })) },
     rpc: vi.fn(async (name) => name === 'campus_place_rate_limit' ? { data: true, error: null } : { data: { allowed: true }, error: null }),
     from: vi.fn((table) => {
       if (!(table in rows)) throw new Error(`Unexpected table: ${table}`)

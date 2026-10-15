@@ -1,6 +1,7 @@
 <script setup>
 import { computed, reactive, ref, watch } from 'vue'
-import { accountUser, hasVerifiedContactEmail } from '../../composables/accountAuth.js'
+import { accountUser } from '../../composables/accountAuth.js'
+import { hasVerifiedContactEmail } from '../../composables/accountVerification.js'
 import { socialRequest } from '../../services/social.js'
 import { Button } from '../ui/button'
 import { Badge } from '../ui/badge'

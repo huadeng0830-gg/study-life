@@ -8,7 +8,7 @@ export const RELEASE_UPDATES = Object.freeze([
     legacyVersion: '2026年10月15日-版本7',
     channel: 'stable',
     summary: '新增校园反馈、审核申请与贡献积分',
-    signature: 'cb28c3a1a7',
+    signature: '4ebda450de',
     changes: {
       features: [
       '新增校园反馈、审核申请与贡献积分',
@@ -26,6 +26,7 @@ export const RELEASE_UPDATES = Object.freeze([
     },
     notes: [
       '新增校园反馈、审核申请与贡献积分',
+      '完善校园内容审核、申诉与好友协作',
       '优化账号同步、备份恢复与校园导航',
       '修复同步启动竞态及多个校园页面状态问题',
       '收紧微信内部账号与邮箱验证功能的服务端边界',
@@ -89,7 +90,7 @@ export const RELEASE_CHANNEL = 'stable'
 export const LEGACY_RELEASE_VERSION = RELEASE_UPDATES[0].legacyVersion || RELEASE_UPDATES[0].version
 
 // 与第一条签名保持一致，交给 vite.config.js 校验源码一致性。
-export const RELEASE_SOURCE_SIGNATURE = 'cb28c3a1a7'
+export const RELEASE_SOURCE_SIGNATURE = '4ebda450de'
 
 // 兼容旧引用：当前版本的更新说明。
 export const RELEASE_NOTES = RELEASE_UPDATES[0].notes

@@ -1,5 +1,6 @@
 import { socialRequest } from './social.js'
-import { accountUser, hasVerifiedContactEmail } from '../composables/accountAuth.js'
+import { accountUser } from '../composables/accountAuth.js'
+import { hasVerifiedContactEmail } from '../composables/accountVerification.js'
 import { getSupabaseClient } from './supabase.js'
 import { validDate } from '../composables/zonedTime.js'
 import { PROJECT_FILE_MAX_BYTES } from './projectFileLimits.js'

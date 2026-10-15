@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onActivated, onBeforeUnmount, onDeactivated, ref, watch } from 'vue'
-import { accountUser, hasVerifiedContactEmail } from '../composables/accountAuth.js'
+import { accountUser } from '../composables/accountAuth.js'
+import { hasVerifiedContactEmail } from '../composables/accountVerification.js'
 import { appNow } from '../composables/timeContext.js'
 import { dateInZone } from '../composables/zonedTime.js'
 import { socialRequest, subscribeSocialNotifications } from '../services/social.js'

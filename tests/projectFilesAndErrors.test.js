@@ -17,7 +17,7 @@ const projectId = '00000002-0000-4000-8000-000000000002'
 const deliverableId = '00000003-0000-4000-8000-000000000003'
 const upload = vi.fn(), signedUrl = vi.fn()
 beforeEach(() => {
-  mocks.user.value = { id: userId, email_confirmed_at: '2026-01-01T00:00:00Z' }
+  mocks.user.value = { id: userId, email: 'student@example.test', email_confirmed_at: '2026-01-01T00:00:00Z' }
   upload.mockReset().mockResolvedValue({ error: null })
   signedUrl.mockReset().mockResolvedValue({ data: { signedUrl: 'https://example.invalid/fictional-file' }, error: null })
   mocks.client = {

@@ -54,7 +54,7 @@ vi.mock('../src/services/campusLife.js', () => Object.fromEntries(serviceState.s
 vi.mock('../src/composables/accountAuth.js', async () => {
   const { shallowRef, ref, computed } = await import('vue')
   return {
-    accountUser: shallowRef({ id: '00000001-0000-4000-8000-000000000001' }),
+    accountUser: shallowRef({ id: '00000001-0000-4000-8000-000000000001', email: 'student@example.test', email_confirmed_at: '2026-10-01T00:00:00Z' }),
     accountOpen: shallowRef(false),
     openAccountSection: vi.fn((section) => { serviceState.accountSectionRequests.push(section) }),
     accountReady: shallowRef(true),

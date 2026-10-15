@@ -1,4 +1,5 @@
-import { accountUser, hasVerifiedContactEmail } from '../composables/accountAuth.js'
+import { accountUser } from '../composables/accountAuth.js'
+import { hasVerifiedContactEmail } from '../composables/accountVerification.js'
 import { accountSyncStatus, syncAccountNow } from '../composables/accountSyncState.js'
 import { accountSyncViaAccount } from '../composables/accountSyncMode.js'
 import { getSupabaseClient } from './supabase.js'

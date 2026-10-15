@@ -42,6 +42,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Install Electron updater test dependency
+        run: npm ci --prefix desktop-app
+
       - name: Verify public account configuration
         run: npm run supabase:verify-config -- production
 

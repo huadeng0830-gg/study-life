@@ -1,7 +1,8 @@
 <script setup>
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { accountUser, hasVerifiedContactEmail } from '../composables/accountAuth.js'
+import { accountUser } from '../composables/accountAuth.js'
+import { hasVerifiedContactEmail } from '../composables/accountVerification.js'
 import {
   MAX_WEEK,
   dayName,

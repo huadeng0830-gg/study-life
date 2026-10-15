@@ -11,7 +11,7 @@ const source = readFileSync(new URL('../supabase/functions/campus-social/index.t
 const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
 function setup() {
   let handler
-  const admin = { auth: { getUser: async () => ({ data: { user: { id: actor, email_confirmed_at: '2026-01-01' } } }) },
+  const admin = { auth: { getUser: async () => ({ data: { user: { id: actor, email: 'student@example.test', email_confirmed_at: '2026-01-01' } } }) },
     rpc: vi.fn(async () => ({ data: { allowed: true }, error: null })) }
   vm.runInNewContext(compiled, {
     Deno: { env: { get: (name) => ({ SUPABASE_URL: 'https://example.invalid', SUPABASE_SERVICE_ROLE_KEY: 'fictional-server-key' })[name] }, serve: (callback) => { handler = callback } },

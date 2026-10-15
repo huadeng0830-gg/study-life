@@ -71,7 +71,7 @@ async function mount() {
   app = createApp(ProjectsView); app.use(router); app.mount(host); await flush()
 }
 beforeEach(() => {
-  stubs.user.value = { id: 'fictional-account-a', email_confirmed_at: '2026-01-01' }
+  stubs.user.value = { id: 'fictional-account-a', email: 'first@example.test', email_confirmed_at: '2026-01-01' }
   stubs.meetingSync.mockClear(); stubs.ensureTodo.mockClear()
   stubs.upload.mockReset(); stubs.setTodoStatus.mockClear(); stubs.detachTodos.mockClear()
   stubs.request.mockReset().mockImplementation(async (action) => {
@@ -91,7 +91,7 @@ describe('engineering audit: project account lifecycle', () => {
       ? new Promise((resolve) => { resolveOld = resolve }) : base(action, payload))
     await mount()
     expect(resolveOld).toBeTypeOf('function')
-    stubs.user.value = { id: 'fictional-account-b', email_confirmed_at: '2026-01-01' }; await flush()
+    stubs.user.value = { id: 'fictional-account-b', email: 'second@example.test', email_confirmed_at: '2026-01-01' }; await flush()
     expect(stubs.request.mock.calls.filter(([action]) => action === 'list')).toHaveLength(2)
     resolveOld({ projects: [PROJECT] }); await flush()
     expect(host.textContent).not.toContain(PROJECT.name)
@@ -118,7 +118,7 @@ describe('engineering audit: project account lifecycle', () => {
     const create = [...host.querySelectorAll('button')].find((button) => button.textContent.trim() === '新建项目')
     expect(create).toBeTruthy(); create.click(); await flush()
     expect(document.querySelector('.overlay')).toBeTruthy()
-    stubs.user.value = { id: 'fictional-account-b', email_confirmed_at: '2026-01-01' }; await flush()
+    stubs.user.value = { id: 'fictional-account-b', email: 'second@example.test', email_confirmed_at: '2026-01-01' }; await flush()
     expect(document.querySelector('.overlay')).toBeNull()
   })
 
@@ -136,7 +136,7 @@ describe('engineering audit: project account lifecycle', () => {
     const accept = [...host.querySelectorAll('button')].find((button) => button.textContent.trim() === '接受分工')
     expect(accept).toBeTruthy(); accept.click(); await flush()
     expect(resolveAcceptance).toBeTypeOf('function')
-    stubs.user.value = { id: 'fictional-account-b', email_confirmed_at: '2026-01-01' }; await flush()
+    stubs.user.value = { id: 'fictional-account-b', email: 'second@example.test', email_confirmed_at: '2026-01-01' }; await flush()
     resolveAcceptance({ assignmentStatus: 'accepted' }); await flush()
     expect(stubs.ensureTodo).not.toHaveBeenCalled()
   })
@@ -154,7 +154,7 @@ describe('engineering audit: project account lifecycle', () => {
     await mount()
     const progress = host.querySelector('[aria-label="查看“虚构私有分工”的进展记录"]')
     expect(progress).toBeTruthy(); progress.click(); await flush()
-    stubs.user.value = { id: 'fictional-account-b', email_confirmed_at: '2026-01-01' }; await flush()
+    stubs.user.value = { id: 'fictional-account-b', email: 'second@example.test', email_confirmed_at: '2026-01-01' }; await flush()
     resolveEvents({ events: [{ id: 'fictional-event', summary: '虚构旧账号私有记录', createdAt: '2026-01-01' }] }); await flush()
     expect(document.querySelector('.overlay')).toBeNull()
   })

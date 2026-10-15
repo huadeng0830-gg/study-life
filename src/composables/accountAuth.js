@@ -11,10 +11,6 @@ export function openAccountSection(section = 'overview') {
   accountOpen.value = true
 }
 export const accountUser = shallowRef(/** @type {import('@supabase/supabase-js').User | null} */ (null))
-export function hasVerifiedContactEmail(user = accountUser.value) {
-  const email = String(user?.email || '').trim().toLowerCase()
-  return Boolean(user?.email_confirmed_at && email && !email.endsWith('@wechat.study-life.invalid'))
-}
 export const accountReady = ref(false)
 export const accountBusy = ref(false)
 export const accountAuthError = ref('')
