@@ -8,7 +8,7 @@ export const RELEASE_UPDATES = Object.freeze([
     legacyVersion: '2026年10月17日-版本1',
     channel: 'stable',
     summary: '三两豆兑换数字权益并查看归属与贡献豆流水',
-    signature: '10f214b1dd',
+    signature: 'bd3af33dfd',
     changes: {
       features: [
       '三两豆兑换数字权益并查看归属与贡献豆流水',
@@ -26,6 +26,7 @@ export const RELEASE_UPDATES = Object.freeze([
       '三两豆兑换数字权益并查看归属与贡献豆流水',
       '已就绪的新版本可安全自动应用，全局和手机端都会提示更新',
       '修复标签页并行编辑时的未保存保护，补齐校园队列索引和反馈审计',
+      '补齐校园治理队列索引、反馈审计和举报申诉所需数据库结构',
     ],
   },
   {
@@ -105,7 +106,7 @@ export const RELEASE_CHANNEL = 'stable'
 export const LEGACY_RELEASE_VERSION = RELEASE_UPDATES[0].legacyVersion || RELEASE_UPDATES[0].version
 
 // 与第一条签名保持一致，交给 vite.config.js 校验源码一致性。
-export const RELEASE_SOURCE_SIGNATURE = '10f214b1dd'
+export const RELEASE_SOURCE_SIGNATURE = 'bd3af33dfd'
 
 // 兼容旧引用：当前版本的更新说明。
 export const RELEASE_NOTES = RELEASE_UPDATES[0].notes

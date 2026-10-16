@@ -17,12 +17,17 @@ export const RELEASE_INPUTS = ['src', 'functions', 'workers', 'supabase/function
 // 打包后的 index.js），缓存与临时目录同理。把它们纳入签名会令本机与干净 CI
 // 算出不同签名 —— 换一次 wrangler dev 就足以让发布闸门误报。
 const RELEASE_INPUT_EXCLUDED_DIRS = new Set(['node_modules', '.git', '.wrangler', '.tmp', '.vitest-tmp', '.playwright-cli', 'dist', 'dist-desktop'])
+// Wrangler generates this ignored declaration locally when checking the public Worker.
+// It is not part of the commit, so including it would make release signatures differ
+// between a developer checkout and the clean Cloudflare Pages checkout.
+const RELEASE_INPUT_EXCLUDED_FILES = new Set(['workers/public-api/worker-configuration.d.ts'])
 
 export function collectReleaseFiles(target) {
   if (!existsSync(target)) return []
   if (!statSync(target).isDirectory()) return [target]
   return readdirSync(target, { withFileTypes: true })
-    .filter((entry) => !RELEASE_INPUT_EXCLUDED_DIRS.has(entry.name))
+    .filter((entry) => !RELEASE_INPUT_EXCLUDED_DIRS.has(entry.name) &&
+      !RELEASE_INPUT_EXCLUDED_FILES.has(relative(PROJECT_ROOT, resolve(target, entry.name)).replaceAll('\\', '/')))
     .flatMap((entry) => collectReleaseFiles(resolve(target, entry.name)))
 }
 
