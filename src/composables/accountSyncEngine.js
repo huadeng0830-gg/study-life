@@ -39,6 +39,8 @@ let failureCount = 0
 let localSequence = 0
 let pendingSignature = ''
 let lastSuccessfulSync = null
+let lastSuccessfulCheckAt = null
+let scheduleHealthyPoll = null
 let unbind = null
 /** 本轮是否发现云端 manifest 与它的值对不上（版本错位）。用来强制回写一次修好的 manifest。 */
 let manifestDrifted = false
@@ -73,7 +75,7 @@ function assertCurrent(id, revision) {
   }
 }
 function setState(state, error = '') { accountSyncStatus.value = state; accountSyncError.value = error }
-function clearTimers() { window.clearTimeout(timer); window.clearInterval(poll); timer = null; poll = null }
+function clearTimers() { window.clearTimeout(timer); window.clearTimeout(poll); timer = null; poll = null }
 async function localValues() {
   const { flushStoredWrites, useStoredRef } = await import('./store/cloudAccess.js')
   const flushed = flushStoredWrites()
@@ -419,7 +421,13 @@ export function runAccountSync(choices = null) {
       const retrySoon = error?.status === 401
       scheduleFailure(error, { fatal: Boolean(error?.fatal), retrySoon })
       return false
-    } finally { running = null }
+    } finally {
+      if (generation === revision && accountSyncStatus.value === 'synced') {
+        lastSuccessfulCheckAt = Date.now()
+        scheduleHealthyPoll?.()
+      }
+      running = null
+    }
   })()
   return running
 }
@@ -528,6 +536,10 @@ export async function startAccountSync(id) {
   const storage = (event) => { if (SYNC_KEYS.includes(event.key)) dirty() }
   const resume = () => {
     if (document.hidden || AUTO_RESUME_BLOCKED_STATES.has(accountSyncStatus.value)) return
+    // Focus and visibility often fire together, and opening/closing browser
+    // panels can repeat them. Healthy syncs need no extra probe within a minute.
+    const elapsed = lastSuccessfulCheckAt === null ? Infinity : Date.now() - lastSuccessfulCheckAt
+    if (accountSyncStatus.value === 'synced' && elapsed >= 0 && elapsed < ACCOUNT_SYNC_POLL_MS) return
     // An offline poll is only a fallback. Once connectivity/focus returns, wake
     // immediately; error backoff is protected above by its distinct error state.
     if (timer !== null) {
@@ -568,9 +580,19 @@ export async function startAccountSync(id) {
   }
   // Poll only while healthy to discover remote edits. Errors use scheduleFailure's
   // backoff/give-up timer; an unconditional poll here would bypass both policies.
-  poll = window.setInterval(() => {
-    if (!document.hidden && accountSyncStatus.value === 'synced') void runAccountSync()
-  }, ACCOUNT_SYNC_POLL_MS)
+  // Rearm from completion, so a request taking a few milliseconds does not
+  // accidentally skip a fixed interval and stretch remote detection to 2 min.
+  const schedulePoll = () => {
+    if (generation !== revision || owner !== id) return
+    window.clearTimeout(poll)
+    poll = window.setTimeout(() => {
+      poll = null
+      if (!document.hidden && accountSyncStatus.value === 'synced') void runAccountSync()
+      else schedulePoll()
+    }, ACCOUNT_SYNC_POLL_MS)
+  }
+  scheduleHealthyPoll = schedulePoll
+  schedulePoll()
   void runAccountSync()
 }
 export async function stopAccountSync() {
@@ -579,6 +601,7 @@ export async function stopAccountSync() {
   owner = ''
   controller?.abort()
   clearTimers()
+  scheduleHealthyPoll = null
   unbind?.(); unbind = null
   await running
   // 【这一段原本无条件执行】stopAccountSync 里有一句 `await running`，
@@ -591,6 +614,7 @@ export async function stopAccountSync() {
   // A stopped or logged-out session must never reuse the previous session's
   // unchanged-revision shortcut (the local stores may have been cleared/reset).
   lastSuccessfulSync = null
+  lastSuccessfulCheckAt = null
   localSequence++
   accountSyncLastSyncedAt.value = ''
   accountSyncConflicts.value = []

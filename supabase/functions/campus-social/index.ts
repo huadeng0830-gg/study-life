@@ -18,6 +18,7 @@ const admin = createClient(supabaseUrl, serviceKey, { auth: { persistSession: fa
 const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, apikey, content-type, x-client-info, x-supabase-api-version',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Max-Age': '7200',
 }
 const allowedOrigins = new Set([
   'https://study-life.pages.dev',

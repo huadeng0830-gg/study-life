@@ -15,6 +15,8 @@ describe('campus life privacy and state rules', () => {
     '寄存柜取件码：ABCD1234',
     '宿舍 6号楼 203室',
     'student@example.edu',
+    '身份证号：11010519900101123X',
+    '家庭住址：北京市朝阳区幸福路 12 号 2 单元 302 室',
   ])('detects private contact or access details: %s', (value) => {
     expect(containsPrivateCampusDetails(value)).toBe(true)
   })

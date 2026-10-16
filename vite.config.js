@@ -191,7 +191,9 @@ export default defineConfig(({ mode }) => {
           },
           {
             urlPattern: /\/assets\/.*\.(?:js|css|png|svg)$/i,
-            handler: 'StaleWhileRevalidate',
+            // Content-hashed assets never change at the same URL. A cache hit
+            // needs no background revalidation or extra Cloudflare request.
+            handler: 'CacheFirst',
             options: {
               cacheName: 'study-life-lazy-assets',
               expiration: { maxEntries: 80, maxAgeSeconds: 30 * 24 * 60 * 60 },

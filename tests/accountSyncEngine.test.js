@@ -66,6 +66,35 @@ afterEach(async () => {
 })
 
 describe('按账号自动同步与内容保护', () => {
+  it('健康轮询从上次检查完成后安排，仍在一分钟后读取远端', async () => {
+    const scheduled = vi.spyOn(window, 'setTimeout')
+    await boot()
+    const poll = scheduled.mock.calls.filter(([, delay]) => delay === 60000).at(-1)?.[0]
+    expect(poll).toBeTypeOf('function')
+    fake.request.mockClear()
+    poll()
+    await runAccountSync()
+    expect(fake.request.mock.calls.map(([operation]) => operation)).toEqual(['probe'])
+    expect(scheduled.mock.calls.filter(([, delay]) => delay === 60000).length).toBeGreaterThan(1)
+  })
+  it('刚同步后反复恢复焦点不会重复探测，超过轮询间隔后仍读取远端修改', async () => {
+    let now = 100000
+    vi.spyOn(Date, 'now').mockImplementation(() => now)
+    await boot()
+    fake.request.mockClear()
+    for (let index = 0; index < 4; index++) {
+      window.dispatchEvent(new Event('focus'))
+      document.dispatchEvent(new Event('visibilitychange'))
+      await new Promise(resolve => setTimeout(resolve, 5))
+    }
+    expect(fake.request).not.toHaveBeenCalled()
+    now += 60001
+    const values = clone(remote.values)
+    values.sl_tasks.push(task('remote-after-focus', '另一设备新增'))
+    remote = envelope(values); remoteRevision++
+    window.dispatchEvent(new Event('focus'))
+    await vi.waitFor(() => expect(tasks().value.some(item => item.id === 'remote-after-focus')).toBe(true))
+  })
   it('首次登录上传本机记录，负载只包含同步业务数据', async () => {
     tasks().value = [task('local-task', '本机任务')]
     localStorage.setItem('study-life-auth', 'fictional-session')

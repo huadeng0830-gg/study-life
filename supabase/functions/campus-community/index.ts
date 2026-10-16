@@ -21,8 +21,9 @@ function respond(request: Request, body: unknown, status = 200) {
   const origin = request.headers.get('origin') || ''
   if (allowedOrigins.has(origin)) headers.set('Access-Control-Allow-Origin', origin)
   if (request.method === 'OPTIONS') {
-    headers.set('Access-Control-Allow-Headers', 'authorization, apikey, content-type, x-client-info')
+    headers.set('Access-Control-Allow-Headers', 'authorization, apikey, content-type, x-client-info, x-supabase-api-version')
     headers.set('Access-Control-Allow-Methods', 'POST, OPTIONS')
+    headers.set('Access-Control-Max-Age', '7200')
     return new Response('ok', { headers })
   }
   return new Response(JSON.stringify(body), { status, headers })

@@ -108,6 +108,11 @@ try {
   })
 
   await send('Runtime.enable'); await send('Page.enable'); await send('Log.enable')
+  // This audit measures page layout; release-note overlays have separate tests.
+  // Seed only this isolated browser so screenshots expose the actual page.
+  const auditedVersion = JSON.parse(await readFile(new URL('../../package.json', import.meta.url), 'utf8')).version
+  await send('Page.addScriptToEvaluateOnNewDocument', { source:
+    `localStorage.setItem('study_life_seen_release',${JSON.stringify(auditedVersion)});localStorage.setItem('study_life_seen_releases_v1',JSON.stringify([${JSON.stringify(auditedVersion)}]));` })
   await send('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-color-scheme', value: colorScheme }] })
   if (colorScheme === 'dark' || sampleProfile) {
     const packageInfo = JSON.parse(await readFile(new URL('../../package.json', import.meta.url), 'utf8'))
@@ -158,7 +163,9 @@ try {
         // Wait for this route's own title and heading. A previous route's DOM or the
         // startup vault skeleton must never count as the destination page being ready.
         const routeTarget = routeTargets[route] || route
-        const expectedTitle = routeTitles.get(routeTarget) || '页面不存在'
+        const routePattern = [...routeTitles.keys()].find(pattern => pattern.includes(':') &&
+          new RegExp('^' + pattern.replace(/:[^/]+/g, '[^/]+') + '/?$').test(routeTarget))
+        const expectedTitle = routeTitles.get(routeTarget) || routeTitles.get(routePattern) || '页面不存在'
         const targetHash = `#${routeTarget}`
         const stableRoute = `document.title.includes(${JSON.stringify(expectedTitle)}) && location.hash.startsWith(${JSON.stringify(targetHash)}) && document.querySelector('main')?.getBoundingClientRect().height > 0 && [...document.querySelectorAll('main h1, main h2')].some((heading) => heading.textContent.includes(${JSON.stringify(expectedTitle)})) && !document.querySelector('main .page-leave-active')`
         await until(stableRoute, `${route} page content`)

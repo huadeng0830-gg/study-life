@@ -3,6 +3,9 @@ const PRIVATE_CONTENT_PATTERNS = [
   /(?:\+?86[-\s]?)?1[3-9](?:[\s\-()（）.·—_]*\d){9}/,
   /(?:取件码|手机号|电话|微信|微\s*信|QQ|WX|WeChat|Weixin)\s*[:：]?\s*[\w-]{4,}/i,
   /(?:宿舍|寝室|\d+号楼).{0,12}\d{1,4}室/,
+  /(?:身份证(?:号)?|身份号码|公民身份号码|ID号)\s*[:：]?\s*[\dXx-]{15,20}/i,
+  /\b\d{6}(?:19|20)\d{2}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])\d{3}[0-9Xx]\b/,
+  /(?:详细住址|家庭住址|家庭地址|具体住址|具体地址)\s*[:：]?\s*[^,，。;；\n]{3,80}(?:号|栋|幢|单元|室)/,
 ]
 
 export function containsPrivateCampusDetails(value) {
@@ -37,6 +40,7 @@ export function averageCampusRating(reviews, fields = ['clarity', 'organization'
 // Explicit public projections: searching never loads owners, messages, claims,
 // registrations, reviews or shuttle child tables.
 export const campusSearchSources = [
+  { type: 'matter', table: 'campus_matters', title: 'title', details: ['content'], statusField: 'review_status', statuses: ['approved'] },
   { type: 'course', table: 'campus_courses', title: 'name', details: ['department', 'description'], statusField: 'review_status', statuses: ['approved'] },
   { type: 'teacher', table: 'campus_teachers', title: 'name', details: ['department', 'research_directions'], statusField: 'review_status', statuses: ['approved'] },
   { type: 'place', table: 'campus_places', title: 'name', details: ['place_type', 'area', 'description'], statusField: 'review_status', statuses: ['approved'] },

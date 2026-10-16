@@ -39,6 +39,7 @@ import { announce, announceAlert, clearAnnouncement, liveAlert, liveMessage } fr
 import { openSearch, searchOpen } from './composables/globalSearch.js'
 import { adminTitleForRoute } from './composables/adminWorkspaceModel.js'
 import { desktopShortcutRoutes } from './router/navigation.js'
+import { preloadRouteLink } from './router/routePreload.js'
 retireLegacySyncState()
 const UpdateNotes = defineAsyncComponent(() => import('./components/UpdateNotes.vue'))
 const QuickRecordPanel = defineAsyncComponent(() => import('./components/QuickRecordPanel.vue'))
@@ -411,7 +412,7 @@ function t(key) {
   <!-- 这里原先还有 `:data-atmosphere="atmosphereKey"`：全仓没有任何一条 CSS 或脚本读它，
        是个写出去就没人看的死钩子（同 tests/styleHooks.test.js 抓的那一类）。
        当天的氛围已经由上面的 [data-festive] 精确分叉，不再需要第二份标记。 -->
-  <div class="layout" :class="{ 'layout-admin': isAdminWorkspace }">
+  <div class="layout" :class="{ 'layout-admin': isAdminWorkspace }" @pointerover="preloadRouteLink" @focusin="preloadRouteLink" @pointerdown="preloadRouteLink">
     <!-- 跳到主内容（WCAG 2.4.1 绕过区块）。侧边栏有十几个导航项，键盘用户每换一页
          都得先 Tab 穿过它们才能到正文；这是纯键盘用户最常用的第一颗「按键」。
          平时视觉隐藏（见 <style> 里的 .skip-to-content），按 Tab 第一个聚焦时才浮现，

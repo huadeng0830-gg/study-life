@@ -34,6 +34,7 @@ const statusLabels = {
 const notificationLabels = {
   friend_request: '向你发送了好友请求', friend_accepted: '接受了你的好友请求', friend_removed: '已将你从好友中移除',
   invitation: '发来一条新邀约', invitation_updated: '更新了邀约', invitation_cancelled: '取消了一条邀约', invitation_expired: '一条邀约已过期', place_preset: '发来一份可拒收的地点预设；前往地点→好友预设查看', campus_place_reviewed: '地点审核已有结果；前往“校园 → 我的地点”查看意见', campus_content_reviewed: '校园内容审核已有结果；查看我的投稿', campus_report_reviewed: '校园举报已有处理结果；查看我的举报', campus_market_interest: '有人表达了二手商品联系意向', campus_help_application: '有人申请接手互助任务', campus_help_update: '互助任务或争议状态已更新', campus_lost_found_claim: '失物认领申请有更新', campus_event_update: '活动报名有更新', campus_private_message: '收到一条校园服务私信',
+  campus_matter_response: '有人提交了一个解决办法', campus_matter_clarification: '这件事的关键补充有更新', campus_matter_adopted: '楼主采纳了你的办法', campus_matter_outcome: '楼主反馈了尝试结果', campus_matter_reviewed: '事项审核已有结果',
 }
 const durationChoices = [30, 60, 90, 120, 180]
 const context = createCollaborationContext(() => [accountUser.value?.id || '', hasVerifiedContactEmail()], { onError: (error) => announce('error', error.message) })

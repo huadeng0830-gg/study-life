@@ -1,8 +1,36 @@
+import { watch } from 'vue'
 import { accountUser } from '../composables/accountAuth.js'
 import { hasVerifiedContactEmail } from '../composables/accountVerification.js'
 import { accountSyncStatus, syncAccountNow } from '../composables/accountSyncState.js'
 import { accountSyncViaAccount } from '../composables/accountSyncMode.js'
 import { getSupabaseClient } from './supabase.js'
+import { createReadCache } from './readCache.js'
+import { EDGE_FUNCTION_TIMEOUT_MS } from './cloudConfig.js'
+
+const campusReads = new Set([
+  'search', 'courses_list', 'market_list', 'help_list', 'shuttle_list',
+  'lost_found_list', 'events_list', 'guides_list', 'mine_list',
+  'market_interest_list', 'help_applications_list', 'lost_found_claims_list',
+  'favorite_list',
+  'matter_overview', 'matter_list', 'matter_detail',
+])
+const readCache = createReadCache()
+let accountGeneration = 0
+// Synchronous invalidation also catches logout → login to the same account.
+watch(() => accountUser.value?.id || '', () => {
+  accountGeneration += 1
+  readCache.clear()
+}, { flush: 'sync' })
+
+async function cachedCampusRequest(action, payload, request, options = { area: '校园服务' }) {
+  const user = signedInUser(options)
+  const generation = accountGeneration
+  if (!navigator.onLine) return request()
+  const key = JSON.stringify([user.id, action, payload])
+  const result = await readCache.read(key, request)
+  if (accountGeneration !== generation) throw new SocialError('account_changed', '登录状态已变化，请重新打开页面。', 401)
+  return result
+}
 
 export class SocialError extends Error {
   constructor(code, message, status = 0) {
@@ -59,6 +87,7 @@ function messageFor(code, fallback, action = '') {
     invalid_input: '内容格式不正确，请检查后重试。',
     not_found: '内容已更新，请刷新后查看。',
     rate_limited: '操作太频繁了，请稍后再试。',
+    request_timeout: '连接等待超时。请先刷新确认操作状态，再决定是否重试。',
     duplicate_place: '相同校区和区域已有同名地点，请先检查现有资料。',
     schedule_unknown: '暂时无法读取双方的课表，请检查账号同步状态后重试。',
     schedule_changed: '课表或可约偏好刚刚发生变化，请刷新共同时间后重试。',
@@ -70,6 +99,7 @@ function messageFor(code, fallback, action = '') {
 }
 
 async function parseFunctionError(error) {
+  if (error?.context?.name === 'AbortError') return { code: 'request_timeout', message: '', status: 0 }
   try {
     const context = error?.context
     if (context && typeof context.json === 'function') {
@@ -92,6 +122,7 @@ async function requestFunction(functionName, action, payload, { requireVerified 
   // The SDK may resolve its default token after an account switch. Bind this
   // mutation to the session that authorized the user's original action.
   const { data, error } = await client.functions.invoke(functionName, {
+    timeout: EDGE_FUNCTION_TIMEOUT_MS,
     body: { action, payload }, headers: { Authorization: `Bearer ${session.access_token}` },
   })
   if (accountUser.value?.id !== user.id) throw new SocialError('account_changed', '登录账号已切换，本次操作已取消。', 401)
@@ -106,11 +137,22 @@ async function requestFunction(functionName, action, payload, { requireVerified 
 }
 
 export function socialRequest(action, payload = {}) {
-  return requestFunction('campus-social', action, payload, { requireVerified: !['profile_get', 'profile_save'].includes(action), area: '好友协作' })
+  const options = { requireVerified: !['profile_get', 'profile_save'].includes(action), area: '好友协作' }
+  const request = () => requestFunction('campus-social', action, payload, options)
+  if (['profile_get', 'campus_places_list'].includes(action)) return cachedCampusRequest(`social:${action}`, payload, request, options)
+  // Profile edits can change school/campus scope; never reuse earlier lists.
+  readCache.clear()
+  return request().finally(() => readCache.clear())
 }
 
-export function campusLifeRequest(action, payload = {}) {
-  return requestFunction('campus-life', action, payload, { area: '校园服务', messageAction: `campus_life_${action}` })
+export function campusLifeRequest(action, payload = {}, { forceRefresh = false } = {}) {
+  const request = () => requestFunction('campus-life', action, payload, { area: '校园服务', messageAction: `campus_life_${action}` })
+  if (forceRefresh) readCache.clear()
+  if (campusReads.has(action)) return cachedCampusRequest(action, payload, request)
+  // Invalidate before AND after a write: a read started while the write was
+  // pending must not repopulate the next page with the pre-write response.
+  readCache.clear()
+  return request().finally(() => readCache.clear())
 }
 
 // Public feedback can be read before login. The function still verifies every
@@ -123,7 +165,7 @@ export async function campusCommunityRequest(action, payload = {}) {
   const session = authData?.session
   const callerId = accountUser.value?.id || ''
   const headers = session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}
-  const { data, error } = await client.functions.invoke('campus-community', { body: { action, payload }, headers })
+  const { data, error } = await client.functions.invoke('campus-community', { body: { action, payload }, headers, timeout: EDGE_FUNCTION_TIMEOUT_MS })
   if (callerId && accountUser.value?.id !== callerId) throw new SocialError('account_changed', '登录账号已切换，本次操作已取消。', 401)
   if (error) {
     const detail = await parseFunctionError(error)
@@ -133,7 +175,10 @@ export async function campusCommunityRequest(action, payload = {}) {
   return data.data
 }
 
-export function listCampusPlaces() { return socialRequest('campus_places_list') }
+export function listCampusPlaces({ forceRefresh = false } = {}) {
+  if (forceRefresh) readCache.clear()
+  return socialRequest('campus_places_list')
+}
 export function publishCampusPlace(place) {
   return socialRequest('campus_place_publish', { place })
 }

@@ -13,14 +13,22 @@ const error = ref('')
 const confirmRemove = ref(false)
 const isReport = computed(() => props.entry.type === 'report')
 const content = computed(() => isReport.value ? props.entry.item.target : props.entry.item)
-const title = computed(() => campusContentTitle(content.value || {}))
+const linkedAccount = computed(() => content.value?.author_id || content.value?.asker_id || content.value?.owner_id || content.value?.user_id || '')
+const title = computed(() => {
+  const item = content.value || {}
+  const value = campusContentTitle(item)
+  return value.length > 100 ? `${value.slice(0,100)}…` : value
+})
 const source = computed(() => {
   const value = content.value?.source_url || content.value?.source_info || ''
   try { const url = new URL(value); return ['https:', 'http:'].includes(url.protocol) ? url.href : '' } catch { return '' }
 })
 const details = computed(() => {
   const item = content.value || {}
-  return [item.description, item.body, item.official_intro, item.note, item.detail, item.reason, item.research_directions,
+  return [item.content, item.why && `为什么：${item.why}`, item.steps && `可以怎么做：${item.steps}`, item.risk && `可能的困难：${item.risk}`,
+    item.question && `关键问题：${item.question}`, item.answer && `补充回答：${item.answer}`,
+    item.matter && `关联事项：${item.matter.title || ''}\n${item.matter.content || ''}`,
+    item.description, item.body, item.official_intro, item.note, item.detail, item.reason, item.research_directions,
     item.task && `争议任务：${item.task.title} · ${item.task.description || ''} · 当前状态：${item.task.status}`,
     ['clarity','organization','learning','workload','assessment'].some(key => item[key] != null) && `评价维度：${[['clarity','讲解'],['organization','组织'],['learning','收获'],['workload','任务量'],['assessment','考核']].filter(([key]) => item[key] != null).map(([key,label]) => `${label} ${item[key]} / 5`).join(' · ')}`,
     item.course_name && `课程：${item.course_name} · ${item.teacher_name || '教师待核对'} · ${item.term || ''}`,
@@ -48,7 +56,7 @@ function decide(decision) {
 
 <template>
   <article class="campus-review-item">
-    <div class="campus-life-meta"><Badge variant="secondary">{{ campusContentLabels[entry.type] }}</Badge><span>{{ entry.item.school }}<template v-if="entry.item.campus"> · {{ entry.item.campus }}</template></span><span>{{ String(entry.item.created_at || '').slice(0,10) }}</span></div>
+    <div class="campus-life-meta"><Badge variant="secondary">{{ campusContentLabels[entry.type] }}</Badge><span>{{ entry.item.school }}<template v-if="entry.item.campus"> · {{ entry.item.campus }}</template></span><span>{{ String(entry.item.created_at || '').slice(0,10) }}</span><span v-if="linkedAccount" class="campus-review-account-link">审核关联账号 {{ linkedAccount }}</span></div>
     <template v-if="isReport"><h3>{{ campusReportReasons[entry.item.reason] || '用户举报' }} · {{ campusContentLabels[entry.item.target_type] }}</h3><p class="campus-review-report">举报说明：{{ entry.item.detail || '无补充说明' }}</p><h4>被举报内容：{{ content ? title : '原内容已不可用' }}</h4></template>
     <h3 v-else>{{ title }}</h3>
     <pre class="campus-review-detail">{{ details }}</pre>

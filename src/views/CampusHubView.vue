@@ -1,6 +1,6 @@
 <script setup>
 import { computed } from 'vue'
-import { ArrowRight, ClipboardList, Flag, NotebookPen, Search } from '@lucide/vue'
+import { ArrowRight, ClipboardList, Compass, Flag, NotebookPen, Search } from '@lucide/vue'
 import CampusLifeLayout from '../components/campus/CampusLifeLayout.vue'
 import { CAMPUS_FEATURED_PATHS, CAMPUS_NON_SERVICE_PATHS, campusNavigationGrouped } from '../components/campus/navigation.js'
 import { openAccountSection } from '../composables/accountAuth.js'
@@ -8,6 +8,7 @@ import { useCampusBeanWallet } from '../composables/campusBeanWallet.js'
 import { CAMPUS_BEAN_RULES } from '../composables/campusContentModel.js'
 
 const featuredLinks = [
+  { path: '/campus/matters', label: '怎么办', detail: '不知道怎么办，就先看看真实经历和能执行的办法', icon: Compass },
   { path: '/campus/publish', label: '统一发布', detail: '发布校园指南、活动、互助、失物等信息', icon: NotebookPen },
   { path: '/campus/mine', label: '我的投稿', detail: '跟进审核意见和发布状态', icon: ClipboardList },
   { path: '/campus/reports', label: '我的举报', detail: '查看举报受理与处理结果', icon: Flag },
@@ -52,7 +53,7 @@ function openBeanAccount() { openAccountSection('beans') }
       </section>
 
       <section class="campus-hub-featured" aria-labelledby="campus-hub-featured-title">
-        <div class="campus-hub-section-heading"><div><h2 id="campus-hub-featured-title">常用入口</h2><p>发布校园信息，跟进自己的投稿和举报。</p></div></div>
+        <div class="campus-hub-section-heading"><div><h2 id="campus-hub-featured-title">常用入口</h2><p>先找办法，再发布校园信息，跟进自己的事项和举报。</p></div></div>
         <div class="campus-hub-feature-grid">
           <RouterLink v-for="item in featuredLinks" :key="item.path" :to="item.path" class="campus-hub-feature">
             <span class="campus-hub-icon"><component :is="item.icon" aria-hidden="true" /></span>

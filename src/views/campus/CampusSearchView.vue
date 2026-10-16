@@ -11,11 +11,12 @@ const page = useCampusLifePage({ reloadOnAccountChange: false })
 const query = ref('')
 const searched = ref(false)
 const category = ref('')
-const searchTypes = ['place', 'course', 'teacher', 'market_listing', 'help_task', 'shuttle_route', 'lost_found', 'event', 'guide']
+const searchTypes = ['matter', 'place', 'course', 'teacher', 'market_listing', 'help_task', 'shuttle_route', 'lost_found', 'event', 'guide']
 const submitted = ref({ term: '', type: '' })
 const currentPage = computed(() => page.data.value?.page || 0)
 watch(() => accountUser.value?.id, () => { query.value = ''; category.value = ''; searched.value = false; submitted.value = { term: '', type: '' } }, { flush: 'sync' })
 const results = computed(() => page.data.value?.results || [])
+function resultRoute(item) { return item.type === 'matter' ? `/campus/matters/${item.id}` : campusContentRoute(item.type) }
 
 async function search() {
   const term = query.value.trim()
@@ -34,7 +35,7 @@ function changePage(index) { return runSearch(submitted.value.term, submitted.va
 </script>
 
 <template>
-  <CampusLifeLayout title="校园全站搜索" description="在已审核公开的地点、课程、集市、互助、校车、失物、活动和指南中查找。">
+  <CampusLifeLayout title="校园全站搜索" description="在同校已审核的事项、地点、课程、集市、互助、校车、失物、活动和指南中查找。">
     <template #default>
       <section class="campus-life-panel">
         <form class="campus-life-search" role="search" aria-label="校园全站搜索" @submit.prevent="search"><label class="sr-only" for="campus-global-search">搜索校园内容</label><input id="campus-global-search" v-model="query" type="search" maxlength="100" placeholder="搜课程、活动、地点或校园服务" /><button class="btn btn-primary" type="submit" :disabled="page.loading.value">{{ page.loading.value ? '搜索中…' : '搜索' }}</button></form>
@@ -55,7 +56,7 @@ function changePage(index) { return runSearch(submitted.value.term, submitted.va
             <p class="campus-life-result-count" role="status">“{{ submitted.term }}” · 本页 {{ results.length }} 条相关内容<span v-if="page.data.value?.hasMore"> · 还有更多结果</span></p>
             <article v-for="item in results" :key="`${item.type}:${item.id}`" class="campus-search-result">
               <div><span class="campus-life-tag">{{ campusContentLabel(item.type) }}</span><h2>{{ item.title }}</h2><p>{{ item.detail || '暂无补充说明。' }}</p><small v-if="item.campus">{{ item.campus }}</small></div>
-              <RouterLink class="btn btn-ghost" :to="campusContentRoute(item.type)">查看{{ campusContentLabel(item.type) }}</RouterLink>
+              <RouterLink class="btn btn-ghost" :to="resultRoute(item)">{{ item.type === 'matter' ? '看看这件事怎么处理' : `查看${campusContentLabel(item.type)}` }}</RouterLink>
             </article>
           </div>
         </CampusStateBlock>

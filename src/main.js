@@ -13,7 +13,7 @@ import { recallScroll, rememberScroll, resolveScrollPosition, scrollMemoryKey } 
 import { animationsEnabled } from './composables/motion.js'
 import { enableLocalSafeMode } from './composables/localSafeMode.js'
 import { routes } from './router/routes.js'
-import { preloadRoute } from './router/routePreload.js'
+import { initialRoutePath, preloadRoute } from './router/routePreload.js'
 import { configureStartupDiagnostics, recordStartupTiming, startupElapsedMs, startupNow } from './composables/startupDiagnostics.js'
 import { configureOverlayHistory } from './composables/overlayStack.js'
 
@@ -189,9 +189,9 @@ async function bootstrap({ skipGate = false } = {}) {
       },
       prepareApp: async () => {
         await import('./composables/contrast.js')
-        // 首页一定是本次会话的首个路由；先发起请求，让它和数据准备共用等待时间。
+        // 预热实际书签页面，让分包下载和数据准备并行，避免多下载一份首页。
         // routePreload 会吞掉预加载失败，真正导航时仍由路由自己的失败界面处理。
-        void preloadRoute('/')
+        void preloadRoute(initialRoutePath())
         const [prepared] = await Promise.all([loadPreparedDomainData(), loadAppModule()])
         return prepared
       },
@@ -207,7 +207,7 @@ async function bootstrap({ skipGate = false } = {}) {
   } else {
     await import('./composables/contrast.js')
     // 初始化已完成但账号数据恢复失败时，安全模式仍需准备本机业务数据。
-    void preloadRoute('/')
+    void preloadRoute(initialRoutePath())
     await Promise.all([loadPreparedDomainData(), loadAppModule()])
   }
 

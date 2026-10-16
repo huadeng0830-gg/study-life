@@ -18,7 +18,14 @@ const rowsByDefault = {
   campus_lost_found_items: [],
   campus_lost_found_claims: [],
   campus_events: [],
+  campus_matters: [],
   campus_private_messages: [],
+  campus_matter_marks: [],
+  campus_matter_outcomes: [],
+  campus_matter_actions: [],
+  campus_matter_responses: [],
+  campus_matter_response_feedback: [],
+  campus_matter_clarifications: [],
   platform_admins: [],
   social_notifications: [],
 }
@@ -52,10 +59,13 @@ function createEdge({ user = { id: actor, email: 'student@example.test', email_c
       const query = {
         select(columns = '*') { selected = columns; return query },
         eq(key, value) { appliedFilters.push({ table, op: 'eq', key, value }); filters.push((row) => row[key] === value); return query },
+        neq(key, value) { filters.push(row => row[key] !== value); return query },
         in(key, values) { appliedFilters.push({ table, op: 'in', key, values: [...values] }); filters.push((row) => values.includes(row[key])); return query },
         is(key, value) { appliedFilters.push({ table, op: 'is', key, value }); filters.push((row) => row[key] === value); return query },
         gte(key, value) { filters.push((row) => row[key] >= value); return query },
         or(expression) {
+          const review = expression.match(/^review_status\.eq\.approved,author_id\.eq\.(.+)$/)
+          if (review) { filters.push(row => row.review_status === 'approved' || row.author_id === review[1]); return query }
           if (expression.startsWith('expires_on.is.null,')) {
             const today = expression.split('expires_on.gte.')[1]
             filters.push((row) => row.expires_on == null || row.expires_on >= today)
@@ -138,6 +148,84 @@ async function call(handler, action, payload = {}) {
 }
 
 describe('campus-life Edge Function', () => {
+  it.each(['pending_review', 'rejected'])('does not show an unapproved answer to its question author: %s', async review_status => {
+    const matterId = '80000001-0000-4000-8000-000000000001'
+    const { handler } = createEdge({ tables: {
+      campus_matters: [{ id: matterId, author_id: '80000004-0000-4000-8000-000000000004', school: '虚构大学', campus: '东区', review_status: 'approved', deleted_at: null, is_anonymous: true, show_outcomes: false }],
+      campus_matter_clarifications: [{ id: 'fictional-question', matter_id: matterId, asker_id: actor, question: '虚构提问', answer: '尚未获准公开的回答', status: 'answered', review_status, review_reason: '私有审核说明', deleted_at: null }],
+    } })
+    const response = await call(handler, 'matter_detail', { matterId })
+    expect(response.status).toBe(200)
+    const { data } = await response.json()
+    expect(data.clarifications).toHaveLength(1)
+    expect(data.clarifications[0].question).toBe('虚构提问')
+    expect(data.clarifications[0].answer).toBe('')
+    expect(data.clarifications[0].review_reason).toBe('')
+  })
+  it('loads the five matter overview sections with one authentication and only three summaries each', async () => {
+    const { handler, admin } = createEdge({ tables: {
+      campus_matters: Array.from({ length: 20 }, (_, index) => ({ id: `fictional-${index}`, author_id: actor,
+        school: '虚构大学', campus: '东区', review_status: 'approved', deleted_at: null, is_anonymous: true,
+        title: '虚构标题', content: 'Large detail should not be downloaded', intake_answers: { private_detail: 'Unneeded' },
+        status: index < 10 ? 'finding_help' : 'resolved', intent: index % 2 ? 'decision' : 'experience', show_outcomes: true })),
+    } })
+    const response = await call(handler, 'matter_overview')
+    expect(response.status).toBe(200)
+    const { data } = await response.json()
+    expect(data.items).toHaveLength(3)
+    expect(Object.keys(data.sections)).toEqual(['finding', 'decisions', 'solved', 'experiences'])
+    for (const items of [data.items, ...Object.values(data.sections)]) {
+      expect(items.length).toBeLessThanOrEqual(3)
+      for (const item of items) {
+        expect(item).not.toHaveProperty('content')
+        expect(item).not.toHaveProperty('intake_answers')
+      }
+    }
+    expect(admin.auth.getUser).toHaveBeenCalledTimes(1)
+    expect(admin.from.mock.calls.filter(([name]) => name === 'social_profiles')).toHaveLength(1)
+  })
+  it('keeps anonymous labels private when the same author also has named content', async () => {
+    const base = { author_id: actor, school: '虚构大学', campus: '东区', review_status: 'approved', deleted_at: null, show_outcomes: true }
+    const { handler } = createEdge({ tables: {
+      social_profiles: [{ user_id: actor, school: '虚构大学', campus: '东区', nickname: '虚构实名昵称' }],
+      campus_matters: [{ ...base, id: 'named', is_anonymous: false }, { ...base, id: 'anonymous', is_anonymous: true }],
+    } })
+    const response = await call(handler, 'matter_list')
+    expect(response.status).toBe(200)
+    const { data } = await response.json()
+    expect(data.items.find(item => item.id === 'anonymous').authorLabel).toBe('匿名同学')
+    expect(data.items.find(item => item.id === 'named').authorLabel).toBe('虚构实名昵称')
+  })
+  it.each([true, false])('notifications respect matter author anonymity: %s', async isAnonymous => {
+    const matterId = '80000001-0000-4000-8000-000000000001'
+    const responseId = '80000002-0000-4000-8000-000000000002'
+    const actionId = '80000003-0000-4000-8000-000000000003'
+    const helperId = '80000004-0000-4000-8000-000000000004'
+    const { handler, rows } = createEdge({ tables: {
+      campus_matters: [{ id: matterId, is_anonymous: isAnonymous, show_outcomes: true }],
+      campus_matter_responses: [{ id: responseId, matter_id: matterId, author_id: helperId }],
+      campus_matter_actions: [{ id: actionId, matter_id: matterId, response_id: responseId }],
+    }, rpcResults: { campus_matter_response_adopt: { responseAuthorId: helperId }, campus_matter_outcome_submit: { id: actionId } } })
+    expect((await call(handler, 'matter_adopt', { responseId })).status).toBe(200)
+    expect((await call(handler, 'matter_outcome', { matterId, actionId, outcome: 'solved' })).status).toBe(200)
+    expect(rows.social_notifications).toHaveLength(2)
+    for (const notification of rows.social_notifications) expect(notification.actor_id).toBe(isAnonymous ? null : actor)
+  })
+  it('holds others pending or rejected responses and clarifications back from the matter author', async () => {
+    const matterId = '80000001-0000-4000-8000-000000000001'
+    const helperId = '80000004-0000-4000-8000-000000000004'
+    const { handler } = createEdge({ tables: {
+      campus_matters: [{ id: matterId, author_id: actor, school: '虚构大学', campus: '东区', review_status: 'approved', deleted_at: null, is_anonymous: true, show_outcomes: false }],
+      campus_matter_responses: ['pending_review', 'rejected', 'approved'].map((review_status, i) => ({ id: `response-${i}`, matter_id: matterId, author_id: helperId, deleted_at: null, is_anonymous: true, review_status })),
+      campus_matter_clarifications: ['pending_review', 'rejected', 'approved'].map((review_status, i) => ({ id: `question-${i}`, matter_id: matterId, asker_id: helperId, deleted_at: null, review_status })),
+    } })
+    const response = await call(handler, 'matter_detail', { matterId })
+    expect(response.status).toBe(200)
+    const { data } = await response.json()
+    expect(data.responses.map(item => item.id)).toEqual(['response-2'])
+    expect(data.clarifications.map(item => item.id)).toEqual(['question-2'])
+    expect(data.responses[0].authorLabel).toBe('匿名同学')
+  })
   it('loads only the requested submission domain and validates domain names', async () => {
     const { handler, admin } = createEdge()
     const result = await call(handler, 'mine_list', { domains: ['listings'] })
@@ -184,6 +272,11 @@ describe('campus-life Edge Function', () => {
     } })
     const response = await call(handler, 'search', { query: '共同关键词' })
     expect((await response.json()).data.results).toEqual([])
+  })
+  it('hides a matter status in search when its author hides later outcomes', async () => {
+    const { handler } = createEdge({ tables: { campus_matters: [{ id: '80000001-0000-4000-8000-000000000001', school: '虚构大学', campus: '东区', title: '快递点后来怎么样', content: '想确认快递点信息', status: 'resolved', intent: 'information', category: 'campus_info', review_status: 'approved', deleted_at: null, show_outcomes: false }] } })
+    const response = await call(handler, 'search', { query: '快递点', type: 'matter' })
+    expect((await response.json()).data.results[0]).toMatchObject({ status: 'outcome_hidden', intent: 'information' })
   })
   it('returns twenty market rows per page and searches before paging', async () => {
     const { handler } = createEdge({ tables: { campus_market_listings: Array.from({ length: 100 }, (_, i) => ({ id: String(i).padStart(3, '0'), school: '虚构大学', campus: '东区', title: '教材' + i, listing_type: 'sale', category: 'textbook', status: 'active', created_at: '2026-10-10' })) } })

@@ -423,10 +423,10 @@ async function changeVisibility(place) {
   }
 }
 
-async function loadSharedPlaces() {
+async function loadSharedPlaces({ forceRefresh = false } = {}) {
   sharedLoading.value = true
   try {
-    const result = await listCampusPlaces()
+    const result = await listCampusPlaces({ forceRefresh })
     sharedPlaces.value = Array.isArray(result?.places) ? result.places : []
     syncPlaceReviewStatuses(sharedPlaces.value)
     sharedLoaded.value = true
@@ -630,7 +630,7 @@ function searchCampusPlaces(category = 'all') {
     <section v-if="section === 'discover'" class="place-discovery">
       <div class="discovery-heading">
         <div><span class="discovery-mark" aria-hidden="true">校</span><div><h2>找校园里的地点</h2><p>同校目录展示已审核地点和你自己的待审核投稿；个人到访、消费和私人备注不会公开。</p></div></div>
-        <button class="btn btn-ghost" type="button" :disabled="sharedLoading" @click="loadSharedPlaces">{{ sharedLoading ? '更新中…' : '刷新地点' }}</button>
+        <button class="btn btn-ghost" type="button" :disabled="sharedLoading" @click="loadSharedPlaces({ forceRefresh: true })">{{ sharedLoading ? '更新中…' : '刷新地点' }}</button>
       </div>
       <label class="place-search"><span aria-hidden="true">⌕</span><span class="sr-only">搜索校园地点</span><input v-model.trim="searchQuery" type="search" placeholder="搜地点、校区、区域或服务" /><button v-if="searchQuery" type="button" aria-label="清除搜索" @click="searchQuery = ''">清除</button></label>
       <div class="place-filter-row" aria-label="按地点类别筛选">

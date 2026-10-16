@@ -22,7 +22,7 @@ watch(() => accountUser.value?.id, () => { confirm.close(); withdrawing.value = 
 const items = computed(() => flattenCampusSubmissions(page.data.value))
 const canResubmit = (item) => CAMPUS_RESUBMITTABLE_STATUSES.includes(item.status) && Boolean(item.resubmitType || item.domainKey === 'courseReviews')
 
-async function refresh() { return page.load(campusLifeMine) }
+async function refresh({ forceRefresh = false } = {}) { return page.load(() => campusLifeMine({}, { forceRefresh })) }
 
 function askWithdraw(item) {
   confirm.ask({
@@ -49,7 +49,7 @@ onMounted(() => { void refresh() })
   <CampusLifeLayout title="我的校园投稿" description="集中查看自己提交的校园内容与审核结果。公开审核不代表学校或商户身份认证。">
     <template #default>
       <section class="campus-life-panel">
-        <div class="campus-mine-heading"><div><h2>投稿记录</h2><p>发布 → 等待审核 → 公开展示。退回后可修改重提；每类显示最近 100 条记录。</p></div><button class="btn btn-ghost" type="button" :disabled="page.loading.value" @click="refresh()">{{ page.loading.value ? '读取中…' : '刷新' }}</button></div>
+        <div class="campus-mine-heading"><div><h2>投稿记录</h2><p>发布 → 等待审核 → 公开展示。退回后可修改重提；每类显示最近 100 条记录。</p></div><button class="btn btn-ghost" type="button" :disabled="page.loading.value" @click="refresh({ forceRefresh: true })">{{ page.loading.value ? '读取中…' : '刷新' }}</button></div>
         <CampusStatusMessages :notice="page.notice.value" :error="page.actionError.value" />
         <CampusStateBlock
           :loading="page.loading.value"

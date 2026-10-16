@@ -1,7 +1,10 @@
 import { campusCommunityRequest } from './social.js'
 import { getPublicApiUrl } from './cloudConfig.js'
+import { createReadCache } from './readCache.js'
 
-export async function campusFeedbackPublicList(filters = {}) {
+const publicReads = createReadCache({ ttl: 15000, maxEntries: 30 })
+
+export async function campusFeedbackPublicList(filters = {}, { forceRefresh = false } = {}) {
   const origin = getPublicApiUrl()
   if (!origin) return campusCommunityRequest('public_list', filters)
   if (navigator.onLine === false) throw new Error('当前离线，请联网后查看公开建议。')
@@ -9,6 +12,11 @@ export async function campusFeedbackPublicList(filters = {}) {
   for (const key of ['status', 'limit', 'offset', 'category', 'q', 'sort', 'view', 'id']) {
     if (filters[key] !== undefined && filters[key] !== '') url.searchParams.set(key, String(filters[key]))
   }
+  if (forceRefresh) publicReads.clear()
+  return publicReads.read(url.href, () => fetchPublicFeedback(url))
+}
+
+async function fetchPublicFeedback(url) {
   const controller = new AbortController()
   const timeout = window.setTimeout(() => controller.abort(), 10000)
   try {
@@ -19,7 +27,11 @@ export async function campusFeedbackPublicList(filters = {}) {
     return body.data
   } finally { window.clearTimeout(timeout) }
 }
-export const submitCampusFeedback = (payload) => campusCommunityRequest('submit', payload)
+function publicFeedbackMutation(action, payload) {
+  publicReads.clear()
+  return campusCommunityRequest(action, payload).finally(() => publicReads.clear())
+}
+export const submitCampusFeedback = (payload) => publicFeedbackMutation('submit', payload)
 export const myCampusFeedback = (filters) => filters ? campusCommunityRequest('mine', filters) : campusCommunityRequest('mine')
 export const applyCampusReviewer = (reason) => campusCommunityRequest('reviewer_apply', { reason })
 export const myCampusReviewerApplication = () => campusCommunityRequest('reviewer_application_mine')
@@ -34,8 +46,8 @@ export const campusReviewerAudits = (filters = {}) => campusCommunityRequest('au
 export const resolveCampusReviewerAudit = (auditId, correct, reason, reopen = false) =>
   campusCommunityRequest('audit_resolve', { auditId, correct, reason, reopen })
 export const campusFeedbackAdminList = (filters = {}) => campusCommunityRequest('feedback_admin_list', filters)
-export const manageCampusFeedback = (payload) => campusCommunityRequest('feedback_manage', payload)
+export const manageCampusFeedback = (payload) => publicFeedbackMutation('feedback_manage', payload)
 export const campusFeedbackMessages = (suggestionId, body) => campusCommunityRequest('message_thread', { suggestionId, ...(body ? { body } : {}) })
 
 export const campusFeedbackVotes = (feedbackIds) => campusCommunityRequest('feedback_votes', { feedbackIds })
-export const setCampusFeedbackVote = (feedbackId, liked) => campusCommunityRequest('feedback_vote', { feedbackId, liked })
+export const setCampusFeedbackVote = (feedbackId, liked) => publicFeedbackMutation('feedback_vote', { feedbackId, liked })

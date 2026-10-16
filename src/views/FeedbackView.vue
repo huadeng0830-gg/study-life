@@ -87,12 +87,12 @@ async function focusComposer(event) {
   document.getElementById('feedback-title')?.focus()
 }
 
-async function refresh() {
+async function refresh({ forceRefresh = false } = {}) {
   const revision = request.begin()
   loading.value = true
   loadError.value = ''
   try {
-    const result = await campusFeedbackPublicList({ status: selectedStatus.value, category: selectedCategory.value, q: search.value, sort: sort.value, view: 'summary', limit: pageSize, offset: offset.value })
+    const result = await campusFeedbackPublicList({ status: selectedStatus.value, category: selectedCategory.value, q: search.value, sort: sort.value, view: 'summary', limit: pageSize, offset: offset.value }, { forceRefresh })
     if (request.live(revision)) {
       const count = Number.isInteger(result.total) ? result.total : (result.items || []).length
       if (offset.value > 0 && offset.value >= count) { offset.value = Math.max(0, Math.floor((count - 1) / pageSize) * pageSize); return refresh() }
@@ -205,7 +205,7 @@ function handlePrivateThreadToggle(event, item) {
 
     <Dialog v-model:open="detailOpen">
     <section class="feedback-public" aria-labelledby="feedback-public-title">
-      <div class="feedback-section-heading"><div><h2 id="feedback-public-title">公开反馈 <small>{{ total }} 条</small></h2></div><Button variant="outline" :disabled="loading" @click="refresh">刷新</Button></div>
+      <div class="feedback-section-heading"><div><h2 id="feedback-public-title">公开反馈 <small>{{ total }} 条</small></h2></div><Button variant="outline" :disabled="loading" @click="refresh({ forceRefresh: true })">刷新</Button></div>
       <form class="feedback-search" role="search" aria-label="搜索公开反馈" @submit.prevent="runSearch"><label class="sr-only" for="feedback-search">搜索全部反馈</label><Input id="feedback-search" v-model="searchDraft" type="search" maxlength="100" placeholder="搜索标题或内容" /><Button type="submit" :disabled="loading">搜索</Button></form>
       <div class="feedback-filters"><Field><FieldLabel for="feedback-status">状态</FieldLabel><NativeSelect id="feedback-status" v-model="selectedStatus"><NativeSelectOption v-for="filter in filters" :key="filter.value" :value="filter.value">{{ filter.label }}</NativeSelectOption></NativeSelect></Field><Field><FieldLabel for="feedback-list-category">分类</FieldLabel><NativeSelect id="feedback-list-category" v-model="selectedCategory"><NativeSelectOption value="">全部分类</NativeSelectOption><NativeSelectOption v-for="(label,value) in { product: '产品体验', campus: '校园功能', accessibility: '无障碍', other: '其他' }" :key="value" :value="value">{{ label }}</NativeSelectOption></NativeSelect></Field><Field><FieldLabel for="feedback-sort">排序</FieldLabel><NativeSelect id="feedback-sort" v-model="sort"><NativeSelectOption value="supported">最多支持</NativeSelectOption><NativeSelectOption value="updated">最近进展</NativeSelectOption><NativeSelectOption value="newest">最新提交</NativeSelectOption></NativeSelect></Field><Button v-if="search || selectedStatus || selectedCategory || sort !== 'updated'" variant="ghost" @click="clearFilters">清除筛选</Button></div>
       <p v-if="search" class="feedback-results" role="status">“{{ search }}”的搜索结果 · {{ total }} 条</p>

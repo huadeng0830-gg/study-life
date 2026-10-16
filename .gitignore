@@ -91,5 +91,6 @@ sl_*.json
 
 /.desktop-build-tmp/
 /.vitest-tmp/
+/.tmp-vitest/
 /scratch-seg*.mjs
 /docs/brand-review/

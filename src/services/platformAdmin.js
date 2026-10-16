@@ -1,3 +1,4 @@
+import { EDGE_FUNCTION_TIMEOUT_MS } from './cloudConfig.js'
 import { accountUser } from '../composables/accountAuth.js'
 import { getSupabaseClient } from './supabase.js'
 
@@ -52,6 +53,7 @@ export async function platformAdminRequest(action, payload = {}) {
   }
 
   const result = await client.functions.invoke('platform-admin', {
+    timeout: EDGE_FUNCTION_TIMEOUT_MS,
     body: { action, payload },
     headers: { Authorization: `Bearer ${session.access_token}` },
   })

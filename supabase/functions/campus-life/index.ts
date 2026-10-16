@@ -8,6 +8,7 @@ const admin = createClient(supabaseUrl, serviceKey, { auth: { persistSession: fa
 const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, apikey, content-type, x-client-info, x-supabase-api-version',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
+  'Access-Control-Max-Age': '7200',
 }
 const allowedOrigins = new Set([
   'https://study-life.pages.dev', 'https://codex-preview-1-4-0.study-life.pages.dev',
@@ -144,6 +145,12 @@ function dbError(error: any): never {
   if (/CAMPUS_HELP_DISPUTE_INVALID/.test(marker)) throw new ApiError('invalid_input', '请补充争议说明。')
   if (/CAMPUS_DISPUTE_OUTCOME_INVALID/.test(marker)) throw new ApiError('invalid_input', '争议裁定结果无效。')
   if (/CAMPUS_DISPUTE_REASON_INVALID/.test(marker)) throw new ApiError('invalid_input', '请补充争议裁定说明。')
+  if (/CAMPUS_MATTER_PROFILE_REQUIRED/.test(marker)) throw new ApiError('profile_required', '请先在个人资料中填写学校，再使用「怎么办」。', 409)
+  if (/CAMPUS_MATTER_FORBIDDEN/.test(marker)) throw new ApiError('forbidden', '这件事或回应当前不属于你的可操作范围。', 403)
+  if (/CAMPUS_MATTER_SELF_ACTION/.test(marker)) throw new ApiError('invalid_input', '这项操作不能用于自己的事项。')
+  if (/CAMPUS_MATTER_NOT_FOUND/.test(marker)) throw new ApiError('not_found', '这件事已不可用，或不在你的校园范围内。', 404)
+  if (/CAMPUS_MATTER_OPTIONS_INVALID/.test(marker)) throw new ApiError('invalid_input', '请检查两个选项及对应选择。')
+  if (/CAMPUS_MATTER_INVALID/.test(marker)) throw new ApiError('invalid_input', '请检查填写内容和操作选项。')
   if (/CAMPUS_DISPUTE_STATE_CHANGED/.test(marker)) throw new ApiError('state_changed', '争议或任务状态已经变化，请刷新后重试。', 409)
   if (error?.code === '23505') throw new ApiError('duplicate', '已存在相同的提交，请刷新后查看。', 409)
   console.error('[campus-life] database request failed', error?.code || 'unknown')
@@ -193,7 +200,7 @@ function scopeQuery(query: any, scope: { school: string; campus: string }) {
   return scope.campus ? query.in('campus', [scope.campus, '']) : query
 }
 
-async function notify(recipientId: string, actorId: string, kind: string, resourceId: string, dedupeKey?: string) {
+async function notify(recipientId: string, actorId: string | null, kind: string, resourceId: string, dedupeKey?: string) {
   try {
     const notification = { recipient_id: recipientId, actor_id: actorId, kind, resource_id: resourceId, dedupe_key: dedupeKey || null }
     const result = dedupeKey
@@ -540,6 +547,31 @@ async function submitCourseReview(user: any, payload: any, scope: { school: stri
 }
 
 async function assertPublicTarget(targetType: string, targetId: string, scope: { school: string; campus: string }) {
+  if (targetType === 'matter') {
+    const result = await admin.from('campus_matters').select('id,author_id,school,campus,review_status,deleted_at')
+      .eq('id', targetId).eq('review_status', 'approved').is('deleted_at', null).maybeSingle()
+    const row = dataOrThrow(result)
+    if (!row || !inScope(row, scope)) throw new ApiError('not_found', '这件事当前不在可举报的公开范围内。', 404)
+    return row
+  }
+  if (targetType === 'matter_response') {
+    const response = dataOrThrow(await admin.from('campus_matter_responses').select('id,matter_id,author_id,review_status,deleted_at')
+      .eq('id', targetId).eq('review_status', 'approved').is('deleted_at', null).maybeSingle())
+    if (!response) throw new ApiError('not_found', '这条回应当前不在可举报的公开范围内。', 404)
+    const matter = dataOrThrow(await admin.from('campus_matters').select('id,school,campus,review_status,deleted_at')
+      .eq('id', response.matter_id).eq('review_status', 'approved').is('deleted_at', null).maybeSingle())
+    if (!matter || !inScope(matter, scope)) throw new ApiError('not_found', '这条回应当前不在可举报的公开范围内。', 404)
+    return { ...response, school: matter.school, campus: matter.campus }
+  }
+  if (targetType === 'matter_clarification') {
+    const clarification = dataOrThrow(await admin.from('campus_matter_clarifications').select('id,matter_id,asker_id,review_status,deleted_at')
+      .eq('id', targetId).eq('review_status', 'approved').is('deleted_at', null).maybeSingle())
+    if (!clarification) throw new ApiError('not_found', '这条补充说明当前不在可举报的公开范围内。', 404)
+    const matter = dataOrThrow(await admin.from('campus_matters').select('id,school,campus,review_status,deleted_at')
+      .eq('id', clarification.matter_id).eq('review_status', 'approved').is('deleted_at', null).maybeSingle())
+    if (!matter || !inScope(matter, scope)) throw new ApiError('not_found', '这条补充说明当前不在可举报的公开范围内。', 404)
+    return { ...clarification, author_id: clarification.asker_id, school: matter.school, campus: matter.campus }
+  }
   const configs: Record<string, { table: string; statusField: string; statuses: string[] }> = {
     place: { table: 'campus_places', statusField: 'review_status', statuses: ['approved'] },
     teacher: { table: 'campus_teachers', statusField: 'review_status', statuses: ['approved'] },
@@ -573,6 +605,32 @@ async function assertPublicTarget(targetType: string, targetId: string, scope: {
   return row
 }
 
+async function assertPublicRelation(targetType: string, targetId: string, scope: { school: string; campus: string }) {
+  const configs: Record<string, { table: string; statusField: string; statuses: string[]; titleField: string }> = {
+    teacher: { table: 'campus_teachers', statusField: 'review_status', statuses: ['approved'], titleField: 'name' },
+    course: { table: 'campus_courses', statusField: 'review_status', statuses: ['approved'], titleField: 'name' },
+    place: { table: 'campus_places', statusField: 'review_status', statuses: ['approved'], titleField: 'name' },
+    market_listing: { table: 'campus_market_listings', statusField: 'status', statuses: ['active', 'reserved'], titleField: 'title' },
+    help_task: { table: 'campus_help_tasks', statusField: 'status', statuses: ['open'], titleField: 'title' },
+    shuttle_route: { table: 'campus_shuttle_routes', statusField: 'status', statuses: ['approved'], titleField: 'name' },
+    lost_found: { table: 'campus_lost_found_items', statusField: 'status', statuses: ['open', 'claim_pending'], titleField: 'title' },
+    event: { table: 'campus_events', statusField: 'review_status', statuses: ['approved'], titleField: 'title' },
+    guide: { table: 'campus_guides', statusField: 'review_status', statuses: ['approved'], titleField: 'title' },
+  }
+  const config = configs[targetType]
+  if (!config) throw new ApiError('invalid_input', '关联资料类型无效。')
+  const optional = targetType === 'place' ? ',visibility,archived_at'
+    : targetType === 'event' ? ',status,ends_at' : targetType === 'guide' ? ',expires_on' : ''
+  const row = dataOrThrow(await admin.from(config.table).select(`id,school,campus,${config.titleField},${config.statusField}${optional}`).eq('id',targetId).maybeSingle())
+  if (!row || !inScope(row,scope) || !config.statuses.includes(row[config.statusField])
+    || (targetType === 'place' && (row.visibility !== 'school' || row.archived_at))
+    || (targetType === 'event' && (row.status !== 'published' || Date.parse(row.ends_at) < Date.now()))
+    || (targetType === 'guide' && row.expires_on && row.expires_on < new Date().toISOString().slice(0,10))) {
+    throw new ApiError('not_found', '关联资料当前不在同校公开范围内。',404)
+  }
+  return row
+}
+
 async function createFavorite(user: any, payload: any, scope: { school: string; campus: string }) {
   const targetType = enumValue(payload.targetType, ['place', 'teacher', 'course', 'market_listing', 'help_task', 'shuttle_route', 'lost_found', 'event', 'guide'] as const, '收藏类型')
   const targetId = uuid(payload.targetId, '收藏对象')
@@ -588,10 +646,10 @@ async function createFavorite(user: any, payload: any, scope: { school: string; 
 }
 
 async function submitReport(user: any, payload: any, scope: { school: string; campus: string }) {
-  const targetType = enumValue(payload.targetType, ['place', 'teacher', 'course', 'course_review', 'market_listing', 'help_task', 'shuttle_route', 'lost_found', 'event', 'guide'] as const, '内容类型')
+  const targetType = enumValue(payload.targetType, ['place', 'teacher', 'course', 'course_review', 'market_listing', 'help_task', 'shuttle_route', 'lost_found', 'event', 'guide', 'matter', 'matter_response', 'matter_clarification'] as const, '内容类型')
   const targetId = uuid(payload.targetId, '内容')
   const target = await assertPublicTarget(targetType, targetId, scope)
-  if ((target.owner_id || target.user_id) === user.id) throw new ApiError('invalid_input', '自己的内容请在投稿记录中修改或撤回。')
+  if ((target.owner_id || target.user_id || target.author_id) === user.id) throw new ApiError('invalid_input', '自己的内容请在对应页面修改或撤回。')
   const reason = enumValue(payload.reason, ['inaccurate', 'privacy', 'abuse', 'prohibited', 'other'] as const, '举报原因')
   const detail = text(payload.detail, 1000, '举报说明')
   const result = await admin.from('campus_content_reports').insert({ reporter_id: user.id, school: scope.school, campus: target.campus || '', target_type: targetType, target_id: targetId, reason, detail }).select('id,status').single()
@@ -903,20 +961,300 @@ async function search(scope: { school: string; campus: string }, payload: any) {
   const now = new Date().toISOString()
   const groups = await Promise.all(campusSearchSources.filter((source) => !type || source.type === type).map(async (source) => {
     const fields = [source.title, ...source.details, 'campus']
-    let query = scopeQuery(admin.from(source.table).select(['id', 'school', ...fields].join(','))
+    const matterFields = source.type === 'matter' ? ',status,intent,category,created_at,show_outcomes' : ''
+    let query = scopeQuery(admin.from(source.table).select(['id', 'school', ...fields].join(',') + matterFields)
       .eq('school', scope.school).in(source.statusField, source.statuses), scope)
       .or(campusSearchFilter(fields, term))
     if (source.type === 'place') query = query.eq('visibility', 'school').is('archived_at', null)
+    if (source.type === 'matter') query = query.is('deleted_at', null)
     if (source.type === 'event') query = query.eq('status', 'published').gte('ends_at', now)
     if (source.type === 'guide') query = query.or('expires_on.is.null,expires_on.gte.' + now.slice(0, 10))
     const found = (dataOrThrow(await query.order('id', { ascending: true }).range(page * pageSize, page * pageSize + pageSize)) || [])
       .filter((row: any) => inScope(row, scope))
     return {
       hasMore: found.length > pageSize,
-      results: found.slice(0, pageSize).map((row: any) => ({ id: row.id, type: source.type, title: row[source.title], detail: source.details.map((key) => row[key]).filter(Boolean).join(' · '), campus: row.campus })),
+      results: found.slice(0, pageSize).map((row: any) => ({ id: row.id, type: source.type, title: row[source.title], detail: source.details.map((key) => row[key]).filter(Boolean).join(' · '), campus: row.campus,
+        ...(source.type === 'matter' ? { status: row.show_outcomes ? row.status : 'outcome_hidden', intent: row.intent, category: row.category, created_at: row.created_at } : {}) })),
     }
   }))
   return { results: groups.flatMap((group) => group.results), hasMore: groups.some((group) => group.hasMore), page, pageSize }
+}
+
+const MATTER_COLUMNS = 'id,author_id,school,campus,title,content,intent,category,status,review_status,review_reason,is_anonymous,allow_clarifications,show_outcomes,intake_answers,related_entity_type,related_entity_id,options,author_choice,choice_note,revision,created_at,updated_at'
+const MATTER_LIST_COLUMNS = 'id,author_id,school,campus,title,intent,category,status,review_status,is_anonymous,show_outcomes,created_at,updated_at'
+const MATTER_RESPONSE_COLUMNS = 'id,matter_id,author_id,response_type,content,why,steps,risk,firsthand,is_anonymous,selected_option,review_status,review_reason,adopted,revision,created_at,updated_at'
+
+function presentMatter(row: any, userId: string, extras: Record<string, unknown> = {}) {
+  if (!row) return null
+  const { author_id: authorId, ...matter } = row
+  if (!row.show_outcomes && authorId !== userId) {
+    matter.author_choice = null
+    matter.choice_note = ''
+    matter.status = 'outcome_hidden'
+  }
+  return { ...matter, ...extras, isMine: authorId === userId, authorLabel: row.is_anonymous ? '匿名同学' : (extras.authorLabel || '校园同学') }
+}
+
+function presentMatterResponse(row: any, userId: string, extras: Record<string, unknown> = {}) {
+  const { author_id: authorId, ...response } = row
+  return { ...response, ...extras, isMine: authorId === userId, authorLabel: row.is_anonymous ? '匿名同学' : (extras.authorLabel || '校园同学') }
+}
+
+async function matterList(user: any, scope: { school: string; campus: string }, payload: any, pageSize = 30) {
+  const view = enumValue(payload.view || 'all', ['all','mine','helped'] as const, '事项范围')
+  const topic = enumValue(payload.topic || '', ['','finding','decisions','solved','experiences'] as const, '事项筛选')
+  const page = payload.page === undefined ? 0 : Number(payload.page)
+  if (!Number.isSafeInteger(page) || page < 0 || page > 2000) throw new ApiError('invalid_input', '事项页码无效。')
+  let ids: string[] | null = null
+  if (view === 'helped') {
+    const responses = dataOrThrow(await admin.from('campus_matter_responses').select('matter_id').eq('author_id', user.id)
+      .eq('review_status','approved').is('deleted_at',null).limit(1000)) || []
+    ids = [...new Set(responses.map((row: any) => row.matter_id).filter(Boolean))]
+    if (!ids.length) return { items: [], total: 0, page, pageSize, hasMore: false }
+  }
+  let query = scopeQuery(admin.from('campus_matters').select(MATTER_LIST_COLUMNS, { count: 'exact' })
+    .eq('school', scope.school).is('deleted_at',null).order('updated_at',{ascending:false}).order('id',{ascending:false}), scope)
+  if (view === 'mine') query = query.eq('author_id', user.id)
+  else query = query.eq('review_status','approved')
+  if (ids) query = query.in('id',ids)
+  if (topic === 'finding') query = query.in('status',['finding_help','trying'])
+  if (topic === 'decisions') query = query.eq('intent','decision').neq('status','resolved')
+  if (topic === 'solved') query = query.eq('status','resolved').eq('show_outcomes',true)
+  if (topic === 'experiences') query = query.in('intent',['experience','vent'])
+  const result = await query.range(page * pageSize, page * pageSize + pageSize - 1)
+  const rows = (dataOrThrow(result) || []).filter((row: any) => inScope(row, scope))
+  const items = rows.slice(0,pageSize)
+  const matterIds = items.map((row: any) => row.id)
+  if (!matterIds.length) return { items: [], total: result.count || 0, page, pageSize, hasMore: (result.count || 0) > (page + 1) * pageSize }
+  const [marks, outcomes] = await Promise.all([
+    admin.from('campus_matter_marks').select('matter_id,mark_type').in('matter_id',matterIds),
+    admin.from('campus_matter_outcomes').select('matter_id,outcome,note,created_at').in('matter_id',matterIds).order('created_at',{ascending:false}),
+  ])
+  const markRows = dataOrThrow(marks) || []
+  const outcomeRows = dataOrThrow(outcomes) || []
+  const namedAuthors = [...new Set(items.filter((row: any) => !row.is_anonymous).map((row: any) => row.author_id))]
+  const profiles = namedAuthors.length ? dataOrThrow(await admin.from('social_profiles').select('user_id,nickname').in('user_id',namedAuthors)) || [] : []
+  const authorLabels = new Map(profiles.map((row: any) => [row.user_id,row.nickname]))
+  const latestOutcome = new Map<string, any>()
+  for (const outcome of outcomeRows) if (!latestOutcome.has(outcome.matter_id)) latestOutcome.set(outcome.matter_id,outcome)
+  const counts = new Map<string,{experienced:number;understand:number}>()
+  for (const mark of markRows) {
+    const value = counts.get(mark.matter_id) || { experienced: 0, understand: 0 }
+    if (mark.mark_type === 'experienced') value.experienced += 1
+    if (mark.mark_type === 'understand') value.understand += 1
+    counts.set(mark.matter_id,value)
+  }
+  return {
+    items: items.map((row: any) => {
+      const count = counts.get(row.id) || { experienced: 0, understand: 0 }
+      const outcome = row.show_outcomes || row.author_id === user.id ? latestOutcome.get(row.id) : null
+      return presentMatter(row,user.id,{authorLabel:authorLabels.get(row.author_id) || '校园同学',experienceCount:count.experienced,understandCount:count.understand,
+        latestOutcome:outcome ? { outcome:outcome.outcome,note:outcome.note,createdAt:outcome.created_at } : null})
+    }),
+    total: result.count || 0, page, pageSize, hasMore: (result.count || 0) > (page + 1) * pageSize,
+  }
+}
+
+async function matterDetail(user: any, scope: { school: string; campus: string }, payload: any) {
+  const matterId = uuid(payload.matterId,'事项')
+  const matter = dataOrThrow(await admin.from('campus_matters').select(MATTER_COLUMNS).eq('id',matterId).is('deleted_at',null).maybeSingle())
+  const isOwner = matter?.author_id === user.id
+  if (!matter || !inScope(matter,scope) || (matter.review_status !== 'approved' && !isOwner)) throw new ApiError('not_found','这件事已不可用，或不在你的校园范围内。',404)
+  const matterAuthorLabel = matter.is_anonymous ? '匿名同学' : dataOrThrow(await admin.from('social_profiles').select('nickname').eq('user_id',matter.author_id).maybeSingle())?.nickname || '校园同学'
+  let relatedEntityTitle = ''
+  if (matter.related_entity_type && matter.related_entity_id) {
+    try {
+      const related = await assertPublicRelation(matter.related_entity_type,matter.related_entity_id,scope)
+      relatedEntityTitle = String(related?.name || related?.title || '')
+    } catch { /* The linked campus record may have been archived since this matter was created. */ }
+  }
+  const responsesQuery = admin.from('campus_matter_responses').select(MATTER_RESPONSE_COLUMNS).eq('matter_id',matterId).is('deleted_at',null).order('created_at',{ascending:false}).limit(100)
+  const responses = dataOrThrow(await responsesQuery.or(`review_status.eq.approved,author_id.eq.${user.id}`)) || []
+  const responseIds = responses.map((row: any) => row.id)
+  const [feedbackResult, markResult, clarificationResult, actionsResult, outcomesResult] = await Promise.all([
+    responseIds.length ? admin.from('campus_matter_response_feedback').select('response_id,user_id,feedback_type').in('response_id',responseIds).limit(3000) : Promise.resolve({data:[],error:null}),
+    admin.from('campus_matter_marks').select('mark_type,user_id').eq('matter_id',matterId).limit(1000),
+    admin.from('campus_matter_clarifications').select('id,question,answer,status,review_status,review_reason,revision,created_at,asker_id').eq('matter_id',matterId).is('deleted_at',null).order('created_at',{ascending:true}).limit(30),
+    isOwner ? admin.from('campus_matter_actions').select('id,matter_id,response_id,action_text,due_on,local_task_id,status,created_at,updated_at').eq('matter_id',matterId).eq('author_id',user.id).order('created_at',{ascending:false}).limit(20) : Promise.resolve({data:[],error:null}),
+    matter.show_outcomes || isOwner ? admin.from('campus_matter_outcomes').select('id,matter_id,action_id,outcome,note,created_at').eq('matter_id',matterId).order('created_at',{ascending:false}).limit(30) : Promise.resolve({data:[],error:null}),
+  ])
+  const feedbackRows = dataOrThrow(feedbackResult) || []
+  const markRows = dataOrThrow(markResult) || []
+  const clarifications = dataOrThrow(clarificationResult) || []
+  const actions = dataOrThrow(actionsResult) || []
+  const outcomes = dataOrThrow(outcomesResult) || []
+  const namedAuthors = [...new Set(responses.filter((row: any) => !row.is_anonymous).map((row: any) => row.author_id))]
+  const profiles = namedAuthors.length ? dataOrThrow(await admin.from('social_profiles').select('user_id,nickname').in('user_id',namedAuthors)) || [] : []
+  const authorLabels = new Map(profiles.map((row: any) => [row.user_id,row.nickname]))
+  const verifiedResponseIds = new Set<string>()
+  if (matter.show_outcomes || isOwner) {
+    const outcomeIds = [...new Set(outcomes.filter((row: any) => ['solved','improved'].includes(row.outcome) && row.action_id).map((row: any) => row.action_id))]
+    if (outcomeIds.length) {
+      const linkedActions = dataOrThrow(await admin.from('campus_matter_actions').select('response_id').eq('matter_id',matterId).in('id',outcomeIds).not('response_id','is',null)) || []
+      for (const action of linkedActions) if (action.response_id) verifiedResponseIds.add(action.response_id)
+    }
+  }
+  const responseFeedback = new Map<string,{helpful:number;experienced:number;confirmed:number;mine:string}>()
+  for (const row of feedbackRows) {
+    const value = responseFeedback.get(row.response_id) || { helpful:0, experienced:0, confirmed:0, mine:'' }
+    if (row.feedback_type in value) value[row.feedback_type as 'helpful'|'experienced'|'confirmed'] += 1
+    if (row.user_id === user.id) value.mine = row.feedback_type
+    responseFeedback.set(row.response_id,value)
+  }
+  const marks = { experienced: markRows.filter((row: any) => row.mark_type === 'experienced').length,
+    understand: markRows.filter((row: any) => row.mark_type === 'understand').length }
+  const publicClarifications = clarifications.filter((row: any) => row.asker_id === user.id || row.review_status === 'approved' || (isOwner && row.status === 'answered')).map((row: any) => {
+    const { asker_id: _askerId, ...safe } = row
+    // The asker owns the question, not the matter author's answer. Keep their
+    // question visible without delivering a pending/rejected answer to them.
+    if (!isOwner && row.status === 'answered' && row.review_status !== 'approved') {
+      safe.answer = ''
+      safe.review_reason = ''
+      safe.status = 'pending'
+    }
+    return { ...safe, isMine: row.asker_id === user.id }
+  })
+  const visibleOutcomes = matter.show_outcomes || isOwner ? outcomes.map(({ author_id: _authorId, ...row }: any) => row) : []
+  const myMarks = markRows.filter((row: any) => row.user_id === user.id).map((row: any) => row.mark_type)
+  const publicMatter = presentMatter(matter,user.id,{authorLabel:matterAuthorLabel,relatedEntityTitle,experienceCount:marks.experienced,understandCount:marks.understand,myMarks,
+    latestOutcome:visibleOutcomes[0] ? { outcome:visibleOutcomes[0].outcome,note:visibleOutcomes[0].note,createdAt:visibleOutcomes[0].created_at } : null})
+  const publicResponses = responses.map((row: any) => {
+    const feedback = responseFeedback.get(row.id) || { helpful:0,experienced:0,confirmed:0,mine:'' }
+    return presentMatterResponse(row,user.id,{authorLabel:authorLabels.get(row.author_id) || '校园同学',feedbackCounts:{helpful:feedback.helpful,experienced:feedback.experienced,confirmed:feedback.confirmed},myFeedback:feedback.mine,
+      verifiedHelpful:verifiedResponseIds.has(row.id)})
+  }).sort((a: any,b: any) => Number(b.verifiedHelpful)*100 + Number(b.adopted)*50 + Number(b.firsthand)*15 + Number(Boolean(b.steps))*10 + Number(Boolean(b.why))*8 + (b.feedbackCounts?.helpful || 0)
+    - (Number(a.verifiedHelpful)*100 + Number(a.adopted)*50 + Number(a.firsthand)*15 + Number(Boolean(a.steps))*10 + Number(Boolean(a.why))*8 + (a.feedbackCounts?.helpful || 0)))
+  return { matter:publicMatter,responses:publicResponses,clarifications:publicClarifications,actions:actions.map(({author_id: _authorId,...row}: any)=>row),outcomes:visibleOutcomes }
+}
+
+async function createMatter(user: any, payload: any, scope: { school: string; campus: string }) {
+  const content = publicText(payload.content,2400,'事情描述',true)
+  const title = publicText(payload.title,100,'标题')
+  const intent = enumValue(payload.intent || 'advice',['advice','decision','experience','vent','information','judgment'] as const,'求助方式')
+  const category = enumValue(payload.category || 'other',['dormitory','relationship','academic','career','purchase','campus_info','transport','lost_found','other'] as const,'事项分类')
+  const rawOptions = payload.options === undefined ? [] : payload.options
+  if (!Array.isArray(rawOptions) || rawOptions.length !== 0 && rawOptions.length !== 2) throw new ApiError('invalid_input','选项需要留空，或提供两个选择。')
+  const options = rawOptions.map((item: any,index: number) => ({ label: publicText(item?.label,80,`选项${index + 1}`,true) }))
+  const intakeAnswers = payload.intakeAnswers === undefined ? {} : requireObject(payload.intakeAnswers, '补充情况')
+  const intakeEntries = Object.entries(intakeAnswers)
+  if (intakeEntries.length > 3 || intakeEntries.some(([key, value]) => !/^[a-z_]{1,40}$/.test(key) || typeof value !== 'string')) throw new ApiError('invalid_input','补充情况格式无效。')
+  const safeIntakeAnswers = Object.fromEntries(intakeEntries.map(([key,value]) => [key, publicText(value,160,'补充情况')]))
+  let relatedEntityType: string | null = null
+  let relatedEntityId: string | null = null
+  if (payload.relatedEntityType || payload.relatedEntityId) {
+    relatedEntityType = enumValue(payload.relatedEntityType,['teacher','course','place','market_listing','help_task','shuttle_route','lost_found','event','guide'] as const,'关联资料类型')
+    relatedEntityId = uuid(payload.relatedEntityId,'关联资料')
+    await assertPublicRelation(relatedEntityType,relatedEntityId,scope)
+  }
+  const result = await admin.rpc('campus_matter_create',{ p_actor:user.id,p_title:title,p_content:content,p_intent:intent,p_category:category,
+    p_anonymous:payload.isAnonymous !== false,p_allow_clarifications:payload.allowClarifications !== false,
+    p_show_outcomes:payload.showOutcomes !== false,p_options:options,p_intake_answers:safeIntakeAnswers,
+    p_related_entity_type:relatedEntityType,p_related_entity_id:relatedEntityId })
+  return { matter:dataOrThrow(result),school:scope.school }
+}
+
+async function submitMatterResponse(user: any, payload: any, scope: { school: string; campus: string }) {
+  const matterId = uuid(payload.matterId,'事项')
+  const responseType = enumValue(payload.responseType,['advice','experience','information','risk','perspective','decision','judgment'] as const,'回应类型')
+  const result = dataOrThrow(await admin.rpc('campus_matter_response_submit',{ p_actor:user.id,p_matter:matterId,p_response_type:responseType,
+    p_content:publicText(payload.content,2400,'回应内容',true),p_why:publicText(payload.why,1000,'原因'),p_steps:publicText(payload.steps,1500,'下一步'),
+    p_risk:publicText(payload.risk,800,'可能的困难'),p_firsthand:payload.firsthand===true || responseType==='experience',p_anonymous:payload.isAnonymous!==false,
+    p_selected_option:payload.selectedOption ? text(payload.selectedOption,40,'选择') : null }))
+  return { response:{ id:result.id,reviewStatus:result.reviewStatus },school:scope.school }
+}
+
+async function submitMatterClarification(user: any, payload: any, scope: { school: string; campus: string }) {
+  const matterId = uuid(payload.matterId,'事项')
+  const question = publicText(payload.question,180,'澄清问题',true)
+  const result = dataOrThrow(await admin.rpc('campus_matter_clarification_submit',{p_actor:user.id,p_matter:matterId,p_question:question}))
+  return { clarification:{id:result.id,status:result.status},school:scope.school }
+}
+
+async function replyMatterClarification(user: any, payload: any, scope: { school: string; campus: string }) {
+  const clarificationId = uuid(payload.clarificationId,'澄清问题')
+  const skip = payload.skip === true
+  const answer = skip ? '' : publicText(payload.answer,500,'补充回答',true)
+  const result = dataOrThrow(await admin.rpc('campus_matter_clarification_reply',{p_actor:user.id,p_clarification:clarificationId,p_answer:answer,p_skip:skip}))
+  return { clarification:{id:result.id,status:result.status},school:scope.school }
+}
+
+async function matterAction(user: any, action: string, payload: any, scope: { school: string; campus: string }) {
+  if (action === 'matter_mark') {
+    const enabled = payload.enabled !== false
+    const result = await admin.rpc('campus_matter_mark',{p_actor:user.id,p_matter:uuid(payload.matterId,'事项'),p_mark_type:enumValue(payload.markType,['experienced','understand'] as const,'互动方式'),p_enabled:enabled})
+    return { result:dataOrThrow(result),school:scope.school }
+  }
+  if (action === 'matter_feedback') {
+    const feedback = enumValue(payload.feedbackType,['helpful','experienced','confirmed'] as const,'回应反馈')
+    const result = await admin.rpc('campus_matter_response_feedback',{p_actor:user.id,p_response:uuid(payload.responseId,'回应'),p_feedback_type:feedback,p_enabled:payload.enabled!==false})
+    return { result:dataOrThrow(result),school:scope.school }
+  }
+  if (action === 'matter_adopt') {
+    const result = dataOrThrow(await admin.rpc('campus_matter_response_adopt',{p_actor:user.id,p_response:uuid(payload.responseId,'回应')}))
+    if (result.responseAuthorId && result.responseAuthorId !== user.id) {
+      const response = dataOrThrow(await admin.from('campus_matter_responses').select('matter_id').eq('id',payload.responseId).maybeSingle())
+      if (response?.matter_id) {
+        const matter = dataOrThrow(await admin.from('campus_matters').select('is_anonymous').eq('id',response.matter_id).maybeSingle())
+        await notify(result.responseAuthorId,matter?.is_anonymous === false ? user.id : null,'campus_matter_adopted',response.matter_id,`matter-adopted:${payload.responseId}`)
+      }
+    }
+    return { adopted:true,school:scope.school }
+  }
+  if (action === 'matter_action_start') {
+    const responseId = payload.responseId ? uuid(payload.responseId,'回应') : null
+    const result = dataOrThrow(await admin.rpc('campus_matter_action_start',{p_actor:user.id,p_matter:uuid(payload.matterId,'事项'),p_response:responseId,
+      p_action_text:publicText(payload.actionText,500,'下一步',true),p_due_on:isoDate(payload.dueOn,'日期')}))
+    return { action:result,school:scope.school }
+  }
+  if (action === 'matter_action_link_task') {
+    const result = await admin.rpc('campus_matter_action_link_task',{p_actor:user.id,p_action:uuid(payload.actionId,'下一步'),p_local_task_id:text(payload.localTaskId,120,'待办')})
+    return { result:dataOrThrow(result),school:scope.school }
+  }
+  if (action === 'matter_outcome') {
+    const matterId = uuid(payload.matterId,'事项')
+    const actionId = payload.actionId ? uuid(payload.actionId,'下一步') : null
+    const outcome = enumValue(payload.outcome,['solved','improved','ongoing','no_help','no_action'] as const,'结果')
+    let recipient = ''
+    if (actionId) {
+      const actionRow = dataOrThrow(await admin.from('campus_matter_actions').select('response_id').eq('id',actionId).eq('matter_id',matterId).maybeSingle())
+      if (actionRow?.response_id) recipient = dataOrThrow(await admin.from('campus_matter_responses').select('author_id').eq('id',actionRow.response_id).maybeSingle())?.author_id || ''
+    }
+    const result = dataOrThrow(await admin.rpc('campus_matter_outcome_submit',{p_actor:user.id,p_matter:matterId,p_action:actionId,p_outcome:outcome,
+      p_note:publicText(payload.note,1000,'结果补充')}))
+    const visibility = dataOrThrow(await admin.from('campus_matters').select('show_outcomes,is_anonymous').eq('id',matterId).maybeSingle())
+    if (visibility?.show_outcomes && recipient && recipient !== user.id && ['solved','improved'].includes(outcome)) await notify(recipient,visibility.is_anonymous === false ? user.id : null,'campus_matter_outcome',matterId,`matter-outcome:${result.id}`)
+    return { outcome:result,school:scope.school }
+  }
+  if (action === 'matter_set_choice') {
+    const result = await admin.rpc('campus_matter_set_choice',{p_actor:user.id,p_matter:uuid(payload.matterId,'事项'),p_choice:enumValue(payload.choice,['A','B'] as const,'最终选择'),p_note:publicText(payload.note,500,'选择原因')})
+    return { result:dataOrThrow(result),school:scope.school }
+  }
+  if (action === 'matter_state') {
+    const result = await admin.rpc('campus_matter_update_state',{p_actor:user.id,p_matter:uuid(payload.matterId,'事项'),p_status:enumValue(payload.status,['finding_help','considering','trying','paused','venting'] as const,'事项状态')})
+    return { result:dataOrThrow(result),school:scope.school }
+  }
+  if (action === 'matter_preferences') {
+    const result = await admin.rpc('campus_matter_update_preferences',{p_actor:user.id,p_matter:uuid(payload.matterId,'事项'),
+      p_anonymous:payload.isAnonymous!==false,p_allow_clarifications:payload.allowClarifications!==false,p_show_outcomes:payload.showOutcomes!==false})
+    return { result:dataOrThrow(result),school:scope.school }
+  }
+  if (action === 'matter_delete') {
+    const result = await admin.rpc('campus_matter_delete',{p_actor:user.id,p_matter:uuid(payload.matterId,'事项')})
+    return { result:dataOrThrow(result),school:scope.school }
+  }
+  if (action === 'matter_response_delete') {
+    const result = await admin.rpc('campus_matter_response_delete',{p_actor:user.id,p_response:uuid(payload.responseId,'回应')})
+    return { result:dataOrThrow(result),school:scope.school }
+  }
+  if (action === 'matter_response_privacy') {
+    const result = await admin.rpc('campus_matter_response_privacy',{p_actor:user.id,p_response:uuid(payload.responseId,'回应'),p_anonymous:payload.isAnonymous!==false})
+    return { result:dataOrThrow(result),school:scope.school }
+  }
+  if (action === 'matter_clarification_delete') {
+    const result = await admin.rpc('campus_matter_clarification_delete',{p_actor:user.id,p_clarification:uuid(payload.clarificationId,'澄清问题')})
+    return { result:dataOrThrow(result),school:scope.school }
+  }
+  throw new ApiError('invalid_input','事项操作无效。')
 }
 
 async function moderationQueue(userId: string, payload: any) {
@@ -973,6 +1311,37 @@ async function moderate(user: any, payload: any) {
     const result = dataOrThrow(await admin.rpc('campus_review_place', { p_actor: user.id, p_id: uuid(payload.targetId, '地点'), p_decision: enumValue(payload.decision, ['approve', 'reject'] as const, '审核决定'), p_reason: text(payload.reason, 500, '审核说明'), p_revision: uuid(payload.revision, '地点版本') }))
     const notificationSent = await notify(result.ownerId, user.id, 'campus_place_reviewed', result.id)
     return { item: result, notificationSent }
+  }
+  if (['matter', 'matter_response', 'matter_clarification'].includes(payload.targetType)) {
+    const targetType = enumValue(payload.targetType, ['matter', 'matter_response', 'matter_clarification'] as const, '审核内容类型')
+    const targetId = uuid(payload.targetId, '审核内容')
+    const decision = enumValue(payload.decision, ['approve', 'reject'] as const, '审核决定')
+    const reason = text(payload.reason, 500, '审核说明')
+    if (decision === 'reject' && !reason) throw new ApiError('invalid_input', '退回内容时需要说明原因。')
+    const revision = Number(payload.revision)
+    if (!Number.isSafeInteger(revision) || revision < 1) throw new ApiError('invalid_input', '内容版本无效。')
+    const result = dataOrThrow(await admin.rpc('campus_matter_moderate', {
+      p_actor: user.id, p_type: targetType, p_id: targetId, p_decision: decision, p_reason: reason, p_revision: revision,
+    }))
+    let notificationSent = true
+    if (result?.status === 'approved') {
+      if (targetType === 'matter') notificationSent = await notify(result.ownerId,user.id,'campus_matter_reviewed',result.matterId || targetId,`matter-approved:${targetId}:${revision}`)
+      else if (targetType === 'matter_response') {
+        notificationSent = result.matterAuthorId && result.matterAuthorId !== user.id
+          ? await notify(result.matterAuthorId,user.id,'campus_matter_response',result.matterId,`matter-response:${targetId}:${revision}`) : true
+      } else {
+        const recipient = result.clarificationStatus === 'answered' ? result.askerId : result.matterAuthorId
+        notificationSent = recipient && recipient !== user.id
+          ? await notify(recipient,user.id,'campus_matter_clarification',result.matterId,`matter-clarification:${targetId}:${revision}`) : true
+      }
+    } else if (result?.ownerId) {
+      const recipient = targetType === 'matter_clarification' && result.clarificationStatus === 'answered'
+        ? result.matterAuthorId : result.ownerId
+      notificationSent = recipient
+        ? await notify(recipient,user.id,'campus_matter_reviewed',result.matterId || targetId,`matter-rejected:${targetType}:${targetId}:${revision}`)
+        : true
+    }
+    return { item: { id: result.id, status: result.status }, notificationSent }
   }
   const targetType = enumValue(payload.targetType, [...Object.keys(PUBLIC_TABLES), 'report'] as const, '审核内容类型')
   if (targetType === 'help_dispute') throw new ApiError('invalid_input', '互助争议需要使用裁定流程处理。')
@@ -1053,14 +1422,37 @@ async function handle(user: any, action: string, payload: any) {
   if (action === 'moderation_queue') return moderationQueue(user.id, payload)
   if (action === 'moderation_decide') return moderate(user, payload)
   if (action === 'help_dispute_resolve') return resolveHelpDispute(user, payload)
-  if (['teacher_submit', 'course_submit', 'assignment_submit', 'market_submit', 'help_submit', 'shuttle_submit', 'lost_found_submit', 'event_submit', 'guide_submit', 'shuttle_correction_submit', 'shuttle_exception_submit', 'content_resubmit'].includes(action)) {
+  if (['teacher_submit', 'course_submit', 'assignment_submit', 'market_submit', 'help_submit', 'shuttle_submit', 'lost_found_submit', 'event_submit', 'guide_submit', 'shuttle_correction_submit', 'shuttle_exception_submit', 'content_resubmit', 'matter_create'].includes(action)) {
     await enforceRateLimit(user.id, 'campus_publish', 8)
+  } else if (['matter_response_submit', 'matter_action_start', 'matter_outcome'].includes(action)) {
+    await enforceRateLimit(user.id, 'campus_contact', 30)
+  } else if (action === 'matter_clarification_submit') {
+    await enforceRateLimit(user.id, 'campus_contact', 10)
+  } else if (['matter_mark', 'matter_feedback'].includes(action)) {
+    await enforceRateLimit(user.id, 'campus_favorite', 100)
   } else if (action === 'course_review_submit') await enforceRateLimit(user.id, 'campus_review', 5)
   else if (action === 'content_report') await enforceRateLimit(user.id, 'campus_report', 10)
   else if (action === 'message_send' || action === 'market_interest_create' || action === 'help_apply' || action === 'lost_found_claim_submit') {
     await enforceRateLimit(user.id, 'campus_contact', 30)
   } else if (action === 'favorite_set') await enforceRateLimit(user.id, 'campus_favorite', 100)
   const scope = await scopeFor(user.id)
+  if (['matter_overview', 'matter_list', 'matter_detail', 'matter_create', 'matter_response_submit', 'matter_clarification_submit', 'matter_clarification_reply',
+    'matter_mark', 'matter_feedback', 'matter_adopt', 'matter_action_start', 'matter_action_link_task', 'matter_outcome', 'matter_set_choice',
+    'matter_state', 'matter_preferences', 'matter_delete', 'matter_response_delete', 'matter_response_privacy', 'matter_clarification_delete'].includes(action)) {
+    if (action === 'matter_list') return matterList(user, scope, payload)
+    if (action === 'matter_overview') {
+      const [recent, finding, decisions, solved, experiences] = await Promise.all(
+        ['', 'finding', 'decisions', 'solved', 'experiences'].map(topic => matterList(user, scope, { topic }, 3)),
+      )
+      return { ...recent, sections: { finding: finding.items, decisions: decisions.items, solved: solved.items, experiences: experiences.items } }
+    }
+    if (action === 'matter_detail') return matterDetail(user, scope, payload)
+    if (action === 'matter_create') return createMatter(user, payload, scope)
+    if (action === 'matter_response_submit') return submitMatterResponse(user, payload, scope)
+    if (action === 'matter_clarification_submit') return submitMatterClarification(user, payload, scope)
+    if (action === 'matter_clarification_reply') return replyMatterClarification(user, payload, scope)
+    return matterAction(user, action, payload, scope)
+  }
   if (['teacher_submit', 'course_submit', 'assignment_submit', 'market_submit', 'help_submit', 'shuttle_submit', 'lost_found_submit', 'event_submit', 'guide_submit'].includes(action)) {
     return submit(user, action, payload, scope)
   }

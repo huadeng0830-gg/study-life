@@ -1,5 +1,5 @@
 // 路由组件保持懒加载；这里只保存加载函数，导入本模块本身不会下载任何页面代码。
-export const routeLoaders = Object.freeze({
+const imports = {
   '/': () => import('../views/TodayView.vue'),
   '/schedule': () => import('../views/ScheduleView.vue'),
   '/course': () => import('../views/CourseArchiveView.vue'),
@@ -10,6 +10,8 @@ export const routeLoaders = Object.freeze({
   '/lists': () => import('../views/ListsView.vue'),
   '/bills': () => import('../views/LedgerView.vue'),
   '/campus': () => import('../views/CampusHubView.vue'),
+  '/campus/matters': () => import('../views/campus/CampusMattersView.vue'),
+  '/campus/matters/:matterId': () => import('../views/campus/CampusMatterDetailView.vue'),
   '/campus/places': () => import('../views/PlacesView.vue'),
   '/campus/search': () => import('../views/campus/CampusSearchView.vue'),
   '/campus/courses': () => import('../views/campus/CampusCoursesView.vue'),
@@ -31,7 +33,47 @@ export const routeLoaders = Object.freeze({
   '/projects': () => import('../views/ProjectsView.vue'),
   '/admin': () => import('../views/AdminCenterView.vue'),
   '/platform-admin': () => import('../views/AdminCenterView.vue'),
-})
+}
+
+const resolvedRoutes = new Map()
+const pendingRoutes = new Map()
+
+// Keep modules, not mounted pages: even an evicted KeepAlive entry can reopen
+// synchronously without retaining forms, watchers or large page data in memory.
+export const routeLoaders = Object.freeze(Object.fromEntries(Object.entries(imports).map(([path, load]) => [path, () => {
+  if (pendingRoutes.has(path)) return pendingRoutes.get(path)
+  const pending = load().then(module => {
+    resolvedRoutes.set(path, module.default)
+    return module
+  }).finally(() => { pendingRoutes.delete(path) })
+  pendingRoutes.set(path, pending)
+  return pending
+}])))
+
+export function resolvedRouteComponent(path) {
+  return resolvedRoutes.get(path) || null
+}
+
+export function initialRoutePath(hash = globalThis.location?.hash || '') {
+  let path = hash.replace(/^#/, '').split(/[?#]/)[0] || '/'
+  if (path === '/places') return '/campus/places'
+  if (/^\/campus\/matters\/[^/]+\/?$/.test(path)) path = '/campus/matters/:matterId'
+  return Object.prototype.hasOwnProperty.call(routeLoaders, path) ? path : '/'
+}
+
+// Start downloading a link's page when the user focuses, hovers or presses it.
+// This covers campus links as well as the sidebar, without fetching any data.
+export function preloadRouteLink(event) {
+  if (event.type === 'pointerover' && !connectionAllowsPrefetch()) return
+  if (event.type === 'pointerdown' && event.button !== 0) return
+  const link = event.target?.closest?.('a[href]')
+  if (!link || link.hasAttribute('download') || (link.target && link.target !== '_self')) return
+  const url = new URL(link.href, window.location.href)
+  if (url.origin !== window.location.origin || url.pathname !== window.location.pathname) return
+  let path = url.hash.replace(/^#/, '').split(/[?#]/)[0]
+  if (/^\/campus\/matters\/[^/]+\/?$/.test(path)) path = '/campus/matters/:matterId'
+  if (Object.prototype.hasOwnProperty.call(routeLoaders, path)) return preloadRoute(path)
+}
 
 export function connectionAllowsPrefetch() {
   if (typeof navigator === 'undefined') return false

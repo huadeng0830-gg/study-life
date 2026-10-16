@@ -44,7 +44,8 @@ import { campusErrorMessage } from './campusContentModel.js'
  * until the next action or until the view unmounts.
  */
 export function useCampusLifePage({ reloadOnAccountChange = true } = {}) {
-  const data = ref(null)
+  // Payload shapes differ by campus domain and are normalized by each caller.
+  const data = ref(/** @type {any} */ (null))
   const loading = ref(false)
   const error = ref('')
   const actionError = ref('')

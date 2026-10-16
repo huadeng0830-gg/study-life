@@ -19,6 +19,7 @@ export const campusContentLabels = {
   place: '校园地点', teacher: '教师资料', course: '课程资料', assignment: '授课安排', course_review: '课程评价',
   market_listing: '二手信息', help_task: '互助任务', help_dispute: '互助争议', shuttle_route: '校车线路',
   shuttle_exception: '特殊班次', shuttle_correction: '校车纠错', lost_found: '失物招领', event: '校园活动', guide: '校园指南', report: '用户举报',
+  matter: '真实事项', matter_response: '解决方案', matter_clarification: '关键澄清',
 }
 
 export const campusReportReasons = { inaccurate: '信息不准确', privacy: '隐私风险', abuse: '辱骂或骚扰', prohibited: '违规内容', other: '其他问题' }
@@ -52,6 +53,9 @@ const CONTENT_ROUTES = Object.freeze({
   shuttle_exception: '/campus/shuttle',
   event: '/campus/events',
   guide: '/campus/guides',
+  matter: '/campus/matters',
+  matter_response: '/campus/matters',
+  matter_clarification: '/campus/matters',
 })
 
 /** 内容类型对应的模块页；未知类型回落到「我的校园投稿」，那里至少有上下文。 */
@@ -63,7 +67,7 @@ export function campusContentLabel(type) { return campusContentLabels[type] || '
 /** 状态展示名；服务端若出现新状态，显示原值好过留空。 */
 export function campusStatusLabel(status) { return campusStatusLabels[status] || status || '' }
 
-export function campusContentTitle(item = {}) { return item.title || item.name || item.term || item.detail || item.note || '校园内容' }
+export function campusContentTitle(item = {}) { return item.title || item.name || item.term || item.detail || item.content || item.note || '校园内容' }
 
 /**
  * 「我的校园投稿」的领域表。
@@ -133,6 +137,7 @@ export const CAMPUS_BEAN_RULES = Object.freeze({
 })
 
 export function campusNotificationRoute(item) {
+  if (['campus_matter_response','campus_matter_clarification','campus_matter_adopted','campus_matter_outcome','campus_matter_reviewed'].includes(item.kind)) return `/campus/matters/${item.resource_id}`
   if (item.kind === 'campus_report_reviewed') return '/campus/reports'
   if (item.kind === 'campus_content_reviewed') return '/campus/mine'
   if (item.kind === 'campus_place_reviewed') return '/campus/places?section=mine'

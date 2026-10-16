@@ -6,7 +6,7 @@
  * 抽出来之后 `main.js` 只负责装配，懒加载与失败兜底的行为一字未改。
  */
 import { defineComponent, h, onBeforeUnmount, ref, shallowRef } from 'vue'
-import { routeLoaders } from './routePreload.js'
+import { resolvedRouteComponent, routeLoaders } from './routePreload.js'
 import RouteFallback from '../components/RouteFallback.vue'
 import NotFoundView from '../components/NotFoundView.vue'
 
@@ -26,6 +26,8 @@ export const ROUTE_COMPONENT_NAMES = Object.freeze({
   '/lists': 'ListsView',
   '/bills': 'LedgerView',
   '/campus': 'CampusHubView',
+  '/campus/matters': 'CampusMattersView',
+  '/campus/matters/:matterId': 'CampusMatterDetailView',
   '/campus/places': 'PlacesView',
   '/campus/search': 'CampusSearchView',
   '/campus/courses': 'CampusCoursesView',
@@ -57,12 +59,12 @@ function asyncRoute(path) {
   return defineComponent({
     name: ROUTE_COMPONENT_NAMES[path] || 'LazyRouteView',
     setup() {
-      const loaded = shallowRef(null)
+      const loaded = shallowRef(resolvedRouteComponent(path))
       const failed = ref(false)
       let disposed = false
       const loader = routeLoaders[path]
       if (!loader) failed.value = true
-      else {
+      else if (!loaded.value) {
         void loader()
           .then((module) => { if (!disposed) loaded.value = module.default })
           .catch(() => { if (!disposed) failed.value = true })
@@ -91,6 +93,8 @@ export const routes = [
   { path: '/lists', name: 'lists', meta: { title: '清单', navigation: { id: 'lists', icon: '☑️', groupId: 'other', groupLabel: '其他', defaultDesktop: true, shortcut: 5 } }, component: asyncRoute('/lists') },
   { path: '/bills', name: 'bills', meta: { title: '账本', navigation: { id: 'bills', icon: '📒', groupId: 'other', groupLabel: '其他', defaultDesktop: true, shortcut: 6 } }, component: asyncRoute('/bills') },
   { path: '/campus', name: 'campus', meta: { title: '校园', navigation: { id: 'places', icon: '📍', mobileLabel: '校园', groupId: 'campus', groupLabel: '校园', defaultDesktop: true } }, component: asyncRoute('/campus') },
+  { path: '/campus/matters', name: 'campus-matters', meta: { title: '怎么办' }, component: asyncRoute('/campus/matters') },
+  { path: '/campus/matters/:matterId', name: 'campus-matter-detail', meta: { title: '这件事' }, component: asyncRoute('/campus/matters/:matterId') },
   { path: '/campus/places', name: 'campus-places', meta: { title: '校园地点' }, component: asyncRoute('/campus/places') },
   { path: '/campus/search', name: 'campus-search', meta: { title: '校园全站搜索' }, component: asyncRoute('/campus/search') },
   { path: '/campus/courses', name: 'campus-courses', meta: { title: '老师与课程' }, component: asyncRoute('/campus/courses') },

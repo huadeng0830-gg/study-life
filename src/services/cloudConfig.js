@@ -1,4 +1,5 @@
 const OAUTH_PROVIDERS = Object.freeze({ github: 'GitHub', google: 'Google' })
+export const EDGE_FUNCTION_TIMEOUT_MS = 30000
 
 // Public deployment capabilities, never credentials. Enable email delivery only
 // after a production SMTP service has actually been configured and tested.
