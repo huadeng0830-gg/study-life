@@ -15,6 +15,17 @@ afterEach(() => vi.restoreAllMocks())
 const run = (req = request(), config = env) => handlePublicApi(req, config, ctx, fetcher, cache)
 
 describe('Cloudflare public feedback API', () => {
+  it('ranks support globally before pagination while exposing only public counts', async () => {
+    fetcher.mockResolvedValue(new Response(JSON.stringify([{ id: 'fictional', like_count: 12, user_id: 'private-voter' }]), { headers: { 'Content-Range': '0-0/1000' } }))
+    const response = await run(request('/v1/feedback?view=summary&sort=supported&limit=20'))
+    expect(response.status).toBe(200)
+    const upstream = fetcher.mock.calls[0][0]
+    expect(upstream.searchParams.get('order')).toBe('like_count.desc,created_at.asc,id.asc')
+    expect(upstream.searchParams.get('visibility')).toBe('eq.public')
+    const item = (await response.json()).data.items[0]
+    expect(item.like_count).toBe(12)
+    expect(item).not.toHaveProperty('user_id')
+  })
   it('returns compact summaries and scopes detail lookups to public rows', async () => {
     fetcher.mockResolvedValueOnce(new Response(JSON.stringify([{ id: 'fictional', title: 'Fictional title', body: 'large body', public_history: [{ reply: 'large history' }], public_author_name: '虚构昵称' }]), { headers: { 'Content-Range': '0-0/1000' } }))
     const result = await run(request('/v1/feedback?view=summary&limit=20'))

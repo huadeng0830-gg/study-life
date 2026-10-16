@@ -36,3 +36,6 @@ export const resolveCampusReviewerAudit = (auditId, correct, reason, reopen = fa
 export const campusFeedbackAdminList = (filters = {}) => campusCommunityRequest('feedback_admin_list', filters)
 export const manageCampusFeedback = (payload) => campusCommunityRequest('feedback_manage', payload)
 export const campusFeedbackMessages = (suggestionId, body) => campusCommunityRequest('message_thread', { suggestionId, ...(body ? { body } : {}) })
+
+export const campusFeedbackVotes = (feedbackIds) => campusCommunityRequest('feedback_votes', { feedbackIds })
+export const setCampusFeedbackVote = (feedbackId, liked) => campusCommunityRequest('feedback_vote', { feedbackId, liked })

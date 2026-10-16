@@ -108,7 +108,7 @@ export const routes = [
   { path: '/notes', redirect: '/' },
   { path: '/together', name: 'together', meta: { title: '一起约', navigation: { id: 'together', icon: '👥', groupId: 'schedule', groupLabel: '日程', defaultDesktop: true } }, component: asyncRoute('/together') },
   { path: '/projects', name: 'projects', meta: { title: '齐行', navigation: { id: 'projects', icon: '🧩', groupId: 'qixing', groupLabel: '齐行', defaultDesktop: true } }, component: asyncRoute('/projects') },
-  // 管理中心是本机数据与运行状态的入口，不进入可编辑的业务导航布局。
+  // 管理工作区共用导航，按任务懒加载；不进入用户可编辑的业务导航。
   { path: '/admin', name: 'admin-center', meta: { title: '管理中心' }, component: asyncRoute('/admin') },
   { path: '/platform-admin', name: 'platform-admin', meta: { title: '平台运维' }, component: asyncRoute('/platform-admin') },
   { path: '/admin/campus', name: 'campus-governance', meta: { title: '校园审核工作台' }, component: asyncRoute('/admin/campus') },

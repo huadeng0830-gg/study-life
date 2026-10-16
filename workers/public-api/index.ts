@@ -1,5 +1,5 @@
-const PUBLIC_FIELDS = ['id', 'category', 'title', 'body', 'status', 'public_author_name', 'public_history', 'public_reply', 'public_reason', 'reward_beans', 'reward_issued', 'created_at', 'updated_at']
-const SUMMARY_FIELDS = ['id', 'category', 'title', 'status', 'public_author_name', 'created_at', 'updated_at']
+const PUBLIC_FIELDS = ['id', 'category', 'title', 'body', 'status', 'public_author_name', 'public_history', 'public_reply', 'public_reason', 'reward_beans', 'reward_issued', 'like_count', 'created_at', 'updated_at']
+const SUMMARY_FIELDS = ['id', 'category', 'title', 'status', 'public_author_name', 'like_count', 'created_at', 'updated_at']
 const STATUSES = new Set(['pending','needs_info','planned','processing','resolved','not_adopted','duplicate'])
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 const CACHE_SECONDS = 15
@@ -79,7 +79,7 @@ export async function handlePublicApi(request: Request, env: Env, ctx: Execution
   const sort = url.searchParams.get('sort') || 'updated'
   const view = url.searchParams.get('view') || 'detail'
   const id = url.searchParams.get('id') || ''
-  if ((category && !['product','campus','accessibility','other'].includes(category)) || q.length > 100 || !['newest','updated'].includes(sort) || !['summary','detail'].includes(view) || (id && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id))) return respond({ code: 'invalid_input' }, 400)
+  if ((category && !['product','campus','accessibility','other'].includes(category)) || q.length > 100 || !['newest','updated','supported'].includes(sort) || !['summary','detail'].includes(view) || (id && !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id))) return respond({ code: 'invalid_input' }, 400)
   const fields = view === 'summary' ? SUMMARY_FIELDS : PUBLIC_FIELDS
   const limit = Number(url.searchParams.get('limit') || '30')
   const offset = Number(url.searchParams.get('offset') || '0')
@@ -95,7 +95,7 @@ export async function handlePublicApi(request: Request, env: Env, ctx: Execution
     if (hit) return withCors(hit, origin)
   } catch { /* Cache eviction or failure must not disable the public API. */ }
   const upstream = new URL('/rest/v1/campus_feedback_suggestions', config.origin)
-  upstream.search = new URLSearchParams({ select: fields.join(','), visibility: 'eq.public', order: sort === 'newest' ? 'created_at.desc,id.asc' : 'updated_at.desc,id.asc', limit: String(limit), offset: String(offset), ...(status ? { status: `eq.${status}` } : {}), ...(category ? { category: `eq.${category}` } : {}), ...(id ? { id: `eq.${id}` } : {}), ...(q ? { or: '(title.imatch.' + JSON.stringify('***=' + q) + ',body.imatch.' + JSON.stringify('***=' + q) + ')' } : {}) }).toString()
+  upstream.search = new URLSearchParams({ select: fields.join(','), visibility: 'eq.public', order: sort === 'supported' ? 'like_count.desc,created_at.asc,id.asc' : sort === 'newest' ? 'created_at.desc,id.asc' : 'updated_at.desc,id.asc', limit: String(limit), offset: String(offset), ...(status ? { status: `eq.${status}` } : {}), ...(category ? { category: `eq.${category}` } : {}), ...(id ? { id: `eq.${id}` } : {}), ...(q ? { or: '(title.imatch.' + JSON.stringify('***=' + q) + ',body.imatch.' + JSON.stringify('***=' + q) + ')' } : {}) }).toString()
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), 8000)
   let stage = 'fetch'

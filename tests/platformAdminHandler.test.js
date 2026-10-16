@@ -35,6 +35,18 @@ function request({ method = 'POST', body = {}, token = 'valid', origin = ALLOWED
 }
 
 describe('platform-admin function authorization boundary', () => {
+  it('reserves registration controls for owners and forwards the verified actor plus concurrency version', async () => {
+    const setRegistration = vi.fn(async () => ({ enabled: false, updatedAt: '2026-10-16T01:00:01Z' }))
+    const getRegistration = vi.fn(async () => ({ enabled: true, updatedAt: '2026-10-16T01:00:00Z' }))
+    const delegated = makeHandler({ isOwner: vi.fn(async () => false), setRegistration, getRegistration })
+    expect((await delegated.handler(request({ body: { action: 'registration_get' } }))).status).toBe(403)
+    expect((await delegated.handler(request({ body: { action: 'registration_set' } }))).status).toBe(403)
+    const owner = makeHandler({ setRegistration, getRegistration })
+    expect((await owner.handler(request({ body: { action: 'registration_set', payload: { enabled: 'false' } } }))).status).toBe(400)
+    const payload = { enabled: false, expectedUpdatedAt: '2026-10-16T01:00:00Z', actorId: TARGET_ID }
+    expect((await owner.handler(request({ body: { action: 'registration_set', payload } }))).status).toBe(200)
+    expect(setRegistration).toHaveBeenCalledWith({ actorId: OWNER.id, enabled: false, expectedUpdatedAt: payload.expectedUpdatedAt })
+  })
   it('exposes only delegated scope and denies reviewers access to account management and grants', async () => {
     const delegated = makeHandler({ isOwner: vi.fn(async () => false), reviewerAccess: vi.fn(async () => ({ reviewer: true, scope: { school: '虚构大学', campus: '东区' } })), setReviewer: vi.fn(), listReviewers: vi.fn() })
     const identity = await delegated.handler(request({ body: { action: 'identity' } }))

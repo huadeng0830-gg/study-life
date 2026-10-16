@@ -5,6 +5,7 @@ const SAFE_MESSAGES = Object.freeze({
   unauthorized: '登录状态已失效，请重新登录。',
   email_verification_required: '请先完成邮箱验证。',
   forbidden: '当前账号没有平台管理权限。',
+  registration_changed: '注册设置已在其他页面更新，请刷新状态后重试。',
   self_action_forbidden: '不能暂停或恢复当前平台所有者账号。',
   invalid_input: '输入内容有误，请检查后重试。',
   origin_not_allowed: '当前访问来源未获授权。',

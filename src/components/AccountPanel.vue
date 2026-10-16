@@ -1,5 +1,6 @@
 <script setup>
 import ActionButton from './ActionButton.vue'
+import { readRegistrationStatus } from '../services/platformRegistration.js'
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Modal from './Modal.vue'
 import AccountSyncPanel from './data/AccountSyncPanel.vue'
@@ -27,7 +28,9 @@ const DataManager = defineAsyncComponent(() => import('./DataManager.vue'))
 const props = defineProps({ open: Boolean })
 const authOptions = getAccountAuthOptions()
 const oauthProviders = window.studyLifeDesktop?.isDesktop ? [] : authOptions.providers
-const emailSignupEnabled = authOptions.emailSignup && authOptions.emailDelivery
+const registrationOpen = ref(null)
+const emailSignupEnabled = computed(() => authOptions.emailSignup && authOptions.emailDelivery && registrationOpen.value !== false)
+watch(() => props.open, async open => { if (open && !accountUser.value && accountAvailable.value) { try { registrationOpen.value = await readRegistrationStatus() } catch { registrationOpen.value = null } } }, { immediate: true })
 const passwordAccount = computed(() => !accountUser.value?.app_metadata?.providers?.length || accountUser.value.app_metadata.providers.includes('email'))
 const emit = defineEmits(['close'])
 // 账号面板的常见场景是已有账号登录；新用户仍可在同一屏切到注册。
@@ -291,6 +294,7 @@ onBeforeUnmount(() => {
         <span class="account-avatar" aria-hidden="true">我</span>
         <div><h3>{{ mode === 'recovery' ? '找回你的账号' : mode === 'register' ? '把记录带到更多设备' : '欢迎回来' }}</h3><p class="account-description">登录后同步课程、待办与日常记录，已有的本机记录会合并保留。</p></div>
       </div>
+      <p v-if="registrationOpen === false && !accountUser" class="account-service-note" role="status">当前已暂停新用户注册，已有账号仍可登录。</p>
       <p v-if="!accountAvailable" class="account-service-note">此版本未包含账号服务，无法注册或登录。本机功能仍可使用。</p>
       <Alert v-show="formError" variant="destructive" class="account-error-alert"><AlertDescription id="account-form-error">{{ formError }}</AlertDescription></Alert>
       <p v-if="feedback" class="account-feedback account-success"><span class="account-feedback-icon" aria-hidden="true">✓</span><span>{{ feedback }}</span></p>

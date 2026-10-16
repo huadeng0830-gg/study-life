@@ -50,6 +50,7 @@ beforeEach(async () => {
   window.history.replaceState(null, '', '/#/')
   adapter.getSupabaseConfig.mockReturnValue({ url: 'https://example.supabase.co', key: 'sb_publishable_example' })
   client = {
+    rpc: vi.fn().mockResolvedValue({ data: true, error: null }),
     auth: {
       getSession: vi.fn().mockResolvedValue({ data: { session: null }, error: null }),
       onAuthStateChange: vi.fn((listener) => {
@@ -74,6 +75,15 @@ beforeEach(async () => {
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs() })
 
 describe('邮箱注册与账号生命周期', () => {
+  it('checks registration availability before signup while keeping existing login available', async () => {
+    client.rpc.mockResolvedValue({ data: false, error: null })
+    const result = await account.registerAccount({ email: user.email, password: 'Example123!', confirmation: 'Example123!' })
+    expect(result).toMatchObject({ ok: false, code: 'signup_disabled' })
+    expect(client.auth.signUp).not.toHaveBeenCalled()
+    expect((await account.loginAccount({ email: user.email, password: 'Example123!' })).ok).toBe(true)
+    client.rpc.mockResolvedValue({ data: null, error: new Error('fictional network failure') })
+    expect((await account.registerAccount({ email: user.email, password: 'Example123!', confirmation: 'Example123!' })).code).toBe('registration_status_unavailable')
+  })
   it('无效表单不会调用账号服务，登录兼容已有的较短密码', async () => {
     const result = await account.registerAccount({ email: 'invalid', password: 'short', confirmation: 'other' })
     expect(Object.keys(result.errors)).toEqual(['email', 'password', 'confirmation'])

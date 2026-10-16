@@ -23,14 +23,14 @@ export const routeLoaders = Object.freeze({
   '/campus/mine': () => import('../views/campus/CampusMySubmissionsView.vue'),
   '/campus/reports': () => import('../views/campus/CampusReportsView.vue'),
   '/feedback': () => import('../views/FeedbackView.vue'),
-  '/admin/feedback': () => import('../views/FeedbackAdminView.vue'),
+  '/admin/feedback': () => import('../views/AdminCenterView.vue'),
   '/campus/reviewer-application': () => import('../views/campus/CampusReviewerApplicationView.vue'),
-  '/admin/campus': () => import('../views/campus/CampusGovernanceView.vue'),
+  '/admin/campus': () => import('../views/AdminCenterView.vue'),
   '/review': () => import('../views/WeeklyReviewView.vue'),
   '/together': () => import('../views/TogetherView.vue'),
   '/projects': () => import('../views/ProjectsView.vue'),
   '/admin': () => import('../views/AdminCenterView.vue'),
-  '/platform-admin': () => import('../views/PlatformAdminView.vue'),
+  '/platform-admin': () => import('../views/AdminCenterView.vue'),
 })
 
 export function connectionAllowsPrefetch() {

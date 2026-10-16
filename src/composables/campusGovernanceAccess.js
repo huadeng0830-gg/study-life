@@ -1,8 +1,12 @@
-import { onScopeDispose, ref, watch } from 'vue'
+import { inject, onScopeDispose, ref, watch } from 'vue'
 import { accountUser } from './accountAuth.js'
 import { campusGovernanceAccess } from '../services/campusLife.js'
 
+export const ADMIN_GOVERNANCE_ACCESS = Symbol('admin-governance-access')
+
 export function useCampusGovernanceAccess() {
+  const inherited = inject(ADMIN_GOVERNANCE_ACCESS, null)
+  if (inherited) return inherited
   const access = ref(null)
   const error = ref('')
   const loading = ref(false)

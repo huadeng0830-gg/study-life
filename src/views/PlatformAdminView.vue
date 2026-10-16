@@ -4,42 +4,36 @@ import { accountAvailable, accountOpen, accountReady, accountUser, initializeAcc
 import { currentVersionInfo } from '../composables/versionInfo.js'
 import { PlatformAdminRequestError, platformAdminRequest } from '../services/platformAdmin.js'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
+import AdminActivity from '../components/admin/AdminActivity.vue'
+import RegistrationControl from '../components/admin/RegistrationControl.vue'
+const props = defineProps({ section: { type: String, default: 'system' } })
 
 /** @typedef {{ id: string, email: string, createdAt: string|null, lastSignInAt: string|null, emailVerifiedAt: string|null, status: string, platformOwner: boolean }} AdminAccount */
 /** @typedef {{ users: AdminAccount[], page: number, pageSize: number, total: number, truncated: boolean }} AccountPage */
 /** @typedef {{ checkedAt: string, services: { auth: string, collaborationData: string }, counts: { accounts: number|null, accountsScanned: number, accountsTruncated: boolean, activeProjects: number, collaborationProfiles: number } }} PlatformOverview */
-/** @typedef {{ id: string, actor_user_id: string|null, target_user_id: string|null, action: string, outcome: string, reason: string, created_at: string, completed_at: string|null }} AuditEvent */
 /** @typedef {{ id: string, school: string, name: string, campus: string, area: string, place_hint: string, place_type: string, description: string, opening_hours: string, service_info: string, public_contact: string, source_info: string, category: string, owner_id: string, review_revision: string, created_at: string, updated_at: string }} PendingPlace */
-/** @typedef {{ id: string, place_id: string|null, actor_id: string, decision: string, outcome: string, reason: string, created_at: string, completed_at: string|null }} PlaceReviewEvent */
 /** @typedef {{ account: AdminAccount, suspend: boolean }} StatusChangeDialog */
 /** @typedef {{ tone: string, text: string }} FeedbackMessage */
 
 const PAGE_SIZE = 25
 const PLACE_PAGE_SIZE = 50
 const access = ref('checking')
-const ownerEmail = ref('')
 const overview = ref(/** @type {PlatformOverview|null} */ (null))
 const accounts = ref(/** @type {AccountPage|null} */ (null))
-const auditEvents = ref(/** @type {AuditEvent[]} */ ([]))
 const pendingPlaces = ref(/** @type {PendingPlace[]} */ ([]))
 const pendingPlacePage = ref(1)
 const pendingPlaceTotal = ref(0)
-const placeReviewEvents = ref(/** @type {PlaceReviewEvent[]} */ ([]))
 const reviewReasons = ref({})
 const placeReviewConfirmation = ref(null)
 const placesLoading = ref(false)
-const placeAuditLoading = ref(false)
 const placesError = ref('')
-const placeAuditError = ref('')
 const reviewActionId = ref('')
 const query = ref('')
 const page = ref(1)
 const loading = ref(false)
 const usersLoading = ref(false)
-const auditLoading = ref(false)
 const pageError = ref('')
 const usersError = ref('')
-const auditError = ref('')
 const feedback = ref(/** @type {FeedbackMessage|null} */ (null))
 const changeDialog = ref(/** @type {StatusChangeDialog|null} */ (null))
 const changeReason = ref('')
@@ -81,16 +75,8 @@ function dateLabel(value) {
   }).format(date)
 }
 
-function actionLabel(action) {
-  return ({ 'user.suspend': '暂停账号', 'user.restore': '恢复账号', 'place.review': '地点审核' })[action] || '管理操作'
-}
-
 function placeTypeLabel(type) {
   return ({ 'teaching-building': '教学楼', library: '图书馆', 'study-room': '自习室', laboratory: '实验楼', cafeteria: '食堂', restaurant: '餐厅', 'tea-shop': '奶茶店', 'coffee-shop': '咖啡店', supermarket: '超市', 'convenience-store': '便利店', 'campus-shop': '校园商店', printing: '打印复印', 'parcel-station': '快递站', sports: '体育场馆', recreation: '休闲社交', 'dorm-facility': '宿舍设施', medical: '医疗服务', administration: '行政办事', 'shuttle-stop': '校车站点', scenic: '校园景点', 'campus-edge-shop': '校园周边', other: '其他校园服务' })[type] || '校园地点'
-}
-
-function outcomeLabel(outcome) {
-  return ({ started: '处理中', succeeded: '已完成', failed: '失败' })[outcome] || '未知'
 }
 
 function errorMessage(error, fallback) {
@@ -119,18 +105,6 @@ async function loadAccounts(revision = dataRevision) {
   }
 }
 
-async function loadAudit(revision = dataRevision) {
-  auditLoading.value = true
-  auditError.value = ''
-  try {
-    const result = await platformAdminRequest('audit_list', { limit: 20 })
-    if (revision === dataRevision) auditEvents.value = Array.isArray(result) ? result : []
-  } catch (error) {
-    if (revision === dataRevision) auditError.value = errorMessage(error, '暂时无法读取操作记录。')
-  } finally {
-    if (revision === dataRevision) auditLoading.value = false
-  }
-}
 
 async function loadPendingPlaces(revision = dataRevision, pageNumber = pendingPlacePage.value) {
   placesLoading.value = true
@@ -155,18 +129,6 @@ async function loadPendingPlaces(revision = dataRevision, pageNumber = pendingPl
   }
 }
 
-async function loadPlaceReviewAudit(revision = dataRevision) {
-  placeAuditLoading.value = true
-  placeAuditError.value = ''
-  try {
-    const result = await platformAdminRequest('place_review_audit', { limit: 20 })
-    if (revision === dataRevision) placeReviewEvents.value = Array.isArray(result) ? result : []
-  } catch (error) {
-    if (revision === dataRevision) placeAuditError.value = errorMessage(error, '暂时无法读取地点审核记录。')
-  } finally {
-    if (revision === dataRevision) placeAuditLoading.value = false
-  }
-}
 
 async function refreshAll() {
   if (access.value !== 'owner') return
@@ -175,7 +137,10 @@ async function refreshAll() {
   feedback.value = null
   const revision = ++dataRevision
   try {
-    await Promise.all([loadOverview(revision), loadAccounts(revision), loadAudit(revision), loadPendingPlaces(revision), loadPlaceReviewAudit(revision)])
+    if (props.section === 'accounts') await loadAccounts(revision)
+    else if (props.section === 'places') await loadPendingPlaces(revision)
+    else if (props.section === 'activity') return
+    else await loadOverview(revision)
   } finally {
     if (revision === dataRevision) loading.value = false
   }
@@ -186,21 +151,15 @@ async function checkAccess() {
   dataRevision += 1
   overview.value = null
   accounts.value = null
-  auditEvents.value = []
   pendingPlaces.value = []
   pendingPlacePage.value = 1
   pendingPlaceTotal.value = 0
-  placeReviewEvents.value = []
   loading.value = false
   usersLoading.value = false
-  auditLoading.value = false
   placesLoading.value = false
-  placeAuditLoading.value = false
   pageError.value = ''
   usersError.value = ''
-  auditError.value = ''
   placesError.value = ''
-  placeAuditError.value = ''
   feedback.value = null
 
   if (!accountAvailable.value) {
@@ -213,7 +172,6 @@ async function checkAccess() {
   }
   if (!accountUser.value?.id) {
     access.value = 'signed-out'
-    ownerEmail.value = ''
     return
   }
 
@@ -225,7 +183,6 @@ async function checkAccess() {
       access.value = 'denied'
       return
     }
-    ownerEmail.value = identity.email || accountUser.value.email || ''
     access.value = 'owner'
     await refreshAll()
   } catch (error) {
@@ -271,7 +228,7 @@ async function confirmPlaceReview() {
       : { tone: 'success', text: `「${place.name}」已${label}。` }
     reviewReasons.value[place.id] = ''
     const revision = ++dataRevision
-    await Promise.all([loadPendingPlaces(revision), loadPlaceReviewAudit(revision)])
+    await loadPendingPlaces(revision)
   } catch (error) {
     if (error instanceof PlatformAdminRequestError && error.code === 'place_state_changed') {
       placesError.value = ''
@@ -329,7 +286,7 @@ async function confirmStatusChange() {
       ? { tone: 'warning', text: '账号状态已变更，但审计记录未能确认完成。请刷新操作记录检查。' }
       : { tone: 'success', text: target.suspend ? '账号已暂停，用户数据没有删除。' : '账号已恢复。' }
     const revision = ++dataRevision
-    await Promise.all([loadAccounts(revision), loadAudit(revision), loadOverview(revision)])
+    await loadAccounts(revision)
   } catch (error) {
     changeError.value = errorMessage(error, '账号状态没有确认变更，请刷新后检查。')
   } finally {
@@ -366,18 +323,7 @@ onBeforeUnmount(() => window.clearTimeout(searchTimer))
 
 <template>
   <div class="platform-admin">
-    <header class="ops-header">
-      <div class="ops-title-group">
-        <p class="ops-breadcrumb">管理中心 / 平台运维</p>
-        <h1>平台运维</h1>
-        <p class="ops-intro">管理账号访问、校园内容审核与协作服务。个人日程、账本和同步快照仍由用户本人控制。</p>
-      </div>
-      <div v-if="access === 'owner'" class="ops-owner-chip">
-        <span class="owner-mark" aria-hidden="true">所</span>
-        <span><b>平台所有者</b><small>{{ ownerEmail }}</small></span>
-        <RouterLink class="ops-button ops-button-ghost" to="/admin/campus">打开校园审核队列</RouterLink>
-      </div>
-    </header>
+
 
     <section v-if="access === 'checking'" class="ops-gate" role="status">
       <span class="ops-loader" aria-hidden="true"></span><p>正在验证管理权限…</p>
@@ -388,7 +334,7 @@ onBeforeUnmount(() => window.clearTimeout(searchTimer))
     <section v-else-if="access === 'signed-out'" class="ops-gate">
       <span class="gate-mark" aria-hidden="true">登</span>
       <h2>请先登录平台所有者账号</h2>
-      <p>使用已绑定为平台所有者的 Supabase 登录邮箱。登录身份由服务端核验。</p>
+
       <button class="ops-button ops-button-primary" type="button" @click="openLogin">打开账号登录</button>
     </section>
     <section v-else-if="access === 'denied'" class="ops-gate ops-gate-warning" role="alert">
@@ -397,8 +343,10 @@ onBeforeUnmount(() => window.clearTimeout(searchTimer))
       <p>当前账号可以继续使用个人工作台；平台运维仅对已授权所有者开放。</p>
     </section>
     <template v-else-if="access === 'owner'">
-      <section class="ops-signal" aria-label="服务连接状态">
-        <div class="signal-heading"><span class="signal-pulse" :data-state="overview ? 'online' : 'pending'" aria-hidden="true"></span><div><b>连接检查</b><small>{{ overview?.checkedAt ? `最近检查 ${dateLabel(overview.checkedAt)}` : '正在读取真实服务状态' }}</small></div></div>
+      <RegistrationControl v-if="section === 'system'" />
+      <div v-if="section === 'system'" class="ops-system-toolbar"><button class="ops-button ops-button-quiet" type="button" :disabled="loading" @click="refreshAll">{{ loading ? '检查中' : '检查服务' }}</button></div>
+      <section v-if="section === 'system'" class="ops-signal" aria-label="服务连接状态">
+        <div class="signal-heading"><span class="signal-pulse" :data-state="overview ? 'online' : 'pending'" aria-hidden="true"></span><div><b>服务状态</b><small>{{ overview?.checkedAt ? `最近检查 ${dateLabel(overview.checkedAt)}` : '正在读取真实服务状态' }}</small></div></div>
         <div class="signal-services">
           <div><span>Supabase Auth</span><b :data-state="overview?.services?.auth || 'pending'">{{ overview?.services?.auth === 'online' ? '可连接' : '检查中' }}</b></div>
           <div><span>协作数据</span><b :data-state="overview?.services?.collaborationData || 'pending'">{{ overview?.services?.collaborationData === 'online' ? '可读取' : '检查中' }}</b></div>
@@ -409,16 +357,17 @@ onBeforeUnmount(() => window.clearTimeout(searchTimer))
       <p v-if="pageError" class="ops-feedback error" role="alert">{{ pageError }} <button type="button" @click="refreshAll">重试</button></p>
       <p v-if="feedback" class="ops-feedback" :class="feedback.tone" role="status">{{ feedback.text }}</p>
 
-      <section class="ops-overview" aria-label="平台业务概况">
-        <div><span>已注册账号</span><b>{{ accountSummary }}</b><small>逐页读取；超过 50,000 时显示下限</small></div>
-        <div><span>进行中的协作项目</span><b>{{ activeProjectSummary }}</b><small>仅统计状态为进行中的项目</small></div>
-        <div><span>协作资料</span><b>{{ collaborationProfileSummary }}</b><small>仅计数，不读取用户日程正文</small></div>
+      <section v-if="section === 'system'" class="ops-overview" aria-label="平台业务概况">
+        <div><span>已注册账号</span><b>{{ accountSummary }}</b></div>
+        <div><span>进行中的协作项目</span><b>{{ activeProjectSummary }}</b></div>
+        <div><span>协作资料</span><b>{{ collaborationProfileSummary }}</b></div>
       </section>
 
-      <div class="ops-review-columns">
-        <section class="ops-panel ops-place-review" aria-labelledby="ops-place-review-heading">
+      <AdminActivity v-if="section === 'activity'" />
+      <div v-if="section === 'places'" class="ops-review-columns">
+        <section v-if="section === 'places'" class="ops-panel ops-place-review" aria-labelledby="ops-place-review-heading">
           <div class="ops-panel-heading">
-            <div><h2 id="ops-place-review-heading">校园地点审核 <span class="review-count">{{ pendingPlaceTotal }}</span></h2><p>新提交和资料变更先进入待审核队列；仅审核通过的地点会出现在同校发现中。公开联系方式须核对来源，勿公开个人联系方式。</p></div>
+            <div><h2 id="ops-place-review-heading">校园地点审核 <span class="review-count">{{ pendingPlaceTotal }}</span></h2></div>
             <button class="ops-button ops-button-quiet" type="button" :disabled="placesLoading || loading" @click="loadPendingPlaces()">{{ placesLoading ? '刷新中' : '刷新队列' }}</button>
           </div>
           <p v-if="placesError" class="ops-inline-error" role="alert">{{ placesError }} <button type="button" @click="loadPendingPlaces()">重试</button></p>
@@ -430,7 +379,7 @@ onBeforeUnmount(() => window.clearTimeout(searchTimer))
               <p class="review-place-location">{{ placeTypeLabel(place.place_type) }}<span v-if="place.area"> · {{ place.area }}</span><span v-if="place.place_hint"> · {{ place.place_hint }}</span></p>
               <p v-if="place.description" class="review-place-copy">{{ place.description }}</p>
               <dl class="review-place-facts"><div v-if="place.opening_hours"><dt>开放时间</dt><dd>{{ place.opening_hours }}</dd></div><div v-if="place.service_info"><dt>服务与价格</dt><dd>{{ place.service_info }}</dd></div><div v-if="place.public_contact"><dt>公开业务联系</dt><dd>{{ place.public_contact }}</dd></div><div v-if="place.source_info"><dt>来源说明</dt><dd>{{ place.source_info }}</dd></div></dl>
-              <label class="ops-search review-reason"><span>拒绝原因（拒绝时必填，发布者可修改后重提）</span><textarea v-model="reviewReasons[place.id]" rows="2" maxlength="500" :disabled="Boolean(reviewActionId)" placeholder="请说明需要补充或修改的内容"></textarea><small>{{ String(reviewReasons[place.id] || '').trim().length }} / 500</small></label>
+              <label class="ops-search review-reason"><span>拒绝原因</span><textarea v-model="reviewReasons[place.id]" rows="2" maxlength="500" :disabled="Boolean(reviewActionId)" placeholder="请说明需要补充或修改的内容"></textarea><small>{{ String(reviewReasons[place.id] || '').trim().length }} / 500</small></label>
               <div class="dialog-actions"><button class="ops-button ops-button-danger" type="button" :disabled="Boolean(reviewActionId)" @click="reviewPlace(place, 'rejected')">{{ reviewActionId === place.id ? '正在提交…' : '拒绝并说明原因' }}</button><button class="ops-button ops-button-primary" type="button" :disabled="Boolean(reviewActionId)" @click="reviewPlace(place, 'approved')">{{ reviewActionId === place.id ? '正在提交…' : '审核通过并发布' }}</button></div>
             </li>
           </ul>
@@ -441,21 +390,13 @@ onBeforeUnmount(() => window.clearTimeout(searchTimer))
           </div>
         </section>
 
-        <section class="ops-panel ops-place-audit" aria-labelledby="ops-place-audit-heading">
-          <div class="ops-panel-heading"><div><h2 id="ops-place-audit-heading">地点审核记录</h2><p>审核结论、原因和处理结果保存在服务端审计表。</p></div></div>
-          <p v-if="placeAuditError" class="ops-inline-error" role="alert">{{ placeAuditError }} <button type="button" @click="loadPlaceReviewAudit()">重试</button></p>
-          <div v-else-if="placeAuditLoading && !placeReviewEvents.length" class="ops-empty" role="status">正在读取审核记录…</div>
-          <ul v-else-if="placeReviewEvents.length" class="ops-audit-list">
-            <li v-for="event in placeReviewEvents" :key="event.id"><span class="audit-mark" :data-outcome="event.outcome" aria-hidden="true"></span><div><b>{{ event.decision === 'approved' ? '通过地点' : '拒绝地点' }} · {{ outcomeLabel(event.outcome) }}</b><p>{{ event.reason || '通过并公开展示' }}</p><small>地点 {{ event.place_id || '已删除' }} · {{ dateLabel(event.created_at) }}</small></div></li>
-          </ul>
-          <p v-else class="ops-empty">还没有地点审核记录。</p>
-        </section>
+
       </div>
 
       <div class="ops-columns">
-        <section class="ops-panel ops-accounts" aria-labelledby="ops-accounts-heading">
+        <section v-if="section === 'accounts'" class="ops-panel ops-accounts" aria-labelledby="ops-accounts-heading">
           <div class="ops-panel-heading">
-            <div><h2 id="ops-accounts-heading">账号管理</h2><p>暂停只阻止后续登录与云服务访问，不删除账号或设备上的个人数据。</p></div>
+            <div><h2 id="ops-accounts-heading">账号管理</h2></div>
             <button class="ops-button ops-button-quiet" type="button" :disabled="loading || usersLoading" @click="refreshAll">{{ loading ? '刷新中' : '刷新' }}</button>
           </div>
           <label class="ops-search"><span>按登录邮箱搜索</span><input v-model="query" type="search" autocomplete="off" placeholder="输入邮箱的一部分" maxlength="120"></label>
@@ -482,25 +423,7 @@ onBeforeUnmount(() => window.clearTimeout(searchTimer))
           </footer>
         </section>
 
-        <aside class="ops-side-column">
-          <section class="ops-panel ops-audit" aria-labelledby="ops-audit-heading">
-            <div class="ops-panel-heading"><div><h2 id="ops-audit-heading">最近管理操作</h2><p>账号暂停与恢复均留下服务端记录。</p></div></div>
-            <p v-if="auditError" class="ops-inline-error" role="alert">{{ auditError }} <button type="button" @click="loadAudit()">重试</button></p>
-            <div v-else-if="auditLoading && !auditEvents.length" class="ops-empty" role="status">正在读取操作记录…</div>
-            <ul v-else-if="auditEvents.length" class="ops-audit-list">
-              <li v-for="event in auditEvents" :key="event.id">
-                <span class="audit-mark" :data-outcome="event.outcome" aria-hidden="true"></span>
-                <div><b>{{ actionLabel(event.action) }} · {{ outcomeLabel(event.outcome) }}</b><p>{{ event.reason }}</p><time :datetime="event.created_at">{{ dateLabel(event.created_at) }}</time></div>
-              </li>
-            </ul>
-            <p v-else class="ops-empty">还没有平台管理操作记录。</p>
-          </section>
 
-          <section class="ops-boundary" aria-labelledby="ops-boundary-heading">
-            <span class="boundary-mark" aria-hidden="true">隐</span>
-            <div><h2 id="ops-boundary-heading">数据访问边界</h2><p>后台不提供个人同步快照、账本、课表或协作正文的查询入口。账号列表只返回登录邮箱与认证状态；权限由服务端表和已验证会话共同决定。</p></div>
-          </section>
-        </aside>
       </div>
 
       <ConfirmDialog v-if="placeReviewConfirmation" :open="Boolean(placeReviewConfirmation)" :title="placeReviewConfirmation.decision === 'approved' ? '审核并发布地点' : '拒绝地点资料'" :message="placeReviewConfirmation.decision === 'approved' ? `确认通过“${placeReviewConfirmation.place.name}”？通过后，同校学生可以搜索并查看。` : `确认拒绝“${placeReviewConfirmation.place.name}”？发布者会收到填写的原因并可修改后重新提交。`" :confirm-label="placeReviewConfirmation.decision === 'approved' ? '审核通过并发布' : '拒绝并说明原因'" :tone="placeReviewConfirmation.decision === 'approved' ? 'primary' : 'danger'" @close="placeReviewConfirmation = null" @confirm="confirmPlaceReview" />
@@ -512,7 +435,7 @@ onBeforeUnmount(() => window.clearTimeout(searchTimer))
 
     <dialog ref="dialogElement" class="ops-dialog" :aria-labelledby="changeDialog ? 'ops-dialog-title' : undefined" @cancel.prevent="cancelStatusChange" @close="onDialogClose">
       <form v-if="changeDialog" class="ops-dialog-form" @submit.prevent="confirmStatusChange">
-        <p class="ops-breadcrumb">账号安全操作</p>
+
         <h2 id="ops-dialog-title">{{ changeDialog.suspend ? '暂停此账号？' : '恢复此账号？' }}</h2>
         <p class="dialog-impact">{{ changeDialog.suspend ? `暂停 ${changeDialog.account.email} 后，将阻止新的登录和会话续期。已签发的访问令牌在过期前可能仍可使用；账号与本机数据不会删除，也不会修改协作项目内容。` : `恢复 ${changeDialog.account.email} 后，账号可重新登录并继续使用云服务。` }}</p>
         <label class="ops-search dialog-reason"><span>处理原因（写入审计记录）</span><textarea v-model="changeReason" rows="3" maxlength="500" required placeholder="例如：用户确认账号被盗，已通过其他方式核实"></textarea><small>{{ changeReason.trim().length }} / 500</small></label>
@@ -525,15 +448,6 @@ onBeforeUnmount(() => window.clearTimeout(searchTimer))
 
 <style scoped>
 .platform-admin { width:100%; max-width:1240px; margin:0 auto; padding:0 0 38px; color:var(--text); }
-.ops-header { display:flex; align-items:flex-end; justify-content:space-between; gap:20px; margin:0 0 22px; }
-.ops-title-group h1 { margin:0; font-size:var(--fs-26); font-weight:var(--fw-800); letter-spacing:-.025em; }
-.ops-breadcrumb { margin:0 0 8px; color:var(--muted); font-size:var(--fs-12); }
-.ops-intro { max-width:70ch; margin:7px 0 0; color:var(--ink-soft); font-size:var(--fs-13); line-height:1.65; }
-.ops-owner-chip { display:flex; align-items:center; gap:10px; max-width:310px; padding:8px 13px 8px 9px; border:1px solid var(--border); border-radius:var(--radius-pill); background:var(--card); }
-.owner-mark,.gate-mark,.boundary-mark { display:grid; place-items:center; width:34px; height:34px; flex:0 0 34px; border-radius:50%; color:var(--primary); background:var(--primary-soft); font-size:var(--fs-12); font-weight:var(--fw-750); }
-.ops-owner-chip span:last-child { display:grid; min-width:0; gap:1px; }
-.ops-owner-chip b { font-size:var(--fs-11); }
-.ops-owner-chip small { overflow:hidden; color:var(--muted); font-size:var(--fs-11); text-overflow:ellipsis; white-space:nowrap; }
 .ops-signal { display:flex; align-items:center; justify-content:space-between; gap:24px; min-height:84px; margin-bottom:15px; padding:15px 18px; border:1px solid var(--border); border-radius:var(--radius-12); background:var(--card); }
 .signal-heading { display:flex; align-items:center; gap:11px; min-width:180px; }
 .signal-pulse { width:10px; height:10px; flex:0 0 10px; border-radius:50%; background:var(--muted); }
@@ -570,13 +484,10 @@ onBeforeUnmount(() => window.clearTimeout(searchTimer))
 .review-reason { margin:2px 0 0; }
 .review-reason textarea { min-height:66px; resize:vertical; }
 .review-reason small { justify-self:end; color:var(--muted); font-weight:var(--fw-400); }
-.ops-place-audit .ops-audit-list small { color:var(--muted); font-size:var(--fs-10); overflow-wrap:anywhere; }
 .ops-columns { display:grid; grid-template-columns:minmax(0,1.55fr) minmax(270px,.9fr); align-items:start; gap:16px; }
 .ops-panel { min-width:0; padding:17px 18px; border:1px solid var(--border); border-radius:var(--radius-12); background:var(--card); box-shadow:var(--shadow-sm); }
 .ops-accounts { min-height:390px; }
 .ops-panel-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:14px; margin-bottom:14px; }
-.ops-panel-heading h2,.ops-boundary h2 { margin:0; font-size:var(--fs-15); font-weight:var(--fw-750); }
-.ops-panel-heading p,.ops-boundary p { margin:4px 0 0; color:var(--muted); font-size:var(--fs-11); line-height:1.55; }
 .ops-button { display:inline-flex; align-items:center; justify-content:center; min-height:40px; padding:7px 12px; border:1px solid var(--border); border-radius:var(--radius-8); color:var(--text); background:var(--card); font:inherit; font-size:var(--fs-12); font-weight:var(--fw-650); cursor:pointer; }
 .ops-button:hover:not(:disabled) { border-color:var(--primary); color:var(--primary); background:var(--primary-soft); }
 .ops-button:focus-visible,.ops-search input:focus-visible,.ops-search textarea:focus-visible { outline:var(--focus-width) solid var(--focus-solid); outline-offset:var(--focus-offset); }
@@ -587,7 +498,6 @@ onBeforeUnmount(() => window.clearTimeout(searchTimer))
 .ops-button-quiet { color:var(--ink-soft); background:var(--bg-tint); }
 .ops-search { display:grid; gap:6px; margin:0 0 11px; color:var(--ink-soft); font-size:var(--fs-11); font-weight:var(--fw-650); }
 .ops-search input,.ops-search textarea { width:100%; min-height:42px; padding:9px 11px; border:1px solid var(--border-strong); border-radius:var(--radius-8); color:var(--text); background:var(--bg); font:inherit; font-size:var(--fs-13); font-weight:var(--fw-400); }
-.ops-account-list,.ops-audit-list { list-style:none; margin:0; padding:0; }
 .ops-account-row { display:flex; align-items:center; justify-content:space-between; gap:12px; min-height:75px; padding:10px 0; border-top:1px solid var(--border); }
 .account-primary { display:flex; align-items:center; flex-wrap:wrap; gap:7px 10px; min-width:0; }
 .account-primary > b { overflow:hidden; max-width:100%; font-size:var(--fs-13); font-weight:var(--fw-650); text-overflow:ellipsis; white-space:nowrap; }
@@ -601,18 +511,6 @@ onBeforeUnmount(() => window.clearTimeout(searchTimer))
 .ops-pagination { display:flex; align-items:center; justify-content:space-between; gap:10px; padding-top:12px; border-top:1px solid var(--border); color:var(--muted); font-size:var(--fs-10); }
 .ops-pagination > div { display:flex; gap:6px; }
 .ops-pagination .ops-button { min-height:36px; }
-.ops-side-column { display:grid; gap:15px; min-width:0; }
-.ops-audit-list li { display:grid; grid-template-columns:9px minmax(0,1fr); gap:10px; padding:11px 0; border-top:1px solid var(--border); }
-.audit-mark { width:8px; height:8px; margin-top:5px; border-radius:50%; background:var(--warning); }
-.audit-mark[data-outcome='succeeded'] { background:var(--success); }
-.audit-mark[data-outcome='failed'] { background:var(--danger); }
-.ops-audit-list b { font-size:var(--fs-11); font-weight:var(--fw-650); }
-.ops-audit-list p { margin:4px 0; color:var(--ink-soft); font-size:var(--fs-11); line-height:1.5; overflow-wrap:anywhere; }
-.ops-audit-list time { color:var(--muted); font-size:var(--fs-10); }
-.ops-boundary { display:flex; align-items:flex-start; gap:11px; padding:15px; border:1px solid color-mix(in srgb,var(--primary) 19%,var(--border)); border-radius:var(--radius-12); background:color-mix(in srgb,var(--primary-soft) 46%,var(--card)); }
-.boundary-mark { width:29px; height:29px; flex-basis:29px; }
-.ops-boundary h2 { font-size:var(--fs-12); }
-.ops-boundary p { margin-top:5px; color:var(--ink-soft); }
 .ops-empty { padding:19px 10px; border-top:1px solid var(--border); color:var(--muted); font-size:var(--fs-12); text-align:center; }
 .ops-inline-error,.ops-feedback { padding:10px 12px; border:1px solid color-mix(in srgb,var(--danger) 30%,var(--border)); border-radius:var(--radius-8); color:var(--danger); background:var(--danger-soft); font-size:var(--fs-12); line-height:1.55; }
 .ops-inline-error button,.ops-feedback button { margin-left:5px; padding:0; border:0; color:inherit; background:transparent; font:inherit; font-weight:var(--fw-750); text-decoration:underline; cursor:pointer; }
@@ -637,7 +535,6 @@ onBeforeUnmount(() => window.clearTimeout(searchTimer))
 @media (max-width:760px) {
   .ops-review-columns { grid-template-columns:minmax(0,1fr); }
   .ops-columns { grid-template-columns:minmax(0,1fr); }
-  .ops-side-column { grid-template-columns:repeat(2,minmax(0,1fr)); align-items:start; }
   .ops-signal { align-items:flex-start; flex-direction:column; gap:13px; }
   .signal-services { justify-content:stretch; width:100%; }
   .signal-services > div { flex:1; min-width:0; padding:0 10px; }
@@ -645,16 +542,12 @@ onBeforeUnmount(() => window.clearTimeout(searchTimer))
 }
 @media (max-width:520px) {
   .platform-admin { padding-bottom:24px; }
-  .ops-header { align-items:flex-start; flex-direction:column; gap:12px; margin-bottom:16px; }
-  .ops-title-group h1 { font-size:var(--fs-23); }
-  .ops-owner-chip { max-width:100%; }
   .ops-overview { grid-template-columns:repeat(2,minmax(0,1fr)); }
   .ops-overview > div { padding:12px; }
   .ops-overview > div + div { border-left:0; }
   .ops-overview > div:nth-child(2) { border-left:1px solid var(--border); }
   .ops-overview > div:nth-child(3) { grid-column:1/-1; border-top:1px solid var(--border); }
   .ops-overview b { font-size:var(--fs-20); }
-  .ops-side-column { grid-template-columns:minmax(0,1fr); }
   .ops-panel { padding:14px; }
   .ops-account-row { align-items:flex-start; }
   .ops-account-row > .ops-button { min-width:56px; min-height:44px; flex:0 0 auto; }
@@ -670,4 +563,7 @@ onBeforeUnmount(() => window.clearTimeout(searchTimer))
 @media (prefers-reduced-motion: reduce) {
   .ops-loader { animation:none; }
 }
+.ops-columns,.ops-review-columns{grid-template-columns:minmax(0,1fr)}
+.ops-system-toolbar{display:flex;justify-content:flex-end;margin-bottom:14px}
+.gate-mark{display:grid;place-items:center;width:34px;height:34px;border-radius:50%;color:var(--primary);background:var(--primary-soft)}
 </style>

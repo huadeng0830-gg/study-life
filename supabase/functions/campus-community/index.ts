@@ -98,12 +98,14 @@ async function listPublic(payload: any) {
   const limit = Math.min(60, Math.max(1, Number.isSafeInteger(payload.limit) ? payload.limit : 30))
   const offset = Math.min(10000, Math.max(0, Number.isSafeInteger(payload.offset) ? payload.offset : 0))
   let query = admin.from('campus_feedback_suggestions')
-    .select(payload.view === 'summary' ? 'id,category,title,status,public_author_name,created_at,updated_at' : 'id,category,title,body,status,public_author_name,public_history,public_reply,public_reason,reward_beans,reward_issued,created_at,updated_at', { count: 'exact' })
+    .select(payload.view === 'summary' ? 'id,category,title,status,public_author_name,like_count,created_at,updated_at' : 'id,category,title,body,status,public_author_name,public_history,public_reply,public_reason,reward_beans,reward_issued,like_count,created_at,updated_at', { count: 'exact' })
     .eq('visibility', 'public')
   if (['pending','needs_info','planned','processing','resolved','not_adopted','duplicate'].includes(payload.status)) query = query.eq('status', payload.status)
   if (payload.id) query = query.eq('id', uuid(payload.id, '反馈'))
   query = feedbackFilters(query, payload)
-  const { data, count, error } = await query.order(payload.sort === 'newest' ? 'created_at' : 'updated_at', { ascending: false }).order('id', { ascending: true }).range(offset, offset + limit - 1)
+  if (payload.sort === 'supported') query = query.order('like_count', { ascending: false }).order('created_at', { ascending: true })
+  else query = query.order(payload.sort === 'newest' ? 'created_at' : 'updated_at', { ascending: false })
+  const { data, count, error } = await query.order('id', { ascending: true }).range(offset, offset + limit - 1)
   if (error) throw error
   return { items: data || [], total: count || 0, offset, limit }
 }
@@ -137,7 +139,7 @@ async function listMine(userId: string, payload: any) {
   const limit = Math.min(60, Math.max(1, Number.isSafeInteger(payload.limit) ? payload.limit : 20))
   const offset = Math.min(10000, Math.max(0, Number.isSafeInteger(payload.offset) ? payload.offset : 0))
   const { data, count, error } = await admin.from('campus_feedback_suggestions')
-    .select('id,category,title,body,status,visibility,is_anonymous,public_author_name,public_history,public_reply,public_reason,reward_beans,reward_issued,created_at,updated_at', { count: 'exact' })
+    .select('id,category,title,body,status,visibility,is_anonymous,public_author_name,public_history,public_reply,public_reason,reward_beans,reward_issued,like_count,created_at,updated_at', { count: 'exact' })
     .eq('author_id', userId).order('created_at', { ascending: false }).order('id', { ascending: true }).range(offset, offset + limit - 1)
   if (error) throw error
   return { items: data || [], total: count || 0, offset, limit }
@@ -233,14 +235,40 @@ async function ownerFeedback(payload: any) {
   const limit = Math.min(60, Math.max(1, Number.isSafeInteger(payload.limit) ? payload.limit : 40))
   const offset = Math.min(10000, Math.max(0, Number.isSafeInteger(payload.offset) ? payload.offset : 0))
   let query = admin.from('campus_feedback_suggestions')
-    .select(payload.view === 'summary' ? 'id,category,title,status,visibility,public_author_name,created_at,updated_at' : 'id,author_id,category,title,body,status,visibility,is_anonymous,public_author_name,public_history,public_reply,public_reason,reward_beans,reward_issued,created_at,updated_at', { count: 'exact' })
+    .select(payload.view === 'summary' ? 'id,category,title,status,visibility,public_author_name,like_count,created_at,updated_at' : 'id,author_id,category,title,body,status,visibility,is_anonymous,public_author_name,public_history,public_reply,public_reason,reward_beans,reward_issued,like_count,created_at,updated_at', { count: 'exact' })
   if (['pending','needs_info','planned','processing','resolved','not_adopted','duplicate'].includes(payload.status)) query = query.eq('status', payload.status)
+  if (payload.status === 'active') query = query.in('status', ['pending','needs_info','planned','processing'])
   if (['pending_safety','public','hidden'].includes(payload.visibility)) query = query.eq('visibility', payload.visibility)
   if (payload.id) query = query.eq('id', uuid(payload.id, '反馈'))
   query = feedbackFilters(query, payload)
-  const { data, count, error } = await query.order(payload.sort === 'updated' ? 'updated_at' : 'created_at', { ascending: payload.sort !== 'updated' && payload.sort !== 'newest' }).order('id', { ascending: true }).range(offset, offset + limit - 1)
+  if (payload.sort === 'supported') query = query.order('like_count', { ascending: false }).order('created_at', { ascending: true })
+  else query = query.order(payload.sort === 'updated' ? 'updated_at' : 'created_at', { ascending: payload.sort !== 'updated' && payload.sort !== 'newest' })
+  const { data, count, error } = await query.order('id', { ascending: true }).range(offset, offset + limit - 1)
   if (error) throw error
   return { items: data || [], total: count || 0, offset, limit }
+}
+
+async function ownFeedbackVotes(userId: string, payload: any) {
+  if (!Array.isArray(payload.feedbackIds) || payload.feedbackIds.length > 60) throw new CommunityError('invalid_input', '最多查询 60 条反馈。')
+  const ids = [...new Set(payload.feedbackIds.map((id: unknown) => uuid(id, '反馈')))]
+  if (!ids.length) return { likedIds: [] }
+  const [votes, counts] = await Promise.all([
+    admin.from('feedback_support_votes').select('feedback_id').eq('user_id', userId).in('feedback_id', ids),
+    admin.from('campus_feedback_suggestions').select('id,like_count').eq('visibility', 'public').in('id', ids),
+  ])
+  if (votes.error) throw votes.error
+  if (counts.error) throw counts.error
+  const visible = new Set((counts.data || []).map(row => row.id))
+  return { likedIds: (votes.data || []).map(row => row.feedback_id).filter(id => visible.has(id)), counts: counts.data || [] }
+}
+
+async function voteFeedback(user: any, payload: any) {
+  if (typeof payload.liked !== 'boolean') throw new CommunityError('invalid_input', '点赞状态无效。')
+  const feedbackId = uuid(payload.feedbackId, '反馈')
+  await rateLimit(user.id, 'feedback_vote', 60, 60)
+  const { data, error } = await admin.rpc('feedback_set_support', { p_actor: user.id, p_feedback: feedbackId, p_liked: payload.liked })
+  if (error) throw error
+  return data
 }
 
 async function privateMessages(userId: string, payload: any) {
@@ -266,6 +294,8 @@ async function privateMessages(userId: string, payload: any) {
 
 async function handle(request: Request, action: string, payload: any) {
   if (action === 'public_list') return listPublic(payload)
+  if (action === 'feedback_vote') return voteFeedback(await requireVerified(request), payload)
+  if (action === 'feedback_votes') return ownFeedbackVotes((await userFor(request)).id, payload)
   if (action === 'submit') return submitSuggestion(await userFor(request), payload)
   if (action === 'mine') return listMine((await userFor(request)).id, payload)
   if (action === 'wallet') return wallet((await userFor(request)).id)

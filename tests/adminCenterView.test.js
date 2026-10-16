@@ -27,11 +27,12 @@ vi.mock('virtual:pwa-register', () => ({ registerSW: vi.fn(() => vi.fn()) }))
 const ROUTE_PATHS = new Set(routes.filter((route) => route.name).map((route) => route.path))
 
 let mounted = null
-const modulePath = '/admin'
+const modulePath = '/admin?section=data'
 
 beforeEach(async () => {
   localStorage.clear()
   mounted = await mountApp({ routes, hash: modulePath })
+  await vi.waitFor(() => expect(document.querySelector('#main-content .admin-center')).toBeTruthy(), { timeout: 10000 })
 })
 
 afterEach(() => {

@@ -89,7 +89,7 @@ onMounted(() => { void refresh() })
 
 <template>
   <section class="campus-life-panel">
-    <div><h2>审核人员与范围</h2><p>仅总管理员可设置。审核员可处理授权范围内的投稿、举报与争议，不具有账号管理或继续授权的权限。</p></div>
+    <div><h2>审核人员与范围</h2></div>
     <form @submit.prevent="findAccounts"><FieldGroup class="flex-row items-end gap-3"><Field><FieldLabel for="reviewer-search">查找已注册账号</FieldLabel><Input id="reviewer-search" v-model="search" type="search" maxlength="120" placeholder="输入对方的完整邮箱" required /></Field><Button type="submit" :disabled="searching || saving">{{ searching ? '查找中…' : '查找账号' }}</Button></FieldGroup></form>
     <form v-if="candidates.length" @submit.prevent="save(true)">
       <FieldGroup>
@@ -100,7 +100,7 @@ onMounted(() => { void refresh() })
         <Button type="submit" :disabled="searching || saving || !selected || selectedAccount?.status !== 'active'">{{ saving ? '保存中…' : currentGrant ? '更新审核授权' : '授予审核权限' }}</Button>
       </FieldGroup>
     </form>
-    <p v-else-if="search && !searching" class="campus-life-meta">账号注册并完成邮箱验证后，可以授予审核权限。总管理员账号不在此列表中。</p>
+    <p v-else-if="search && !searching" class="campus-life-meta">未找到可授权的已验证账号。</p>
     <p v-if="error || page.error.value" role="alert" class="campus-life-inline-state error">{{ error || page.error.value }} <button class="text-button" @click="refresh()">刷新授权记录</button></p><p v-if="feedback" role="status" class="campus-life-inline-state campus-life-success">{{ feedback }}</p>
     <div class="campus-reviewer-list"><article v-for="grant in page.data.value?.reviewers || []" :key="grant.user_id" class="campus-reviewer-row"><div><b>{{ grant.email }}</b><p>{{ grant.school }} · {{ grant.campus || '全部校区' }} · {{ grant.active ? '授权中' : '已撤销' }}</p></div><Button v-if="grant.active" variant="outline" :disabled="saving" @click="revokeTarget = grant; reason = ''">撤销权限</Button></article></div>
     <div v-if="page.data.value?.total > REVIEWER_PAGE_SIZE" class="campus-life-actions"><Button variant="outline" :disabled="page.loading.value || index === 1" @click="refresh(index - 1)">上一页</Button><span>第 {{ index }} 页</span><Button variant="outline" :disabled="page.loading.value || index * REVIEWER_PAGE_SIZE >= page.data.value.total" @click="refresh(index + 1)">下一页</Button></div>

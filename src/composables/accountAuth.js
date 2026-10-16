@@ -1,3 +1,4 @@
+import { readRegistrationStatus } from '../services/platformRegistration.js'
 import { computed, ref, shallowRef } from 'vue'
 import { ACCOUNT_STORAGE_KEY, getSupabaseClient, getSupabaseConfig, verifyAccountCurrentPassword } from '../services/supabase.js'
 import { getAccountAuthOptions } from '../services/cloudConfig.js'
@@ -76,6 +77,7 @@ export function accountErrorMessage(error) {
     email_address_not_authorized: '验证邮件暂时无法发送，请稍后重试或联系管理员。',
     over_email_send_rate_limit: '邮件发送过于频繁，请稍后再试。',
     over_request_rate_limit: '操作过于频繁，请稍后再试。',
+    registration_status_unavailable: '暂时无法确认注册状态，请稍后重试。已有账号仍可登录。',
     signup_disabled: '当前暂未开放注册，请稍后再试。',
     email_provider_disabled: '邮箱注册暂时不可用，请稍后再试。',
     otp_expired: '邮件链接已过期，请重新发送邮件。',
@@ -201,11 +203,15 @@ export async function registerAccount({ email, password, confirmation }) {
   if (!getAccountAuthOptions().emailSignup || !getAccountAuthOptions().emailDelivery) return { ok: false, message: '邮箱注册暂未开放，请使用其他登录方式或继续在本机使用。' }
   const errors = validateAccountForm({ email, password, confirmation })
   if (Object.keys(errors).length) return { ok: false, errors }
-  const result = await accountAction((auth) => auth.signUp({
+  const result = await accountAction(async (auth) => {
+    try { if (!(await readRegistrationStatus())) return { data: null, error: { code: 'signup_disabled' } } }
+    catch { return { data: null, error: { code: 'registration_status_unavailable' } } }
+    return auth.signUp({
     email: normalizeAccountEmail(email),
     password,
     options: { emailRedirectTo: accountRedirectUrl() },
-  }))
+    })
+  })
   if (!result.ok) return result
   if (result.data?.session) acceptSession(result.data.session)
   return { ok: true, needsConfirmation: !result.data?.session }

@@ -9,7 +9,7 @@ const suggestion = '10000001-0000-4000-8000-000000000001'
 const source = readFileSync(new URL('../supabase/functions/campus-community/index.ts', import.meta.url), 'utf8')
 const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
 
-function edge({ owner = false, nickname = '虚构昵称', suggestions = [] } = {}) {
+function edge({ owner = false, nickname = '虚构昵称', suggestions = [], votes = [] } = {}) {
   let handler
   const inserted = []
   const admin = {
@@ -18,8 +18,9 @@ function edge({ owner = false, nickname = '虚构昵称', suggestions = [] } = {
     from(table) {
       let columns = '*', single = false, offset = 0, limit = Infinity
       const filters = []
+      const orders = []
       let rows = table === 'social_profiles' ? [{ user_id: actor, nickname }]
-        : table === 'platform_admins' ? (owner ? [{ user_id: actor, role: 'owner' }] : []) : suggestions
+        : table === 'feedback_support_votes' ? votes : table === 'platform_admins' ? (owner ? [{ user_id: actor, role: 'owner' }] : []) : suggestions
       const query = {
         select(value) { columns = value; return query },
         eq(key, value) { filters.push(row => row[key] === value); return query },
@@ -28,14 +29,15 @@ function edge({ owner = false, nickname = '虚构昵称', suggestions = [] } = {
           filters.push(row => values.some(([key,value]) => String(row[key] || '').includes(value)))
           return query
         },
-        order() { return query },
+        in(key, values) { filters.push(row => values.includes(row[key])); return query },
+        order(key, options) { orders.push([key, options]); return query },
         range(start, end) { offset = start; limit = end - start + 1; return query },
         limit(value) { limit = value; return query },
         maybeSingle() { single = true; return query },
         single() { single = true; return query },
         insert(value) { inserted.push(value); rows = [{ id: suggestion, ...value }]; return query },
         then(resolve, reject) {
-          const matches = rows.filter(row => filters.every(filter => filter(row)))
+          const matches = rows.filter(row => filters.every(filter => filter(row))).sort((a,b) => { for(const [key,options] of orders) { const difference = a[key] < b[key] ? -1 : a[key] > b[key] ? 1 : 0; if(difference) return options.ascending ? difference : -difference } return 0 })
           const projected = matches.slice(offset, offset + limit).map(row => Object.fromEntries(columns.split(',').map(key => [key, row[key]])))
           return Promise.resolve({ data: single ? projected[0] || null : projected, count: matches.length, error: null }).then(resolve, reject)
         },
@@ -56,6 +58,36 @@ function edge({ owner = false, nickname = '虚构昵称', suggestions = [] } = {
 }
 
 describe('independent feedback API', () => {
+  it('sorts support before pagination, breaks ties by age and excludes completed feedback from the active queue', async () => {
+    const rows = [
+      { id: suggestion, visibility: 'public', status: 'pending', like_count: 3, created_at: '2026-10-14' },
+      { id: '00000002-0000-4000-8000-000000000001', visibility: 'public', status: 'processing', like_count: 9, created_at: '2026-10-15' },
+      { id: '00000002-0000-4000-8000-000000000002', visibility: 'public', status: 'planned', like_count: 9, created_at: '2026-10-13' },
+      { id: '00000002-0000-4000-8000-000000000003', visibility: 'public', status: 'resolved', like_count: 100, created_at: '2026-10-12' },
+    ]
+    const app = edge({ owner: true, suggestions: rows })
+    const result = await app.call('feedback_admin_list', { status: 'active', sort: 'supported', limit: 1, view: 'summary' })
+    expect(result.body.data.total).toBe(3)
+    expect(result.body.data.items[0]).toMatchObject({ id: rows[2].id, like_count: 9 })
+    const publicResult = await app.call('public_list', { sort: 'supported', limit: 1 }, false)
+    expect(publicResult.body.data.items[0].id).toBe(rows[3].id)
+  })
+  it('binds support to the verified caller and rejects anonymous, invalid or oversized requests', async () => {
+    const app = edge()
+    expect((await app.call('feedback_vote', { feedbackId: suggestion, liked: true }, false)).status).toBe(401)
+    expect((await app.call('feedback_vote', { feedbackId: suggestion, liked: 'true' })).status).toBe(400)
+    expect((await app.call('feedback_votes', { feedbackIds: Array(61).fill(suggestion) })).status).toBe(400)
+    app.admin.rpc.mockImplementation(async name => ({ data: name === 'feedback_set_support' ? { feedbackId: suggestion, liked: true, likeCount: 1 } : true, error: null }))
+    expect((await app.call('feedback_vote', { feedbackId: suggestion, liked: true, userId: 'forged' })).body.data.likeCount).toBe(1)
+    expect(app.admin.rpc).toHaveBeenCalledWith('feedback_set_support', { p_actor: actor, p_feedback: suggestion, p_liked: true })
+  })
+  it('returns only the callers own visible vote IDs and public counts', async () => {
+    const app = edge({ suggestions: [{ id: suggestion, visibility: 'public', like_count: 2 }], votes: [{ feedback_id: suggestion, user_id: actor }, { feedback_id: 'other', user_id: 'another-account' }] })
+    const response = await app.call('feedback_votes', { feedbackIds: [suggestion] })
+    expect(response.body.data).toEqual({ likedIds: [suggestion], counts: [{ id: suggestion, like_count: 2 }] })
+    expect(JSON.stringify(response.body)).not.toContain(actor)
+    expect((await app.call('feedback_votes', { feedbackIds: [suggestion] }, false)).status).toBe(401)
+  })
   const draft = { title: '虚构问题反馈', body: '这是用于验证提交行为的虚构反馈内容。', category: 'product' }
   it('defaults to anonymity and ignores client-supplied identity', async () => {
     const app = edge()

@@ -54,6 +54,7 @@ beforeEach(async () => {
   vi.stubGlobal('indexedDB', fakeIndexedDB())
   adapter.getSupabaseConfig.mockReturnValue({ url: 'https://example.supabase.co', key: 'sb_publishable_example' })
   client = {
+    rpc: vi.fn().mockResolvedValue({ data: true, error: null }),
     auth: {
       getSession: vi.fn().mockResolvedValue({ data: { session: null }, error: null }),
       onAuthStateChange: vi.fn(listener => {

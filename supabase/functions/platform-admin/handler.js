@@ -1,6 +1,6 @@
 const MAX_BODY_BYTES = 8_192
 const MAX_REASON_LENGTH = 500
-const ACTIONS = new Set(['identity', 'overview', 'users_list', 'audit_list', 'user_suspend', 'user_restore', 'places_pending', 'place_review', 'place_review_audit', 'reviewers_list', 'reviewer_set'])
+const ACTIONS = new Set(['identity', 'overview', 'users_list', 'audit_list', 'user_suspend', 'user_restore', 'places_pending', 'place_review', 'place_review_audit', 'reviewers_list', 'reviewer_set', 'registration_get', 'registration_set'])
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 export class PlatformAdminError extends Error {
@@ -108,6 +108,12 @@ export function createPlatformAdminHandler({ service, allowedOrigins = [], logge
       switch (body.action) {
         case 'identity':
           return json({ data: { owner: true, email: user.email || '' } }, 200, corsOrigin)
+        case 'registration_get':
+          return json({ data: await service.getRegistration() }, 200, corsOrigin)
+        case 'registration_set': {
+          if (typeof payload.enabled !== 'boolean' || typeof payload.expectedUpdatedAt !== 'string' || !Number.isFinite(Date.parse(payload.expectedUpdatedAt))) throw new PlatformAdminError('invalid_input', '注册设置无效，请刷新后重试。')
+          return json({ data: await service.setRegistration({ actorId: user.id, enabled: payload.enabled, expectedUpdatedAt: payload.expectedUpdatedAt }) }, 200, corsOrigin)
+        }
         case 'overview':
           return json({ data: await service.getOverview() }, 200, corsOrigin)
         case 'reviewers_list':

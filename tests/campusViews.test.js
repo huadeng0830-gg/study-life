@@ -77,6 +77,8 @@ vi.mock('../src/services/social.js', () => ({
 }))
 
 vi.mock('../src/services/campusCommunity.js', () => ({
+  campusFeedbackVotes: vi.fn(async () => ({ likedIds: [], counts: [] })),
+  setCampusFeedbackVote: vi.fn(async () => ({ liked: true, likeCount: 1 })),
   campusBeanWallet: vi.fn(async () => serviceState.responses.campusBeanWallet || {
     wallet: { purchased: 0, contribution: 0, contributionDebt: 0 }, ledger: [],
   }),
@@ -655,9 +657,25 @@ describe('独立反馈流程', () => {
     const row = host.querySelector('.feedback-row')
     expect(row.textContent).toContain('虚构昵称')
     expect(row.textContent).not.toContain('虚构不采纳说明')
-    row.querySelector('button').click(); await settle()
+    row.querySelector('.feedback-row-open').click(); await settle()
     expect(document.body.querySelector('.feedback-detail').textContent).toContain('虚构不采纳说明')
     expect(document.body.querySelector('.feedback-history').textContent).toContain('虚构历史进展')
+  })
+  it('点赞按钮独立于详情入口，使用服务器返回的计数并允许取消', async () => {
+    const { campusFeedbackVotes, setCampusFeedbackVote } = await import('../src/services/campusCommunity.js')
+    campusFeedbackVotes.mockResolvedValueOnce({ likedIds: [], counts: [{ id: 'fictional-vote', like_count: 5 }] })
+    serviceState.responses.campusFeedbackPublicList = { items: [{ id: 'fictional-vote', title: '虚构点赞建议', status: 'pending', like_count: 5 }], total: 1 }
+    const { default: view } = await import('../src/views/FeedbackView.vue')
+    await mountView(view)
+    setCampusFeedbackVote.mockResolvedValueOnce({ liked: true, likeCount: 6 })
+    host.querySelector('.feedback-support').click(); await settle()
+    expect(host.querySelector('.feedback-support').getAttribute('aria-pressed')).toBe('true')
+    expect(host.querySelector('.feedback-support').textContent).toContain('6')
+    expect(document.body.querySelector('.feedback-detail')).toBeNull()
+    setCampusFeedbackVote.mockResolvedValueOnce({ liked: false, likeCount: 5 })
+    host.querySelector('.feedback-support').click(); await settle()
+    expect(setCampusFeedbackVote).toHaveBeenLastCalledWith('fictional-vote', false)
+    expect(host.querySelector('.feedback-support').getAttribute('aria-pressed')).toBe('false')
   })
   it('普通用户无法渲染管理员处理表单', async () => {
     serviceState.responses.campusGovernanceAccess = { owner: false, reviewer: false }

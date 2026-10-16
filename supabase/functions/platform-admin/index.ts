@@ -78,6 +78,22 @@ const service = {
     return data
   },
 
+  async getRegistration() {
+    const { data, error } = await requireAdminClient().from('platform_registration_settings').select('registration_open,updated_at').eq('singleton', true).single()
+    if (error) throw error
+    return { enabled: data.registration_open, updatedAt: data.updated_at }
+  },
+
+  async setRegistration({ actorId, enabled, expectedUpdatedAt }) {
+    const { data, error } = await requireAdminClient().rpc('platform_set_registration', { p_actor: actorId, p_enabled: enabled, p_expected_updated_at: expectedUpdatedAt })
+    if (error) {
+      if (String(error.message).includes('PLATFORM_STATE_CHANGED')) throw new PlatformAdminError('registration_changed', '注册设置已在其他页面更新，请刷新后重试。', 409)
+      if (String(error.message).includes('PLATFORM_FORBIDDEN')) throw new PlatformAdminError('forbidden', '当前账号没有修改注册设置的权限。', 403)
+      throw error
+    }
+    return data
+  },
+
   async getOverview() {
     const client = requireAdminClient()
     const [userResult, projectResult, profileResult] = await Promise.all([

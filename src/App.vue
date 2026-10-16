@@ -37,6 +37,7 @@ import { backupReminderTitle, needsBackup, useBackupNotice } from './composables
 import { attachFloatingSlot, createFloatingSlot, detachFloatingSlot, useFloatingOffset } from './composables/floatingStack.js'
 import { announce, announceAlert, clearAnnouncement, liveAlert, liveMessage } from './composables/liveRegion.js'
 import { openSearch, searchOpen } from './composables/globalSearch.js'
+import { adminTitleForRoute } from './composables/adminWorkspaceModel.js'
 import { desktopShortcutRoutes } from './router/navigation.js'
 retireLegacySyncState()
 const UpdateNotes = defineAsyncComponent(() => import('./components/UpdateNotes.vue'))
@@ -326,15 +327,13 @@ onMounted(() => {
   // 没有播报的话键盘/读屏用户察觉不到"已经换页了"。
   stopTitleWatcher = watchEffect(() => {
     const pending = tasks.value.filter((task) => isTaskActionable(task, appNow.value)).length
-    const pageTitle = route.meta?.title || '三两事'
+    const pageTitle = adminTitleForRoute(route) || route.meta?.title || '三两事'
     const brandedTitle = pageTitle === '三两事' ? pageTitle : `三两事 · ${pageTitle}`
     document.title = pending > 0 ? `${brandedTitle} · ${pending} 项待办` : brandedTitle
   })
-  stopRouteAnnouncer = watch(() => route.path, () => {
-    // 只看 path，不看 fullPath：query 变化属于**页面内部状态**——
-    // 账本分区（?tab=review）、深链高亮（?focus=…）都只改 query，页面并没有换。
-    // 用 fullPath 的话，每切一次分区读屏就会再听到一遍"账本 已打开"。
-    announce(`${route.meta?.title || '三两事'} 已打开`)
+  stopRouteAnnouncer = watch(() => adminTitleForRoute(route) || route.path, () => {
+    // 管理分区变化播报对应任务；其他页面仍只跟踪 path，避免筛选时重复播报。
+    announce(`${adminTitleForRoute(route) || route.meta?.title || '三两事'} 已打开`)
   })
   window.addEventListener('keydown', onKeydown)
   window.addEventListener('storage', onReleaseSeenInAnotherTab)
@@ -387,12 +386,10 @@ const WIDTH_BY_PATH = {
   '/lists': 'content-mid',
   '/bills': 'content-mid',
 }
+const isAdminWorkspace = computed(() => route.path === '/admin' || route.path.startsWith('/admin/') || route.path === '/platform-admin')
 const widthClass = computed(() => WIDTH_BY_PATH[route.path] ?? '')
 const cachedPageNames = ['TodayView', 'ScheduleView', 'CourseArchiveView', 'TasksView', 'ExamsView', 'EventsView', 'ListsView', 'LedgerView']
-// 视觉降级与页面缓存分开处理。移动 Safari 保留“当前页 + 上一页”，
-// 避免每次返回都重建复杂页面；桌面保留更多常用页面以提高来回切换速度。
 const pageCacheSize = isIOSDevice() ? 2 : 4
-// 简单的 i18n 映射，便于未来扩展多语言
 const i18n = {
   'skip.toContent': '跳到主内容',
   'skip.toMain': 'Skip to main content',
@@ -414,7 +411,7 @@ function t(key) {
   <!-- 这里原先还有 `:data-atmosphere="atmosphereKey"`：全仓没有任何一条 CSS 或脚本读它，
        是个写出去就没人看的死钩子（同 tests/styleHooks.test.js 抓的那一类）。
        当天的氛围已经由上面的 [data-festive] 精确分叉，不再需要第二份标记。 -->
-  <div class="layout">
+  <div class="layout" :class="{ 'layout-admin': isAdminWorkspace }">
     <!-- 跳到主内容（WCAG 2.4.1 绕过区块）。侧边栏有十几个导航项，键盘用户每换一页
          都得先 Tab 穿过它们才能到正文；这是纯键盘用户最常用的第一颗「按键」。
          平时视觉隐藏（见 <style> 里的 .skip-to-content），按 Tab 第一个聚焦时才浮现，
@@ -429,7 +426,7 @@ function t(key) {
          只给 id 的话各浏览器行为不一致，有的只移动「顺序焦点起点」而不移动焦点。 -->
     <main id="main-content" class="content" :class="widthClass" tabindex="-1">
       <div v-if="hasGlobalAlert" class="global-alert-reserve" :style="{ '--alert-count': `${alertCount}` }" aria-hidden="true" />
-      <header class="desktop-toolbar" aria-label="桌面常用操作">
+      <header v-if="!isAdminWorkspace" class="desktop-toolbar" aria-label="桌面常用操作">
         <button
           type="button"
           class="desktop-search-trigger"
@@ -460,7 +457,7 @@ function t(key) {
       <!-- 聚焦态（`?focus=` / `?section=`）下的返回入口。放在 router-view **之外**，
           因为它是外壳级的一条出口，不属于任何单个页面；只在聚焦时渲染，
           所以平时对布局与焦点序都没有影响。 -->
-      <FocusReturn />
+      <FocusReturn v-if="!isAdminWorkspace" />
       <!-- router-view **必须在外层**：vue-router 4 明确不支持把 <router-view> 直接放进
            <transition>/<keep-alive>，那样写每次切路由都会在控制台打一条警告，
            而且过渡与 keep-alive 的包含关系也不按预期生效（作者以为有页面切换动画，其实没有）。
@@ -474,7 +471,7 @@ function t(key) {
       </router-view>
     </main>
   </div>
-  <TaskCenter />
+  <TaskCenter v-if="!isAdminWorkspace" />
   <!-- 五条外壳级提示共用**一个**队列容器（取舍见 .global-alert-stack 那条规则）；
        TransitionGroup 只为收掉五份重复的 <Transition name="global-sync">，子条必须带 key。 -->
   <div class="global-alert-stack">
@@ -557,6 +554,9 @@ function t(key) {
 </template>
 
 <style scoped>
+.layout-admin :deep(.sidebar){display:none}
+.layout-admin .content{max-width:1600px}
+
 /* 第三十七轮说明：本样式块曾因一次删除器 bug 被破坏，内容由删除前的构建产物
    （dist/assets 的编译 CSS，去掉 scope 属性后反压缩）整体重建，**原有注释在重建中丢失**。
    第三十八轮已按 scope 归属清掉其中属于别组件的同值副本。新增规则时请照常写注释。 */
