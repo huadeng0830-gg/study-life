@@ -79,6 +79,7 @@ function receiveUpdateReminder(event) {
   if (!detail || typeof detail.stage !== 'string' || typeof detail.version !== 'string') return
   updateReminder.value = { stage: detail.stage, version: detail.version }
 }
+function openUpdatePanelFromGlobalNotice() { showVersionUpdate.value = true }
 const showAppearance = ref(false)
 const showNavigationSettings = ref(false)
 const showQuickRecordSettings = ref(false)
@@ -134,6 +135,7 @@ function openNavigationSettings() {
 
 onMounted(() => {
   window.addEventListener('study-life:update-reminder', receiveUpdateReminder)
+  window.addEventListener('study-life:open-app-updates', openUpdatePanelFromGlobalNotice)
   viewportBaselineHeight = Math.max(window.screen?.height || 0, window.innerHeight || 0, window.visualViewport?.height || 0)
   window.addEventListener('focusin', onKeyboardFocusChange)
   window.addEventListener('focusout', onKeyboardFocusChange)
@@ -159,6 +161,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('study-life:update-reminder', receiveUpdateReminder)
+  window.removeEventListener('study-life:open-app-updates', openUpdatePanelFromGlobalNotice)
   window.clearTimeout(warmupTimer)
   window.clearTimeout(keyboardFocusTimer)
   window.removeEventListener('focusin', onKeyboardFocusChange)
@@ -467,8 +470,8 @@ function openMobileTool(key) {
       <button class="mobile-nav-item capture-trigger" type="button" aria-label="快速记录" aria-haspopup="dialog" @pointerenter="warmTool('capture')" @pointerdown="warmTool('capture')" @focus="warmTool('capture')" @click="openMobileTool('capture')">
         <span aria-hidden="true"><AppIcon name="capture" /></span><small>快速记录</small>
       </button>
-      <button ref="moreTriggerEl" class="mobile-nav-item more-trigger" :class="{ active: showMobileMore || mobileMoreHasCurrentPage }" type="button" :aria-expanded="showMobileMore" @click="showMobileMore = !showMobileMore">
-        <span><AppIcon name="more" /></span><small>更多</small>
+      <button ref="moreTriggerEl" class="mobile-nav-item more-trigger" :class="{ active: showMobileMore || mobileMoreHasCurrentPage }" type="button" :aria-expanded="showMobileMore" :aria-label="updateReminderVisible ? '更多功能，有新版本' : '更多功能'" @click="showMobileMore = !showMobileMore">
+        <span><AppIcon name="more" /><i v-if="updateReminderVisible" class="update-dot"></i></span><small>更多</small>
       </button>
     </nav>
 
@@ -502,7 +505,7 @@ function openMobileTool(key) {
             <router-link v-for="item in group.items" :key="item.path" :to="item.path" class="mobile-more-item" :class="{ subdued: item.subdued }" @click="closeMobileMore()" @pointerdown="warmRoute(item.path)">
               <span><AppIcon :name="item.id" /></span><small>{{ item.label }}</small>
             </router-link>
-            <button v-for="item in group.tools" :key="item.key" type="button" class="mobile-more-item" :class="{ subdued: !['account', 'update'].includes(item.key) }" @click="openMobileTool(item.key)" @pointerdown="warmTool(item.key)"><span><AppIcon :name="item.key" /></span><small>{{ item.key === 'account' ? accountLabel : item.label }}</small><em v-if="item.key === 'account'">{{ accountUser ? '已登录' : '未登录' }}</em></button>
+            <button v-for="item in group.tools" :key="item.key" type="button" class="mobile-more-item" :class="{ subdued: !['account', 'update'].includes(item.key) }" @click="openMobileTool(item.key)" @pointerdown="warmTool(item.key)"><span><AppIcon :name="item.key" /></span><small>{{ item.key === 'account' ? accountLabel : item.label }}</small><em v-if="item.key === 'update' && updateReminderVisible" class="update-reminder-label">有新版本</em><em v-else-if="item.key === 'account'">{{ accountUser ? '已登录' : '未登录' }}</em></button>
           </div>
         </div>
       </section>

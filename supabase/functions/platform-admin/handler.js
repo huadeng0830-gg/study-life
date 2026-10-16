@@ -134,7 +134,8 @@ export function createPlatformAdminHandler({ service, allowedOrigins = [], logge
         case 'audit_list': {
           const limit = Number(payload.limit ?? 20)
           if (!Number.isSafeInteger(limit) || limit < 1 || limit > 50) throw new PlatformAdminError('invalid_input', '审计记录数量无效。')
-          return json({ data: await service.listAudit(limit) }, 200, corsOrigin)
+          const category = ['accounts', 'feedback'].includes(payload.category) ? payload.category : ''
+          return json({ data: await service.listAudit(limit, category) }, 200, corsOrigin)
         }
         case 'places_pending':
           return json({ data: await service.listPendingPlaces({ page: positivePage(payload.page) }) }, 200, corsOrigin)

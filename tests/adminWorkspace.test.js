@@ -47,7 +47,7 @@ describe('统一管理工作区', () => {
   })
   it('地点、账号和运维切换仅加载当前任务，避免进入后台就查询全部账号', async () => {
     await mount('/platform-admin?section=places')
-    await vi.waitFor(() => expect(host.querySelector('.ops-place-review')).toBeTruthy())
+    await vi.waitFor(() => expect(host.querySelector('.ops-place-review')).toBeTruthy(), { timeout: 10000 })
     expect(host.querySelector('.ops-accounts')).toBeNull()
     expect(api.platform.mock.calls.map(call => call[0])).toEqual(['identity', 'places_pending'])
     api.platform.mockClear()

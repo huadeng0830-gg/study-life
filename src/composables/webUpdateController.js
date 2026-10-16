@@ -11,7 +11,7 @@ export function createWebUpdateController({ currentVersion, currentSourceSignatu
   legacyCurrentVersion = '', channel = 'stable', navigatorRef = navigator, windowRef = window,
   fetchFn = (input, init) => fetch(input, init), storage, now = () => Date.now(),
   reload = () => windowRef.location.reload(), progress = null, checkTimeoutMs = 8000,
-  downloadTimeoutMs = 30000, takeoverTimeoutMs = 6000 } = {}) {
+  downloadTimeoutMs = 30000, takeoverTimeoutMs = 6000, beforeReload = null } = {}) {
   /** @type {any} */
   const state = reactive({ stage: 'idle', currentVersion, currentBuildId, availableVersion: '', message: '', releaseManifest: null, updateReleases: [],
     lastCheckedAt: 0, lastAttemptAt: 0, lastCheckOutcome: '', startedAt: 0, finishedAt: 0,
@@ -41,8 +41,7 @@ export function createWebUpdateController({ currentVersion, currentSourceSignatu
   let workerUpdateAllowed = false
   const BroadcastChannelCtor = windowRef.BroadcastChannel || globalThis.BroadcastChannel
   let updateChannel = null
-  let activeProbeId = ''
-  let peerResponded = false
+  let peerReloadPending = false
   const tabId = `${now()}-${Math.random().toString(36).slice(2, 10)}`
   try {
     if (typeof BroadcastChannelCtor === 'function') {
@@ -50,9 +49,7 @@ export function createWebUpdateController({ currentVersion, currentSourceSignatu
       updateChannel.addEventListener('message', (event) => {
         const data = event?.data
         if (!data || typeof data !== 'object' || data.sender === tabId) return
-        if (data.type === 'apply-probe' && typeof data.id === 'string')
-          updateChannel?.postMessage({ type: 'apply-response', id: data.id, sender: tabId })
-        else if (data.type === 'apply-response' && data.id === activeProbeId) peerResponded = true
+        if (data.type === 'apply-notice') onPeerApplyNotice(typeof data.version === 'string' ? data.version : '')
       })
     }
   } catch { updateChannel = null }
@@ -160,16 +157,57 @@ export function createWebUpdateController({ currentVersion, currentSourceSignatu
       return action()
     })
   }
-  async function ensureSingleUpdateTab() {
+  /**
+   * 把「本页要应用更新」告诉其他标签页。
+   *
+   * 【为什么不再阻止更新】旧实现在这里探测到任何一个同伴就 throw OTHER_TASK，
+   * 要求用户「先保存并关闭其他窗口，再应用更新」。结果是：只要浏览器里还开着
+   * 第二个标签页，应用内更新就永远点不动，用户只剩「全部退出再进来」一条路 ——
+   * 这正是长期抱怨的来源。
+   *
+   * 新规则：本页继续应用，同时通知同伴先落盘再刷新。这比阻止更安全：
+   * skipWaiting 之后新 Worker 会 clientsClaim 接管**所有**标签页，旧分包 URL
+   * 随即失效，留在旧页面上的同伴只会撞上「部分资源加载失败」，并不能保住数据。
+   */
+  function announceApplyToPeers(version) {
     if (!updateChannel) return
-    activeProbeId = `${tabId}:${now()}:${Math.random().toString(36).slice(2, 8)}`
-    peerResponded = false
-    try { updateChannel.postMessage({ type: 'apply-probe', id: activeProbeId, sender: tabId }) }
-    catch { updateChannel.close(); updateChannel = null; activeProbeId = ''; return }
-    await new Promise((resolve) => windowRef.setTimeout(resolve, 400))
-    const foundPeer = peerResponded
-    activeProbeId = ''
-    if (foundPeer) throw updateError('OTHER_TASK', '检测到另一个已打开的应用窗口。请先保存并关闭其他窗口，再应用更新。', 'apply')
+    try {
+      updateChannel.postMessage({ type: 'apply-notice', version: typeof version === 'string' ? version : '', sender: tabId })
+    } catch { log('PEER_NOTICE_FAILED') }
+  }
+  function beforeReloadResult() {
+    try {
+      const result = beforeReload?.()
+      if (result && typeof result === 'object' && 'ok' in result) return result.ok === true
+      return result !== false
+    } catch { return false }
+  }
+  function pauseForUnsavedChanges() {
+    applying = false
+    transition('manual-reload', '本页修改尚未成功保存，已暂停刷新。请先处理保存提示，再手动完成更新。', { taskPending: false })
+    log('RELOAD_BLOCKED_UNSAVED')
+  }
+  function peerReload() {
+    if (disposed) return
+    if (!beforeReloadResult()) {
+      peerReloadPending = true
+      pauseForUnsavedChanges()
+      return
+    }
+    peerReloadPending = false
+    try { reload() } catch {
+      transition('manual-reload', '新版本已启用，请手动重新加载本页。', { taskPending: false })
+    }
+  }
+  function retryPeerReloadAfterSave() {
+    if (peerReloadPending) peerReload()
+  }
+  function onPeerApplyNotice(version) {
+    if (disposed || applying) return
+    log('PEER_APPLY_NOTICE')
+    transition('manual-reload', `另一个标签页正在应用更新${version ? `（${version}）` : ''}，本页保存后会一起刷新。`,
+      { taskPending: false, availableVersion: version || state.availableVersion })
+    peerReload()
   }
   function workerTimedOut() {
     resolveWorker?.('timeout')
@@ -325,7 +363,9 @@ export function createWebUpdateController({ currentVersion, currentSourceSignatu
     const validatingDownloadedWorker = state.stage === 'downloading' && Boolean(observedWorker)
     if (applyPromise || (state.taskPending && !validatingDownloadedWorker) || ['ready', 'manual-reload'].includes(state.stage)) return Promise.resolve(false)
     if (!showResult && state.error?.code === 'VERSION_VERIFY') return Promise.resolve(false)
-    if (!showResult && lastSilentCheckAt && now() - lastSilentCheckAt < 600000) return Promise.resolve(false)
+    // 静默检查节流 90 秒：原来是 10 分钟，用户在一次会话里几乎碰不到第二次检查，
+    // 只有退出重进才会立刻重查 —— 这也是「退出重进才更新」的观感来源之一。
+    if (!showResult && lastSilentCheckAt && now() - lastSilentCheckAt < 90000) return Promise.resolve(false)
     lastSilentCheckAt = now()
     const id = begin()
     checkPromise = originLock(() => performCheck(id)).catch((error) => fail(error)).finally(() => { checkPromise = null })
@@ -340,6 +380,8 @@ export function createWebUpdateController({ currentVersion, currentSourceSignatu
   }
   function scheduleReload() {
     if (disposed || state.stage === 'verifying') return
+    windowRef.clearTimeout(reloadTimer)
+    if (!beforeReloadResult()) { pauseForUnsavedChanges(); return }
     windowRef.clearTimeout(takeoverTimer)
     transition('verifying', '新资源已启用，重新加载后核对实际运行版本…', { taskPending: true })
     const id = generation
@@ -355,11 +397,26 @@ export function createWebUpdateController({ currentVersion, currentSourceSignatu
       fail(updateError('RELOAD_TIMEOUT', '自动重新加载失败，请手动重新加载。', 'apply'))
     }
   }
+  // 本页是否**原本就**由某个 Worker 控制。首次安装（进来时没有控制器）
+// 触发的 controllerchange 不是「版本接管」，沿用原行为不重载。
+  const hadControllerAtStart = Boolean(navigatorRef.serviceWorker?.controller)
+  const startController = navigatorRef.serviceWorker?.controller || null
   const takeover = () => {
-    if (!applying || !navigatorRef.serviceWorker?.controller) return
-    if (observedWorker && navigatorRef.serviceWorker.controller !== observedWorker) return
-    scheduleReload()
+    const controller = navigatorRef.serviceWorker?.controller
+    if (!controller) return
+    if (applying) {
+      if (observedWorker && controller !== observedWorker) return
+      scheduleReload()
+      return
+    }
+    // 本页没有发起更新，但控制权已被新 Worker 换掉：说明其他标签页应用了更新
+    // （或浏览器自行更新了 Worker）。旧分包 URL 已经失效，必须跟着刷新，
+    // 否则只会在下一次懒加载时撞上「部分资源加载失败」。
+    if (!hadControllerAtStart || controller === startController) return
+    log('PEER_CONTROLLER_TAKEOVER')
+    peerReload()
   }
+  windowRef.addEventListener?.('study-life:storage-updated', retryPeerReloadAfterSave)
   navigatorRef.serviceWorker?.addEventListener('controllerchange', takeover)
   async function preflightEntry(manifest) {
     transition('downloading', '正在获取并核对新版本入口…', { taskPending: true })
@@ -403,9 +460,31 @@ export function createWebUpdateController({ currentVersion, currentSourceSignatu
     log('SW_RECOVERY_DEFERRED')
     return true
   }
-  async function performApply(repair, manualReload) {
-    if (navigatorRef.onLine === false) return fail(updateError('OFFLINE', '当前没有网络，联网后再应用更新。', 'apply'))
-    const manifest = await readRelease()
+  async function performApply(repair, manualReload, sessionVerified) {
+    // 本会话已经核对过、且离线资源已就绪（ready / manual-reload）时，应用更新
+    // **不需要再联网**：资源已在本机，重新加载只是让等待中的 Worker 接管。
+    // 旧实现无论什么状态都先要求联网重取 release.json 并逐个预检入口资源，
+    // 于是弱网/离线点「立即重新加载」必然失败，而「退出再进来」不需要网络 ——
+    // 用户因此被训练成每次都退出重进。
+    const offline = navigatorRef.onLine === false
+    if (offline && !sessionVerified)
+      return fail(updateError('OFFLINE',
+        '当前没有网络，无法核对新版本。联网后重试即可；如果浏览器已经下载好新版本，关闭并重新打开应用也会启用它。', 'apply'))
+    let trustedSession = sessionVerified
+    let manifest = sessionVerified ? state.releaseManifest : null
+    if (manifest) {
+      log('APPLY_SESSION_VERIFIED')
+    } else {
+      try {
+        manifest = await readRelease()
+      } catch (error) {
+        // 弱网抖动：已经核对过并下载完成时，不该把用户挡回去。
+        if (!sessionVerified || !['NETWORK', 'TIMEOUT'].includes(safeUpdateError(error).code)) throw error
+        trustedSession = true
+        manifest = state.releaseManifest
+        log('APPLY_TRUSTED_SESSION')
+      }
+    }
     const comparison = compareRelease(manifest.version, currentVersion)
     if (comparison === null) throw updateError('SOURCE_INVALID', '当前版本与服务器版本不兼容，已保留现有应用。')
     if (comparison < 0) throw updateError('SOURCE_ROLLBACK', '服务器版本较旧，已保留当前应用。')
@@ -413,16 +492,18 @@ export function createWebUpdateController({ currentVersion, currentSourceSignatu
       throw updateError('SOURCE_CHANGED', '同一正式版本的构建内容不一致，已阻止刷新。')
     if (!repair && state.availableVersion && state.availableVersion !== manifest.version && observedWorker)
       throw updateError('SOURCE_CHANGED', '发布版本在下载后发生变化，请重新获取资源后再应用。', 'repair')
-    if (!repair && state.releaseManifest && (state.releaseManifest.buildId !== manifest.buildId ||
-      state.releaseManifest.sourceSignature !== manifest.sourceSignature))
-      throw updateError('SOURCE_CHANGED', '检查期间发布构建发生变化，请重新检查后再应用。', 'check')
+    // 内容是否变化看**源码签名**。buildId 是部署标识（Pages 部署主机名 / CI 运行号），
+    // 同一份内容重新部署也会变，用它会一次重新部署就把更新误判成
+    // 「检查期间发布构建发生变化」，表现为「更新成功却报失败」。
+    if (!repair && state.releaseManifest && state.releaseManifest.sourceSignature !== manifest.sourceSignature)
+      throw updateError('SOURCE_CHANGED', '检查期间发布内容发生变化，请重新检查后再应用。', 'check')
     state.availableVersion = comparison > 0 ? manifest.version : ''
     state.releaseManifest = manifest
     workerUpdateAllowed = true
     const value = await getRegistration()
     if (deferRecoveryForWorker(value)) return false
-    await ensureSingleUpdateTab()
-    await preflightEntry(manifest)
+    // 只有必须联网核对时才预检部署入口；本会话已核对过就直接用本机已下载的资源。
+    if (!trustedSession) await preflightEntry(manifest)
     if (deferRecoveryForWorker(value)) return false
     if (repair || manualReload || !value) {
       savePending(manifest, repair ? 'repair' : 'update')
@@ -451,6 +532,9 @@ export function createWebUpdateController({ currentVersion, currentSourceSignatu
           if (deleted.some((ok) => !ok)) throw updateError('CACHE_REPAIR', '部分离线缓存无法重建，请关闭应用后重试。', 'repair')
         }
       }
+      // 通知同伴的时刻要贴近真正的重载：修复流程会先注销 Worker 并清空缓存，
+      // 过早通知会让同伴在缓存被清空的同时重建注册。
+      announceApplyToPeers(manifest.version)
       applying = true
       scheduleReload()
       return true
@@ -463,6 +547,7 @@ export function createWebUpdateController({ currentVersion, currentSourceSignatu
       if (outcome === 'redundant' || outcome === 'timeout') return false
     }
     savePending(manifest, 'update')
+    announceApplyToPeers(manifest.version)
     applying = true
     transition('installing', '正在启用新版本资源…', { taskPending: true, error: null })
     if (worker.state === 'activated') { scheduleReload(); return true }
@@ -481,9 +566,14 @@ export function createWebUpdateController({ currentVersion, currentSourceSignatu
     if (applyPromise) return applyPromise
     if (checkPromise || state.taskPending) return Promise.resolve(false)
     const manualReload = state.stage === 'manual-reload' || state.error?.code === 'RELOAD_TIMEOUT'
+    // 在 begin()/transition 把 stage 改成 checking 之前先把「资源已就绪且本会话已核对」
+    // 这个事实记下来：它决定应用更新时是否还需要联网。
+    const sessionVerified = Boolean(state.releaseManifest) &&
+      state.availableVersion === state.releaseManifest.version &&
+      ['ready', 'manual-reload'].includes(state.stage)
     begin()
     transition('checking', repair ? '正在检查缓存恢复条件…' : '正在确认待应用版本…', { taskPending: true })
-    applyPromise = originLock(() => performApply(repair, manualReload)).catch((error) => {
+    applyPromise = originLock(() => performApply(repair, manualReload, sessionVerified)).catch((error) => {
       applying = false
       windowRef.clearTimeout(takeoverTimer)
       windowRef.clearTimeout(reloadTimer)
@@ -510,14 +600,15 @@ export function createWebUpdateController({ currentVersion, currentSourceSignatu
       storage.removeItem(PENDING_WEB_UPDATE_KEY)
       const versionComparison = compareRelease(currentVersion, saved.toVersion)
       const legacyComparison = compareRelease(legacyCurrentVersion, saved.toVersion)
-      const hasExpectedBuild = Object.prototype.hasOwnProperty.call(saved, 'expectedBuildId') ||
-        Object.prototype.hasOwnProperty.call(saved, 'expectedSourceSignature')
-      const buildIdentityMatches = !hasExpectedBuild || (
-        typeof saved.expectedBuildId === 'string' && saved.expectedBuildId === currentBuildId &&
-        typeof saved.expectedSourceSignature === 'string' && saved.expectedSourceSignature === currentSourceSignature)
+      // 身份判定只看**源码签名**（内容身份）。buildId 是部署标识：同一份内容
+      // 重新部署也会变（Pages 用部署主机名），拿它判定会把一次成功的更新
+      // 判成 VERSION_VERIFY 失败，用户看到「更新成功却报失败」。
+      const hasExpectedIdentity = Object.prototype.hasOwnProperty.call(saved, 'expectedSourceSignature')
+      const identityMatches = !hasExpectedIdentity ||
+        (typeof saved.expectedSourceSignature === 'string' && saved.expectedSourceSignature === currentSourceSignature)
       const targetWasSuperseded = versionComparison !== null && versionComparison > 0
       const versionReached = versionComparison !== null ? versionComparison >= 0 : legacyComparison !== null && legacyComparison >= 0
-      const verified = versionReached && (!hasExpectedBuild || targetWasSuperseded || buildIdentityMatches)
+      const verified = versionReached && (!hasExpectedIdentity || targetWasSuperseded || identityMatches)
       if (versionComparison === null && legacyComparison === null) return
       if (verified) {
         transition('completed', saved.action === 'repair'
@@ -541,6 +632,7 @@ export function createWebUpdateController({ currentVersion, currentSourceSignatu
       registration?.removeEventListener('updatefound', registrationListener)
       observedWorker?.removeEventListener('statechange', workerListener)
       navigatorRef.serviceWorker?.removeEventListener('controllerchange', takeover)
+      windowRef.removeEventListener?.('study-life:storage-updated', retryPeerReloadAfterSave)
       updateChannel?.close()
       progress?.dispose()
     } }

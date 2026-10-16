@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { computeSourceSignature, collectReleaseFiles } from '../scripts/source-signature.mjs'
+import { computeSourceSignature, collectReleaseFiles, RELEASE_INPUTS } from '../scripts/source-signature.mjs'
 
 let temporaryRoots = []
 
@@ -18,6 +18,18 @@ function createTemporaryRoot() {
 }
 
 describe('release source signature', () => {
+  it('includes Worker sources in the release signature', () => {
+    expect(RELEASE_INPUTS).toContain('workers')
+    const projectRoot = createTemporaryRoot()
+    const workerPath = path.join(projectRoot, 'workers', 'public-api', 'worker.js')
+    mkdirSync(path.dirname(workerPath), { recursive: true })
+    writeFileSync(workerPath, 'export default { fetch() { return new Response("one") } }\n')
+    const firstSignature = computeSourceSignature({ projectRoot, releaseInputs: ['workers'] })
+    writeFileSync(workerPath, 'export default { fetch() { return new Response("two") } }\n')
+    const secondSignature = computeSourceSignature({ projectRoot, releaseInputs: ['workers'] })
+    expect(secondSignature).not.toBe(firstSignature)
+  })
+
   it('ignores installed dependencies so clean CI and developer machines hash the same tracked sources', () => {
     const temporaryRoot = createTemporaryRoot()
     const appDirectory = path.join(temporaryRoot, 'desktop-app')

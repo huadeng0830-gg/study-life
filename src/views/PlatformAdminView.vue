@@ -499,7 +499,10 @@ onBeforeUnmount(() => { window.clearTimeout(searchTimer); window.clearInterval(a
   .ops-overview b { font-size:var(--fs-20); }
   .ops-panel { padding:14px; }
   .ops-account-row { align-items:flex-start; }
-  .ops-account-row > .ops-button { min-width:56px; min-height:44px; flex:0 0 auto; }
+  /* `>` 只匹配直接子元素，而账号行的按钮是嵌在 `.account-actions` 里的，
+     于是窄屏下它们一直是 40px —— 用后代选择器把两种情况一起覆盖。 */
+  .ops-account-row .ops-button { min-width:56px; min-height:44px; flex:0 0 auto; }
+  .ops-search input, .ops-search textarea { min-height:44px; }
   .account-primary { gap:5px 7px; }
   .account-primary > b { font-size:var(--fs-12); }
   .account-primary small { gap:2px; }

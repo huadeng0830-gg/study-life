@@ -1,8 +1,26 @@
-import { computed, ref, watch } from 'vue'
+import { computed, onScopeDispose, ref, watch } from 'vue'
 import { accountUser } from './accountAuth.js'
 import { campusErrorMessage } from './campusContentModel.js'
 import { useCampusRequest } from './campusRequest.js'
 import { socialRequest } from '../services/social.js'
+
+const profileSubscribers = new Set()
+
+/** Update any open campus surface after the account profile is saved. */
+export function publishSocialProfile(profile, userId = accountUser.value?.id, previousProfile = null) {
+  if (!userId) return
+  for (const subscriber of profileSubscribers) subscriber(profile, userId, previousProfile)
+}
+
+export function subscribeSocialProfile(subscriber) {
+  profileSubscribers.add(subscriber)
+  return () => profileSubscribers.delete(subscriber)
+}
+
+export function campusProfileScopeChanged(nextProfile, previousProfile) {
+  return String(nextProfile?.school || '') !== String(previousProfile?.school || '')
+    || String(nextProfile?.campus || '') !== String(previousProfile?.campus || '')
+}
 
 /**
  * 账号公开资料（昵称、学校、校区、时区、可约偏好）。
@@ -12,7 +30,8 @@ import { socialRequest } from '../services/social.js'
  * 边缘函数的英文原文直接摆到界面上（没有兜底），另一份则连失败都看不出来。
  * 学校和校区同时决定校园内容的可见范围 —— 读错了，用户会以为"学校没内容"。
  *
- * `loadProfile` 只负责取回和归一化；把它渲染成什么样子由调用方决定。
+ * `loadProfile` 负责读取，`publishSocialProfile` 把刚保存的内容同步给仍打开的页面。
+ * 把它渲染成什么样子由调用方决定。
  */
 export function useSocialProfile() {
   const profile = ref(/** @type {any} */ (null))
@@ -24,6 +43,16 @@ export function useSocialProfile() {
   const school = computed(() => profile.value?.school || '')
   const campus = computed(() => profile.value?.campus || '')
   const nickname = computed(() => profile.value?.nickname || '')
+
+  const receiveProfile = (nextProfile, userId) => {
+    if (!signedIn.value || userId !== accountUser.value?.id) return
+    request.invalidate()
+    profile.value = nextProfile || null
+    error.value = ''
+    loading.value = false
+    loaded.value = true
+  }
+  onScopeDispose(subscribeSocialProfile(receiveProfile))
 
   async function loadProfile() {
     const revision = request.begin()

@@ -8,7 +8,7 @@ import { useCampusBeanWallet } from '../composables/campusBeanWallet.js'
 import { CAMPUS_BEAN_RULES } from '../composables/campusContentModel.js'
 
 const featuredLinks = [
-  { path: '/campus/matters', label: '怎么办', detail: '不知道怎么办，就先看看真实经历和能执行的办法', icon: Compass },
+  { path: '/campus/matters', label: '校园交流', detail: '提问、分享经历，也可以只发布一条内容', icon: Compass },
   { path: '/campus/publish', label: '统一发布', detail: '发布校园指南、活动、互助、失物等信息', icon: NotebookPen },
   { path: '/campus/mine', label: '我的投稿', detail: '跟进审核意见和发布状态', icon: ClipboardList },
   { path: '/campus/reports', label: '我的举报', detail: '查看举报受理与处理结果', icon: Flag },
@@ -34,7 +34,7 @@ function openBeanAccount() { openAccountSection('beans') }
 
 
       <section class="campus-hub-featured" aria-labelledby="campus-hub-featured-title">
-        <div class="campus-hub-section-heading section-heading"><div><h2 id="campus-hub-featured-title">常用入口</h2><p>先找办法，再发布校园信息，跟进自己的事项和举报。</p></div></div>
+        <div class="campus-hub-section-heading section-heading"><div><h2 id="campus-hub-featured-title">常用入口</h2><p>分享或提问，再发布校园信息，跟进自己的内容和举报。</p></div></div>
         <div class="campus-hub-feature-grid">
           <RouterLink v-for="item in featuredLinks" :key="item.path" :to="item.path" class="campus-hub-feature">
             <span class="campus-hub-icon"><component :is="item.icon" aria-hidden="true" /></span>
@@ -76,7 +76,7 @@ function openBeanAccount() { openAccountSection('beans') }
             <div><b>提交反馈与建议</b><p>{{ CAMPUS_BEAN_RULES.feedback }}</p></div>
           </div>
         </div>
-        <div class="campus-hub-beans-foot"><p>审核员每月随机复核约 10%。贡献豆与充值豆分账，不提现、不转赠；充值和数字权益兑换暂未开放。</p><div><RouterLink class="text-button" to="/campus/reviewer-application">查看规则与申请审核员</RouterLink></div></div>
+        <div class="campus-hub-beans-foot"><p>审核员每月随机复核约 10%。贡献豆与充值豆分账，不提现、不转赠；充值暂未开放，贡献豆已可兑换应用内数字权益。</p><div><RouterLink class="text-button" to="/campus/beans">三两豆与兑换</RouterLink><RouterLink class="text-button" to="/campus/reviewer-application">查看规则与申请审核员</RouterLink></div></div>
       </details>
     </div>
   </CampusLifeLayout>

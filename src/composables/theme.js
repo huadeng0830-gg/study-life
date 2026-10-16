@@ -135,9 +135,9 @@ if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
  * 是否需要强对比。
  *
  * 与 `style.css` 的分工保持一致：应用内开关打开就生效，没打开时跟随系统设置。
- * （注：`contrast.js` 目前只写 `'high'` 与 `'auto'` 两种值，所以 CSS 里
- * 「显式关闭 → `data-contrast='normal'` 压制系统设置」那条路当前走不到；
- * 那是三态语义，改动它会动到既有的 `sl_high_contrast` 键语义，故不在此处理。）
+ * （注：界面只暴露两态，所以 CSS 里「显式关闭 → `data-contrast='normal'` 压制系统设置」
+ * 那条路当前走不到。做成三态要把 `sl_high_contrast` 从布尔改成字符串，而它是进备份与
+ * 账号同步的键，旧设备会把 `'normal'` 读成 `true` 反而开启高对比 —— 理由见 contrast.js 头部。）
  */
 function needsStrongContrast() {
   return Boolean(highContrast.value) || prefersContrast.value

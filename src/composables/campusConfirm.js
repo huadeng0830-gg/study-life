@@ -36,7 +36,7 @@ import { accountUser } from './accountAuth.js'
  * for those.
  */
 export function useCampusConfirm() {
-  const pending = ref(null)
+  const pending = ref(/** @type {Record<string, any>|null} */ (null))
 
   function ask(request) {
     pending.value = { tone: 'primary', confirmLabel: '确认', cancelLabel: '取消', ...request }

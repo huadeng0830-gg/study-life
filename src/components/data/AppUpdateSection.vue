@@ -213,7 +213,11 @@ async function copyDiagnostic() {
         <summary>更新偏好</summary>
         <label class="update-preference-row">
           <input type="checkbox" :checked="updatePreferences.autoCheck" @change="changePreference('autoCheck', $event)">
-          <span><strong>自动检查更新</strong><small>启动、联网或重新打开应用时检查，最多每 10 分钟一次。</small></span>
+          <span><strong>自动检查更新</strong><small>启动、联网或重新打开应用时检查，最多每 90 秒一次。</small></span>
+        </label>
+        <label class="update-preference-row">
+          <input type="checkbox" :checked="updatePreferences.autoApply" @change="changePreference('autoApply', $event)">
+          <span><strong>下载完成后自动应用更新</strong><small>新版资源下载完成后自动重新加载；有未保存的改动或弹窗打开时会等待。</small></span>
         </label>
         <label class="update-preference-row">
           <input type="checkbox" :checked="updatePreferences.showReminder" @change="changePreference('showReminder', $event)">

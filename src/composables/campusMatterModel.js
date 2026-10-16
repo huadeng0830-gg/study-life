@@ -1,9 +1,11 @@
 const intentRules = [
+  { value: 'vent', words: ['不求建议', '不想要建议', '不需要建议', '不要建议', '不想听建议', '只是想说说', '只想说说', '想倾诉', '只想分享', '只是分享', '分享一件事', '随手记录', '只想记录', '我想发一条', '我只是想说'] },
+  { value: 'experience', words: ['有没有人也', '类似经历', '别人也这样', '只有我这样', '有人经历过', '分享经历', '亲身经历', '分享亲身经历', '我的经历'] },
+  { value: 'advice', words: ['求建议', '给点建议', '想听建议', '帮我想办法', '怎么处理', '怎么解决', '该怎么办', '我该怎么办', '求助'] },
   { value: 'judgment', words: ['是不是我想多了', '我是不是想多了', '是不是我的问题', '我做错了吗', '对不对'] },
   { value: 'decision', words: ['选哪个', '怎么选', '买哪个', '要不要买', '该不该', '考研还是就业', '还是就业', 'a还是b', 'a/b', '两个'] },
   { value: 'information', words: ['几点关门', '几点开门', '在哪里', '怎么去', '怎么样', '靠谱吗', '有没有人知道', '真实情况'] },
-  { value: 'experience', words: ['有没有人也', '类似经历', '别人也这样', '只有我这样', '有人经历过'] },
-  { value: 'vent', words: ['只是想说说', '想倾诉', '没有朋友', '没什么朋友', '没有什么朋友', '没有真正的朋友', '没有什么真正的朋友', '很孤独', '不想要建议'] },
+  { value: 'vent', words: ['没有朋友', '没什么朋友', '没有真正的朋友', '没有什么真正的朋友', '很孤独', '想分享', '只分享'] },
 ]
 
 const categoryRules = [
@@ -26,8 +28,7 @@ function matchRule(text, rules, fallback) {
 export function analyzeCampusMatter(content = '') {
   const normalized = String(content).toLowerCase().replace(/\s+/g, ' ').trim()
   const category = matchRule(normalized, categoryRules, 'other')
-  let intent = matchRule(normalized, intentRules, '')
-  if (!intent) intent = category === 'relationship' || category === 'dormitory' ? 'advice' : 'advice'
+  const intent = matchRule(normalized, intentRules, '')
 
   let followUp = null
   if (normalized.length >= 8 && category === 'dormitory' && !/沟通过|说过|谈过/.test(normalized)) {
@@ -66,15 +67,15 @@ export function analyzeCampusMatter(content = '') {
 }
 
 export const matterIntentLabels = Object.freeze({
-  advice: '帮我想办法', decision: '帮我做决定', experience: '听听类似经历',
-  vent: '我只是想说说', information: '我想知道真实情况', judgment: '帮我换个角度判断',
+  vent: '分享一件事，不求建议', advice: '我想问个问题', experience: '分享亲身经历',
+  information: '分享或核实信息', decision: '我在做选择', judgment: '帮我换个角度看',
 })
 export const matterCategoryLabels = Object.freeze({
   dormitory: '宿舍', relationship: '人际关系', academic: '学业', career: '学业与就业',
   purchase: '消费决策', campus_info: '校园信息', transport: '出行', lost_found: '失物', other: '其他',
 })
 export const matterStatusLabels = Object.freeze({
-  finding_help: '寻找办法', considering: '正在考虑', trying: '正在尝试', resolved: '已解决', paused: '暂时搁置', venting: '只是想说说',
+  finding_help: '寻找办法', considering: '正在考虑', trying: '正在尝试', resolved: '已解决', paused: '暂时搁置', venting: '自由分享',
   outcome_hidden: '发起者隐藏了后续状态',
 })
 export const matterOutcomeLabels = Object.freeze({

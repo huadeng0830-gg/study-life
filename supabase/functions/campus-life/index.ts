@@ -18,6 +18,8 @@ const allowedOrigins = new Set([
   ...(Deno.env.get('CAMPUS_SOCIAL_ALLOWED_ORIGINS') || '').split(',').map((origin) => origin.trim()).filter(Boolean),
 ])
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+const CAMPUS_REPORT_RESPONSE_TARGET_HOURS = 72
+const CAMPUS_REPORT_APPEAL_WINDOW_DAYS = 7
 const PUBLIC_TABLES: Record<string, { table: string; statusField: string; pending: string; accepted: string; rejected: string; ownerField?: string }> = {
   teacher: { table: 'campus_teachers', statusField: 'review_status', pending: 'pending_review', accepted: 'approved', rejected: 'rejected', ownerField: 'owner_id' },
   course: { table: 'campus_courses', statusField: 'review_status', pending: 'pending_review', accepted: 'approved', rejected: 'rejected', ownerField: 'owner_id' },
@@ -122,6 +124,7 @@ function dbError(error: any): never {
   if (/CAMPUS_REVISION_CHANGED/.test(marker)) throw new ApiError('state_changed', '内容或授权已经变化，请刷新后重新核对。', 409)
   if (/CAMPUS_NOT_FOUND/.test(marker)) throw new ApiError('not_found', '内容已不可用，请刷新列表。', 404)
   if (/CAMPUS_USE_DISPUTE/.test(marker)) throw new ApiError('state_changed', '互助正在履行，请先通过互助争议流程处理。', 409)
+  if (/CAMPUS_APPEAL_NOT_AVAILABLE/.test(marker)) throw new ApiError('state_changed', '该举报目前不符合申诉条件，或一次申诉机会已用完。', 409)
   if (/CAMPUS_INVALID_INPUT/.test(marker)) throw new ApiError('invalid_input', '请填写处理依据并检查操作选项。')
   if (/CAMPUS_RESUBMIT_INVALID/.test(marker)) throw new ApiError('invalid_input', '修改内容无效，请检查填写字段。')
   if (/CAMPUS_RESUBMIT_RELATION_INVALID/.test(marker)) throw new ApiError('not_found', '授课安排必须关联同校已审核的课程和教师。', 404)
@@ -1435,8 +1438,20 @@ async function handle(user: any, action: string, payload: any) {
   if (action === 'governance_access') return governanceAccess(user.id)
   if (action === 'reports_mine') {
     const page = Math.max(0, Math.min(2000, Number.isSafeInteger(payload.page) ? payload.page : 0))
-    const result = await admin.from('campus_content_reports').select('id,target_type,target_id,school,campus,reason,detail,status,resolution,resolution_action,resolved_at,created_at', { count: 'exact' }).eq('reporter_id', user.id).order('created_at', { ascending: false }).range(page * 30, page * 30 + 29)
-    return { reports: dataOrThrow(result) || [], total: result.count || 0, page }
+    const result = await admin.from('campus_content_reports').select('id,target_type,target_id,school,campus,reason,detail,status,resolution,resolution_action,resolved_at,created_at,revision,appeal_status,appeal_reason,appealed_at,appeal_resolution,appeal_resolved_at', { count: 'exact' }).eq('reporter_id', user.id).order('created_at', { ascending: false }).range(page * 30, page * 30 + 29)
+    const reports = dataOrThrow(result) || []
+    return { reports: reports.map((item: any) => {
+      const responseStart = item.appealed_at || item.created_at
+      const responseDue = Date.parse(responseStart || '')
+      const appealDeadline = Date.parse(item.resolved_at || '')
+      const appealUntil = Number.isFinite(appealDeadline) ? appealDeadline + CAMPUS_REPORT_APPEAL_WINDOW_DAYS * 24 * 60 * 60 * 1000 : null
+      return { ...item,
+        response_due_at: Number.isFinite(responseDue) ? new Date(responseDue + CAMPUS_REPORT_RESPONSE_TARGET_HOURS * 60 * 60 * 1000).toISOString() : null,
+        response_target_hours: CAMPUS_REPORT_RESPONSE_TARGET_HOURS,
+        appeal_deadline: appealUntil === null ? null : new Date(appealUntil).toISOString(),
+        can_appeal: item.status === 'dismissed' && item.appeal_status === 'none' && appealUntil !== null && Date.now() <= appealUntil,
+      }
+    }), total: result.count || 0, page }
   }
   if (action === 'moderation_history') {
     await requireReviewer(user.id)
@@ -1446,6 +1461,14 @@ async function handle(user: any, action: string, payload: any) {
     await requireReviewer(user.id)
     const result = dataOrThrow(await admin.rpc('campus_resolve_report', { p_actor: user.id, p_report: uuid(payload.reportId, '举报'), p_decision: enumValue(payload.decision, ['remove', 'resolve', 'dismiss'] as const, '处理方式'), p_reason: text(payload.reason, 500, '处理依据', true), p_revision: Number(payload.revision), p_target_revision: payload.targetRevision == null ? null : String(payload.targetRevision).slice(0,100) }))
     return result
+  }
+  if (action === 'report_appeal_submit') {
+    const reason = text(payload.reason, 500, '申诉说明', true)
+    if ([...reason].length < 10) throw new ApiError('invalid_input', '申诉说明至少需要 10 个字。')
+    const revision = Number(payload.revision)
+    if (!Number.isSafeInteger(revision) || revision < 1) throw new ApiError('invalid_input', '举报记录已变化，请刷新后重试。')
+    await enforceRateLimit(user.id, 'campus_report', 10)
+    return dataOrThrow(await admin.rpc('campus_submit_report_appeal', { p_actor: user.id, p_report: uuid(payload.reportId, '举报'), p_reason: reason, p_revision: revision }))
   }
   if (action === 'moderation_queue') return moderationQueue(user.id, payload)
   if (action === 'moderation_decide') return moderate(user, payload)

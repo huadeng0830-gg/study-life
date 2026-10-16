@@ -55,6 +55,7 @@ export function scrollMemorySize() {
 /**
  * 该把页面滚到哪里。
  * @returns {{top: number}} 传给 vue-router scrollBehavior 的坐标
+ * @param {{savedPosition?: {top?: number}|null, remembered?: number|null}} [options]
  */
 export function resolveScrollPosition({ savedPosition = null, remembered = null } = {}) {
   // 浏览器前进/后退自带的位置最准，优先用它

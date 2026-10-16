@@ -4,7 +4,7 @@ import { useRoute } from 'vue-router'
 import { ChevronDown, Flag, MapPin, ClipboardList, NotebookPen, School } from '@lucide/vue'
 import { Alert, AlertDescription, AlertTitle } from '../ui/alert'
 import { campusGroups, campusNavigation } from './navigation.js'
-import { accountOpen } from '../../composables/accountAuth.js'
+import { openAccountSection } from '../../composables/accountAuth.js'
 import { useSocialProfile } from '../../composables/socialProfile.js'
 import './campus-life.css'
 
@@ -20,13 +20,16 @@ const { profile, error: contextError, loaded: contextLoaded, signedIn, loadProfi
 // Every campus request is scoped server-side from the profile school, so a missing
 // school blocks the whole module; surface that as a setup step instead of a blank list.
 const needsSchool = computed(() => Boolean(signedIn.value) && contextLoaded.value && !contextError.value && !profile.value?.school)
+const contextSchool = computed(() => !signedIn.value ? '登录并设置学校' : !contextLoaded.value ? '正在读取学校资料' : profile.value?.school || '设置我的学校')
+const contextCampus = computed(() => profile.value?.campus || (profile.value?.school ? '全部校区' : '填写校园范围'))
+function openCampusProfile() { openAccountSection('profile') }
 </script>
 
 <template>
   <div class="campus-life-page">
     <header class="campus-life-header">
       <div class="campus-life-heading"><RouterLink class="campus-life-breadcrumb" to="/campus"><School aria-hidden="true" />校园生活</RouterLink><h1>{{ title }}</h1><p v-if="description">{{ description }}</p></div>
-      <RouterLink class="campus-life-context" to="/together" aria-label="查看或修改学校与校区"><MapPin aria-hidden="true" /><span><b>{{ profile?.school || '设置我的学校' }}</b><small>{{ profile?.campus || '在个人资料中补充校区' }}</small></span></RouterLink>
+      <button class="campus-life-context" type="button" aria-label="查看或修改学校与校区" @click="openCampusProfile"><MapPin aria-hidden="true" /><span><b>{{ contextSchool }}</b><small>{{ contextCampus }}</small></span></button>
     </header>
     <nav v-if="showQuickLinks" class="campus-life-quick-nav" aria-label="校园常用入口">
       <RouterLink to="/campus/mine"><ClipboardList aria-hidden="true" /><span>我的投稿</span><small>跟进校园投稿</small></RouterLink>
@@ -43,8 +46,8 @@ const needsSchool = computed(() => Boolean(signedIn.value) && contextLoaded.valu
     </aside>
     <div class="campus-life-body">
       <Alert v-if="contextError" role="status"><AlertTitle>学校资料暂时无法读取</AlertTitle><AlertDescription>{{ contextError }} <button class="text-button" type="button" @click="loadProfile">重新读取</button></AlertDescription></Alert>
-      <Alert v-else-if="!signedIn" role="status"><AlertTitle>登录，连接你的校园</AlertTitle><AlertDescription>登录并填写学校后，即可查看同校内容。发布草稿可以先在本机填写。<button class="text-button" type="button" @click="accountOpen = true">登录账号</button></AlertDescription></Alert>
-      <Alert v-else-if="needsSchool"><AlertTitle>先设置学校，找到同校内容</AlertTitle><AlertDescription>校园生活按学校筛选信息。<RouterLink to="/together">前往个人资料填写</RouterLink></AlertDescription></Alert>
+      <Alert v-else-if="!signedIn" role="status"><AlertTitle>登录，连接你的校园</AlertTitle><AlertDescription>登录并填写学校后，即可查看同校内容。发布草稿可以先在本机填写。<button class="text-button" type="button" @click="openCampusProfile">登录并填写资料</button></AlertDescription></Alert>
+      <Alert v-else-if="needsSchool"><AlertTitle>先设置学校，找到同校内容</AlertTitle><AlertDescription>校园信息按你的学校和校区筛选。<button class="text-button" type="button" @click="openCampusProfile">前往我的账号填写</button></AlertDescription></Alert>
       <slot :profile="profile" />
     </div>
   </div>

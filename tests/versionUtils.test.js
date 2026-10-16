@@ -5,6 +5,7 @@ import {
   MAX_RELEASE_ENTRIES,
   nextSemverVersion,
   nextVersion,
+  releaseHistoryMatchesCurrent,
   replaceCurrentNotes,
   replaceCurrentReleaseEntry,
   trimReleaseUpdates,
@@ -12,6 +13,14 @@ import {
 } from '../scripts/version-utils.mjs'
 
 describe('version-utils', () => {
+  it('blocks release bumps when either current version marker drifts from history', () => {
+    const history = [{ version: '1.11.2', legacyVersion: '2026年10月16日-版本6' }]
+    expect(releaseHistoryMatchesCurrent(history, '1.11.2', '2026年10月16日-版本6')).toBe(true)
+    expect(releaseHistoryMatchesCurrent(history, '1.11.3', '2026年10月16日-版本6')).toBe(false)
+    expect(releaseHistoryMatchesCurrent(history, '1.11.2', '2026年10月16日-版本7')).toBe(false)
+    expect(releaseHistoryMatchesCurrent([], '1.11.2', '2026年10月16日-版本6')).toBe(true)
+  })
+
   it('formatDateKey 输出 YYYY年MM月DD日', () => {
     expect(formatDateKey(new Date(2026, 7, 29))).toBe('2026年08月29日')
   })

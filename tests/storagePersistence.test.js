@@ -66,7 +66,33 @@ describe('本机持久化状态', () => {
     expect(JSON.parse(localStorage.getItem(key))).toEqual({ value: 2 })
     expect(persistenceState.value.status).toBe('conflict')
     expect(persistenceWriteStates.value[key].status).toBe('conflict')
-    expect(flushStoredWrites()).toMatchObject({ ok: false, pendingKeys: [key] })
+    const flush = flushStoredWrites()
+    expect(flush.ok).toBe(false)
+    expect(flush.pendingKeys).toContain(key)
+    localStorage.removeItem(key)
+  })
+
+  it('持久化 watcher 安装前收到同键更新也会保留刚发生的本页编辑', () => {
+    const key = 'sl_test_storage_conflict_before_watcher'
+    localStorage.setItem(key, JSON.stringify({ value: 0 }))
+    const state = useStoredRef(key, { value: 0 })
+    // Do not wait for the 120 ms watcher-install delay: this is the race window.
+    state.value.value = 1
+    localStorage.setItem(key, JSON.stringify({ value: 2 }))
+    window.dispatchEvent(new StorageEvent('storage', {
+      key,
+      oldValue: JSON.stringify({ value: 0 }),
+      newValue: JSON.stringify({ value: 2 }),
+      storageArea: localStorage,
+    }))
+
+    expect(state.value.value).toBe(1)
+    expect(JSON.parse(localStorage.getItem(key))).toEqual({ value: 2 })
+    expect(persistenceState.value.status).toBe('conflict')
+    expect(persistenceWriteStates.value[key].status).toBe('conflict')
+    const flush = flushStoredWrites()
+    expect(flush.ok).toBe(false)
+    expect(flush.pendingKeys).toContain(key)
     localStorage.removeItem(key)
   })
 

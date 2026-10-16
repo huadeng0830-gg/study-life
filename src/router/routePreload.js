@@ -23,6 +23,7 @@ const imports = {
   '/campus/guides': () => import('../views/campus/CampusGuidesView.vue'),
   '/campus/publish': () => import('../views/campus/CampusPublishView.vue'),
   '/campus/mine': () => import('../views/campus/CampusMySubmissionsView.vue'),
+  '/campus/beans': () => import('../views/campus/CampusBeansView.vue'),
   '/campus/reports': () => import('../views/campus/CampusReportsView.vue'),
   '/feedback': () => import('../views/FeedbackView.vue'),
   '/admin/feedback': () => import('../views/AdminCenterView.vue'),

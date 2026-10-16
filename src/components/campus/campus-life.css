@@ -8,11 +8,12 @@
 .campus-life-breadcrumb { display: inline-flex; align-items: center; gap: var(--space-2); min-height: var(--control-compact); color: var(--primary); font-size: var(--type-footnote); text-decoration: none; }
 .campus-life-breadcrumb svg { width: 16px; height: 16px; }
 .campus-life-eyebrow { color: var(--primary); font-size: var(--type-footnote); font-weight: var(--fw-600); }
-.campus-life-context { display: flex; align-items: center; gap: var(--space-2); align-self: center; max-width: 240px; padding: var(--space-2) var(--space-3); border-radius: var(--radius-control); background: var(--bg-tint); color: var(--text); text-decoration: none; }
+.campus-life-context { display: flex; align-items: center; gap: var(--space-2); align-self: center; max-width: 240px; padding: var(--space-2) var(--space-3); border: 0; border-radius: var(--radius-control); background: var(--bg-tint); color: var(--text); font: inherit; text-align: left; cursor: pointer; }
 .campus-life-context > svg { width: 18px; height: 18px; color: var(--muted); flex: none; }
 .campus-life-context > span { display: grid; gap: var(--space-1); min-width: 0; }
 .campus-life-context b { font-size: var(--type-subheadline); font-weight: var(--fw-600); overflow-wrap: anywhere; }
 .campus-life-context small { color: var(--muted); font-size: var(--type-caption); }
+.campus-life-context:focus-visible { outline: var(--focus-width) solid var(--ui-ring); outline-offset: var(--focus-offset); }
 .campus-life-quick-nav { display: flex; flex-wrap: wrap; gap: var(--space-2); }
 .campus-life-quick-nav a { display: flex; align-items: center; gap: var(--space-2); min-height: var(--control-height); padding: var(--space-2) var(--space-3); color: var(--ink-soft); text-decoration: none; font-size: var(--type-subheadline); border-radius: var(--radius-control); }
 .campus-life-quick-nav a > svg { width: 16px; height: 16px; }

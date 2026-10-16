@@ -11,12 +11,21 @@
 // 这个文件把两边的差集固定下来。新增一个备份字段时，它必须落在
 // SYNC_DEFAULTS 或 BACKUP_ONLY_KEYS 其中之一，不能两边都没有。
 import { describe, expect, it } from 'vitest'
+import { readdirSync, readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 
 import { BACKUP_STORAGE_KEYS, BACKUP_MODULES } from '../src/composables/backupArchive.js'
-import { BACKUP_ONLY_KEYS, SYNC_DEFAULTS, SYNC_KEYS } from '../src/composables/syncKeys.js'
+import { BACKUP_ONLY_KEYS, LOCAL_ONLY_KEYS, SYNC_DEFAULTS, SYNC_KEYS } from '../src/composables/syncKeys.js'
 import { emergencyBackupKeys } from '../src/composables/emergencyExport.js'
 
 const BACKUP_KEYS = Object.values(BACKUP_STORAGE_KEYS)
+
+function sourceFiles(directory) {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const path = `${directory}/${entry.name}`
+    return entry.isDirectory() ? sourceFiles(path) : /\.(?:js|vue|ts)$/.test(entry.name) ? [path] : []
+  })
+}
 
 describe('备份与同步的范围各自说得清', () => {
   it('每个备份键要么同步，要么写明为什么不跟着同步', () => {
@@ -53,6 +62,20 @@ describe('备份与同步的范围各自说得清', () => {
     for (const [key, value] of Object.entries(SYNC_DEFAULTS)) {
       expect(SYNC_KEYS).toContain(key)
       expect(value, key).not.toBeUndefined()
+    }
+  })
+
+  it('源码里每个明确的 sl_ 键都有同步、备份或本机状态分类', () => {
+    const sourceRoot = fileURLToPath(new URL('../src/', import.meta.url))
+    const sourceKeys = new Set()
+    for (const path of sourceFiles(sourceRoot)) {
+      const source = readFileSync(path, 'utf8')
+      for (const match of source.matchAll(/(['"`])(sl_[A-Za-z0-9_]+)\1/g)) sourceKeys.add(match[2])
+    }
+    const classified = new Set([...SYNC_KEYS, ...Object.keys(BACKUP_ONLY_KEYS), ...Object.keys(LOCAL_ONLY_KEYS)])
+    expect([...sourceKeys].filter((key) => !classified.has(key)).sort()).toEqual([])
+    for (const [key, reason] of Object.entries(LOCAL_ONLY_KEYS)) {
+      expect(reason.trim().length, key).toBeGreaterThan(0)
     }
   })
 })

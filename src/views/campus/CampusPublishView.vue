@@ -1,5 +1,5 @@
 <script setup>
-import { computed, ref, watch } from 'vue'
+import { computed, onScopeDispose, ref, watch } from 'vue'
 import { accountUser } from '../../composables/accountAuth.js'
 import { useRoute } from 'vue-router'
 import { Check, CheckCheck, FilePenLine, ShieldCheck, ChevronDown, ShoppingBag, HandHelping, Bus, Telescope, CalendarDays, BookOpen, GraduationCap, UserRound, Link, FileCheck, Clock } from '@lucide/vue'
@@ -15,6 +15,7 @@ import { campusPublicationOptions as options, campusPublicationDefaults as defau
 import { submitCampusPublication } from '../../services/campusPublication.js'
 import { useCampusLifeDraft } from '../../composables/campusLifeDraft.js'
 import { useCampusRequest } from '../../composables/campusRequest.js'
+import { campusProfileScopeChanged, subscribeSocialProfile } from '../../composables/socialProfile.js'
 import { campusCourses, campusLifeMine, campusShuttles } from '../../services/campusLife.js'
 
 const primaryKinds = ['market', 'help', 'lost', 'event', 'guide', 'shuttle']
@@ -64,6 +65,11 @@ async function loadChoices() {
   } catch (cause) { if (choices.live(revision)) error.value = campusErrorMessage(cause, '暂时无法读取已审核校园资料。') }
   finally { if (choices.live(revision)) optionsLoading.value = false }
 }
+const unsubscribeProfile = subscribeSocialProfile((nextProfile, userId, previousProfile) => {
+  if (accountUser.value?.id !== userId) return
+  if (campusProfileScopeChanged(nextProfile, previousProfile)) void loadChoices()
+})
+onScopeDispose(unsubscribeProfile)
 const submissionKeys = {
   teacher: 'teachers', course: 'courses', assignment: 'assignments', market: 'listings', help: 'helpTasks',
   shuttle: 'shuttleRoutes', shuttle_correction: 'shuttleCorrections', shuttle_exception: 'shuttleExceptions',

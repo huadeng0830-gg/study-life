@@ -132,11 +132,14 @@ const service = {
 
   async setUserRestriction(payload) { return setAccountRestriction(requireAdminClient(), payload, PlatformAdminError) },
 
-  async listAudit(limit) {
+  async listAudit(limit, category = '') {
     const client = requireAdminClient()
-    const { data, error } = await client.from('platform_admin_audit')
-      .select('id,actor_user_id,target_user_id,action,outcome,reason,created_at,completed_at')
+    let query = client.from('platform_admin_audit')
+      .select('id,actor_user_id,target_user_id,action,outcome,reason,change_details,created_at,completed_at')
       .order('created_at', { ascending: false }).limit(limit)
+    if (category === 'feedback') query = query.eq('action', 'feedback.manage')
+    else if (category === 'accounts') query = query.neq('action', 'feedback.manage')
+    const { data, error } = await query
     if (error) throw error
     return data || []
   },

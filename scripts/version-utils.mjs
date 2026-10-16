@@ -42,6 +42,15 @@ export function isSemver(value) {
 }
 
 /**
+ * The newest history entry must match both public and legacy versions.
+ * A one-sided drift is enough to make a release ambiguous and must block a bump.
+ */
+export function releaseHistoryMatchesCurrent(history, version, legacyVersion) {
+  if (!Array.isArray(history) || history.length === 0) return true
+  return history[0]?.version === version && history[0]?.legacyVersion === legacyVersion
+}
+
+/**
  * 把内容归一为 LF 进行结构匹配，并记住原文件用的换行符以便写回时还原。
  *
  * 【为什么需要】本文件的结构识别全部靠 '\n' 字面量与 /^  \{\n…$/gm 这类正则。

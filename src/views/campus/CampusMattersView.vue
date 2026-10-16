@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ArrowRight, Search } from '@lucide/vue'
 import CampusLifeLayout from '../../components/campus/CampusLifeLayout.vue'
@@ -8,45 +8,107 @@ import { useCampusLifeDraft } from '../../composables/campusLifeDraft.js'
 import { campusContentLabel, campusContentRoute } from '../../composables/campusContentModel.js'
 import { analyzeCampusMatter, matterCategoryLabels, matterIntentLabels, matterOutcomeLabels, matterStatusLabels } from '../../composables/campusMatterModel.js'
 import { useCampusLifePage } from '../../composables/campusLifePage.js'
+import { animationsEnabled } from '../../composables/motion.js'
 import { campusLifeSearch } from '../../services/campusLife.js'
 import { campusMatterOverview, campusMatters, createCampusMatter } from '../../services/campusMatters.js'
 
 const route = useRoute()
 const router = useRouter()
 const page = useCampusLifePage()
-const view = ref(['mine','helped'].includes(String(route.query.view)) ? String(route.query.view) : 'all')
+const view = ref(['mine', 'helped'].includes(String(route.query.view)) ? String(route.query.view) : 'all')
+const topic = ref('all')
 const searchText = ref('')
-const searchItems = ref(/** @type {any[]} */ ([]))
+/** @typedef {{type: string, id: string, title?: string, detail?: string, status?: string, latestOutcome?: {outcome: string}, campus?: string}} CampusSearchItem */
+const searchItems = ref(/** @type {CampusSearchItem[]} */ ([]))
 const searchBusy = ref(false)
+const searchPerformed = ref(false)
 const searchError = ref('')
 const publishBusy = ref(false)
+const composerOpen = ref(false)
+const composerEl = ref(/** @type {HTMLElement|null} */ (null))
 const defaultDraft = { content: '', intent: '', options: ['', ''], isAnonymous: true, allowClarifications: true, showOutcomes: true, intakeAnswers: {}, relatedEntityType: '', relatedEntityId: '' }
 const draft = useCampusLifeDraft('matters', defaultDraft)
 const draftValue = draft.value
 const draftSavedRevision = draft.savedRevision
 const draftSaveError = draft.saveError
 const analysis = computed(() => analyzeCampusMatter(draftValue.value.content))
-const chosenIntent = computed(() => draftValue.value.intent || analysis.value.intent)
+const chosenIntent = computed(() => draftValue.value.intent || analysis.value.intent || 'vent')
 const categoryLabel = computed(() => matterCategoryLabels[analysis.value.category] || matterCategoryLabels.other)
 const allItems = computed(() => page.data.value?.items || [])
-const sections = computed(() => page.data.value?.sections || {})
+const pageIndex = computed(() => Number(page.data.value?.page) || 0)
+const feedItems = computed(() => allItems.value)
 const optionPartlyFilled = computed(() => chosenIntent.value === 'decision' && draftValue.value.options.some(Boolean) && !draftValue.value.options.every((value) => value.trim()))
 const canPublish = computed(() => Boolean(draftValue.value.content.trim()) && !optionPartlyFilled.value && !publishBusy.value)
+const hasDraft = computed(() => Boolean(draftValue.value.content.trim()))
+const viewOptions = [
+  { value: 'all', label: '同校交流' },
+  { value: 'mine', label: '我发布的' },
+  { value: 'helped', label: '我帮助过的' },
+]
+const topicOptions = [
+  { value: 'all', label: '最近更新' },
+  { value: 'finding', label: '正在找办法' },
+  { value: 'decisions', label: '正在做决定' },
+  { value: 'solved', label: '已确认解决' },
+  { value: 'experiences', label: '经历分享' },
+]
+const feedEmptyTitle = computed(() => {
+  if (view.value === 'mine') return '你还没有发布内容'
+  if (view.value === 'helped') return '你还没有帮助过其他同学'
+  if (topic.value !== 'all') return '暂时没有这类交流内容'
+  return '暂时没有公开内容'
+})
+const feedEmptyDescription = computed(() => {
+  if (view.value === 'mine') return '分享、提问或发布一条校园信息都可以。'
+  if (view.value === 'helped') return '你提交并通过审核的回应会关联到这里。'
+  if (topic.value !== 'all') return '换个类型看看，或发布一条你想分享的内容。'
+  return '这里汇集同校同学的提问、经历、想法和校园信息。你也可以只发布一条内容。'
+})
 
 async function load({ forceRefresh = false } = {}) {
-  return page.load(async () => {
-    if (view.value !== 'all') return campusMatters({ view: view.value }, { forceRefresh })
-    return campusMatterOverview({ forceRefresh })
-  }, null, { cacheKey: ['matters', view.value] })
+  return page.load(() => {
+    if (view.value === 'all' && topic.value === 'all') return campusMatterOverview({ forceRefresh })
+    const filters = { view: view.value, page: 0 }
+    if (view.value === 'all') filters.topic = topic.value
+    return campusMatters(filters, { forceRefresh })
+  }, null, { cacheKey: ['matters', view.value, topic.value] })
+}
+
+function loadPage(nextPage) {
+  if (nextPage < 0) return
+  const filters = { view: view.value, page: nextPage }
+  if (view.value === 'all' && topic.value !== 'all') filters.topic = topic.value
+  return page.load(() => campusMatters(filters), null, {
+    cacheKey: ['matters', view.value, topic.value, nextPage],
+  })
+}
+
+function selectTopic(value) {
+  if (topic.value === value) {
+    if (pageIndex.value > 0) void load()
+    return
+  }
+  topic.value = value
 }
 
 function displayDate(value) { return value ? String(value).slice(0, 10) : '' }
 function matterRoute(item) { return `/campus/matters/${item.id}` }
 function resourceRoute(item) { return item.type === 'matter' ? matterRoute(item) : campusContentRoute(item.type) }
 
+async function openComposer() {
+  composerOpen.value = true
+  await nextTick()
+  composerEl.value?.scrollIntoView({ behavior: animationsEnabled() ? 'smooth' : 'auto', block: 'center' })
+}
+
+function closeComposer() {
+  composerOpen.value = false
+}
+
 async function findExisting() {
+  searchPerformed.value = true
   const term = (searchText.value || draftValue.value.content).trim()
-  if (!term) { searchError.value = '先写下想查的问题，平台才知道该找什么。'; return }
+  if (!term) { searchError.value = '先输入想找的内容。'; return }
   searchBusy.value = true
   searchError.value = ''
   searchItems.value = []
@@ -74,11 +136,17 @@ function useRelatedItem(item) {
   searchError.value = ''
 }
 
+watch([searchText, () => draftValue.value.content], () => { searchPerformed.value = false })
 watch(() => analysis.value.followUp?.key, (next, previous) => {
   if (previous && previous !== next) draftValue.value.intakeAnswers = {}
 })
-watch(view, () => { void load() })
-onMounted(() => { if (view.value !== 'all' || !page.data.value) void load() })
+watch([view, topic], () => { void load() })
+onMounted(() => {
+  if (!page.data.value) {
+    if (hasDraft.value) composerOpen.value = true
+    void load()
+  }
+})
 
 async function publish() {
   if (!canPublish.value) return
@@ -86,92 +154,265 @@ async function publish() {
   let created = null
   const options = draftValue.value.options.every((value) => value.trim())
     ? draftValue.value.options.map((label) => ({ label: label.trim() })) : []
-  const intakeAnswers = analysis.value.followUp && draftValue.value.intakeAnswers[analysis.value.followUp.key]
+  const intakeAnswers = chosenIntent.value !== 'vent' && analysis.value.followUp && draftValue.value.intakeAnswers[analysis.value.followUp.key]
     ? { [analysis.value.followUp.key]: draftValue.value.intakeAnswers[analysis.value.followUp.key] } : {}
   const ok = await page.act(async () => {
     const result = await createCampusMatter({
       content: draftValue.value.content, intent: chosenIntent.value, category: analysis.value.category,
       options, intakeAnswers, relatedEntityType: draftValue.value.relatedEntityType || undefined,
       relatedEntityId: draftValue.value.relatedEntityId || undefined, isAnonymous: draftValue.value.isAnonymous,
-      allowClarifications: draftValue.value.allowClarifications, showOutcomes: draftValue.value.showOutcomes,
+      allowClarifications: chosenIntent.value !== 'vent' && draftValue.value.allowClarifications,
+      showOutcomes: chosenIntent.value !== 'vent' && draftValue.value.showOutcomes,
     })
     created = result?.matter
-  }, '这件事已提交，审核通过后会进入同校问题池。')
+  }, '内容已提交审核，通过后会在同校交流中显示。')
   publishBusy.value = false
   if (!ok || !created?.id) return
   draft.clear()
   await router.push(matterRoute(created))
 }
 
-function viewLabel(value) { return value === 'mine' ? '我遇到的事' : value === 'helped' ? '我帮助过的事' : '所有事情' }
 </script>
 
 <template>
-  <CampusLifeLayout title="怎么办" description="不知道怎么办，就来看看别人怎么做。把真实情况说清楚，找到可执行的办法，再回来告诉大家后来怎么样。">
-    <section class="matter-hero campus-life-panel">
-      <div><span class="matter-eyebrow">校园真实问题解决入口</span><h2>遇到一件事，先把它理清楚。</h2><p>这里记录真实情况、亲身经历和实际办法。没有“热度榜”，只有还在找办法、正在尝试和已经确认的结果。</p></div>
-      <form class="matter-search" role="search" aria-label="搜索问题、经历和校园信息" @submit.prevent="findExisting"><label class="sr-only" for="matter-search">搜问题、经历、校园信息</label><Search aria-hidden="true" /><input id="matter-search" v-model="searchText" maxlength="100" type="search" placeholder="搜问题、经历或校园信息" /><button class="btn btn-primary" type="submit" :disabled="searchBusy">{{ searchBusy ? '正在找…' : '先找办法' }}</button></form>
-      <p class="matter-search-privacy">只在你点击“先找办法”时搜索已公开的同校资料；输入中的草稿不会自动发送。</p>
+  <CampusLifeLayout title="校园交流" description="分享经历、发起讨论，或只发布一条想说的话。">
+    <section class="campus-life-panel matter-hero" aria-labelledby="matter-hero-title">
+      <div class="matter-hero-copy">
+        <h2 id="matter-hero-title">校园里的事，拿出来聊聊。</h2>
+        <p>可以问问题、分享经历、交流信息，也可以只发一条想说的话。</p>
+      </div>
+      <form class="matter-search" role="search" aria-label="搜索同校问题和校园资料" @submit.prevent="findExisting">
+        <Search aria-hidden="true" />
+        <label class="sr-only" for="matter-search">搜索同校问题和校园资料</label>
+        <input id="matter-search" v-model="searchText" maxlength="100" type="search" placeholder="搜宿舍、选课、实习或类似经历" />
+        <button class="btn btn-outline" type="submit" :disabled="searchBusy">{{ searchBusy ? '正在找…' : '搜索' }}</button>
+      </form>
+      <div class="matter-hero-actions">
+        <p>只在你点击搜索时读取公开的同校资料，输入内容不会自动发送。</p>
+        <button class="btn btn-primary" type="button" @click="openComposer">{{ hasDraft ? '继续写草稿' : '发布一条' }}</button>
+      </div>
     </section>
 
-    <section class="campus-life-panel matter-composer" aria-labelledby="matter-composer-title">
-      <div class="matter-section-heading"><div><h2 id="matter-composer-title">＋ 遇到一件事？</h2><p>先写发生了什么。标题、分类和补充问题都可以由系统提示，也都可以跳过。</p></div><span v-if="draftSavedRevision" class="matter-local-save" role="status">草稿已保存在这台设备</span></div>
-      <label class="matter-text-label" for="matter-content">发生了什么？</label>
-      <textarea id="matter-content" v-model="draftValue.content" maxlength="2400" rows="4" placeholder="例如：室友晚上打游戏太吵，我不知道该不该直接说。" />
-      <p class="matter-form-hint">可以直接写你的情况，不需要先想标题。{{ draftValue.content.length }}/2400</p>
-
-      <div v-if="draftValue.content.trim().length >= 8" class="matter-understanding" aria-live="polite">
-        <div><span class="matter-form-hint">根据关键词的一个提示，你更像是：</span><b>{{ matterIntentLabels[chosenIntent] }}</b><small>可改，也可发布时跳过。</small></div>
-        <div class="matter-intent-list"><button v-for="[key,label] in Object.entries(matterIntentLabels)" :key="key" type="button" :class="{ selected: chosenIntent === key }" @click="draftValue.intent = key">{{ label }}</button><button type="button" :class="{ selected: !draftValue.intent }" @click="draftValue.intent = ''">按情况提示</button></div>
-        <p class="matter-category-hint">系统暂时把它归到「{{ categoryLabel }}」，这只用于寻找相关资料，不影响发布。</p>
+    <section v-if="searchPerformed" class="campus-life-panel matter-search-results" aria-live="polite" aria-labelledby="matter-search-results-title">
+      <div class="matter-section-heading">
+        <div><h2 id="matter-search-results-title">{{ searchBusy ? '正在找相关内容' : searchItems.length ? '找到这些相关内容' : '没有找到相似内容' }}</h2><p v-if="!searchBusy && !searchError">搜索校园交流和相关校园资料，也可以换个短关键词再试。</p></div>
       </div>
+      <p v-if="searchError" class="campus-life-inline-state error" role="alert">{{ searchError }}</p>
+      <p v-else-if="searchBusy" class="campus-life-state" role="status">正在查找同校公开资料…</p>
+      <p v-else-if="!searchItems.length" class="matter-empty-inline">可以继续描述自己的情况；草稿会保存在这台设备上。</p>
+      <article v-for="item in searchItems" :key="`${item.type}:${item.id}`" class="matter-search-result">
+        <div class="matter-search-result-copy">
+          <span class="campus-life-tag">{{ item.type === 'matter' ? '相似事情' : campusContentLabel(item.type) }}</span>
+          <h3>{{ item.title }}</h3>
+          <p>{{ item.detail || '暂无补充说明。' }}</p>
+          <small v-if="item.type === 'matter'">{{ matterStatusLabels[item.status] || '正在处理' }}<template v-if="item.status === 'resolved' && item.latestOutcome"> · {{ matterOutcomeLabels[item.latestOutcome.outcome] }}</template></small>
+          <small v-else-if="item.campus">{{ item.campus }}</small>
+        </div>
+        <div class="matter-result-actions">
+          <button v-if="item.type !== 'matter'" type="button" class="btn btn-outline" :aria-pressed="draftValue.relatedEntityId === item.id" @click="useRelatedItem(item)">{{ draftValue.relatedEntityId === item.id ? '已关联' : '关联资料' }}</button>
+          <RouterLink class="btn btn-ghost" :to="resourceRoute(item)">{{ item.type === 'matter' ? '查看处理过程' : `查看${campusContentLabel(item.type)}` }}<ArrowRight aria-hidden="true" /></RouterLink>
+        </div>
+      </article>
+    </section>
 
-      <div v-if="analysis.followUp" class="matter-follow-up">
-        <p class="matter-follow-question">{{ analysis.followUp.question }} <small>可跳过，不影响发布</small></p>
-        <div class="matter-choice-list"><button v-for="option in analysis.followUp.options" :key="option" type="button" :class="{ selected: draftValue.intakeAnswers[analysis.followUp.key] === option }" @click="draftValue.intakeAnswers[analysis.followUp.key] = option">{{ option }}</button></div>
+    <section class="campus-life-panel matter-list-panel" aria-labelledby="matter-feed-title">
+      <div class="matter-section-heading">
+        <div><h2 id="matter-feed-title">同校交流</h2><p>只展示审核通过的真实分享；发帖不要求你提出问题或寻求建议。</p></div>
+        <button class="btn btn-outline" type="button" :disabled="page.loading.value" @click="load({ forceRefresh: true })">刷新</button>
+      </div>
+      <div class="matter-view-tabs" role="group" aria-label="选择内容范围">
+        <button v-for="item in viewOptions" :key="item.value" type="button" :aria-pressed="view === item.value" @click="view = item.value">{{ item.label }}</button>
+      </div>
+      <div v-if="view === 'all'" class="matter-topic-tabs" role="group" aria-label="按内容主题查看">
+        <button v-for="item in topicOptions" :key="item.value" type="button" :aria-pressed="topic === item.value" @click="selectTopic(item.value)">{{ item.label }}</button>
+      </div>
+      <CampusStateBlock
+        :loading="page.loading.value"
+        :loaded="Boolean(page.data.value)"
+        :error="page.error.value"
+        :empty="!feedItems.length"
+        loading-text="正在读取校园交流…"
+        :empty-title="feedEmptyTitle"
+        :empty-description="feedEmptyDescription"
+        @retry="load()"
+      >
+        <div class="matter-record-list">
+          <RouterLink v-for="item in feedItems" :key="item.id" class="matter-feed-card" :to="matterRoute(item)">
+            <span class="matter-feed-status">{{ matterStatusLabels[item.status] || matterIntentLabels[item.intent] || '正在处理' }}</span>
+            <span class="matter-feed-copy">
+              <b>{{ item.title }}</b>
+              <small>{{ matterCategoryLabels[item.category] || '校园生活' }}<span aria-hidden="true"> · </span>{{ item.authorLabel }}<span aria-hidden="true"> · </span>{{ displayDate(item.updated_at || item.created_at) }}</small>
+              <small v-if="item.latestOutcome">后来：{{ matterOutcomeLabels[item.latestOutcome.outcome] }}<template v-if="item.latestOutcome.note"> · {{ item.latestOutcome.note }}</template></small>
+              <small v-else-if="item.experienceCount">{{ item.experienceCount }} 位同学也经历过</small>
+            </span>
+            <ArrowRight aria-hidden="true" />
+          </RouterLink>
+        </div>
+      </CampusStateBlock>
+      <nav v-if="page.data.value && (page.data.value.hasMore || pageIndex > 0)" class="matter-pagination" aria-label="交流内容分页">
+        <button class="btn btn-outline" type="button" :disabled="page.loading.value || pageIndex === 0" @click="loadPage(pageIndex - 1)">上一页</button>
+        <span>第 {{ pageIndex + 1 }} 页<template v-if="page.data.value.total"> · 共 {{ page.data.value.total }} 件</template></span>
+        <button class="btn btn-outline" type="button" :disabled="page.loading.value || !page.data.value.hasMore" @click="loadPage(pageIndex + 1)">下一页</button>
+      </nav>
+    </section>
+
+    <section v-if="composerOpen" ref="composerEl" class="campus-life-panel matter-composer" aria-labelledby="matter-composer-title">
+      <div class="matter-section-heading">
+        <div><h2 id="matter-composer-title">发布一条校园交流</h2><p>可以提问，也可以分享经历、想法或一条信息。没有问题也能发。</p></div>
+        <span v-if="draftSavedRevision" class="matter-local-save" role="status">草稿已保存在这台设备</span>
+      </div>
+      <div class="matter-compose-choice">
+        <span>这条内容想怎么交流？</span>
+        <div class="matter-intent-picker" role="group" aria-label="选择发布类型">
+          <button v-for="[key, label] in Object.entries(matterIntentLabels)" :key="key" type="button" :aria-pressed="chosenIntent === key" @click="draftValue.intent = key">{{ label }}</button>
+        </div>
+        <p v-if="chosenIntent === 'vent'">只分享，不求建议；同学可以回应，也可以只看。</p>
+      </div>
+      <label class="matter-text-label" for="matter-content">你想说什么？</label>
+      <textarea id="matter-content" v-model="draftValue.content" maxlength="2400" rows="4" placeholder="分享一件校园里的事、一次经历、一条信息，或你想讨论的问题。" />
+      <p class="matter-form-hint">写下最想让同校同学知道的内容即可。{{ draftValue.content.length }}/2400</p>
+
+      <p v-if="draftValue.content.trim().length >= 8" class="matter-category-hint">内容分类提示：「{{ categoryLabel }}」。由关键词暂时判断，不影响发布。</p>
+
+      <details v-if="analysis.followUp && chosenIntent !== 'vent'" class="matter-optional-block" :open="Boolean(draftValue.intakeAnswers[analysis.followUp.key])">
+        <summary>补充一个背景（可跳过）</summary>
+        <p class="matter-follow-question">{{ analysis.followUp.question }}</p>
+        <div class="matter-choice-list">
+          <button v-for="option in analysis.followUp.options" :key="option" type="button" :aria-pressed="draftValue.intakeAnswers[analysis.followUp.key] === option" @click="draftValue.intakeAnswers[analysis.followUp.key] = option">{{ option }}</button>
+        </div>
         <button v-if="draftValue.intakeAnswers[analysis.followUp.key]" class="text-button" type="button" @click="delete draftValue.intakeAnswers[analysis.followUp.key]">清除回答</button>
-      </div>
+      </details>
 
-      <details v-if="chosenIntent === 'decision'" class="matter-optional-fields">
+      <details v-if="chosenIntent === 'decision'" class="matter-optional-block">
         <summary>添加 A / B 两个选择（可选）</summary>
         <div class="matter-option-fields"><label>A<input v-model="draftValue.options[0]" maxlength="80" placeholder="第一个选择" /></label><label>B<input v-model="draftValue.options[1]" maxlength="80" placeholder="第二个选择" /></label></div>
         <p v-if="optionPartlyFilled" class="campus-life-inline-state error" role="alert">如果添加选择，请把 A 和 B 都写完整；也可以清空两项后发布。</p>
       </details>
 
-      <div class="matter-privacy-controls">
-        <label><input v-model="draftValue.isAnonymous" type="checkbox" /> 匿名显示</label>
-        <label><input v-model="draftValue.allowClarifications" type="checkbox" /> 允许同学提出关键澄清问题</label>
-        <label><input v-model="draftValue.showOutcomes" type="checkbox" /> 允许大家查看我之后的结果</label>
-      </div>
-      <p v-if="analysis.highRisk" class="campus-life-inline-state matter-safety" role="status">如果你或身边的人现在有立即的人身危险，请先联系可信任的人，并联系学校正式的安全或医疗支持渠道；紧急情况下联系当地急救或警方。本页面的同学经验不能替代专业帮助。</p>
+      <details class="matter-optional-block matter-privacy-block">
+        <summary>隐私和后续设置</summary>
+        <div class="matter-privacy-controls">
+          <label><input v-model="draftValue.isAnonymous" type="checkbox" /> 匿名显示</label>
+          <label v-if="chosenIntent !== 'vent'"><input v-model="draftValue.allowClarifications" type="checkbox" /> 允许同学提出关键问题</label>
+          <label v-if="chosenIntent !== 'vent'"><input v-model="draftValue.showOutcomes" type="checkbox" /> 允许大家查看之后的结果</label>
+        </div>
+      </details>
+      <p v-if="analysis.highRisk" class="campus-life-inline-state matter-safety" role="status">如果你或身边的人正面临人身危险，请立即联系可信任的人和学校正式安全或医疗支持；紧急情况下联系当地急救或警方。同学经验不能替代专业帮助。</p>
       <p v-if="draftSaveError" class="campus-life-inline-state error" role="alert">{{ draftSaveError }}</p>
       <p v-if="page.actionError.value" class="campus-life-inline-state error" role="alert">{{ page.actionError.value }}</p>
       <p v-if="page.notice.value" class="campus-life-inline-state campus-life-success" role="status">{{ page.notice.value }}</p>
-      <div class="matter-compose-actions"><span v-if="draftValue.relatedEntityType" class="matter-related-selected">已关联：{{ campusContentLabel(draftValue.relatedEntityType) }}<button type="button" aria-label="移除关联资料" @click="draftValue.relatedEntityType = ''; draftValue.relatedEntityId = ''">×</button></span><button class="btn btn-outline" type="button" :disabled="searchBusy || !draftValue.content.trim()" @click="searchText = draftValue.content; findExisting()">先找相似事情 / 资料</button><button class="btn btn-primary" type="button" :disabled="!canPublish" @click="publish">{{ publishBusy ? '正在提交…' : '提交这件事' }}</button></div>
-    </section>
-
-    <section v-if="searchError || searchItems.length || searchBusy" class="campus-life-panel matter-search-results" aria-live="polite">
-      <h2>先看看已经有的信息</h2><p v-if="searchError" class="campus-life-inline-state error" role="alert">{{ searchError }}</p><p v-else-if="searchBusy" class="campus-life-state">正在查找同校公开资料…</p><p v-else-if="!searchItems.length" class="campus-life-state">没有找到可直接使用的资料，可以改短关键词或继续描述这件事。</p>
-      <article v-for="item in searchItems" :key="`${item.type}:${item.id}`" class="matter-search-result"><div><span class="campus-life-tag">{{ item.type === 'matter' ? '相似事情' : campusContentLabel(item.type) }}</span><h3>{{ item.title }}</h3><p>{{ item.detail || '暂无补充说明。' }}</p><small v-if="item.type === 'matter'">{{ matterStatusLabels[item.status] || '正在处理' }}<template v-if="item.status === 'resolved'"> · {{ matterOutcomeLabels.solved }}</template></small><small v-else-if="item.campus">{{ item.campus }}</small></div><div class="matter-result-actions"><button v-if="item.type !== 'matter'" type="button" class="btn btn-outline" @click="useRelatedItem(item)">{{ draftValue.relatedEntityId === item.id ? '已关联' : '关联这份资料' }}</button><RouterLink class="btn btn-ghost" :to="resourceRoute(item)">{{ item.type === 'matter' ? '看看怎么处理' : `查看${campusContentLabel(item.type)}` }}<ArrowRight aria-hidden="true" /></RouterLink></div></article>
-    </section>
-
-    <section class="campus-life-panel matter-list-panel">
-      <div class="matter-section-heading"><div><h2>看看同校正在处理的事情</h2><p>根据真实状态查看，不按点赞或热度排列。</p></div><button class="btn btn-outline" type="button" :disabled="page.loading.value" @click="load({ forceRefresh: true })">刷新</button></div>
-      <div class="matter-view-tabs" role="group" aria-label="事项范围"><button v-for="value in ['all','mine','helped']" :key="value" type="button" :aria-pressed="view === value" @click="view = value">{{ viewLabel(value) }}</button></div>
-      <CampusStateBlock :loading="page.loading.value" :loaded="Boolean(page.data.value)" :error="page.error.value" :empty="!allItems.length" loading-text="正在读取同校事项…" :empty-title="view === 'mine' ? '你还没有记录事项' : view === 'helped' ? '你还没有帮助过其他同学' : '当前还没有公开的事项'" :empty-description="view === 'mine' ? '遇到事情时可以先写下来，草稿会保存在本机。' : view === 'helped' ? '你提交过并审核通过的解决方案会出现在这里。' : '这里不会用虚构内容填充。提交的事项审核通过后才会出现。'" @retry="load">
-        <div v-if="view === 'all'" class="matter-sections">
-          <section v-for="[key,title] in [['finding','现在有人正在找办法'],['decisions','大家最近正在纠结'],['solved','已经有人主动确认解决'],['experiences','有人分享了类似经历'],['recent','最近出现的新问题']]" :key="key" class="matter-mini-section"><div class="matter-mini-heading"><h3>{{ title }}</h3><span>{{ (key === 'recent' ? allItems : sections[key])?.length || 0 }}</span></div><p v-if="!(key === 'recent' ? allItems : sections[key])?.length" class="matter-empty-inline">目前没有已审核的真实事项。</p><RouterLink v-for="item in (key === 'recent' ? allItems : sections[key] || []).slice(0,3)" :key="item.id" class="matter-mini-card" :to="matterRoute(item)"><span class="campus-life-tag">{{ matterStatusLabels[item.status] || matterIntentLabels[item.intent] || '正在处理' }}</span><b>{{ item.title }}</b><small>{{ item.authorLabel }} · {{ displayDate(item.created_at) }}<template v-if="item.experienceCount"> · {{ item.experienceCount }} 人也经历过</template></small><ArrowRight aria-hidden="true" /></RouterLink></section>
-        </div>
-        <div v-else class="matter-record-list"><RouterLink v-for="item in allItems" :key="item.id" class="matter-mini-card" :to="matterRoute(item)"><span class="campus-life-tag">{{ matterStatusLabels[item.status] || matterIntentLabels[item.intent] || '正在处理' }}</span><b>{{ item.title }}</b><small>{{ item.authorLabel }} · {{ displayDate(item.updated_at || item.created_at) }}<template v-if="item.latestOutcome"> · 后来：{{ matterOutcomeLabels[item.latestOutcome.outcome] }}</template></small><ArrowRight aria-hidden="true" /></RouterLink></div>
-      </CampusStateBlock>
-      <nav v-if="page.data.value && view !== 'all' && (page.data.value.page || page.data.value.hasMore)" class="campus-life-actions" aria-label="事项列表分页"><button class="btn btn-outline" type="button" :disabled="page.loading.value || !page.data.value.page" @click="page.load(() => campusMatters({ view, page: page.data.value.page - 1 }))">上一页</button><span>第 {{ (page.data.value.page || 0) + 1 }} 页</span><button class="btn btn-outline" type="button" :disabled="page.loading.value || !page.data.value.hasMore" @click="page.load(() => campusMatters({ view, page: page.data.value.page + 1 }))">下一页</button></nav>
+      <div class="matter-compose-actions">
+        <span v-if="draftValue.relatedEntityType" class="matter-related-selected">已关联：{{ campusContentLabel(draftValue.relatedEntityType) }}<button type="button" aria-label="移除关联资料" @click="draftValue.relatedEntityType = ''; draftValue.relatedEntityId = ''">×</button></span>
+        <button class="btn btn-outline" type="button" :disabled="searchBusy || !draftValue.content.trim()" @click="searchText = draftValue.content; findExisting()">先找相似内容</button>
+        <button class="btn btn-primary" type="button" :disabled="!canPublish" @click="publish">{{ publishBusy ? '正在提交…' : '发布内容' }}</button>
+        <button class="text-button matter-close-composer" type="button" @click="closeComposer">收起</button>
+      </div>
     </section>
   </CampusLifeLayout>
 </template>
 
 <style scoped>
-.matter-hero{gap:18px;background:linear-gradient(135deg,var(--card),color-mix(in srgb,var(--primary-soft) 42%,var(--card)))}.matter-hero>div:first-child{display:grid;gap:8px}.matter-eyebrow{color:var(--primary);font-size:var(--fs-11);font-weight:var(--fw-700);letter-spacing:.06em}.matter-hero h2{font-size:clamp(22px,3vw,30px)}.matter-hero p,.matter-search-privacy{margin:0;color:var(--muted);font-size:var(--fs-12);line-height:1.8}.matter-search{display:flex;align-items:center;gap:10px}.matter-search>svg{width:18px;height:18px;flex:none;color:var(--primary)}.matter-search input{flex:1;min-width:0;min-height:44px;padding:10px 12px;border:1px solid var(--border);border-radius:var(--radius-9);background:var(--bg);color:var(--text);font:inherit;font-size:var(--fs-13)}.matter-search-privacy{font-size:var(--fs-10)}.matter-composer{scroll-margin-top:20px}.matter-section-heading{display:flex;align-items:flex-start;justify-content:space-between;gap:14px}.matter-section-heading h2{font-size:var(--fs-18)}.matter-section-heading p{margin:5px 0 0;color:var(--muted);font-size:var(--fs-12);line-height:1.7}.matter-local-save{color:var(--success);font-size:var(--fs-11);white-space:nowrap}.matter-text-label{font-size:var(--fs-14);font-weight:var(--fw-650)}.matter-composer textarea{width:100%;box-sizing:border-box;min-height:126px;padding:13px;border:1px solid var(--border);border-radius:var(--radius-10);background:var(--bg);color:var(--text);font:inherit;font-size:16px;line-height:1.8;resize:vertical}.matter-form-hint,.matter-category-hint{margin:0;color:var(--muted);font-size:var(--fs-11);line-height:1.7}.matter-understanding{display:grid;gap:10px;padding:14px;border:1px solid var(--border);border-radius:var(--radius-10);background:var(--bg-tint)}.matter-understanding>div:first-child{display:flex;align-items:center;flex-wrap:wrap;gap:8px}.matter-understanding b{color:var(--primary);font-size:var(--fs-12)}.matter-understanding small{color:var(--muted);font-size:var(--fs-10)}.matter-intent-list,.matter-choice-list{display:flex;flex-wrap:wrap;gap:8px}.matter-intent-list button,.matter-choice-list button{min-height:40px;padding:8px 12px;border:1px solid var(--border);border-radius:999px;background:var(--card);color:var(--text);font:inherit;font-size:var(--fs-11)}.matter-intent-list button.selected,.matter-choice-list button.selected{border-color:var(--primary);background:var(--primary-soft);color:var(--primary)}.matter-category-hint{grid-column:1/-1}.matter-follow-up{display:grid;gap:10px;padding:14px;border-left:3px solid var(--primary);background:var(--bg-tint)}.matter-follow-up>label{font-size:var(--fs-13);font-weight:var(--fw-600)}.matter-follow-up>label small{margin-left:8px;color:var(--muted);font-size:var(--fs-10);font-weight:var(--fw-400)}.matter-optional-fields{padding:10px 0;border-top:1px solid var(--border);border-bottom:1px solid var(--border)}.matter-optional-fields summary{min-height:38px;padding-top:7px;color:var(--primary);font-size:var(--fs-12);cursor:pointer}.matter-option-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.matter-option-fields label{display:grid;gap:5px;color:var(--muted);font-size:var(--fs-11)}.matter-option-fields input{min-height:42px;padding:9px 11px;border:1px solid var(--border);border-radius:var(--radius-9);background:var(--bg);color:var(--text);font:inherit;font-size:16px}.matter-privacy-controls{display:flex;flex-wrap:wrap;gap:12px 18px;padding:13px 0;border-top:1px solid var(--border);border-bottom:1px solid var(--border)}.matter-privacy-controls label{display:flex;align-items:center;gap:8px;min-height:38px;color:var(--muted);font-size:var(--fs-11)}.matter-privacy-controls input{width:17px;height:17px;accent-color:var(--primary)}.matter-safety{background:color-mix(in srgb,var(--danger) 8%,var(--card));color:var(--text)}.matter-compose-actions{display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:9px}.matter-related-selected{display:inline-flex;align-items:center;gap:6px;margin-right:auto;padding:7px 10px;border-radius:999px;background:var(--primary-soft);color:var(--primary);font-size:var(--fs-11)}.matter-related-selected button{width:28px;height:28px;border:0;border-radius:50%;background:transparent;color:inherit;font-size:19px}.matter-search-results{gap:13px}.matter-search-results>h2{font-size:var(--fs-17)}.matter-search-result{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:14px;border:1px solid var(--border);border-radius:var(--radius-10)}.matter-search-result h3{margin:6px 0;font-size:var(--fs-13);line-height:1.6}.matter-search-result p{margin:0;color:var(--muted);font-size:var(--fs-11);line-height:1.7;white-space:pre-wrap}.matter-search-result small{display:block;margin-top:5px;color:var(--muted);font-size:var(--fs-10)}.matter-result-actions{display:flex;align-items:center;flex:none;flex-wrap:wrap;gap:8px}.matter-result-actions a{display:flex;align-items:center;gap:5px;text-decoration:none}.matter-result-actions svg{width:15px;height:15px}.matter-list-panel{gap:18px}.matter-view-tabs{display:flex;flex-wrap:wrap;gap:8px}.matter-view-tabs button{min-height:40px;padding:8px 13px;border:1px solid var(--border);border-radius:999px;background:var(--bg);color:var(--muted);font:inherit;font-size:var(--fs-11)}.matter-view-tabs button[aria-pressed=true]{border-color:var(--primary);background:var(--primary-soft);color:var(--primary);font-weight:var(--fw-650)}.matter-sections{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:20px}.matter-mini-section{display:grid;align-content:start;gap:9px}.matter-mini-heading{display:flex;align-items:center;justify-content:space-between;gap:10px}.matter-mini-heading h3{font-size:var(--fs-13)}.matter-mini-heading span{color:var(--muted);font-size:var(--fs-10);font-variant-numeric:tabular-nums}.matter-empty-inline{margin:0;color:var(--muted);font-size:var(--fs-11);line-height:1.7}.matter-mini-card{position:relative;display:grid;gap:6px;min-width:0;padding:13px 38px 13px 13px;border:1px solid var(--border);border-radius:var(--radius-10);background:var(--bg);color:var(--text);text-decoration:none}.matter-mini-card:hover{border-color:var(--primary)}.matter-mini-card b{font-size:var(--fs-12);line-height:1.7;overflow-wrap:anywhere}.matter-mini-card small{color:var(--muted);font-size:var(--fs-10);line-height:1.6}.matter-mini-card>svg{position:absolute;right:12px;top:50%;width:16px;height:16px;transform:translateY(-50%);color:var(--muted)}.matter-record-list{display:grid;gap:10px}
-@media(max-width:760px){.matter-sections{grid-template-columns:1fr}.matter-search-result{align-items:flex-start;flex-direction:column}.matter-result-actions{width:100%}.matter-result-actions>*{flex:1;justify-content:center}.matter-compose-actions>*{flex:1}.matter-related-selected{flex:1}.matter-hero .matter-search{flex-wrap:wrap}.matter-search input{flex-basis:calc(100% - 34px)}}
-@media(max-width:520px){.matter-hero{padding:17px}.matter-composer textarea{min-height:145px}.matter-privacy-controls{display:grid;gap:4px}.matter-compose-actions{display:grid;grid-template-columns:1fr}.matter-compose-actions .btn{width:100%}.matter-local-save{white-space:normal;text-align:right}.matter-section-heading{align-items:flex-start}.matter-intent-list button,.matter-choice-list button{min-height:44px}.matter-option-fields{grid-template-columns:1fr}}
-.matter-follow-question{margin:0;font-size:var(--fs-13);font-weight:var(--fw-600)}.matter-follow-question small{margin-left:8px;color:var(--muted);font-size:var(--fs-10);font-weight:var(--fw-400)}
+.matter-hero { gap: 18px; padding-top: clamp(20px, 4vw, 32px); padding-bottom: clamp(20px, 4vw, 32px); }
+.matter-hero-copy { display: grid; gap: 8px; max-width: 68ch; }
+.matter-hero h2 { margin: 0; font-size: clamp(24px, 3vw, 32px); line-height: 1.4; letter-spacing: -.025em; }
+.matter-hero-copy p, .matter-hero-actions p { margin: 0; color: var(--muted); font-size: var(--fs-12); line-height: 1.8; }
+.matter-search { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 7px 8px 7px 12px; border: 1px solid var(--border); border-radius: var(--radius-12); background: var(--bg); }
+.matter-search > svg { width: 18px; height: 18px; flex: none; color: var(--muted); }
+.matter-search input { flex: 1; min-width: 0; min-height: 42px; border: 0; outline: 0; background: transparent; color: var(--text); font: inherit; font-size: 16px; }
+.matter-search:focus-within { outline: 2px solid var(--primary); outline-offset: 3px; }
+.matter-search .btn { flex: none; }
+.matter-hero-actions { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.matter-hero-actions p { font-size: var(--fs-11); }
+.matter-section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+.matter-section-heading h2 { font-size: var(--fs-18); }
+.matter-section-heading p { margin: 5px 0 0; color: var(--muted); font-size: var(--fs-12); line-height: 1.7; }
+.matter-search-results { gap: 13px; }
+.matter-search-result { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 0; border-top: 1px solid var(--border); }
+.matter-search-result-copy { min-width: 0; }
+.matter-search-result h3 { margin: 7px 0 5px; font-size: var(--fs-14); line-height: 1.6; overflow-wrap: anywhere; }
+.matter-search-result p { margin: 0; color: var(--muted); font-size: var(--fs-12); line-height: 1.7; white-space: pre-wrap; }
+.matter-search-result small { display: block; margin-top: 6px; color: var(--muted); font-size: var(--fs-11); }
+.matter-result-actions { display: flex; align-items: center; flex: none; flex-wrap: wrap; gap: 8px; }
+.matter-result-actions a { display: inline-flex; align-items: center; gap: 5px; text-decoration: none; }
+.matter-result-actions svg { width: 15px; height: 15px; }
+.matter-list-panel { gap: 18px; }
+.matter-view-tabs, .matter-topic-tabs { display: flex; flex-wrap: wrap; gap: 8px; }
+.matter-view-tabs button, .matter-topic-tabs button { min-height: 42px; padding: 8px 13px; border: 1px solid var(--border); border-radius: 999px; background: var(--bg); color: var(--muted); font: inherit; font-size: var(--fs-12); cursor: pointer; }
+.matter-view-tabs button[aria-pressed=true] { border-color: var(--primary); background: var(--primary-soft); color: var(--primary); font-weight: var(--fw-650); }
+.matter-topic-tabs { gap: 6px; }
+.matter-topic-tabs button { min-height: 36px; border-color: transparent; background: transparent; font-size: var(--fs-11); }
+.matter-topic-tabs button[aria-pressed=true] { background: var(--bg-tint); color: var(--text); font-weight: var(--fw-650); }
+.matter-record-list { display: grid; }
+.matter-feed-card { display: grid; grid-template-columns: 112px minmax(0, 1fr) 18px; align-items: center; gap: 14px; min-width: 0; padding: 15px 2px; border-top: 1px solid var(--border); color: var(--text); text-decoration: none; }
+.matter-feed-card:first-child { border-top: 0; }
+.matter-feed-status { justify-self: start; padding: 5px 9px; border-radius: 999px; background: var(--bg-tint); color: var(--primary); font-size: var(--fs-11); line-height: 1.4; }
+.matter-feed-copy { display: grid; gap: 6px; min-width: 0; }
+.matter-feed-copy b { font-size: var(--fs-13); line-height: 1.6; overflow-wrap: anywhere; }
+.matter-feed-copy small { color: var(--muted); font-size: var(--fs-11); line-height: 1.6; overflow-wrap: anywhere; }
+.matter-feed-card > svg { width: 17px; height: 17px; color: var(--muted); }
+.matter-feed-card:hover .matter-feed-copy b { color: var(--primary); }
+.matter-feed-card:focus-visible, .matter-hero :is(button, a):focus-visible, .matter-search-results :is(button, a):focus-visible, .matter-list-panel :is(button, a):focus-visible, .matter-composer :is(button, a, input, textarea):focus-visible { outline: 2px solid var(--primary); outline-offset: 3px; }
+.matter-pagination { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 12px; padding-top: 5px; }
+.matter-pagination span { color: var(--muted); font-size: var(--fs-11); font-variant-numeric: tabular-nums; }
+.matter-composer { scroll-margin-top: 20px; }
+.matter-local-save { color: var(--success); font-size: var(--fs-11); white-space: nowrap; }
+.matter-text-label { font-size: var(--fs-14); font-weight: var(--fw-650); }
+.matter-composer textarea { box-sizing: border-box; width: 100%; min-height: 130px; padding: 13px; border: 1px solid var(--border); border-radius: var(--radius-10); background: var(--bg); color: var(--text); font: inherit; font-size: 16px; line-height: 1.8; resize: vertical; }
+.matter-form-hint, .matter-category-hint { margin: 0; color: var(--muted); font-size: var(--fs-11); line-height: 1.7; }
+.matter-compose-choice { display: grid; gap: 9px; }
+.matter-compose-choice > span { color: var(--muted); font-size: var(--fs-12); font-weight: var(--fw-600); }
+.matter-compose-choice > p { margin: 0; color: var(--muted); font-size: var(--fs-11); line-height: 1.6; }
+.matter-intent-picker, .matter-choice-list { display: flex; flex-wrap: wrap; gap: 8px; }
+.matter-intent-picker button, .matter-choice-list button { min-height: 40px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 999px; background: var(--card); color: var(--text); font: inherit; font-size: var(--fs-11); cursor: pointer; }
+.matter-intent-picker button[aria-pressed=true], .matter-choice-list button[aria-pressed=true] { border-color: var(--primary); background: var(--primary-soft); color: var(--primary); }
+.matter-optional-block { padding: 11px 0; border-top: 1px solid var(--border); }
+.matter-optional-block > summary { display: flex; align-items: center; min-height: 40px; color: var(--primary); font-size: var(--fs-12); cursor: pointer; list-style: none; }
+.matter-optional-block > summary::-webkit-details-marker { display: none; }
+.matter-optional-block > summary::after { content: '+'; margin-left: auto; color: var(--muted); font-size: 18px; }
+.matter-optional-block[open] > summary::after { content: '−'; }
+.matter-follow-question { margin: 5px 0 10px; font-size: var(--fs-13); font-weight: var(--fw-600); }
+.matter-option-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.matter-option-fields label { display: grid; gap: 5px; color: var(--muted); font-size: var(--fs-11); }
+.matter-option-fields input { min-height: 42px; padding: 9px 11px; border: 1px solid var(--border); border-radius: var(--radius-9); background: var(--bg); color: var(--text); font: inherit; font-size: 16px; }
+.matter-privacy-block[open] { padding-bottom: 0; }
+.matter-privacy-controls { display: flex; flex-wrap: wrap; gap: 8px 18px; padding: 4px 0 10px; }
+.matter-privacy-controls label { display: flex; align-items: center; gap: 8px; min-height: 40px; color: var(--muted); font-size: var(--fs-11); }
+.matter-privacy-controls input { width: 17px; height: 17px; accent-color: var(--primary); }
+.matter-safety { background: color-mix(in srgb, var(--danger) 8%, var(--card)); color: var(--text); }
+.matter-empty-inline { margin: 0; color: var(--muted); font-size: var(--fs-12); line-height: 1.7; }
+.matter-compose-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 9px; padding-top: 4px; }
+.matter-related-selected { display: inline-flex; align-items: center; gap: 6px; margin-right: auto; padding: 7px 10px; border-radius: 999px; background: var(--primary-soft); color: var(--primary); font-size: var(--fs-11); }
+.matter-related-selected button { width: 28px; height: 28px; border: 0; border-radius: 50%; background: transparent; color: inherit; font-size: 19px; cursor: pointer; }
+.matter-close-composer { min-height: 42px; padding-inline: 9px; }
+@media (max-width: 760px) {
+  .matter-search-result { align-items: flex-start; flex-direction: column; }
+  .matter-result-actions { width: 100%; }
+  .matter-result-actions > * { flex: 1; justify-content: center; }
+  .matter-feed-card { grid-template-columns: 1fr 18px; align-items: start; gap: 7px 12px; }
+  .matter-feed-status { grid-column: 1; }
+  .matter-feed-copy { grid-column: 1; grid-row: 2; }
+  .matter-feed-card > svg { grid-column: 2; grid-row: 1 / span 2; margin-top: 4px; }
+  .matter-compose-actions > * { flex: 1; }
+  .matter-related-selected { flex: 1; }
+}
+@media (max-width: 520px) {
+  .matter-hero { padding: 18px; }
+  .matter-hero-actions { align-items: stretch; flex-direction: column; }
+  .matter-hero-actions .btn { width: 100%; }
+  .matter-search { flex-wrap: wrap; }
+  .matter-search input { flex-basis: calc(100% - 32px); }
+  .matter-search .btn { width: 100%; }
+  .matter-section-heading { align-items: flex-start; }
+  .matter-view-tabs button { flex: 1; }
+  .matter-topic-tabs { flex-wrap: nowrap; overflow-x: auto; padding: 1px 0 5px; scrollbar-width: thin; }
+  .matter-topic-tabs button { flex: none; }
+  .matter-option-fields { grid-template-columns: 1fr; }
+  .matter-privacy-controls { display: grid; gap: 2px; }
+  .matter-compose-actions { display: grid; grid-template-columns: 1fr; }
+  .matter-compose-actions .btn { width: 100%; }
+  .matter-local-save { white-space: normal; text-align: right; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .matter-feed-card, .matter-feed-card:hover .matter-feed-copy b { transition: none; }
+}
 </style>

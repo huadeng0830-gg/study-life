@@ -38,6 +38,36 @@ const PREVIOUS_DESKTOP_NAVIGATION = Object.freeze([
   { id: 'other', label: '其他', items: ['lists', 'bills', 'review', 'feedback'] },
 ])
 
+/**
+ * 曾经被写进 `SYNC_DEFAULTS` 的导航默认值（见 syncKeys.js 的
+ * `sl_navigation_mobile` / `sl_navigation_desktop`）。
+ *
+ * 【为什么必须在这里认出来】那两个值是「云快照里缺这个键时补什么」的答案，
+ * 但它们与应用自己会生成的默认布局**不一致**。于是新设备首次拉取云端快照时
+ * 会得到一个应用永远不会自己生成的旧布局，而上面「只升级原样未改过的内置布局」
+ * 的判断认不出它，就把它当成用户自定义永久保留 —— 用户看到的是旧分组名
+ * （今日/学习/齐行/其他）和错的底栏项，且刷新与重装都改不回来。
+ *
+ * 认出来之后统一升级为现行默认，下一次同步再把修正后的布局写回云端，自愈。
+ * 由 tests/navigationPreferences.test.js 断言这两份常量与 SYNC_DEFAULTS 同步。
+ */
+export const SYNC_DEFAULT_MOBILE_NAVIGATION = Object.freeze(['today', 'schedule', 'events', 'projects'])
+export const SYNC_DEFAULT_DESKTOP_NAVIGATION = Object.freeze([
+  { id: 'workspace', label: '今日', items: ['today'] },
+  { id: 'learning', label: '学习', items: ['schedule', 'course', 'tasks', 'exams'] },
+  { id: 'schedule', label: '日程', items: ['events', 'together'] },
+  { id: 'qixing', label: '齐行', items: ['projects'] },
+  { id: 'other', label: '其他', items: ['lists', 'bills', 'places', 'review'] },
+])
+
+const LEGACY_DEFAULT_MOBILE_NAVIGATION = Object.freeze([
+  Object.freeze(['today', 'tasks', 'schedule']),
+  SYNC_DEFAULT_MOBILE_NAVIGATION,
+])
+const LEGACY_DEFAULT_DESKTOP_NAVIGATIONS = Object.freeze([
+  LEGACY_DEFAULT_DESKTOP_NAVIGATION, PREVIOUS_DESKTOP_NAVIGATION, SYNC_DEFAULT_DESKTOP_NAVIGATION,
+])
+
 const registeredItems = new Map(navigationRegistry
   .filter((item) => item.available && item.pinnable)
   .map((item) => [item.id, item]))
@@ -47,7 +77,8 @@ export function navigationItem(id) {
 }
 
 export function normalizeMobileNavigation(value) {
-  if (Array.isArray(value) && JSON.stringify(value) === JSON.stringify(['today', 'tasks', 'schedule'])) {
+  if (Array.isArray(value) && LEGACY_DEFAULT_MOBILE_NAVIGATION
+    .some((layout) => JSON.stringify(value) === JSON.stringify(layout))) {
     return [...DEFAULT_MOBILE_NAVIGATION]
   }
   if (!Array.isArray(value)) return [...DEFAULT_MOBILE_NAVIGATION]
@@ -72,7 +103,7 @@ function normalizeGroupId(value, index) {
 }
 
 export function normalizeDesktopNavigation(value) {
-  if (Array.isArray(value) && [LEGACY_DEFAULT_DESKTOP_NAVIGATION, PREVIOUS_DESKTOP_NAVIGATION]
+  if (Array.isArray(value) && LEGACY_DEFAULT_DESKTOP_NAVIGATIONS
     .some((layout) => JSON.stringify(value) === JSON.stringify(layout))) {
     return DEFAULT_DESKTOP_NAVIGATION.map((group) => ({ ...group, items: [...group.items] }))
   }

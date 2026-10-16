@@ -66,8 +66,12 @@ export async function ensureSocialScheduleReady() {
 }
 
 function messageFor(code, fallback, action = '') {
+  if (action === 'campus_life_report_appeal_submit' && ['invalid_input', 'state_changed'].includes(code)) {
+    return fallback || (code === 'invalid_input' ? '申诉说明需要 10–500 个字。' : '该举报目前不符合申诉条件，或一次申诉机会已用完。')
+  }
   if (action.startsWith('campus_life_')) {
     const campusMessages = {
+      state_changed: '校园内容或状态已经变化，请刷新后重新核对。',
       private_contact_not_allowed: '公开内容或私信不能包含个人联系方式、取件码或宿舍房间号。',
         profile_required: '请先在“我的账号”填写学校资料；校园归属是自填信息，不代表学校认证。',
       campus_required: '请先填写学校和当前校区，再浏览该校园内容。',

@@ -18,8 +18,8 @@ export const CAMPUS_PAGE_SIZE = 30
 export const campusContentLabels = {
   place: '校园地点', teacher: '教师资料', course: '课程资料', assignment: '授课安排', course_review: '课程评价',
   market_listing: '二手信息', help_task: '互助任务', help_dispute: '互助争议', shuttle_route: '校车线路',
-  shuttle_exception: '特殊班次', shuttle_correction: '校车纠错', lost_found: '失物招领', event: '校园活动', guide: '校园指南', report: '用户举报',
-  matter: '真实事项', matter_response: '解决方案', matter_clarification: '关键澄清',
+  shuttle_exception: '特殊班次', shuttle_correction: '校车纠错', lost_found: '失物招领', event: '校园活动', guide: '校园指南', report: '用户举报', report_appeal: '举报申诉',
+  matter: '校园交流', matter_response: '交流回应', matter_clarification: '交流补充',
 }
 
 export const campusReportReasons = { inaccurate: '信息不准确', privacy: '隐私风险', abuse: '辱骂或骚扰', prohibited: '违规内容', other: '其他问题' }
@@ -56,6 +56,7 @@ const CONTENT_ROUTES = Object.freeze({
   matter: '/campus/matters',
   matter_response: '/campus/matters',
   matter_clarification: '/campus/matters',
+  report_appeal: '/campus/reports',
 })
 
 /** 内容类型对应的模块页；未知类型回落到「我的校园投稿」，那里至少有上下文。 */

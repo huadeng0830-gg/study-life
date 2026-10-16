@@ -286,7 +286,17 @@ async function bootstrap({ skipGate = false } = {}) {
  */
 function startOptionalWarmup() {
   // 更新检查不再阻塞首屏；浏览器空闲后注册 PWA，桌面端接入同一自动检查调度。
-  const startUpdater = () => void import('./composables/appUpdate.js')
+  // 注册之后立刻接上「资源就绪即自动应用」：等待中的 Service Worker 只有全部客户端
+  // 关闭才会自行激活，应用不主动应用的话，用户就只剩「完全退出重新进入」一条路。
+  // 判定条件（无未落盘改动、无打开的浮层）见 composables/updateAutoApply.js。
+  const startUpdater = () => {
+    void import('./composables/appUpdate.js')
+      .then(async (update) => {
+        const { startUpdateAutoApply } = await import('./composables/updateAutoApply.js')
+        startUpdateAutoApply({ state: update.webUpdateState, apply: update.applyAppUpdate })
+      })
+      .catch((error) => console.warn('[update] 自动更新未启动', error))
+  }
   whenIdle(startUpdater, { timeout: 5000, fallbackDelay: 5000, deferMs: 1200 })
 
   // 按钟点猜测下一页会在移动端额外下载整组业务页面，且与侧栏预取重叠。

@@ -1,6 +1,7 @@
 import { onScopeDispose, ref, watch } from 'vue'
 import { accountUser } from './accountAuth.js'
 import { campusErrorMessage } from './campusContentModel.js'
+import { campusProfileScopeChanged, subscribeSocialProfile } from './socialProfile.js'
 import { campusReadRevision, readCampusSnapshot, saveCampusSnapshot } from '../services/campusReadCache.js'
 
 /**
@@ -46,7 +47,8 @@ import { campusReadRevision, readCampusSnapshot, saveCampusSnapshot } from '../s
  */
 export function useCampusLifePage({ reloadOnAccountChange = true } = {}) {
   // Payload shapes differ by campus domain and are normalized by each caller.
-  const data = ref(/** @type {any} */ (null))
+  /** @type {import('vue').Ref<any>} */
+  const data = ref(null)
   const loading = ref(false)
   const error = ref('')
   const actionError = ref('')
@@ -66,6 +68,24 @@ export function useCampusLifePage({ reloadOnAccountChange = true } = {}) {
   function isLiveRead(revision, userId) { return active && revision === generation && currentUser() === userId }
   function isLiveWrite(owner, userId) { return active && owner === ownerGeneration && currentUser() === userId }
 
+  const unsubscribeProfile = subscribeSocialProfile((nextProfile, userId, previousProfile) => {
+    if (userId !== currentUser()) return
+    if (!campusProfileScopeChanged(nextProfile, previousProfile)) return
+    readController?.abort()
+    readController = null
+    generation += 1
+    data.value = null
+    loading.value = false
+    error.value = ''
+    actionError.value = ''
+    notice.value = ''
+    const owner = ownerGeneration
+    if (lastRequest) void Promise.resolve().then(() => {
+      if (active && owner === ownerGeneration) return load(lastRequest.request, null, { cacheKey: lastRequest.cacheKey })
+    })
+  })
+  onScopeDispose(unsubscribeProfile)
+
   watch(currentUser, () => {
     readController?.abort()
     generation += 1
@@ -83,6 +103,11 @@ export function useCampusLifePage({ reloadOnAccountChange = true } = {}) {
     })
   }, { flush: 'sync' })
 
+  /**
+   * @param {(signal: AbortSignal) => Promise<any>} request
+   * @param {any} [initial]
+   * @param {{cacheKey?: any}} [options]
+   */
   async function load(request, initial = null, { cacheKey = null } = {}) {
     readController?.abort()
     const controller = new AbortController()

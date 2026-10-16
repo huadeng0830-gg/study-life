@@ -56,7 +56,7 @@ function changePage(index) { return runSearch(submitted.value.term, submitted.va
             <p class="campus-life-result-count" role="status">“{{ submitted.term }}” · 本页 {{ results.length }} 条相关内容<span v-if="page.data.value?.hasMore"> · 还有更多结果</span></p>
             <article v-for="item in results" :key="`${item.type}:${item.id}`" class="campus-search-result">
               <div><span class="campus-life-tag">{{ campusContentLabel(item.type) }}</span><h2>{{ item.title }}</h2><p>{{ item.detail || '暂无补充说明。' }}</p><small v-if="item.campus">{{ item.campus }}</small></div>
-              <RouterLink class="btn btn-ghost" :to="resultRoute(item)">{{ item.type === 'matter' ? '看看这件事怎么处理' : `查看${campusContentLabel(item.type)}` }}</RouterLink>
+              <RouterLink class="btn btn-ghost" :to="resultRoute(item)">{{ item.type === 'matter' ? '查看交流内容' : `查看${campusContentLabel(item.type)}` }}</RouterLink>
             </article>
           </div>
         </CampusStateBlock>

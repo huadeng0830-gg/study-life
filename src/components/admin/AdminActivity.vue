@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { campusModerationHistory } from '../../services/campusLife.js'
 import { platformAdminRequest } from '../../services/platformAdmin.js'
 import { campusDateTimeLabel } from '../../composables/campusFormatting.js'
-/** @typedef {{ id: string, category: string, label: string, title: string, outcome: string, failed: boolean, reason: string, createdAt: string, targetId: string }} ActivityRow */
+/** @typedef {{ id: string, category: string, label: string, title: string, outcome: string, failed: boolean, reason: string, changeDetails: string, createdAt: string, targetId: string }} ActivityRow */
 const rows = ref(/** @type {ActivityRow[]} */ ([]))
 const loading = ref(false)
 const errors = ref(/** @type {string[]} */ ([]))
@@ -19,7 +19,8 @@ async function refresh() {
   const run = ++revision
   loading.value = true
   const sources = [
-    { category: 'accounts', label: '账号', load: () => platformAdminRequest('audit_list', { limit: 20 }) },
+    { category: 'accounts', label: '账号', load: () => platformAdminRequest('audit_list', { limit: 20, category: 'accounts' }) },
+    { category: 'feedback', label: '反馈', load: () => platformAdminRequest('audit_list', { limit: 20, category: 'feedback' }) },
     { category: 'places', label: '地点', load: () => platformAdminRequest('place_review_audit', { limit: 20 }) },
     { category: 'campus', label: '校园', load: () => campusModerationHistory(0) },
   ]
@@ -32,17 +33,27 @@ async function refresh() {
     const source = sources[index]
     if (result.status === 'rejected') { failures.push(source.label); return }
     const records = source.category === 'campus' ? result.value?.events || [] : Array.isArray(result.value) ? result.value : []
-    for (const event of records) {
+    for (const event of records.slice(0, 20)) {
       const place = source.category === 'places' || (source.category === 'campus' && event.target_type === 'place')
-      const category = place ? 'places' : source.category
+      const feedbackAudit = source.category === 'feedback' || (source.category === 'accounts' && String(event.action || '').startsWith('feedback.'))
+      const category = place ? 'places' : feedbackAudit ? 'feedback' : source.category
       const id = `${category}:${event.id}`
       if (seen.has(id)) continue
       seen.add(id)
       next.push({
-        id, category, label: place ? '地点' : source.label,
-        title: source.category === 'accounts' ? ({ 'user.suspend': '封禁账号', 'user.restore': '解除账号封禁', 'user.publish_restrict': '设置禁止发布', 'user.publish_restore': '解除禁止发布', 'reviewer.grant': '授予审核权限', 'reviewer.revoke': '撤销审核权限', 'registration.open': '恢复注册', 'registration.pause': '暂停注册' })[event.action] || '账号管理' : place ? ((event.decision || event.to_status) === 'approved' ? '通过地点' : '拒绝地点') : ({ approved: '审核通过', active: '已公开', open: '已公开', rejected: '退回或下架', resolved: '举报已处理', dismissed: '举报不成立', completed: '任务完成', cancelled: '任务取消' })[event.to_status] || '校园内容处理',
+        id, category, label: place ? '地点' : feedbackAudit ? '反馈' : source.label,
+        title: feedbackAudit ? '处理反馈' : source.category === 'accounts' ? ({ 'user.suspend': '封禁账号', 'user.restore': '解除账号封禁', 'user.publish_restrict': '设置禁止发布', 'user.publish_restore': '解除禁止发布', 'reviewer.grant': '授予审核权限', 'reviewer.revoke': '撤销审核权限', 'registration.open': '恢复注册', 'registration.pause': '暂停注册' })[event.action] || '账号管理' : place ? ((event.decision || event.to_status) === 'approved' ? '通过地点' : '拒绝地点') : ({ approved: '审核通过', active: '已公开', open: '已公开', rejected: '退回或下架', resolved: '举报已处理', dismissed: '举报不成立', completed: '任务完成', cancelled: '任务取消' })[event.to_status] || '校园内容处理',
         outcome: source.category === 'campus' ? '已保存' : ({ started: '处理中', succeeded: '已完成', failed: '失败' })[event.outcome] || '未知',
-        failed: event.outcome === 'failed', reason: event.reason || '', createdAt: event.created_at, targetId: event.place_id || event.target_user_id || event.target_id || '',
+        failed: event.outcome === 'failed', reason: event.reason || '',
+        changeDetails: feedbackAudit ? [
+          event.change_details?.fromStatus && event.change_details?.toStatus
+            ? `状态：${event.change_details.fromStatus} → ${event.change_details.toStatus}` : '',
+          event.change_details?.fromVisibility && event.change_details?.toVisibility
+            ? `公开方式：${event.change_details.fromVisibility} → ${event.change_details.toVisibility}` : '',
+          event.change_details?.rewardIssued ? `发放贡献豆：${Number(event.change_details.reward) || 0}` : '',
+        ].filter(Boolean).join(' · ') : '',
+        createdAt: event.created_at,
+        targetId: feedbackAudit ? event.change_details?.feedbackId || '' : event.place_id || event.target_user_id || event.target_id || '',
       })
     }
   })
@@ -56,12 +67,12 @@ onBeforeUnmount(() => { revision += 1 })
 </script>
 <template>
   <section class="admin-activity" aria-labelledby="admin-activity-title">
-    <div class="activity-toolbar"><h2 id="admin-activity-title">最近操作</h2><label>类型<select v-model="category"><option value="">全部类型</option><option value="accounts">账号</option><option value="places">地点</option><option value="campus">校园</option></select></label><button type="button" class="text-button" :disabled="loading" @click="refresh">{{ loading ? '刷新中' : '刷新' }}</button></div>
+    <div class="activity-toolbar"><h2 id="admin-activity-title">最近操作</h2><label>类型<select v-model="category"><option value="">全部类型</option><option value="accounts">账号</option><option value="feedback">反馈</option><option value="places">地点</option><option value="campus">校园</option></select></label><button type="button" class="text-button" :disabled="loading" @click="refresh">{{ loading ? '刷新中' : '刷新' }}</button></div>
     <p class="activity-limit">每类展示最近 20 条；校园完整记录可在内容审核中查询。</p>
     <p v-if="errors.length" role="alert">{{ errors.join('、') }}记录暂不可用。<button type="button" class="text-button" @click="refresh">重试</button></p>
     <p v-if="loading && !rows.length" role="status">正在读取操作记录…</p>
     <p v-else-if="!visible.length">当前没有操作记录。</p>
-    <ul v-else class="activity-list" :aria-busy="loading"><li v-for="row in visible" :key="row.id"><details><summary><span class="activity-category">{{ row.label }}</span><b>{{ row.title }}</b><span :class="{ 'activity-failed': row.failed }">{{ row.outcome }}</span><time :datetime="row.createdAt">{{ campusDateTimeLabel(row.createdAt) }}</time></summary><p>{{ row.reason || '未补充说明。' }}</p><p v-if="row.targetId" class="activity-target">{{ row.label }}编号：{{ row.targetId }}</p></details></li></ul>
+    <ul v-else class="activity-list" :aria-busy="loading"><li v-for="row in visible" :key="row.id"><details><summary><span class="activity-category">{{ row.label }}</span><b>{{ row.title }}</b><span :class="{ 'activity-failed': row.failed }">{{ row.outcome }}</span><time :datetime="row.createdAt">{{ campusDateTimeLabel(row.createdAt) }}</time></summary><p>{{ row.reason || '未补充说明。' }}</p><p v-if="row.changeDetails" class="activity-target">{{ row.changeDetails }}</p><p v-if="row.targetId" class="activity-target">{{ row.label }}编号：{{ row.targetId }}</p></details></li></ul>
     <nav v-if="pageCount > 1" class="activity-pagination" aria-label="操作记录分页"><button type="button" class="text-button" :disabled="page === 0" @click="page--">上一页</button><span>{{ page + 1 }} / {{ pageCount }}</span><button type="button" class="text-button" :disabled="page >= pageCount - 1" @click="page++">下一页</button></nav>
   </section>
 </template>

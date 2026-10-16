@@ -82,6 +82,11 @@ function failure(error: unknown) {
   if (/CAMPUS_REVISION_CHANGED/.test(marker)) return { status: 409, body: { code: 'state_changed', error: '记录状态已变化，请刷新后重试。' } }
   if (/CAMPUS_NOT_FOUND/.test(marker)) return { status: 404, body: { code: 'not_found', error: '记录已不可用。' } }
   if (/CAMPUS_INVALID_INPUT/.test(marker)) return { status: 400, body: { code: 'invalid_input', error: '请检查填写内容。' } }
+  // 三两豆兑换：这几条要给用户看得懂的理由，不能落到下面那句通用的「服务暂时不可用」。
+  if (/CAMPUS_BEAN_INSUFFICIENT/.test(marker)) return { status: 409, body: { code: 'insufficient_beans', error: '贡献豆还不够兑换这条权益。' } }
+  if (/CAMPUS_BEAN_OUT_OF_STOCK/.test(marker)) return { status: 409, body: { code: 'entitlement_sold_out', error: '这条权益已经被兑完了。' } }
+  if (/CAMPUS_BEAN_DISABLED|CAMPUS_BEAN_CODE_UNKNOWN/.test(marker)) return { status: 404, body: { code: 'entitlement_unavailable', error: '这条权益已下架。' } }
+  if (/CAMPUS_BEAN_(ACTOR_REQUIRED|CODE_INVALID|IDEMPOTENCY_INVALID)/.test(marker)) return { status: 400, body: { code: 'invalid_input', error: '兑换请求无效，请重新打开页面后再试。' } }
   console.error('[campus-community] request failed', (error as any)?.code || 'unknown')
   return { status: 503, body: { code: 'service_unavailable', error: '校园社区服务暂时不可用，请稍后重试。' } }
 }
@@ -199,6 +204,52 @@ async function wallet(userId: string) {
   return { wallet: result.data, ledger: ledger.data || [] }
 }
 
+/**
+ * 三两豆主页：余额 + 权益目录 + 我的权益 + 最近流水。
+ *
+ * 一次 HTTP 请求取全，而不是让页面为四块内容各发一次 —— 免费层的调用配额与
+ * 移动网络往返都要省（见 docs/PERFORMANCE-RULES.md）。
+ */
+async function beansHome(userId: string) {
+  const [walletResult, entitlements] = await Promise.all([
+    admin.rpc('campus_bean_wallet', { p_actor: userId }),
+    admin.rpc('campus_bean_entitlements', { p_actor: userId }),
+  ])
+  if (walletResult.error) throw walletResult.error
+  if (entitlements.error) throw entitlements.error
+  const ledger = await admin.from('campus_bean_ledger')
+    .select('id,bean_type,amount,debt_delta,balance_after,debt_after,entry_type,reason,created_at')
+    .eq('user_id', userId).order('created_at', { ascending: false }).limit(40)
+  if (ledger.error) throw ledger.error
+  return {
+    wallet: walletResult.data,
+    catalog: entitlements.data?.catalog || [],
+    owned: entitlements.data?.owned || [],
+    ledger: ledger.data || [],
+  }
+}
+
+/**
+ * 兑换一条权益。
+ *
+ * `idempotencyKey` 必须由客户端生成并**在重试时保持不变**：扣豆是不可逆的，
+ * 没有这个键的话「请求已入库但响应丢失」后的重试就是重复扣费。
+ */
+async function redeemEntitlement(user: any, payload: any) {
+  const code = String(payload?.code ?? '').trim()
+  if (!/^[a-z][a-z0-9_]{2,39}$/.test(code)) throw new CommunityError('invalid_input', '权益编号无效。')
+  const idempotencyKey = String(payload?.idempotencyKey ?? '').trim()
+  if (!/^[A-Za-z0-9:_-]{8,220}$/.test(idempotencyKey))
+    throw new CommunityError('invalid_input', '兑换请求标识无效，请重新打开页面后再试。')
+  // 兑换会扣豆：按账号限流，避免脚本批量刷（写入型动作才限流，见 PERFORMANCE-RULES）。
+  await rateLimit(user.id, 'bean_redeem', 20, 3600)
+  const result = await admin.rpc('campus_bean_redeem', {
+    p_actor: user.id, p_code: code, p_idempotency_key: idempotencyKey,
+  })
+  if (result.error) throw result.error
+  return result.data
+}
+
 async function ownerApplications(actorId: string) {
   const { data, error } = await admin.from('campus_reviewer_applications')
     .select('id,user_id,school,campus,reason,status,owner_note,applicant_response,scope_school,scope_campus,created_at,updated_at')
@@ -304,9 +355,11 @@ async function handle(request: Request, action: string, payload: any) {
   await assertAccountAccess(admin, user.id, 'campus-community', action, payload, CommunityError)
   if (action === 'feedback_vote') return voteFeedback(await requireVerified(request, user), payload)
   if (action === 'feedback_votes') return ownFeedbackVotes(user.id, payload)
+  if (action === 'bean_redeem') return redeemEntitlement(await requireVerified(request, user), payload)
   if (action === 'submit') return submitSuggestion(user, payload)
   if (action === 'mine') return listMine(user.id, payload)
   if (action === 'wallet') return wallet(user.id)
+  if (action === 'beans_home') return beansHome(user.id)
   if (action === 'reviewer_apply') return applyReviewer(await requireVerified(request, user), payload)
   if (action === 'reviewer_application_mine') return myReviewerApplication(user.id)
   if (action === 'reviewer_application_reply') return replyToReviewerApplication(await requireVerified(request, user), payload)

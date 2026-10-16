@@ -22,8 +22,17 @@ const desktopPackage = JSON.parse(readFileSync(new URL('./desktop-app/package.js
 if (rootPackage.version !== APP_VERSION || desktopPackage.version !== APP_VERSION) {
   throw new Error(`正式版本来源不一致：release.config.js=${APP_VERSION}，package.json=${rootPackage.version}，desktop-app=${desktopPackage.version}。请运行 npm run release:bump。`)
 }
-// 开发与测试期间允许逐步修改；正式 build 必须通过说明一致性检查。
-if (env.NODE_ENV === 'production' && RELEASE_SOURCE_SIGNATURE !== sourceSignature) {
+// 发布闸门只对**正式发布构建**生效：Cloudflare Pages 的 `npm run build`、
+// `npm run check:release` 与打包桌面版。日常开发与 `npm run check` 走
+// scripts/build-check.mjs，它把 STUDY_LIFE_RELEASE_GATE 设为 0。
+//
+// 为什么必须分开：NODE_ENV 在 Vite 载入本配置之前就已被置为 production，
+// 于是原先把闸门挂在 NODE_ENV 上等于「改一行 src 就必须先发一个版本」，
+// `npm run check` 与 CI 质量门禁都会因此变红，只发 Web 也被迫改动 Windows 版本号。
+// 发版一致性仍由 `npm run check:release` 与发布流程把关。
+const releaseGateEnabled = env.STUDY_LIFE_RELEASE_GATE !== '0'
+const releaseSourceSynced = RELEASE_SOURCE_SIGNATURE === sourceSignature
+if (env.NODE_ENV === 'production' && releaseGateEnabled && !releaseSourceSynced) {
   throw new Error(
     `发布源码已经变化，但更新说明尚未同步。请运行 npm run release:bump -- --notes "说明一|说明二"，` +
     `再确认 README 中的版本和最近更新内容与本次改动一致。当前源码签名为 '${sourceSignature}'。`
@@ -33,6 +42,9 @@ if (env.NODE_ENV === 'production' && RELEASE_SOURCE_SIGNATURE !== sourceSignatur
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
   const desktopBuild = mode === 'desktop'
+  // 测试环境同样没有 `virtual:pwa-register` 的注入实现，而应用壳会静态导入它。
+  // 别名到替身，免得每个挂载真实应用的用例都要自己 mock（见 tests/helpers/pwaRegisterStub.js）。
+  const testBuild = env.VITEST === 'true' || mode === 'test'
   const accountEnv = loadEnv(mode, '.', ['VITE_SUPABASE_'])
   if ((accountEnv.VITE_SUPABASE_URL || accountEnv.VITE_SUPABASE_PUBLISHABLE_KEY) && !getSupabaseConfig(accountEnv)) {
     throw new Error('Supabase 账号配置不完整或密钥不安全：请使用有效项目 URL 与 publishable / anon key，禁止使用 secret / service_role key。')
@@ -52,7 +64,9 @@ export default defineConfig(({ mode }) => {
   const buildId = deploymentId || (env.GITHUB_RUN_ID
     ? `gh-${env.GITHUB_RUN_ID}-${env.GITHUB_RUN_ATTEMPT || '1'}`
     : `${commitId.slice(0, 12)}-${sourceSignature}`)
-  const buildInfo = Object.freeze({ buildId, commitId, sourceSignature,
+  // releaseVerified=false 表示这次构建的源码与 release.config.js 的说明/版本尚未同步，
+  // 只可能出现在本地非发布构建里；正式发布构建为 true。
+  const buildInfo = Object.freeze({ buildId, commitId, sourceSignature, releaseVerified: releaseSourceSynced,
     schemaVersion: ACCOUNT_SYNC_DATA_SCHEMA_VERSION, domainSchemaVersion: DOMAIN_SCHEMA_VERSION })
   const releaseHistory = JSON.parse(readFileSync(new URL('./release-history.json', import.meta.url), 'utf8'))
   const releaseManifest = createReleaseManifest({ appVersion: APP_VERSION, legacyVersion: LEGACY_RELEASE_VERSION,
@@ -71,6 +85,8 @@ export default defineConfig(({ mode }) => {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
       ...(desktopBuild ? {
         'virtual:pwa-register': fileURLToPath(new URL('./desktop/pwa-register-shim.js', import.meta.url)),
+      } : testBuild ? {
+        'virtual:pwa-register': fileURLToPath(new URL('./tests/helpers/pwaRegisterStub.js', import.meta.url)),
       } : {}),
     },
   },

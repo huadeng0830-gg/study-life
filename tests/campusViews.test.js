@@ -560,7 +560,10 @@ describe('缺少学校时给出可执行的下一步', () => {
     const alert = host.querySelector('[role="alert"]')
     expect(alert).toBeTruthy()
     expect(alert.textContent).toContain('学校')
-    expect(alert.querySelector('a')?.getAttribute('href')).toBe('/together')
+    const profileButton = alert.querySelector('button')
+    expect(profileButton?.textContent).toContain('我的账号')
+    profileButton?.click()
+    expect(serviceState.accountSectionRequests).toEqual(['profile'])
   })
 
   it('已经填了学校时不再显示该提示', async () => {

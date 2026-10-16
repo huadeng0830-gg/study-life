@@ -28,6 +28,7 @@ import {
   dismissGlobalError,
   reloadAfterError,
 } from './composables/globalError.js'
+import GlobalUpdateNotice from './components/GlobalUpdateNotice.vue'
 import { isTaskActionable } from './composables/domain/state.js'
 import { accountUser, hasPersistedAccountSession, initializeAccountAuth } from './composables/accountAuth.js'
 import { accountCloudRestricted, restrictionSnapshotKnown } from './composables/accountRestrictions.js'
@@ -48,7 +49,6 @@ retireLegacySyncState()
 const UpdateNotes = defineAsyncComponent(() => import('./components/UpdateNotes.vue'))
 const QuickRecordPanel = defineAsyncComponent(() => import('./components/QuickRecordPanel.vue'))
 const AccountRestrictionNotice = defineAsyncComponent(() => import('./components/account/AccountRestrictionNotice.vue'))
-
 const route = useRoute()
 const restrictedCloudPage = computed(() => Boolean(accountUser.value) && (accountCloudRestricted.value || !restrictionSnapshotKnown.value) && /^\/(?:campus|together|feedback|social|projects?|platform-admin|admin)(?:\/|$)/.test(route.path))
 const router = useRouter()
@@ -439,6 +439,7 @@ function t(key) {
          只给 id 的话各浏览器行为不一致，有的只移动「顺序焦点起点」而不移动焦点。 -->
     <main id="main-content" class="content" :class="widthClass" tabindex="-1">
       <div v-if="hasGlobalAlert" class="global-alert-reserve" :style="{ '--alert-count': `${alertCount}` }" aria-hidden="true" />
+      <GlobalUpdateNotice />
       <header v-if="!isAdminWorkspace" class="desktop-toolbar" aria-label="桌面常用操作">
         <button
           type="button"
@@ -970,5 +971,4 @@ to {
   transition:opacity var(--dur-fast) var(--ease-standard)}
 .page-enter-from,.page-leave-to {
   opacity:0}
-
 </style>

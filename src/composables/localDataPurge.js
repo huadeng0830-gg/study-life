@@ -4,6 +4,7 @@ import { clearAccountLocalData, withAccountDataLock } from './accountLocalData.j
 import { captureAccountDataIdentity, setAccountDataOwner } from './accountSyncIdentity.js'
 import { clearRestoreCheckpoint } from './dataVault.js'
 import { clearStoredDataByPrefix, flushStoredWrites } from './store/core.js'
+import { LOCAL_DRAFT_KEY_PREFIXES } from './localDraftKeys.js'
 import { clearAllWallpapers } from './wallpaperStorage.js'
 import { needsBackup } from './backupReminder.js'
 
@@ -20,8 +21,9 @@ import { needsBackup } from './backupReminder.js'
  * 三个人都只能去清除浏览器网站数据 —— 那会连主题、同步设置和账号会话
  * 一起抹掉，而且恢复点也没了。
  *
- * 【它做什么】按 `sl_` 前缀清本机记录、账号本机副本、壁纸图片和恢复点。
- * 【它不做什么】不登出账号、不删云端快照、不碰非 `sl_` 的应用设置。
+ * 【它做什么】按 `sl_` 前缀清本机记录、清掉没有 `sl_` 前缀的用户内容草稿
+ * （校园投稿正文、快速记录、成果提交）、账号本机副本、壁纸图片和恢复点。
+ * 【它不做什么】不登出账号、不删云端快照、不碰非 `sl_` 的应用设置与状态标记。
  */
 export function useLocalDataPurge() {
   const purging = ref(false)
@@ -47,6 +49,12 @@ export function useLocalDataPurge() {
         assertLock()
         await clearStoredDataByPrefix('sl_')
         assertLock()
+        // 草稿类键没有 `sl_` 前缀，但写的是用户内容（校园投稿正文、快速记录、成果提交）。
+        // 以前它们既不被清空也不计入用量，「清空本机数据」之后仍留在设备上。
+        for (const prefix of LOCAL_DRAFT_KEY_PREFIXES) {
+          await clearStoredDataByPrefix(prefix)
+          assertLock()
+        }
         // 壁纸在独立的 IndexedDB 里，不在 sl_ 前缀下。以前连退出账号都漏掉它，
         // 于是「清空数据」之后图片还留在设备上。
         await clearAllWallpapers()
@@ -66,7 +74,7 @@ export function useLocalDataPurge() {
 
   /** 确认框文案：说清楚删什么、不删什么，以及唯一的退路是什么。 */
   const confirmMessage = computed(() => {
-    const scope = '课程、待办、日程、账本、专注、清单、地点记录、通知档案等全部本机记录，以及账号本机副本、壁纸图片和本机恢复点'
+    const scope = '课程、待办、日程、账本、专注、清单、地点记录、通知档案等全部本机记录，未完成的投稿/记录/提交草稿，以及账号本机副本、壁纸图片和本机恢复点'
     const cloud = signedIn.value
       ? '云端已同步的记录不会删除，其它设备不受影响；本机同步会在重新载入后重新开始。'
       : '本机没有账号副本可删，清空后需要重新登录并重新同步。'

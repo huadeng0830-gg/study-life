@@ -12,7 +12,7 @@ async function applyAndSettle(controller, repair = false) {
   await vi.advanceTimersByTimeAsync(450)
   return result
 }
-function fixture({ release = latest, fetchFn, worker = null, offline = false, noWorker = false } = {}) {
+function fixture({ release = latest, fetchFn, worker = null, offline = false, noWorker = false, beforeReload = null } = {}) {
   const manifest = makeReleaseManifest(release)
   const registration = new EventTarget()
   registration.scope = 'https://fixture.invalid/'
@@ -28,9 +28,9 @@ function fixture({ release = latest, fetchFn, worker = null, offline = false, no
   const fetchMock = fetchFn || vi.fn(async (path) => releaseFetchResponse(path, manifest))
   const reload = vi.fn()
   const controller = createWebUpdateController({ currentVersion: current, currentSourceSignature: TEST_SOURCE_SIGNATURE,
-    currentBuildId: TEST_BUILD_ID, navigatorRef, fetchFn: fetchMock, reload })
+    currentBuildId: TEST_BUILD_ID, navigatorRef, fetchFn: fetchMock, reload, beforeReload })
   controllers.push(controller)
-  return { controller, registration, serviceWorker, fetchMock, reload }
+  return { controller, registration, serviceWorker, fetchMock, reload, navigatorRef }
 }
 beforeEach(() => { vi.useFakeTimers(); sessionStorage.clear() })
 afterEach(() => { controllers.forEach((controller) => controller.dispose()); controllers = []; vi.clearAllTimers(); vi.useRealTimers() })
@@ -164,7 +164,7 @@ describe('网页更新的操作、事件和实际版本验证', () => {
     expect(controller.state).toMatchObject({ stage: 'ready', taskPending: false })
   })
 
-  it('应用前通过 BroadcastChannel 检测其他标签页并阻止影响其数据的重载', async () => {
+  it('应用更新时通知其他标签页一起刷新，而不是阻止本次更新', async () => {
     const peers = new Set()
     class TestChannel {
       listeners = new Set()
@@ -178,6 +178,8 @@ describe('网页更新的操作、事件和实际版本验证', () => {
     }
     const windowRef = {
       BroadcastChannel: TestChannel,
+      addEventListener: window.addEventListener.bind(window),
+      removeEventListener: window.removeEventListener.bind(window),
       setTimeout: window.setTimeout.bind(window),
       clearTimeout: window.clearTimeout.bind(window),
       sessionStorage,
@@ -185,16 +187,122 @@ describe('网页更新的操作、事件和实际版本验证', () => {
       caches: window.caches,
     }
     const fetchFn = vi.fn(async (path) => releaseFetchResponse(path, makeReleaseManifest(latest)))
+    const firstReload = vi.fn()
+    const secondReload = vi.fn()
+    const flushed = []
     const first = createWebUpdateController({ currentVersion: current, currentSourceSignature: TEST_SOURCE_SIGNATURE,
-      navigatorRef: { onLine: true }, windowRef, fetchFn, reload: vi.fn() })
+      navigatorRef: { onLine: true }, windowRef, fetchFn, reload: firstReload,
+      beforeReload: () => flushed.push('first') })
     const second = createWebUpdateController({ currentVersion: current, currentSourceSignature: TEST_SOURCE_SIGNATURE,
-      navigatorRef: { onLine: true }, windowRef: { ...windowRef }, fetchFn, reload: vi.fn() })
+      navigatorRef: { onLine: true }, windowRef: { ...windowRef }, fetchFn, reload: secondReload,
+      beforeReload: () => flushed.push('second') })
     controllers.push(first, second)
     const applying = first.apply()
     await vi.advanceTimersByTimeAsync(450)
-    await expect(applying).resolves.toBe(false)
-    expect(first.state).toMatchObject({ stage: 'warning', error: { code: 'OTHER_TASK' } })
-    expect(fetchFn.mock.calls.some(([url]) => String(url).startsWith('/index.html'))).toBe(false)
+    // 旧实现在这里 throw OTHER_TASK（「请先保存并关闭其他窗口」），
+    // 于是只要开着第二个标签页，应用内更新就永远点不动 —— 用户只剩「全部退出再进来」。
+    await expect(applying).resolves.toBe(true)
+    expect(first.state.error).toBeNull()
+    // 同伴先落盘再刷新：新 Worker 接管后旧分包 URL 全部失效，留在旧页面上并不能保住数据。
+    expect(flushed).toContain('second')
+    expect(secondReload).toHaveBeenCalledTimes(1)
+    expect(second.state.stage).toBe('manual-reload')
+    expect(firstReload).toHaveBeenCalledTimes(1)
+  })
+
+  it('未成功落盘时暂停当前标签页刷新，落盘后允许手动继续', async () => {
+    const worker = new EventTarget()
+    worker.state = 'installed'
+    worker.postMessage = vi.fn()
+    const flush = vi.fn().mockReturnValueOnce({ ok: false, pendingKeys: ['sl_tasks'] })
+      .mockReturnValue({ ok: true, pendingKeys: [] })
+    const { controller, reload } = fixture({ worker, beforeReload: flush })
+    await controller.check()
+    expect(controller.state.stage).toBe('ready')
+
+    worker.state = 'activated'
+    await expect(applyAndSettle(controller)).resolves.toBe(true)
+    expect(reload).not.toHaveBeenCalled()
+    expect(controller.state).toMatchObject({ stage: 'manual-reload', taskPending: false })
+    expect(controller.state.message).toContain('尚未成功保存')
+
+    await expect(applyAndSettle(controller)).resolves.toBe(true)
+    expect(reload).toHaveBeenCalledTimes(1)
+  })
+
+  it('同伴标签页落盘失败时不重载并保留可手动恢复状态', async () => {
+    const peers = new Set()
+    class TestChannel {
+      listeners = new Set()
+      constructor() { peers.add(this) }
+      addEventListener(type, listener) { if (type === 'message') this.listeners.add(listener) }
+      postMessage(data) {
+        for (const peer of peers) if (peer !== this)
+          for (const listener of peer.listeners) listener({ data })
+      }
+      close() { peers.delete(this) }
+    }
+    const windowRef = {
+      BroadcastChannel: TestChannel,
+      addEventListener: window.addEventListener.bind(window),
+      removeEventListener: window.removeEventListener.bind(window),
+      setTimeout: window.setTimeout.bind(window),
+      clearTimeout: window.clearTimeout.bind(window),
+      sessionStorage,
+      location: window.location,
+      caches: window.caches,
+    }
+    const fetchFn = vi.fn(async (path) => releaseFetchResponse(path, makeReleaseManifest(latest)))
+    const firstReload = vi.fn()
+    const secondReload = vi.fn()
+    const secondFlush = vi.fn().mockReturnValueOnce({ ok: false, pendingKeys: ['sl_tasks'] })
+      .mockReturnValue({ ok: true, pendingKeys: [] })
+    const first = createWebUpdateController({ currentVersion: current, currentSourceSignature: TEST_SOURCE_SIGNATURE,
+      navigatorRef: { onLine: true }, windowRef, fetchFn, reload: firstReload,
+      beforeReload: () => ({ ok: true, pendingKeys: [] }) })
+    const second = createWebUpdateController({ currentVersion: current, currentSourceSignature: TEST_SOURCE_SIGNATURE,
+      navigatorRef: { onLine: true }, windowRef: { ...windowRef }, fetchFn, reload: secondReload,
+      beforeReload: secondFlush })
+    controllers.push(first, second)
+
+    await expect(applyAndSettle(first)).resolves.toBe(true)
+    expect(secondReload).not.toHaveBeenCalled()
+    expect(second.state).toMatchObject({ stage: 'manual-reload', taskPending: false })
+    expect(second.state.message).toContain('尚未成功保存')
+    expect(firstReload).toHaveBeenCalledTimes(1)
+
+    window.dispatchEvent(new Event('study-life:storage-updated'))
+    expect(secondReload).toHaveBeenCalledTimes(1)
+  })
+
+  it('已下载并核对过的新版本在离线时也能应用，不必退出重进', async () => {
+    const worker = new EventTarget()
+    worker.state = 'installed'
+    worker.postMessage = vi.fn()
+    const { controller, navigatorRef } = fixture({ worker })
+    await controller.check()
+    expect(controller.state.stage).toBe('ready')
+    // 旧实现无论什么状态都先要求联网重取 release.json + 预检入口资源，
+    // 弱网与离线点「立即重新加载」必然失败 —— 而「退出再进来」不需要网络。
+    navigatorRef.onLine = false
+    await expect(applyAndSettle(controller)).resolves.toBe(true)
+    expect(controller.state.error).toBeNull()
+    expect(worker.postMessage).toHaveBeenCalledTimes(1)
+  })
+
+  it('同一内容重新部署（buildId 变化）不会被判成版本验证失败', async () => {
+    sessionStorage.setItem(PENDING_WEB_UPDATE_KEY, JSON.stringify({
+      fromVersion: current, toVersion: latest,
+      expectedBuildId: 'old-deployment-host', expectedSourceSignature: TEST_SOURCE_SIGNATURE,
+      action: 'update', startedAt: Date.now() - 1000, savedAt: Date.now() - 1000,
+    }))
+    const controller = createWebUpdateController({ currentVersion: latest, currentSourceSignature: TEST_SOURCE_SIGNATURE,
+      currentBuildId: 'new-deployment-host', navigatorRef: {}, reload: vi.fn() })
+    controllers.push(controller)
+    // buildId 是部署标识（Pages 用部署主机名），重新部署就会变；
+    // 内容身份是源码签名，未变即视为这次更新成功。
+    expect(controller.state).toMatchObject({ stage: 'completed' })
+    expect(sessionStorage.getItem(PENDING_WEB_UPDATE_KEY)).toBeNull()
   })
 
   it('核对修复入口期间出现新 Worker，也不删除正在接收的资源', async () => {
@@ -225,14 +333,24 @@ describe('网页更新的操作、事件和实际版本验证', () => {
     expect(controller.state.stage).toBe('error')
   })
 
-  it.each([
-    ['构建编号', { currentBuildId: 'different-build', currentSourceSignature: TEST_SOURCE_SIGNATURE }],
-    ['源码签名', { currentBuildId: TEST_BUILD_ID, currentSourceSignature: 'fedcba9876543210' }],
-  ])('运行版本相同但%s不符时不宣告更新成功', (_label, identity) => {
+  it('运行版本相同、源码签名也相同，但构建编号因重新部署而不同时仍视为更新成功', () => {
     sessionStorage.setItem(PENDING_WEB_UPDATE_KEY, JSON.stringify({ fromVersion: current, toVersion: latest,
       expectedBuildId: TEST_BUILD_ID, expectedSourceSignature: TEST_SOURCE_SIGNATURE, savedAt: Date.now() }))
-    const controller = createWebUpdateController({ currentVersion: latest, currentBuildId: identity.currentBuildId,
-      currentSourceSignature: identity.currentSourceSignature, navigatorRef: {}, reload: vi.fn() })
+    // buildId 是**部署标识**（Pages 用部署主机名 / CI 运行号），同一份内容重新部署就会变。
+    // 拿它判定会把一次成功的更新判成失败，用户看到「更新成功却报失败」。
+    const controller = createWebUpdateController({ currentVersion: latest, currentBuildId: 'different-build',
+      currentSourceSignature: TEST_SOURCE_SIGNATURE, navigatorRef: {}, reload: vi.fn() })
+    controllers.push(controller)
+    expect(controller.state).toMatchObject({ stage: 'completed', error: null })
+    expect(sessionStorage.getItem(PENDING_WEB_UPDATE_KEY)).toBeNull()
+  })
+
+  it('运行版本相同但源码签名不符时不宣告更新成功', () => {
+    sessionStorage.setItem(PENDING_WEB_UPDATE_KEY, JSON.stringify({ fromVersion: current, toVersion: latest,
+      expectedBuildId: TEST_BUILD_ID, expectedSourceSignature: TEST_SOURCE_SIGNATURE, savedAt: Date.now() }))
+    // 内容身份是源码签名：同一版本内容不一致必须拦住。
+    const controller = createWebUpdateController({ currentVersion: latest, currentBuildId: TEST_BUILD_ID,
+      currentSourceSignature: 'fedcba9876543210', navigatorRef: {}, reload: vi.fn() })
     controllers.push(controller)
     expect(controller.state).toMatchObject({ stage: 'error', error: { code: 'VERSION_VERIFY' } })
     expect(controller.state.error.message).toContain('版本或构建')

@@ -7,12 +7,15 @@ import {
   DEFAULT_MOBILE_NAVIGATION,
   DESKTOP_NAVIGATION_KEY,
   MOBILE_NAVIGATION_KEY,
+  SYNC_DEFAULT_DESKTOP_NAVIGATION,
+  SYNC_DEFAULT_MOBILE_NAVIGATION,
   desktopNavigation,
   mobileNavigation,
   moveNavigationItem,
   normalizeDesktopNavigation,
   normalizeMobileNavigation,
 } from '../src/composables/navigationPreferences.js'
+import { SYNC_DEFAULTS } from '../src/composables/syncKeys.js'
 import { navigationRegistry } from '../src/router/navigation.js'
 import { routes } from '../src/router/routes.js'
 
@@ -32,6 +35,18 @@ describe('navigation registry and saved layouts', () => {
     expect(new Set(navigationRegistry.map((item) => item.id)).size).toBe(navigationRegistry.length)
     expect(navigationRegistry.every((item) => routePaths.has(item.path))).toBe(true)
     expect(navigationRegistry.every((item) => item.label && item.icon && item.pinnable)).toBe(true)
+  })
+
+  it('SYNC_DEFAULTS 里的导航默认值是能升级的旧默认，不会把旧布局永久留在设备上', () => {
+    // 这两个值是「云快照缺这个键时补什么」的答案，与应用自己会生成的默认**不同**。
+    // 认不出来的话，新设备首次拉取云端快照就得到一个应用永远不会自己生成的旧布局，
+    // 并被当成用户自定义永久保留 —— 用户看到旧分组名与错误的底栏项。
+    expect(normalizeMobileNavigation(SYNC_DEFAULTS.sl_navigation_mobile)).toEqual([...DEFAULT_MOBILE_NAVIGATION])
+    expect(normalizeDesktopNavigation(SYNC_DEFAULTS.sl_navigation_desktop))
+      .toEqual(DEFAULT_DESKTOP_NAVIGATION.map((group) => ({ ...group, items: [...group.items] })))
+    // 常量必须与 SYNC_DEFAULTS 同步，否则上面的迁移会在发布时静默失效。
+    expect(SYNC_DEFAULT_MOBILE_NAVIGATION).toEqual(SYNC_DEFAULTS.sl_navigation_mobile)
+    expect(SYNC_DEFAULT_DESKTOP_NAVIGATION).toEqual(SYNC_DEFAULTS.sl_navigation_desktop)
   })
 
   it('deduplicates mobile entries, caps the list, preserves an intentional empty list, and repairs stale IDs', () => {

@@ -255,4 +255,11 @@ function handleThreadToggle(event, row) {
 @media(max-width:900px){.feedback-admin-summary{grid-template-columns:minmax(0,1fr) 230px;gap:8px 16px}.feedback-admin-summary time{grid-column:1/-1}.feedback-admin-row-toggle{align-items:flex-start}.feedback-admin-open{padding-top:3px}}
 @media(max-width:520px){.feedback-admin{padding-top:16px}.feedback-admin .feedback-admin-search{padding:0 14px;flex-wrap:wrap;gap:8px}.feedback-admin-search input{flex-basis:100%;font-size:16px}.feedback-admin .feedback-admin-filters{padding:0 14px 16px;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}.feedback-admin-filters select{width:100%;min-width:0;font-size:16px}.feedback-admin .admin-record{padding-inline:14px}.feedback-admin-summary{grid-template-columns:minmax(0,1fr)}.feedback-admin-summary>b{white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}.feedback-admin-summary time{grid-column:auto}.feedback-admin-row-toggle{gap:12px}.feedback-admin-summary time{font-size:var(--fs-12)}}
 .feedback-admin-support{font-size:var(--fs-12);color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap}
+/* 触控尺寸：项目标准是 44px（docs/uiux-refactor-2026-10-16.md），而这块管理界面的
+   输入框、下拉与工具条控件只有 38–40px。只在窄屏或粗指针下抬到 44px，不改桌面观感。 */
+@media (max-width:900px), (pointer: coarse) {
+  .community-admin .record-form input, .community-admin .record-form select, .community-admin .record-form textarea,
+  .community-admin .toolbar-actions input, .community-admin .admin-record > label textarea,
+  .community-admin .thread-content input, .feedback-admin-filters select, .feedback-admin-search input { min-height:44px; }
+}
 </style>

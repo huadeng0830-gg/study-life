@@ -1,6 +1,7 @@
 <script setup>
 import { computed, reactive, ref, watch } from 'vue'
 import { accountUser } from '../../composables/accountAuth.js'
+import { publishSocialProfile } from '../../composables/socialProfile.js'
 import { hasVerifiedContactEmail } from '../../composables/accountVerification.js'
 import { socialRequest } from '../../services/social.js'
 import { Button } from '../ui/button'
@@ -72,6 +73,7 @@ async function loadProfile() {
 
 async function saveProfile() {
   if (profileSaving.value || !accountUser.value) return
+  const userId = accountUser.value.id
   saveError.value = ''
   notice.value = ''
   if (!draft.nickname.trim()) { saveError.value = '请填写昵称。'; return }
@@ -83,7 +85,12 @@ async function saveProfile() {
       emailDiscoverable: hasVerifiedEmail.value ? draft.emailDiscoverable : false,
       timezone: draft.timezone, availabilityPreferences: { ...draft.availabilityPreferences },
     })
-    if (savingRequest.live(revision)) { applyProfile(result.profile); notice.value = '个人资料与可约偏好已保存。' }
+    if (savingRequest.live(revision) && accountUser.value?.id === userId) {
+      const previousProfile = profile.value
+      applyProfile(result.profile)
+      publishSocialProfile(result.profile, userId, previousProfile)
+      notice.value = '个人资料与可约偏好已保存，校园范围已同步。'
+    }
   } catch (cause) { if (savingRequest.live(revision)) saveError.value = campusErrorMessage(cause, '保存没有完成，请重试。') }
   finally { if (savingRequest.live(revision)) profileSaving.value = false }
 }
@@ -92,6 +99,7 @@ async function saveProfile() {
 // 那里会挂着一句和它无关的红字。
 watch(() => [accountUser.value?.id, props.section], (next, previous) => {
   request.invalidate()
+  savingRequest.invalidate()
   if (next[0] !== previous?.[0]) { applyProfile(null); profileSaving.value = false }
   loadError.value = ''
   saveError.value = ''
@@ -105,7 +113,7 @@ watch(() => beans.loading.value, (value) => { walletLoading.value = value })
 
 <template>
   <section v-if="section === 'profile'" class="account-community-settings">
-    <div class="settings-heading"><span class="account-settings-index">{{ SECTION_INDEX.profile }}</span><h3>个人资料与校园范围</h3><p>学校和校区由你自行填写，用于校园内容筛选及审核员申请，不代表学校官方认证。</p></div>
+    <div class="settings-heading"><span class="account-settings-index">{{ SECTION_INDEX.profile }}</span><h3>个人资料与校园范围</h3><p>学校和校区由你自行填写，用于校园内容筛选及审核员申请，不代表学校官方认证。保存后，已打开的校园页面会立即更新范围。</p></div>
     <p v-if="loadError" class="settings-message error" role="alert">{{ loadError }} <button type="button" class="text-button" :disabled="profileLoading" @click="loadProfile">重新读取</button></p>
     <p v-else-if="saveError" class="settings-message error" role="alert">{{ saveError }}</p>
     <p v-if="notice" class="settings-message success" role="status">{{ notice }}</p>
@@ -126,15 +134,15 @@ watch(() => beans.loading.value, (value) => { walletLoading.value = value })
   </section>
 
   <section v-else class="account-community-settings">
-    <div class="settings-heading"><span class="account-settings-index">{{ SECTION_INDEX.beans }}</span><h3>余额与变动记录</h3><p>充值豆和贡献豆分别记账。充值暂未开放；贡献豆不提现、不转赠，可用于后续配置的应用内数字权益。</p></div>
+    <div class="settings-heading"><span class="account-settings-index">{{ SECTION_INDEX.beans }}</span><h3>余额与变动记录</h3><p>充值豆和贡献豆分别记账。充值暂未开放；贡献豆不提现、不转赠，可兑换应用内数字权益。</p></div>
     <p v-if="beans.error.value" class="settings-message error" role="alert">{{ beans.error.value }} <button type="button" class="text-button" :disabled="beans.loading.value" @click="beans.load">重新读取</button></p>
     <p v-if="!signedIn" class="settings-empty">登录后可查看个人贡献记录。</p>
     <p v-else-if="walletLoading || beans.loading.value" class="settings-empty" role="status">正在读取三两豆账本…</p>
     <p v-else-if="!wallet" class="settings-empty">三两豆账本暂时无法读取。</p>
     <template v-else>
       <div class="bean-balances"><article><span>充值豆</span><b>{{ wallet.purchased ?? 0 }}</b><small>尚未开放充值</small></article><article><span>贡献豆</span><b>{{ wallet.contribution ?? 0 }}</b><small>可用贡献余额</small></article><p v-if="wallet.contributionDebt">待抵扣 {{ wallet.contributionDebt }} 豆：后续贡献奖励将优先抵扣，不影响充值豆。</p></div>
-      <section class="bean-earning-rules" aria-labelledby="bean-earning-title"><h4 id="bean-earning-title">怎么获得贡献豆</h4><article><b>参与校园审核</b><p>邮箱已验证、填写学校资料后可申请；由总管理员批准并设置审核范围。每完成 1 条审核并写明依据，可得 3 个贡献豆，每日最多计入 20 条。每位审核员每月随机抽查约 10%；实质错判会追回未花掉的贡献豆，并从后续贡献奖励中抵扣。</p></article><article><b>提交产品反馈</b><p>登录后提交，可选择匿名或署名，内容通过安全检查后公开。只有总管理员确认“已解决”并设置奖励时才发放 0–20 个贡献豆，每条建议只发一次；提交建议本身不保证获得奖励。</p></article><RouterLink to="/feedback">查看反馈与建议</RouterLink><RouterLink to="/campus/reviewer-application">申请成为校园审核员</RouterLink></section>
-      <div class="bean-gate"><Badge variant="outline">充值关闭</Badge><p>应用主体、微信小程序与支付资质准备完成前，不会收取费用。应用内数字权益目录与价格将在资质确认后配置。</p></div>
+      <section class="bean-earning-rules" aria-labelledby="bean-earning-title"><h4 id="bean-earning-title">怎么获得贡献豆</h4><article><b>参与校园审核</b><p>邮箱已验证、填写学校资料后可申请；由总管理员批准并设置审核范围。每完成 1 条审核并写明依据，可得 3 个贡献豆，每日最多计入 20 条。每位审核员每月随机抽查约 10%；实质错判会追回未花掉的贡献豆，并从后续贡献奖励中抵扣。</p></article><article><b>提交产品反馈</b><p>登录后提交，可选择匿名或署名，内容通过安全检查后公开。只有总管理员确认“已解决”并设置奖励时才发放 0–20 个贡献豆，每条建议只发一次；提交建议本身不保证获得奖励。</p></article><RouterLink to="/campus/beans">三两豆与兑换</RouterLink><RouterLink to="/feedback">查看反馈与建议</RouterLink><RouterLink to="/campus/reviewer-application">申请成为校园审核员</RouterLink></section>
+      <div class="bean-gate"><Badge variant="outline">充值关闭</Badge><p>应用主体、微信小程序与支付资质准备完成前，不会收取费用。贡献豆的兑换目录已经开放，去「三两豆与兑换」查看。</p></div>
       <div class="bean-ledger-heading"><h4>最近变动</h4><Button variant="outline" size="sm" :disabled="beans.loading.value" @click="beans.load">刷新</Button></div>
       <p v-if="!ledger.length" class="settings-empty">还没有三两豆记录。</p>
       <div v-else class="bean-ledger"><article v-for="item in ledger" :key="item.id"><div><b>{{ ledgerType(item) }}</b><small>{{ item.reason }} · {{ formatDate(item.created_at) }}</small></div><span :class="{ positive: item.amount > 0, negative: item.amount < 0 }">{{ item.bean_type === 'purchased' ? '充值豆' : '贡献豆' }} {{ item.amount > 0 ? '+' : '' }}{{ item.amount }}<small v-if="item.debt_delta"> · 抵扣变化 {{ item.debt_delta > 0 ? '+' : '' }}{{ item.debt_delta }}</small></span></article></div>

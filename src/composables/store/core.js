@@ -736,6 +736,19 @@ if (typeof window !== 'undefined') {
             : fallback !== null && typeof saved !== typeof fallback)) {
           throw new Error('其他页面写入的本机数据格式异常，本页修改已保留。')
         }
+        const pendingWatcher = pendingWatcherInstalls.get(key)
+        if (pendingWatcher && !pendingWrites.has(key) && !conflictedStorageKeys.has(key)) {
+          // The persistence watcher is intentionally installed after the first
+          // render. An edit made during that short window has no pending write
+          // yet, so compare the live ref against the watcher's original baseline
+          // before accepting another tab's value.
+          const currentRaw = JSON.stringify(state.value)
+          if (rawFingerprint(currentRaw) !== pendingWatcher.baselineFingerprint) {
+            conflictedStorageKeys.add(key)
+            reportPersistenceFailure(new Error('Concurrent localStorage edit'), key, 'conflict')
+            continue
+          }
+        }
         // Preserve local in-memory edits when another tab writes the same key.
         // Keep the external value in localStorage and the local edit in memory;
         // neither version is silently discarded.

@@ -57,5 +57,6 @@ export const campusGovernanceAccess = () => campusLifeRequest('governance_access
 export const campusModerationHistory = (page = 0) => campusLifeRequest('moderation_history', { page })
 export const campusMyReports = (page = 0) => campusLifeRequest('reports_mine', { page })
 export const resolveCampusReport = (reportId, decision, reason, revision, targetRevision) => campusLifeRequest('report_resolve', { reportId, decision, reason, revision, targetRevision })
+export const submitCampusReportAppeal = (reportId, reason, revision) => campusLifeRequest('report_appeal_submit', { reportId, reason, revision })
 export const decideCampusModeration = (targetType, targetId, decision, reason = '', revision) => campusLifeRequest('moderation_decide', { targetType, targetId, decision, reason, revision })
 export const resolveCampusHelpDispute = (disputeId, taskStatus, reason) => campusLifeRequest('help_dispute_resolve', { disputeId, taskStatus, reason })

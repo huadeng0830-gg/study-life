@@ -7,17 +7,22 @@ import { fileURLToPath } from 'node:url'
 
 export const PROJECT_ROOT = fileURLToPath(new URL('../', import.meta.url))
 
-export const RELEASE_INPUTS = ['src', 'functions', 'supabase/functions', 'supabase/migrations', 'supabase/config.toml', 'public', 'desktop', 'desktop-app', 'index.html', 'package.json', 'package-lock.json',
+export const RELEASE_INPUTS = ['src', 'functions', 'workers', 'supabase/functions', 'supabase/migrations', 'supabase/config.toml', 'public', 'desktop', 'desktop-app', 'index.html', 'package.json', 'package-lock.json',
   'vite.config.js', 'electron-builder.yml', 'electron-builder.release.yml', 'release.config.js', 'release-history.json', 'wrangler.jsonc',
   'scripts/source-signature.mjs', 'scripts/release-manifest.mjs', 'scripts/version-utils.mjs', 'scripts/bump-release.mjs',
   'scripts/check-release-build.mjs']
+
+// 这些目录是**本机构建/安装产物**，不属于仓库源码：
+// node_modules 是依赖，.wrangler 是 wrangler 的本地构建输出（workers/ 下会写入
+// 打包后的 index.js），缓存与临时目录同理。把它们纳入签名会令本机与干净 CI
+// 算出不同签名 —— 换一次 wrangler dev 就足以让发布闸门误报。
+const RELEASE_INPUT_EXCLUDED_DIRS = new Set(['node_modules', '.git', '.wrangler', '.tmp', '.vitest-tmp', '.playwright-cli', 'dist', 'dist-desktop'])
 
 export function collectReleaseFiles(target) {
   if (!existsSync(target)) return []
   if (!statSync(target).isDirectory()) return [target]
   return readdirSync(target, { withFileTypes: true })
-    // 安装后依赖不属于仓库源码；把它纳入签名会令本机和干净 CI 算出不同结果。
-    .filter((entry) => !['node_modules', '.git'].includes(entry.name))
+    .filter((entry) => !RELEASE_INPUT_EXCLUDED_DIRS.has(entry.name))
     .flatMap((entry) => collectReleaseFiles(resolve(target, entry.name)))
 }
 

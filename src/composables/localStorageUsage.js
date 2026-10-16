@@ -11,7 +11,9 @@
  * 才退回文本估算，并且**明确标注这是估算**，不再冒充真实配额。
  */
 
-/** localStorage 里业务键（`sl_` 前缀）字符数对应的保守字节数。 */
+import { isPurgeableLocalKey } from './localDraftKeys.js'
+
+/** localStorage 里用户内容键（`sl_` 前缀 + 草稿前缀）字符数对应的保守字节数。 */
 const BYTES_PER_CHAR = 2
 /** 无 estimate() 时用于换算百分比的保守配额估计。 */
 export const LOCAL_STORAGE_ESTIMATE_CHARS = 5_000_000
@@ -22,7 +24,8 @@ export function measureLocalBusinessStorage(storage = globalThis.localStorage) {
   let keyCount = 0
   for (let index = 0; index < storage.length; index += 1) {
     const key = storage.key(index)
-    if (!key?.startsWith('sl_')) continue
+    // 草稿键（校园投稿正文、快速记录、成果提交）也占空间，以前只数 `sl_` 会少算。
+    if (key === null || !isPurgeableLocalKey(key)) continue
     const value = storage.getItem(key) || ''
     chars += key.length + value.length
     keyCount += 1

@@ -469,3 +469,14 @@
   .mobile-more-item { border-radius: var(--radius-control); }
   .mobile-more-item > span { display: grid; place-items: center; }
 }
+
+/* 手机端新版本提示。
+   ① 底部「更多」上的圆点复用 .update-dot（绝对定位），需要父级 span 常驻定位 ——
+      上方 .mobile-nav-item.active > span 只在选中态给了 position:relative，
+      未选中时圆点会跑到最近的定位祖先前去。
+   ② 抽屉里「版本与更新」的标签要盖过 `.mobile-more-item > em` 的弱化色，
+      否则「有新版本」和「已登录」一样是灰的，等于没提示。 */
+@media (max-width: 900px), (pointer: coarse) and (max-height: 520px) {
+  .mobile-nav-item.more-trigger > span { position: relative; }
+  .mobile-more-item > em.update-reminder-label { color: var(--primary); }
+}

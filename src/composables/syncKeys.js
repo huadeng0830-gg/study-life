@@ -21,6 +21,7 @@ export const SYNC_DEFAULTS = {
   sl_course_checkins: [],
   sl_exams: [],
   sl_countdown_show_past: false,
+  sl_countdown_view: 'list',
   sl_checklists: [],
   sl_bills: [],
   sl_expenses: [],
@@ -92,6 +93,30 @@ export const BACKUP_ONLY_KEYS = Object.freeze({
   sl_place_offers: '优惠链接属于个人上下文，不上传',
   sl_focus_active: '正在进行的专注计时，属于单台设备的瞬时状态',
   sl_task_center_log: '快捷记录操作日志，仅用于本机撤销与去重',
+})
+
+/**
+ * 本地状态键：不进账号同步，也不进常规备份。
+ * 新增带 sl_ 前缀的本地键必须在这里说明设备边界或退役迁移原因；
+ * `tests/backupSyncKeyScopes.test.js` 会从源码反向扫描并阻止未分类键。
+ */
+export const LOCAL_ONLY_KEYS = Object.freeze({
+  sl_backup_nudge_at: '本机备份提醒去重时间戳',
+  sl_courier_bookmarks: '已退役的快递收藏数据，启动时清理',
+  sl_courier_local_meta: '已退役的快递模块元数据，启动时清理',
+  sl_courier_recent_carriers: '已退役的快递最近选择，启动时清理',
+  sl_domain_schema: '本机领域数据迁移版本号，不是用户记录',
+  sl_food_filters: '已退役的旧抽签筛选项，仅在迁移前的应急导出保留',
+  sl_food_history: '已退役的旧抽签历史，仅在迁移前的应急导出保留',
+  sl_food_places: '已退役的旧抽签地点，仅在迁移前的应急导出保留',
+  sl_last_backup_at: '本机最近一次备份时间，不跨设备转移',
+  sl_migrations: '本机一次性迁移完成标记',
+  sl_packages: '已退役的旧套餐数据，仅在迁移前的应急导出保留',
+  sl_quick_notes: '旧版快捷笔记会迁入 sl_archived_quick_notes 后清理',
+  sl_retro_year_notice: '本机年度回顾提示已读状态',
+  sl_transfer_undo: '账号迁移操作的本机撤销状态',
+  sl_update_auto_applied_v1: 'sessionStorage 中的单会话自动更新保护标记',
+  sl_update_preferences_v1: '本机更新检查与提醒偏好，不影响账号数据',
 })
 
 /**

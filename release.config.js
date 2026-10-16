@@ -4,6 +4,31 @@
 // RELEASE_UPDATES 仅保留最近 3 条内置说明，完整的简短发布历史保存在 release-history.json。
 export const RELEASE_UPDATES = Object.freeze([
   {
+    version: '1.11.3',
+    legacyVersion: '2026年10月17日-版本1',
+    channel: 'stable',
+    summary: '三两豆兑换数字权益并查看归属与贡献豆流水',
+    signature: '10f214b1dd',
+    changes: {
+      features: [
+      '三两豆兑换数字权益并查看归属与贡献豆流水',
+      ],
+      improvements: [
+      '已就绪的新版本可安全自动应用，全局和手机端都会提示更新',
+      ],
+      fixes: [
+      '修复标签页并行编辑时的未保存保护，补齐校园队列索引和反馈审计',
+      ],
+      security: [],
+      breaking: [],
+    },
+    notes: [
+      '三两豆兑换数字权益并查看归属与贡献豆流水',
+      '已就绪的新版本可安全自动应用，全局和手机端都会提示更新',
+      '修复标签页并行编辑时的未保存保护，补齐校园队列索引和反馈审计',
+    ],
+  },
+  {
     version: '1.11.2',
     legacyVersion: '2026年10月16日-版本6',
     channel: 'stable',
@@ -71,57 +96,16 @@ export const RELEASE_UPDATES = Object.freeze([
       '保持私有数据隔离，批量邮箱查询仅授权服务端可用',
     ],
   },
-  {
-    version: '1.11.0',
-    legacyVersion: '2026年10月16日-版本4',
-    channel: 'stable',
-    summary: '统一学习与生活工作台，简化手机与桌面的日常记录',
-    signature: '3cbe9fcf3b',
-    changes: {
-      features: [
-      '建立统一颜色、字号、间距与界面组件规范',
-      '重组学习、生活与校园导航，保留用户自定义布局',
-      '简化待办表单，按需展开关联信息与学习时段建议',
-      ],
-      improvements: [
-      '统一页面标题、图标、空态、错误和离线反馈',
-      '优化手机点击区域、长内容、深色与键盘操作',
-      '区分校园未登录提示与读取失败，提供可理解的网络错误说明',
-      ],
-      fixes: [
-      '修复收起侧栏后工具缺少无障碍名称',
-      '避免快速记录反馈遮挡新表单，关闭后保留撤销时间',
-      '修复学习建议展开空白，以及原待办删除后无法撤回时段的问题',
-      '保留上传下载的具体失败原因，避免误报网络故障',
-      '新增、编辑或删除课程与日程后，今日安排立即刷新',
-      ],
-      security: [],
-      breaking: [],
-    },
-    notes: [
-      '建立统一颜色、字号、间距与界面组件规范',
-      '重组学习、生活与校园导航，保留用户自定义布局',
-      '简化待办表单，按需展开关联信息与学习时段建议',
-      '统一页面标题、图标、空态、错误和离线反馈',
-      '优化手机点击区域、长内容、深色与键盘操作',
-      '区分校园未登录提示与读取失败，提供可理解的网络错误说明',
-      '修复收起侧栏后工具缺少无障碍名称',
-      '避免快速记录反馈遮挡新表单，关闭后保留撤销时间',
-      '修复学习建议展开空白，以及原待办删除后无法撤回时段的问题',
-      '保留上传下载的具体失败原因，避免误报网络故障',
-      '新增、编辑或删除课程与日程后，今日安排立即刷新',
-    ],
-  },
 ])
 
 // SemVer 是面向用户和发布的正式版本。日期式标识只用于旧网页客户端的升级兼容。
-export const APP_VERSION = '1.11.2'
+export const APP_VERSION = '1.11.3'
 export const RELEASE_VERSION = APP_VERSION
 export const RELEASE_CHANNEL = 'stable'
 export const LEGACY_RELEASE_VERSION = RELEASE_UPDATES[0].legacyVersion || RELEASE_UPDATES[0].version
 
 // 与第一条签名保持一致，交给 vite.config.js 校验源码一致性。
-export const RELEASE_SOURCE_SIGNATURE = '1c8dd69e8a'
+export const RELEASE_SOURCE_SIGNATURE = '10f214b1dd'
 
 // 兼容旧引用：当前版本的更新说明。
 export const RELEASE_NOTES = RELEASE_UPDATES[0].notes

@@ -2,6 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { accountUser } from '../../composables/accountAuth.js'
 import { campusContentLabels, campusContentTitle, campusReportReasons } from '../../composables/campusContentModel.js'
+import { campusDateTimeLabel } from '../../composables/campusFormatting.js'
 import { Button } from '../ui/button'
 import { Badge } from '../ui/badge'
 import { Field, FieldLabel } from '../ui/field'
@@ -11,8 +12,15 @@ const emit = defineEmits(['decide'])
 const reason = ref('')
 const error = ref('')
 const confirmRemove = ref(false)
-const isReport = computed(() => props.entry.type === 'report')
+const isReport = computed(() => ['report', 'report_appeal'].includes(props.entry.type))
+const isReportAppeal = computed(() => props.entry.type === 'report_appeal')
 const content = computed(() => isReport.value ? props.entry.item.target : props.entry.item)
+const reportSlaLabel = computed(() => {
+  const dueAt = props.entry.item.response_due_at
+  if (!isReport.value || !dueAt) return ''
+  const hours = props.entry.item.response_target_hours || 72
+  return Date.now() > Date.parse(dueAt) ? `已超过 ${hours} 小时处理目标` : `处理目标：${campusDateTimeLabel(dueAt)} 前（${hours} 小时）`
+})
 const linkedAccount = computed(() => content.value?.author_id || content.value?.asker_id || content.value?.owner_id || content.value?.user_id || '')
 const title = computed(() => {
   const item = content.value || {}
@@ -57,7 +65,7 @@ function decide(decision) {
 <template>
   <article class="campus-review-item">
     <div class="campus-life-meta"><Badge variant="secondary">{{ campusContentLabels[entry.type] }}</Badge><span>{{ entry.item.school }}<template v-if="entry.item.campus"> · {{ entry.item.campus }}</template></span><span>{{ String(entry.item.created_at || '').slice(0,10) }}</span><span v-if="linkedAccount" class="campus-review-account-link">审核关联账号 {{ linkedAccount }}</span></div>
-    <template v-if="isReport"><h3>{{ campusReportReasons[entry.item.reason] || '用户举报' }} · {{ campusContentLabels[entry.item.target_type] }}</h3><p class="campus-review-report">举报说明：{{ entry.item.detail || '无补充说明' }}</p><h4>被举报内容：{{ content ? title : '原内容已不可用' }}</h4></template>
+    <template v-if="isReport"><h3>{{ isReportAppeal ? '举报结果复核' : campusReportReasons[entry.item.reason] || '用户举报' }} · {{ campusContentLabels[entry.item.target_type] }}</h3><p v-if="!isReportAppeal" class="campus-review-report">举报说明：{{ entry.item.detail || '无补充说明' }}</p><p v-if="isReportAppeal" class="campus-review-report">申诉于 {{ campusDateTimeLabel(entry.item.appealed_at) }} 提交：{{ entry.item.appeal_reason }}</p><p v-if="isReportAppeal" class="campus-review-report">原处理说明：{{ entry.item.resolution || '未填写' }}</p><p v-if="reportSlaLabel" class="campus-review-sla">{{ reportSlaLabel }}</p><h4>被举报内容：{{ content ? title : '原内容已不可用' }}</h4></template>
     <h3 v-else>{{ title }}</h3>
     <pre class="campus-review-detail">{{ details }}</pre>
     <a v-if="source" :href="source" target="_blank" rel="noopener noreferrer">核对公开来源</a>
@@ -65,15 +73,17 @@ function decide(decision) {
     <Field><FieldLabel :for="'review-reason-' + entry.item.id">{{ entry.type === 'help_dispute' ? '裁定依据' : '处理依据' }}</FieldLabel><textarea :id="'review-reason-' + entry.item.id" v-model="reason" maxlength="500" :disabled="busy" :aria-invalid="Boolean(error)" placeholder="说明核查事实、来源和处理依据；审核结论需要留档" /></Field>
     <p v-if="error" role="alert" class="campus-life-inline-state error">{{ error }}</p>
     <div class="campus-life-actions">
-      <template v-if="isReport"><Button :disabled="busy || !content" variant="destructive" @click="decide('remove')">下架原内容</Button><Button :disabled="busy" variant="outline" @click="decide('resolve')">已核实处理</Button><Button :disabled="busy" variant="ghost" @click="decide('dismiss')">举报不成立</Button></template>
+      <template v-if="isReportAppeal"><Button :disabled="busy || !content" variant="destructive" @click="decide('remove')">申诉成立并下架</Button><Button :disabled="busy" variant="outline" @click="decide('resolve')">申诉成立，确认问题</Button><Button :disabled="busy" variant="ghost" @click="decide('dismiss')">维持原结论</Button></template>
+      <template v-else-if="isReport"><Button :disabled="busy || !content" variant="destructive" @click="decide('remove')">下架原内容</Button><Button :disabled="busy" variant="outline" @click="decide('resolve')">已核实处理</Button><Button :disabled="busy" variant="ghost" @click="decide('dismiss')">举报不成立</Button></template>
       <template v-else-if="entry.type === 'help_dispute'"><Button :disabled="busy" @click="decide('completed')">裁定任务完成</Button><Button :disabled="busy" variant="outline" @click="decide('cancelled')">裁定取消任务</Button></template>
       <template v-else><Button :disabled="busy" @click="decide('approve')">{{ busy ? '保存中…' : '通过并发布' }}</Button><Button :disabled="busy" variant="outline" @click="decide('reject')">退回修改</Button></template>
     </div>
-    <Modal v-if="confirmRemove" :open="true" title="下架被举报内容" @close="!busy && (confirmRemove = false)"><p>下架「{{ title }}」后，原内容会退出公开列表。作者可查看原因、修改后重新提交。举报处理结果也会通知举报者。</p><p>{{ reason }}</p><template #foot><div class="campus-life-actions"><Button variant="outline" :disabled="busy" @click="confirmRemove = false">取消</Button><Button variant="destructive" :disabled="busy" @click="decide('remove')">{{ busy ? '正在保存…' : '确认下架' }}</Button></div></template></Modal>
+    <Modal v-if="confirmRemove" :open="true" :title="isReportAppeal ? '申诉复核后下架内容' : '下架被举报内容'" @close="!busy && (confirmRemove = false)"><p>下架「{{ title }}」后，原内容会退出公开列表。作者可查看原因、修改后重新提交。举报处理结果也会通知举报者。</p><p>{{ reason }}</p><template #foot><div class="campus-life-actions"><Button variant="outline" :disabled="busy" @click="confirmRemove = false">取消</Button><Button variant="destructive" :disabled="busy" @click="decide('remove')">{{ busy ? '正在保存…' : '确认下架' }}</Button></div></template></Modal>
   </article>
 </template>
 
 <style scoped>
 .campus-review-item{display:grid;gap:16px;padding:22px;border:1px solid var(--border);border-radius:var(--radius-12);background:var(--card);min-width:0}.campus-review-item h3,.campus-review-item h4{margin:0;overflow-wrap:anywhere}.campus-review-item h3{font-size:var(--fs-17)}.campus-review-item h4{font-size:var(--fs-14)}.campus-review-detail{max-height:300px;overflow:auto;margin:0;white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;font-size:var(--fs-13);line-height:1.8;color:var(--muted);padding:16px;border-radius:var(--radius-9);background:var(--bg-tint)}.campus-review-report{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;font-size:var(--fs-13);line-height:1.8}.campus-review-item>a{color:var(--primary);font-size:var(--fs-12)}@media(max-width:520px){.campus-review-item{padding:16px}}
 .campus-review-item textarea{min-height:96px;width:100%;padding:12px;border:1px solid var(--border);border-radius:var(--radius-9);background:var(--bg);color:var(--text);font:inherit;font-size:var(--fs-13);resize:vertical}.campus-review-item textarea:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
+.campus-review-sla{margin:0;color:var(--muted);font-size:var(--fs-12)}
 </style>

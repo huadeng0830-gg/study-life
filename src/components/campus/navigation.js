@@ -2,7 +2,7 @@ import { BookOpen, Bus, CalendarDays, ClipboardList, Compass, GraduationCap, Han
 
 export const campusNavigation = [
   { label: '校园总览', path: '/campus', icon: LayoutGrid, group: '发现校园', detail: '校园信息、发布、举报与共建入口' },
-  { label: '怎么办', path: '/campus/matters', icon: Compass, group: '发现校园', detail: '把现实问题理清楚，找到能试的办法' },
+  { label: '校园交流', path: '/campus/matters', icon: Compass, group: '发现校园', detail: '提问、分享经历，也可以只发一条内容' },
   { label: '校园地点', path: '/campus/places', icon: MapPin, group: '发现校园', detail: '查找并共建同校地点资料' },
   { label: '全站搜索', path: '/campus/search', icon: Search, group: '发现校园' },
   { label: '统一发布', path: '/campus/publish', icon: NotebookPen, group: '参与共建', detail: '分享校园指南、活动、失物与互助信息' },

@@ -330,7 +330,7 @@ onBeforeUnmount(() => {
               <AccountSyncPanel compact />
             </section>
           </template>
-          <section v-else-if="activeSection === 'profile' && !accountPasswordRecovery" class="account-card"><AccountCommunitySettings section="profile" /></section>
+          <section v-else-if="activeSection === 'profile' && !accountPasswordRecovery" class="account-card"><AccountCommunitySettings section="profile" /><button type="button" class="btn btn-ghost account-profile-complete" @click="close">完成并返回</button></section>
           <section v-else-if="activeSection === 'beans' && !accountPasswordRecovery" class="account-card"><AccountCommunitySettings section="beans" /></section>
           <template v-else>
             <div v-if="passwordAccount || accountPasswordRecovery" class="account-card"><AccountPasswordForm :recovery="accountPasswordRecovery" :reset-seconds="resendSeconds" :reset-enabled="authOptions.emailDelivery" @updated="passwordUpdated" @reset-request="sendRecoveryForUser" /></div>
@@ -420,6 +420,7 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .account-panel { display: grid; gap: 16px; }
+.account-profile-complete { justify-self: end; }
 .account-panel p { margin: 0; line-height: 1.6; }
 .account-help, .account-privacy { color: var(--muted); }
 .account-help, .account-privacy { font-size: var(--fs-13); }

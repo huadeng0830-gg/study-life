@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url'
 import { APP_VERSION, LEGACY_RELEASE_VERSION, RELEASE_NOTES, RELEASE_SOURCE_SIGNATURE, RELEASE_UPDATES } from '../release.config.js'
 import { computeSourceSignature } from './source-signature.mjs'
 import { buildReleaseEntry, MAX_RELEASE_ENTRIES, nextSemverVersion, nextVersion as incrementLegacyVersion,
+  releaseHistoryMatchesCurrent,
   replaceCurrentReleaseEntry, trimReleaseUpdates, validateReleaseNotes } from './version-utils.mjs'
 import { normalizeReleaseHistory } from './release-manifest.mjs'
 import { syncReleaseStatus } from './release-readme.mjs'
@@ -93,8 +94,14 @@ if (rootPackage.version !== APP_VERSION || rootLock.version !== APP_VERSION || r
   console.error('✗ release.config.js、两个 package.json 与 lock 文件版本号必须一致，未写入任何内容')
   process.exit(1)
 }
-if (history.length && history[0].version !== APP_VERSION && history[0].legacyVersion !== LEGACY_RELEASE_VERSION) {
+// 版本或旧版兼容标识**任一**与发布历史首条不一致就必须停：
+// 原来是 &&，只有两者同时不符才拦得住，单边漂移会被静默放过。
+if (!releaseHistoryMatchesCurrent(history, APP_VERSION, LEGACY_RELEASE_VERSION)) {
   console.error('✗ 更新历史首条与当前正式版本不一致，未写入任何内容')
+  process.exit(1)
+}
+if (amend && history[0]?.publishedAt) {
+  console.error(`✗ ${APP_VERSION} 已记录发布时间，不能用 --amend-notes 重新签署；请创建新的 SemVer 发布。`)
   process.exit(1)
 }
 if (notes.length || amend) {

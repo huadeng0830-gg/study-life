@@ -1,7 +1,7 @@
 {
   "name": "study-life",
   "private": true,
-  "version": "1.11.2",
+  "version": "1.11.3",
   "type": "module",
   "engines": {
     "node": ">=22"
@@ -9,6 +9,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build --configLoader native && node scripts/check-release-build.mjs dist",
+    "build:check": "node scripts/build-check.mjs",
+    "check:release": "npm run build",
     "preview": "vite preview",
     "preview:host": "vite preview --host",
     "lint": "eslint .",
@@ -18,8 +20,9 @@
     "typecheck": "vue-tsc --noEmit",
     "typecheck:ratchet": "node scripts/typecheck-ratchet.mjs",
     "typecheck:report": "node scripts/typecheck-ratchet.mjs --report",
-    "check": "npm run check:release-readme && npm run pages:verify-config && npm run worker:check && npm run lint && npm run typecheck && npm run typecheck:ratchet && npm test && npm run build",
+    "check": "npm run check:release-readme && npm run pages:verify-config && npm run worker:check && npm run lint && npm run typecheck && npm run typecheck:ratchet && npm test && npm run build:check",
     "release:bump": "node scripts/bump-release.mjs",
+    "release:sync-versions": "node scripts/sync-release-versions.mjs",
     "audit:contrast": "node scripts/audit-contrast.mjs",
     "audit:release": "node scripts/audit/release-integrity.mjs https://study-life.pages.dev",
     "audit:first-visit": "node scripts/audit/first-visit.mjs https://study-life.pages.dev",

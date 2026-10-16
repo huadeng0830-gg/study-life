@@ -60,6 +60,11 @@ export const myCampusReviewerApplication = () => campusCommunityRequest('reviewe
 export const replyToCampusReviewerApplication = (applicationId, response) =>
   campusCommunityRequest('reviewer_application_reply', { applicationId, response })
 export const campusBeanWallet = () => campusCommunityRequest('wallet')
+// 三两豆主页：余额、权益目录、我的权益与流水由服务端一次取全（action: beans_home），
+// 避免页面为四块内容各发一次请求。
+export const campusBeanHome = () => campusCommunityRequest('beans_home')
+// 兑换。idempotencyKey 由调用方生成并在重试时保持不变：扣豆不可逆，没有它重试就是重复扣费。
+export const redeemCampusBean = (code, idempotencyKey) => campusCommunityRequest('bean_redeem', { code, idempotencyKey })
 export const campusReviewerApplications = () => campusCommunityRequest('reviewer_applications')
 export const decideCampusReviewerApplication = (applicationId, decision, reason, school, campus) =>
   campusCommunityRequest('reviewer_application_decide', { applicationId, decision, reason, school, campus })
