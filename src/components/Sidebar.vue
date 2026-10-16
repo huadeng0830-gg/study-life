@@ -554,6 +554,7 @@ function openMobileTool(key) {
         <span class="icon" aria-hidden="true">🎉</span>
         <span class="nav-label">氛围与纪念日</span>
       </button>
+      <router-link v-if="!navGroups.some(group => group.items.some(item => item.id === 'feedback'))" to="/feedback" class="nav-item data-item" exact-active-class="active" @pointerenter="warmRoute('/feedback')"><span class="icon" aria-hidden="true">💬</span><span class="nav-label">反馈与建议</span></router-link>
       <router-link to="/admin" class="nav-item data-item" exact-active-class="active" title="管理中心" @pointerenter="warmRoute('/admin')" @pointerdown="warmRoute('/admin')" @focus="warmRoute('/admin')">
         <span class="icon" aria-hidden="true">⚙️</span>
         <span class="nav-label">管理中心</span>

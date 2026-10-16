@@ -38,7 +38,9 @@ export const ROUTE_COMPONENT_NAMES = Object.freeze({
   '/campus/publish': 'CampusPublishView',
   '/campus/mine': 'CampusMySubmissionsView',
   '/campus/reports': 'CampusReportsView',
-  '/campus/feedback': 'CampusFeedbackView',
+  '/feedback': 'FeedbackView',
+  '/admin/feedback': 'FeedbackAdminView',
+  '/campus/reviewer-application': 'CampusReviewerApplicationView',
   '/admin/campus': 'CampusGovernanceView',
   '/review': 'WeeklyReviewView',
   '/together': 'TogetherView',
@@ -114,6 +116,8 @@ export const routes = [
   // 名称、页面标题、路由名各不相同。保留旧地址作为重定向，书签和外部链接不会失效。
   { path: '/campus/moderation', redirect: '/admin/campus' },
   { path: '/campus/reports', name: 'campus-reports', meta: { title: '我的举报' }, component: asyncRoute('/campus/reports') },
-  { path: '/campus/feedback', name: 'campus-feedback', meta: { title: '反馈与建议' }, component: asyncRoute('/campus/feedback') },
+  { path: '/feedback', name: 'feedback', meta: { title: '反馈与建议', navigation: { id: 'feedback', icon: '💬', groupId: 'other', groupLabel: '其他', defaultDesktop: true } }, component: asyncRoute('/feedback') },
+  { path: '/admin/feedback', name: 'feedback-admin', meta: { title: '反馈处理' }, component: asyncRoute('/admin/feedback') },
+  { path: '/campus/reviewer-application', name: 'campus-reviewer-application', meta: { title: '申请校园审核员' }, component: asyncRoute('/campus/reviewer-application') },
   { path: '/:pathMatch(.*)*', name: 'not-found', meta: { title: '页面不存在' }, component: NotFoundView },
 ]

@@ -1,7 +1,7 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { ChevronDown, Flag, MapPin, MessageSquareText, NotebookPen, School } from '@lucide/vue'
+import { ChevronDown, Flag, MapPin, ClipboardList, NotebookPen, School } from '@lucide/vue'
 import { Alert, AlertDescription, AlertTitle } from '../ui/alert'
 import { campusGroups, campusNavigation } from './navigation.js'
 import { accountOpen } from '../../composables/accountAuth.js'
@@ -29,7 +29,7 @@ const needsSchool = computed(() => Boolean(signedIn.value) && contextLoaded.valu
       <RouterLink class="campus-life-context" to="/together" aria-label="查看或修改学校与校区"><MapPin aria-hidden="true" /><span><b>{{ profile?.school || '设置我的学校' }}</b><small>{{ profile?.campus || '在个人资料中补充校区' }}</small></span></RouterLink>
     </header>
     <nav v-if="showQuickLinks" class="campus-life-quick-nav" aria-label="校园常用入口">
-      <RouterLink to="/campus/feedback" class="is-feedback" :aria-current="route.path === '/campus/feedback' ? 'page' : undefined"><MessageSquareText aria-hidden="true" /><span>反馈与建议</span><small>查看公开进度</small></RouterLink>
+      <RouterLink to="/campus/mine"><ClipboardList aria-hidden="true" /><span>我的投稿</span><small>跟进校园投稿</small></RouterLink>
       <RouterLink to="/campus/publish" :aria-current="route.path === '/campus/publish' ? 'page' : undefined"><NotebookPen aria-hidden="true" /><span>统一发布</span><small>分享校园信息</small></RouterLink>
       <RouterLink to="/campus" :aria-current="route.path === '/campus' ? 'page' : undefined"><School aria-hidden="true" /><span>校园总览</span><small>查找校园服务</small></RouterLink>
       <RouterLink to="/campus/reports" :aria-current="route.path === '/campus/reports' ? 'page' : undefined"><Flag aria-hidden="true" /><span>我的举报</span><small>跟进处理结果</small></RouterLink>

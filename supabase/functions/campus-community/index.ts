@@ -84,23 +84,45 @@ function failure(error: unknown) {
   return { status: 503, body: { code: 'service_unavailable', error: '校园社区服务暂时不可用，请稍后重试。' } }
 }
 
+function feedbackFilters(query: any, payload: any) {
+  if (payload.category) {
+    if (!['product','campus','accessibility','other'].includes(payload.category)) throw new CommunityError('invalid_input', '反馈分类无效。')
+    query = query.eq('category', payload.category)
+  }
+  const search = input(payload.q, 100, '搜索关键词')
+  if (search) { const literal = JSON.stringify('***=' + search); query = query.or('title.imatch.' + literal + ',body.imatch.' + literal) }
+  return query
+}
+
 async function listPublic(payload: any) {
   const limit = Math.min(60, Math.max(1, Number.isSafeInteger(payload.limit) ? payload.limit : 30))
   const offset = Math.min(10000, Math.max(0, Number.isSafeInteger(payload.offset) ? payload.offset : 0))
   let query = admin.from('campus_feedback_suggestions')
-    .select('id,category,title,body,status,public_reply,public_reason,reward_beans,reward_issued,created_at,updated_at', { count: 'exact' })
+    .select(payload.view === 'summary' ? 'id,category,title,status,public_author_name,created_at,updated_at' : 'id,category,title,body,status,public_author_name,public_history,public_reply,public_reason,reward_beans,reward_issued,created_at,updated_at', { count: 'exact' })
     .eq('visibility', 'public')
-  if (['pending', 'processing', 'resolved', 'not_adopted'].includes(payload.status)) query = query.eq('status', payload.status)
-  const { data, count, error } = await query.order('updated_at', { ascending: false }).order('id', { ascending: true }).range(offset, offset + limit - 1)
+  if (['pending','needs_info','planned','processing','resolved','not_adopted','duplicate'].includes(payload.status)) query = query.eq('status', payload.status)
+  if (payload.id) query = query.eq('id', uuid(payload.id, '反馈'))
+  query = feedbackFilters(query, payload)
+  const { data, count, error } = await query.order(payload.sort === 'newest' ? 'created_at' : 'updated_at', { ascending: false }).order('id', { ascending: true }).range(offset, offset + limit - 1)
   if (error) throw error
   return { items: data || [], total: count || 0, offset, limit }
 }
 
 async function submitSuggestion(user: any, payload: any) {
   await rateLimit(user.id, 'campus_feedback_submit', 5)
+  if (payload.anonymous !== undefined && typeof payload.anonymous !== 'boolean') throw new CommunityError('invalid_input', '请选择匿名或署名提交。')
+  const anonymous = payload.anonymous !== false
+  let publicName = ''
+  if (!anonymous) {
+    const profile = await admin.from('social_profiles').select('nickname').eq('user_id', user.id).maybeSingle()
+    if (profile.error) throw profile.error
+    publicName = input(profile.data?.nickname, 32, '公开昵称', true)
+  }
   const category = ['product', 'campus', 'accessibility', 'other'].includes(payload.category) ? payload.category : 'other'
   const { data, error } = await admin.from('campus_feedback_suggestions').insert({
     author_id: user.id,
+    is_anonymous: anonymous,
+    public_author_name: anonymous ? '匿名用户' : publicName,
     category,
     title: input(payload.title, 100, '标题', true),
     body: input(payload.body, 3000, '建议内容', true),
@@ -108,15 +130,17 @@ async function submitSuggestion(user: any, payload: any) {
     status: 'pending',
   }).select('id,status,visibility,created_at').single()
   if (error) throw error
-  return { item: data, message: '建议已提交，内容检查通过后会匿名公开。' }
+  return { item: data, message: '建议已提交，内容检查通过后会按所选署名方式公开。' }
 }
 
-async function listMine(userId: string) {
-  const { data, error } = await admin.from('campus_feedback_suggestions')
-    .select('id,category,title,body,status,visibility,public_reply,public_reason,reward_beans,reward_issued,created_at,updated_at')
-    .eq('author_id', userId).order('created_at', { ascending: false }).limit(100)
+async function listMine(userId: string, payload: any) {
+  const limit = Math.min(60, Math.max(1, Number.isSafeInteger(payload.limit) ? payload.limit : 20))
+  const offset = Math.min(10000, Math.max(0, Number.isSafeInteger(payload.offset) ? payload.offset : 0))
+  const { data, count, error } = await admin.from('campus_feedback_suggestions')
+    .select('id,category,title,body,status,visibility,is_anonymous,public_author_name,public_history,public_reply,public_reason,reward_beans,reward_issued,created_at,updated_at', { count: 'exact' })
+    .eq('author_id', userId).order('created_at', { ascending: false }).order('id', { ascending: true }).range(offset, offset + limit - 1)
   if (error) throw error
-  return { items: data || [] }
+  return { items: data || [], total: count || 0, offset, limit }
 }
 
 async function applyReviewer(user: any, payload: any) {
@@ -206,11 +230,17 @@ async function listAudits(payload: any) {
 }
 
 async function ownerFeedback(payload: any) {
-  const { data, error } = await admin.from('campus_feedback_suggestions')
-    .select('id,author_id,category,title,body,status,visibility,public_reply,public_reason,reward_beans,reward_issued,created_at,updated_at')
-    .order('created_at', { ascending: false }).limit(300)
+  const limit = Math.min(60, Math.max(1, Number.isSafeInteger(payload.limit) ? payload.limit : 40))
+  const offset = Math.min(10000, Math.max(0, Number.isSafeInteger(payload.offset) ? payload.offset : 0))
+  let query = admin.from('campus_feedback_suggestions')
+    .select(payload.view === 'summary' ? 'id,category,title,status,visibility,public_author_name,created_at,updated_at' : 'id,author_id,category,title,body,status,visibility,is_anonymous,public_author_name,public_history,public_reply,public_reason,reward_beans,reward_issued,created_at,updated_at', { count: 'exact' })
+  if (['pending','needs_info','planned','processing','resolved','not_adopted','duplicate'].includes(payload.status)) query = query.eq('status', payload.status)
+  if (['pending_safety','public','hidden'].includes(payload.visibility)) query = query.eq('visibility', payload.visibility)
+  if (payload.id) query = query.eq('id', uuid(payload.id, '反馈'))
+  query = feedbackFilters(query, payload)
+  const { data, count, error } = await query.order(payload.sort === 'updated' ? 'updated_at' : 'created_at', { ascending: payload.sort !== 'updated' && payload.sort !== 'newest' }).order('id', { ascending: true }).range(offset, offset + limit - 1)
   if (error) throw error
-  return { items: data || [], filter: payload.visibility || 'all' }
+  return { items: data || [], total: count || 0, offset, limit }
 }
 
 async function privateMessages(userId: string, payload: any) {
@@ -237,7 +267,7 @@ async function privateMessages(userId: string, payload: any) {
 async function handle(request: Request, action: string, payload: any) {
   if (action === 'public_list') return listPublic(payload)
   if (action === 'submit') return submitSuggestion(await userFor(request), payload)
-  if (action === 'mine') return listMine((await userFor(request)).id)
+  if (action === 'mine') return listMine((await userFor(request)).id, payload)
   if (action === 'wallet') return wallet((await userFor(request)).id)
   if (action === 'reviewer_apply') return applyReviewer(await requireVerified(request), payload)
   if (action === 'reviewer_application_mine') return myReviewerApplication((await userFor(request)).id)
@@ -276,7 +306,8 @@ async function handle(request: Request, action: string, payload: any) {
     const result = await admin.rpc('campus_manage_feedback', {
       p_actor: user.id, p_feedback: uuid(payload.feedbackId, '建议'),
       p_visibility: ['public','hidden','pending_safety'].includes(payload.visibility) ? payload.visibility : 'hidden',
-      p_status: ['pending','processing','resolved','not_adopted'].includes(payload.status) ? payload.status : 'pending',
+      p_status: ['pending','needs_info','planned','processing','resolved','not_adopted','duplicate'].includes(payload.status) ? payload.status : 'pending',
+      p_expected_updated_at: payload.expectedUpdatedAt || null,
       p_reply: input(payload.reply, 2000, '公开回复'),
       p_public_reason: input(payload.publicReason, 1000, '不采纳说明'),
       p_reward: payload.reward === null || payload.reward === undefined ? null : Number(payload.reward),

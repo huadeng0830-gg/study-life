@@ -76,7 +76,7 @@ async function decide({ entry, decision, reason }) {
     <template v-else>
       <div class="campus-governance-scope"><Badge variant="secondary">{{ access.owner ? '总管理员' : '校园审核员' }}</Badge><span>{{ access.owner ? '全平台校园内容' : `${access.scope.school} · ${access.scope.campus || '全部校区'}` }}</span><RouterLink v-if="access.owner" to="/platform-admin">账号与平台运维</RouterLink></div>
       <Tabs v-model="tab" class="gap-5">
-        <TabsList class="w-full justify-start overflow-x-auto"><TabsTrigger value="queue">待处理 {{ readableCount }}</TabsTrigger><TabsTrigger value="history">处理记录</TabsTrigger><TabsTrigger v-if="access.owner" value="reviewers">审核人员</TabsTrigger><TabsTrigger v-if="access.owner" value="applications">审核员申请</TabsTrigger><TabsTrigger v-if="access.owner" value="audits">随机复核</TabsTrigger><TabsTrigger v-if="access.owner" value="feedback">反馈建议</TabsTrigger></TabsList>
+        <TabsList class="w-full justify-start overflow-x-auto"><TabsTrigger value="queue">待处理 {{ readableCount }}</TabsTrigger><TabsTrigger value="history">处理记录</TabsTrigger><TabsTrigger v-if="access.owner" value="reviewers">审核人员</TabsTrigger><TabsTrigger v-if="access.owner" value="applications">审核员申请</TabsTrigger><TabsTrigger v-if="access.owner" value="audits">随机复核</TabsTrigger></TabsList>
         <TabsContent value="queue" class="flex flex-col gap-4">
           <section class="campus-life-panel"><div class="campus-governance-toolbar"><div><h2>审核与举报</h2><p>先核对正文和来源，再给出处理依据。课程的真实批评不能仅因负面评价而被删除。</p></div><Button variant="outline" :disabled="page.loading.value" @click="refresh()">刷新队列</Button></div><FieldGroup class="flex-row items-end gap-3"><Field><FieldLabel for="governance-type">内容分类</FieldLabel><NativeSelect id="governance-type" v-model="type"><NativeSelectOption value="">全部分类</NativeSelectOption><NativeSelectOption v-for="[value,label] in categoryOptions" :key="value" :value="value">{{ label }}{{ page.data.value?.counts?.[value] ? `（${page.data.value.counts[value]}）` : '' }}</NativeSelectOption></NativeSelect></Field><span class="campus-life-meta">{{ readableCount }} 条待处理</span></FieldGroup></section>
           <Alert v-if="actionError" variant="destructive" role="alert"><AlertTitle>本次操作未完成</AlertTitle><AlertDescription>{{ actionError }}</AlertDescription></Alert>
@@ -91,7 +91,7 @@ async function decide({ entry, decision, reason }) {
         <TabsContent v-if="access.owner" value="reviewers"><CampusReviewerManager /></TabsContent>
         <TabsContent v-if="access.owner" value="applications"><CampusCommunityAdmin mode="applications" /></TabsContent>
         <TabsContent v-if="access.owner" value="audits"><CampusCommunityAdmin mode="audits" /></TabsContent>
-        <TabsContent v-if="access.owner" value="feedback"><CampusCommunityAdmin mode="feedback" /></TabsContent>
+
       </Tabs>
     </template>
   </div>

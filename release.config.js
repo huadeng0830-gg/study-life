@@ -4,6 +4,25 @@
 // RELEASE_UPDATES 仅保留最近 3 条内置说明，完整的简短发布历史保存在 release-history.json。
 export const RELEASE_UPDATES = Object.freeze([
   {
+    version: '1.9.0',
+    legacyVersion: '2026年10月16日-版本1',
+    channel: 'stable',
+    summary: '反馈中心与大量反馈浏览',
+    signature: 'f3c47ffec1',
+    changes: {
+      features: [],
+      improvements: [],
+      fixes: [],
+      security: [],
+      breaking: [],
+    },
+    notes: [
+      '反馈与建议独立为全局功能，支持匿名或昵称署名',
+      '反馈改为分页摘要列表，支持全量搜索、组合筛选和详情按需读取',
+      '新增独立反馈处理页，公开进展与时间线，完善保存冲突和一次性贡献奖励',
+    ],
+  },
+  {
     version: '1.8.1',
     legacyVersion: '2026年10月15日-版本9',
     channel: 'stable',
@@ -57,45 +76,16 @@ export const RELEASE_UPDATES = Object.freeze([
       '修复双方邀约最短时长校验不一致',
     ],
   },
-  {
-    version: '1.7.0',
-    legacyVersion: '2026年10月15日-版本7',
-    channel: 'stable',
-    summary: '校园协作与账号安全更新',
-    signature: '106cd651fd',
-    changes: {
-      features: [
-      '新增校园反馈、审核申请与贡献积分',
-      ],
-      improvements: [
-      '优化账号同步、备份恢复与校园导航',
-      ],
-      fixes: [
-      '修复同步启动竞态及多个校园页面状态问题',
-      ],
-      security: [
-      '收紧微信内部账号与邮箱验证功能的服务端边界',
-      ],
-      breaking: [],
-    },
-    notes: [
-      '新增校园反馈、审核申请与贡献积分',
-      '完善校园内容审核、申诉与好友协作',
-      '优化账号同步、备份恢复与校园导航',
-      '修复同步启动竞态及多个校园页面状态问题',
-      '收紧微信内部账号与邮箱验证功能的服务端边界',
-    ],
-  },
 ])
 
 // SemVer 是面向用户和发布的正式版本。日期式标识只用于旧网页客户端的升级兼容。
-export const APP_VERSION = '1.8.1'
+export const APP_VERSION = '1.9.0'
 export const RELEASE_VERSION = APP_VERSION
 export const RELEASE_CHANNEL = 'stable'
 export const LEGACY_RELEASE_VERSION = RELEASE_UPDATES[0].legacyVersion || RELEASE_UPDATES[0].version
 
 // 与第一条签名保持一致，交给 vite.config.js 校验源码一致性。
-export const RELEASE_SOURCE_SIGNATURE = '9ac923d59e'
+export const RELEASE_SOURCE_SIGNATURE = 'f3c47ffec1'
 
 // 兼容旧引用：当前版本的更新说明。
 export const RELEASE_NOTES = RELEASE_UPDATES[0].notes

@@ -86,6 +86,8 @@ vi.mock('../src/services/campusCommunity.js', () => ({
   applyCampusReviewer: vi.fn(async () => ({})),
   myCampusReviewerApplication: vi.fn(async () => typeof serviceState.responses.myCampusReviewerApplication === 'function' ? serviceState.responses.myCampusReviewerApplication() : { application: null }),
   replyToCampusReviewerApplication: vi.fn(async () => ({})),
+  campusFeedbackAdminList: vi.fn(async (filters) => typeof serviceState.responses.campusFeedbackAdminList === 'function' ? serviceState.responses.campusFeedbackAdminList(filters) : { items: [], total: 0 }),
+  manageCampusFeedback: vi.fn(async () => ({})),
   campusFeedbackMessages: vi.fn(async () => ({ messages: [] })),
 }))
 
@@ -126,7 +128,7 @@ function clickButton(text) {
 }
 
 function typeInto(selector, value) {
-  const field = host.querySelector(selector)
+  const field = host.querySelector(selector) || document.body.querySelector(selector)
   expect(field, `找不到输入框：${selector}`).toBeTruthy()
   field.value = value
   field.dispatchEvent(new Event('input', { bubbles: true }))
@@ -155,7 +157,7 @@ describe('校园长期使用流程', () => {
   it('审核申请和公开建议同时读取时，不会互相作废而一直加载', async () => {
     let finish
     serviceState.responses.campusFeedbackPublicList = () => new Promise((resolve) => { finish = resolve })
-    const { default: view } = await import('../src/views/campus/CampusFeedbackView.vue')
+    const { default: view } = await import('../src/views/FeedbackView.vue')
     await mountView(view)
     finish({ items: [{ id: 'fixture', title: '较晚返回的公开建议', body: '虚构公开建议内容', status: 'pending', category: 'campus' }], total: 1 })
     await settle()
@@ -165,11 +167,11 @@ describe('校园长期使用流程', () => {
   it('公开建议按20条翻页，切换状态后回到第一页', async () => {
     const requests = []
     serviceState.responses.campusFeedbackPublicList = (filters) => { requests.push(filters); return { items: [], total: 100 } }
-    const { default: view } = await import('../src/views/campus/CampusFeedbackView.vue')
+    const { default: view } = await import('../src/views/FeedbackView.vue')
     await mountView(view)
     await clickButton('下一页')
     expect(requests.at(-1)).toMatchObject({ limit: 20, offset: 20 })
-    await clickButton('已解决')
+    const filter = host.querySelector('#feedback-status'); filter.value = 'resolved'; filter.dispatchEvent(new Event('change', { bubbles: true })); await settle()
     expect(requests.at(-1)).toMatchObject({ status: 'resolved', offset: 0 })
   })
   it('昵称即可保存资料，不要求日期，并默认允许周末', async () => {
@@ -502,7 +504,7 @@ describe('缺少学校时给出可执行的下一步', () => {
     await mountView(CampusHubView)
 
     expect(host.querySelector('.campus-hub-hero h2')?.textContent).toContain('校园里要找的、想说的')
-    expect(host.querySelector('.campus-hub-feature.campus-hub-feature-feedback[href="/campus/feedback"]')?.textContent).toContain('反馈与建议')
+    expect(host.querySelector('a[href="/campus/feedback"]')).toBeNull(); expect(host.querySelector('a[href="/feedback"]')).toBeNull()
     expect(host.querySelector('.campus-hub-feature[href="/campus/publish"]')?.textContent).toContain('统一发布')
     expect(host.querySelector('.campus-hub-service[href="/campus/places"]')?.textContent).toContain('校园地点')
     expect(host.querySelector('.campus-hub-beans')?.textContent).toContain('12')
@@ -520,11 +522,13 @@ describe('缺少学校时给出可执行的下一步', () => {
       id: 'fictional-suggestion', category: 'campus', title: '改善校园指引', body: '建议补充校区指引信息。', status: 'resolved',
       public_reply: '已补充指引。', public_reason: '', reward_beans: 8, reward_issued: true, created_at: '2026-10-15T02:00:00.000Z',
     }] }
-    const { default: CampusFeedbackView } = await import('../src/views/campus/CampusFeedbackView.vue')
+    const { default: CampusFeedbackView } = await import('../src/views/FeedbackView.vue')
     await mountView(CampusFeedbackView)
 
-    expect(host.querySelector('.feedback-row')?.textContent).toContain('管理员设置奖励 8 个贡献豆')
-    expect(host.querySelector('.feedback-row .admin-reply')?.textContent).toContain('已补充指引')
+    expect(host.querySelector('.feedback-row .admin-reply')).toBeNull()
+    host.querySelector('.feedback-row-open').click(); await settle()
+    expect(document.body.querySelector('.feedback-detail')?.textContent).toContain('管理员设置奖励 8 个贡献豆')
+    expect(document.body.querySelector('.feedback-detail .admin-reply')?.textContent).toContain('已补充指引')
   })
 
   it('个人资料没有学校时说明原因并给出填写入口', async () => {
@@ -554,7 +558,7 @@ describe('缺少学校时给出可执行的下一步', () => {
     const quickLinks = [...host.querySelectorAll('.campus-life-quick-nav a')]
     expect(quickLinks.map((link) => [link.textContent.replace(/\s+/g, ' ').trim(), link.getAttribute('href')]))
       .toEqual([
-        ['反馈与建议查看公开进度', '/campus/feedback'],
+        ['我的投稿跟进校园投稿', '/campus/mine'],
         ['统一发布分享校园信息', '/campus/publish'],
         ['校园总览查找校园服务', '/campus'],
         ['我的举报跟进处理结果', '/campus/reports'],
@@ -624,4 +628,115 @@ describe('校园列表筛选与失败反馈', () => {
     expect(host.textContent).toContain('新账号大学')
     expect(host.textContent).not.toContain('旧账号大学')
   })
+})
+
+describe('独立反馈流程', () => {
+  it('允许选择匿名或署名，并把选择随反馈提交', async () => {
+    const { submitCampusFeedback } = await import('../src/services/campusCommunity.js')
+    submitCampusFeedback.mockClear()
+    const { default: view } = await import('../src/views/FeedbackView.vue')
+    await mountView(view)
+    await clickButton('提交反馈')
+    expect(document.body.querySelector('#feedback-anonymous').checked).toBe(true)
+    await typeInto('#feedback-title', '虚构功能反馈')
+    await typeInto('#feedback-body', '这是只用于验证匿名选择的虚构反馈。')
+    const checkbox = document.body.querySelector('#feedback-anonymous')
+    checkbox.checked = false; checkbox.dispatchEvent(new Event('change', { bubbles: true })); await nextTick()
+    document.body.querySelector('#feedback-title').closest('form').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await settle()
+    expect(submitCampusFeedback).toHaveBeenCalledWith(expect.objectContaining({ anonymous: false, title: '虚构功能反馈' }))
+    expect(host.textContent).toContain('反馈已提交')
+    expect(host.textContent).not.toContain('申请成为审核员')
+  })
+  it('公开反馈展示所选昵称、历史进展和不采纳说明', async () => {
+    serviceState.responses.campusFeedbackPublicList = { items: [{ id: 'fictional', category: 'product', title: '虚构公开反馈', body: '用于验证公开展示的虚构内容。', status: 'not_adopted', public_author_name: '虚构昵称', public_reason: '虚构不采纳说明', public_history: [{ at: '2026-10-15T00:00:00Z', status: 'processing', reply: '虚构历史进展' }] }], total: 1 }
+    const { default: view } = await import('../src/views/FeedbackView.vue')
+    await mountView(view)
+    const row = host.querySelector('.feedback-row')
+    expect(row.textContent).toContain('虚构昵称')
+    expect(row.textContent).not.toContain('虚构不采纳说明')
+    row.querySelector('button').click(); await settle()
+    expect(document.body.querySelector('.feedback-detail').textContent).toContain('虚构不采纳说明')
+    expect(document.body.querySelector('.feedback-history').textContent).toContain('虚构历史进展')
+  })
+  it('普通用户无法渲染管理员处理表单', async () => {
+    serviceState.responses.campusGovernanceAccess = { owner: false, reviewer: false }
+    const { default: view } = await import('../src/views/FeedbackAdminView.vue')
+    await mountView(view)
+    expect(host.textContent).toContain('仅总管理员可以处理反馈')
+    expect(host.querySelector('.community-admin')).toBeNull()
+  })
+  it('管理员刷新会读取最新编辑版本，保存带上对应版本时间', async () => {
+    const { manageCampusFeedback } = await import('../src/services/campusCommunity.js')
+    manageCampusFeedback.mockClear()
+    let row = { id: 'fictional', title: '虚构待处理反馈', body: '虚构反馈内容', status: 'pending', visibility: 'public', public_reply: '', public_reason: '', updated_at: '2026-10-15T00:00:00Z' }
+    serviceState.responses.campusGovernanceAccess = { owner: true, reviewer: true }
+    serviceState.responses.campusFeedbackAdminList = () => ({ items: [{ ...row }], total: 1 })
+    const { default: view } = await import('../src/views/FeedbackAdminView.vue')
+    await mountView(view)
+    row = { ...row, status: 'processing', public_reply: '另一处刚保存的进展', updated_at: '2026-10-16T00:00:00Z' }
+    await clickButton('刷新')
+    expect(host.querySelector('.record-form')).toBeNull()
+    host.querySelector('.feedback-admin-row-toggle').click(); await settle()
+    expect(host.querySelector('.record-form textarea').value).toBe('另一处刚保存的进展')
+    await typeInto('.record-form textarea', '本次补充的公开进展')
+    await clickButton('保存处理结果')
+    expect(manageCampusFeedback).toHaveBeenCalledWith(expect.objectContaining({ status: 'processing', reply: '本次补充的公开进展', expectedUpdatedAt: row.updated_at }))
+    expect(host.textContent).toContain('建议状态与公开信息已更新')
+  })
+})
+
+describe('反馈数量增长后的浏览', () => {
+  it('1000条反馈按20条读取摘要，详情按需读取并保留当前页', async () => {
+    const requests = []
+    const rows = Array.from({ length: 1000 }, (_, index) => ({ id: 'fictional-' + index, title: '虚构反馈第' + index + '条', category: 'product', status: 'processing', public_author_name: '匿名用户' }))
+    serviceState.responses.campusFeedbackPublicList = filters => {
+      requests.push({ ...filters })
+      if (filters.id) return { items: [{ ...rows.find(row => row.id === filters.id), body: '只在打开详情时读取的虚构正文', public_reply: '虚构处理进展' }], total: 1 }
+      return { items: rows.slice(filters.offset, filters.offset + filters.limit), total: 1000 }
+    }
+    const { default: view } = await import('../src/views/FeedbackView.vue')
+    await mountView(view)
+    expect(host.querySelectorAll('.feedback-row')).toHaveLength(20)
+    expect(requests[0]).toMatchObject({ view: 'summary', limit: 20, offset: 0 })
+    expect(host.querySelector('.feedback-text')).toBeNull()
+    expect(host.querySelector('#feedback-title')).toBeNull()
+    await clickButton('末页')
+    expect(requests.at(-1)).toMatchObject({ offset: 980, view: 'summary' })
+    host.querySelector('.feedback-row-open').click(); await settle()
+    expect(requests.at(-1)).toMatchObject({ id: 'fictional-980', view: 'detail', limit: 1 })
+    expect(document.body.querySelector('.feedback-detail').textContent).toContain('只在打开详情时读取')
+    document.body.querySelector('[data-slot=dialog-close]').click(); await settle()
+    expect(document.activeElement).toBe(host.querySelector('.feedback-row-open'))
+    expect(host.textContent).toContain('第 50 / 50 页')
+    expect(host.querySelector('.feedback-row').textContent).toContain('虚构反馈第980条')
+    await typeInto('#feedback-search', '虚构关键词')
+    host.querySelector('.feedback-search').dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })); await settle()
+    expect(requests.at(-1)).toMatchObject({ q: '虚构关键词', offset: 0 })
+    const category = host.querySelector('#feedback-list-category'); category.value = 'accessibility'; category.dispatchEvent(new Event('change', { bubbles: true })); await settle()
+    expect(requests.at(-1)).toMatchObject({ category: 'accessibility', q: '虚构关键词', offset: 0 })
+  })
+})
+
+it('管理员处理末页最后一条后会自动回到仍有结果的页', async () => {
+  const { manageCampusFeedback } = await import('../src/services/campusCommunity.js')
+  let handled = false
+  manageCampusFeedback.mockImplementationOnce(async () => { handled = true; return {} })
+  const requests = []
+  const row = { id: 'fixture-last', title: '虚构末页反馈', body: '虚构末页反馈的正文', visibility: 'public', status: 'pending', public_reply: '', public_reason: '', updated_at: '2026-10-16T00:00:00Z' }
+  serviceState.responses.campusGovernanceAccess = { owner: true, reviewer: true }
+  serviceState.responses.campusFeedbackAdminList = filters => {
+    requests.push({ ...filters })
+    if (filters.id) return { items: [{ ...row }], total: 1 }
+    const total = handled ? 40 : 41
+    return { items: filters.offset >= total ? [] : [{ ...row }], total }
+  }
+  const { default: view } = await import('../src/views/FeedbackAdminView.vue')
+  await mountView(view)
+  await clickButton('下一页')
+  expect(requests.at(-1).offset).toBe(40)
+  host.querySelector('.feedback-admin-row-toggle').click(); await settle()
+  await clickButton('保存处理结果')
+  expect(requests.at(-1).offset).toBe(0)
+  expect(host.querySelector('.admin-record')).not.toBeNull()
 })

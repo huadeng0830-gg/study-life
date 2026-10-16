@@ -6,7 +6,7 @@ export async function campusFeedbackPublicList(filters = {}) {
   if (!origin) return campusCommunityRequest('public_list', filters)
   if (navigator.onLine === false) throw new Error('当前离线，请联网后查看公开建议。')
   const url = new URL('/v1/feedback', origin)
-  for (const key of ['status', 'limit', 'offset']) {
+  for (const key of ['status', 'limit', 'offset', 'category', 'q', 'sort', 'view', 'id']) {
     if (filters[key] !== undefined && filters[key] !== '') url.searchParams.set(key, String(filters[key]))
   }
   const controller = new AbortController()
@@ -20,7 +20,7 @@ export async function campusFeedbackPublicList(filters = {}) {
   } finally { window.clearTimeout(timeout) }
 }
 export const submitCampusFeedback = (payload) => campusCommunityRequest('submit', payload)
-export const myCampusFeedback = () => campusCommunityRequest('mine')
+export const myCampusFeedback = (filters) => filters ? campusCommunityRequest('mine', filters) : campusCommunityRequest('mine')
 export const applyCampusReviewer = (reason) => campusCommunityRequest('reviewer_apply', { reason })
 export const myCampusReviewerApplication = () => campusCommunityRequest('reviewer_application_mine')
 export const replyToCampusReviewerApplication = (applicationId, response) =>
@@ -33,6 +33,6 @@ export const sampleCampusReviewerAudits = (month) => campusCommunityRequest('aud
 export const campusReviewerAudits = (filters = {}) => campusCommunityRequest('audit_list', filters)
 export const resolveCampusReviewerAudit = (auditId, correct, reason, reopen = false) =>
   campusCommunityRequest('audit_resolve', { auditId, correct, reason, reopen })
-export const campusFeedbackAdminList = () => campusCommunityRequest('feedback_admin_list')
+export const campusFeedbackAdminList = (filters = {}) => campusCommunityRequest('feedback_admin_list', filters)
 export const manageCampusFeedback = (payload) => campusCommunityRequest('feedback_manage', payload)
 export const campusFeedbackMessages = (suggestionId, body) => campusCommunityRequest('message_thread', { suggestionId, ...(body ? { body } : {}) })

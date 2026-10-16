@@ -9,11 +9,11 @@
 [🌐 在线体验](https://study-life.pages.dev/) · [📦 GitHub](https://github.com/huadeng0830-gg/study-life)
 
 <!-- RELEASE_STATUS:START -->
-> **当前源码版本**：网页 / PWA `1.8.1` · Windows 桌面版 `1.8.1`
+> **当前源码版本**：网页 / PWA `1.9.0` · Windows 桌面版 `1.9.0`
 > **最近更新**：
-> - 撤销操作和清单快捷输入按账号归属隔离
-> - 校外考试日期快捷入口校验正确字段
-> - 防止 Toast、快速记录和学习计划中的旧撤销操作跨账号生效
+> - 反馈与建议独立为全局功能，支持匿名或昵称署名
+> - 反馈改为分页摘要列表，支持全量搜索、组合筛选和详情按需读取
+> - 新增独立反馈处理页，公开进展与时间线，完善保存冲突和一次性贡献奖励
 > [下载已发布的 Windows 安装包与版本说明](https://github.com/huadeng0830-gg/study-life/releases/latest)
 <!-- RELEASE_STATUS:END -->
 

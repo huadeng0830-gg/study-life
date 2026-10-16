@@ -15,6 +15,31 @@ afterEach(() => vi.restoreAllMocks())
 const run = (req = request(), config = env) => handlePublicApi(req, config, ctx, fetcher, cache)
 
 describe('Cloudflare public feedback API', () => {
+  it('returns compact summaries and scopes detail lookups to public rows', async () => {
+    fetcher.mockResolvedValueOnce(new Response(JSON.stringify([{ id: 'fictional', title: 'Fictional title', body: 'large body', public_history: [{ reply: 'large history' }], public_author_name: '虚构昵称' }]), { headers: { 'Content-Range': '0-0/1000' } }))
+    const result = await run(request('/v1/feedback?view=summary&limit=20'))
+    const payload = await result.json()
+    expect(payload.data.total).toBe(1000)
+    expect(payload.data.items[0]).not.toHaveProperty('body')
+    expect(payload.data.items[0]).not.toHaveProperty('public_history')
+    expect(fetcher.mock.calls[0][0].searchParams.get('select')).not.toContain('body')
+    await run(request('/v1/feedback?id=10000001-0000-4000-8000-000000000001&view=detail&limit=1'))
+    expect(fetcher.mock.calls[1][0].searchParams.get('id')).toBe('eq.10000001-0000-4000-8000-000000000001')
+    expect(fetcher.mock.calls[1][0].searchParams.get('visibility')).toBe('eq.public')
+  })
+  it('searches the entire dataset with literal text and isolated filter caches', async () => {
+    const q = 'a,b%"\\example'
+    const params = new URLSearchParams({ q, category: 'product', sort: 'newest', view: 'summary' })
+    await run(request('/v1/feedback?' + params))
+    const url = fetcher.mock.calls[0][0]
+    const literal = JSON.stringify('***=' + q)
+    expect(url.searchParams.get('or')).toBe('(title.imatch.' + literal + ',body.imatch.' + literal + ')')
+    expect(url.searchParams.get('category')).toBe('eq.product')
+    expect(url.searchParams.get('order')).toBe('created_at.desc,id.asc')
+    await run(request('/v1/feedback?view=summary&q=different'))
+    expect(fetcher).toHaveBeenCalledTimes(2)
+    for (const query of ['view=private', 'sort=invalid', 'category=private', 'id=invalid', 'q=' + 'a'.repeat(101)]) expect((await run(request('/v1/feedback?' + query))).status).toBe(400)
+  })
   it('rejects upstream redirects without forwarding the API key to another host', async () => {
     fetcher.mockResolvedValueOnce(new Response(null, { status: 302, headers: { Location: 'https://untrusted.example.invalid' } }))
     expect((await run()).status).toBe(503)
