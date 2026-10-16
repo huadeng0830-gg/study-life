@@ -6,6 +6,8 @@ import StudyQuestionMode from './StudyQuestionMode.vue'
 import { useQuickRecordPanel } from '../composables/useQuickRecordPanel.js'
 import { places } from '../composables/placeBook.js'
 import { PLACE_VALUE_OPTIONS } from '../composables/placeModels.js'
+import { ToggleGroup, ToggleGroupItem } from './ui/toggle-group'
+import AppIcon from './AppIcon.vue'
 
 const props = defineProps({
   open: Boolean,
@@ -91,12 +93,12 @@ const {
 </script>
 
 <template>
-  <Modal :open="open" title="⚡ 快速记录" medium sheet :auto-focus="false" :sheet-detents="[0.82, 0.92]" @close="requestClose">
+  <Modal :open="open" title="快速记录" medium sheet :auto-focus="false" :sheet-detents="[0.82, 0.92]" @close="requestClose">
     <section class="quick-record">
-      <div class="mode-switch" role="group" aria-label="选择快速面板模式">
-        <button type="button" :aria-pressed="mode === 'record'" :class="{ on: mode === 'record' }" @click="mode = 'record'">记录</button>
-        <button type="button" :aria-pressed="mode === 'question'" :class="{ on: mode === 'question' }" @click="mode = 'question'">提问</button>
-      </div>
+      <ToggleGroup class="mode-switch" type="single" :model-value="mode" aria-label="选择快速面板模式" @update:model-value="value => value && (mode = value)">
+        <ToggleGroupItem value="record" :class="{ on: mode === 'record' }">记录</ToggleGroupItem>
+        <ToggleGroupItem value="question" :class="{ on: mode === 'question' }">提问</ToggleGroupItem>
+      </ToggleGroup>
       <fieldset v-if="mode === 'record'" class="entry-fields" :disabled="saving" aria-label="编辑快速记录">
         <div class="compose-heading"><b>想到就记，保存前再确认</b><small>待办 · 日程 · 收支 · 重要日期</small></div>
         <div class="input-wrap">
@@ -144,8 +146,8 @@ const {
         <p v-if="draftStatus" class="draft-status">{{ draftStatus }} · 仅保留在当前标签页</p>
 
         <div class="action-row" role="group" aria-label="记录方式">
-          <button type="button" :class="{ on: !forcedType }" :aria-pressed="!forcedType" @click="chooseAuto">✨ 自动识别</button>
-          <button v-for="action in actions" :key="action.type" type="button" :class="{ on: forcedType === action.type }" :aria-pressed="forcedType === action.type" @click="chooseAction(action.type)">{{ action.icon }} {{ action.label }}</button>
+          <button type="button" :class="{ on: !forcedType }" :aria-pressed="!forcedType" @click="chooseAuto"><AppIcon name="festive" />自动识别</button>
+          <button v-for="action in actions" :key="action.type" type="button" :class="{ on: forcedType === action.type }" :aria-pressed="forcedType === action.type" @click="chooseAction(action.type)"><AppIcon :name="action.type" />{{ action.label }}</button>
         </div>
 
         <section v-if="!input.trim()" class="example-block" aria-label="记录示例">

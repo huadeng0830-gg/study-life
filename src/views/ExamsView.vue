@@ -1,4 +1,5 @@
 <script setup>
+import PageHeader from '../components/PageHeader.vue'
 import { computed, nextTick, ref, onActivated, onBeforeUnmount, onDeactivated, onMounted, watch } from 'vue'
 import { parseDate } from '@internationalized/date'
 import { useRoute, useRouter } from 'vue-router'
@@ -510,12 +511,8 @@ function courseLabel(item) {
 
 <template>
   <div class="page">
-    <header class="page-head">
-      <div class="page-head-main">
-        <h1 class="page-title">重要日期</h1>
-        <p class="page-desc">考试、生日、纪念日和重要截止都可以放在这里。</p>
-      </div>
-      <div class="page-actions">
+    <PageHeader class="page-head" title="重要日期" description="考试、生日、纪念日和重要截止都可以放在这里。">
+      <template #actions>
         <button class="btn btn-ghost" :aria-expanded="showHistory" @click="setHistory">{{ showHistory ? '返回当前' : `历史 ${summary.archived || ''}` }}</button>
         <label v-if="!showHistory" class="past-toggle">
           <input v-model="showPast" type="checkbox" />
@@ -523,8 +520,8 @@ function courseLabel(item) {
         </label>
         <Button v-if="!showHistory" class="btn btn-primary" @click="openAdd">＋ 添加重要日期</Button>
         <Button v-if="!showHistory" variant="outline" @click="openAdd('externalExam')">＋ 校外考试</Button>
-      </div>
-    </header>
+      </template>
+    </PageHeader>
 
     <LearningNavigation current="exams" />
 

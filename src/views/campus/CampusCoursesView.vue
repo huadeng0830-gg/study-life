@@ -19,7 +19,7 @@ async function refresh() {
   return page.load(async () => {
     const [directory, mine] = await Promise.all([campusCourses(), campusLifeMine({ domains: ["courseReviews"] })])
     return { ...directory, mine: mine.courseReviews || [] }
-  })
+  }, null, { cacheKey: ['courses'] })
 }
 onMounted(() => { void refresh() })
 

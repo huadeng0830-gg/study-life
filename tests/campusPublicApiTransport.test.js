@@ -10,8 +10,19 @@ beforeEach(() => {
   Object.defineProperty(navigator, 'onLine', { configurable: true, value: true })
   legacy.mockReset().mockResolvedValue({ items: [] })
 })
-afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals() })
+afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs(); vi.unstubAllGlobals() })
 describe('public Worker transport', () => {
+  it('honors Retry-After across different filters without retries or an Edge fallback', async () => {
+    vi.useFakeTimers()
+    fetch.mockResolvedValueOnce(new Response(null, { status: 429, headers: { 'Retry-After': '4' } }))
+    await expect(campusFeedbackPublicList({ q: 'first' })).rejects.toMatchObject({ status: 429 })
+    await expect(campusFeedbackPublicList({ q: 'second' }, { forceRefresh: true })).rejects.toMatchObject({ status: 429 })
+    expect(fetch).toHaveBeenCalledTimes(1)
+    expect(legacy).not.toHaveBeenCalled()
+    vi.advanceTimersByTime(4001)
+    await expect(campusFeedbackPublicList({ q: 'second' })).resolves.toHaveProperty('items')
+    expect(fetch).toHaveBeenCalledTimes(2)
+  })
   it('sends public filters without cookies or account authorization', async () => {
     expect((await campusFeedbackPublicList({ status: 'resolved', limit: 10, author_id: 'not-allowed' })).items).toEqual([])
     const [url, options] = fetch.mock.calls[0]
@@ -40,6 +51,16 @@ describe('public Worker transport', () => {
     results[0].items.push({ title: 'Fictional change' })
     expect(results[1].items).toEqual([])
     await campusFeedbackPublicList({ view: 'summary' }, { forceRefresh: true })
+    expect(fetch).toHaveBeenCalledTimes(2)
+  })
+  it('avoids repeated Worker requests for a minute while still expiring the result', async () => {
+    vi.useFakeTimers()
+    for (let seconds = 0; seconds < 60; seconds++) {
+      await campusFeedbackPublicList({ view: 'summary' })
+      vi.advanceTimersByTime(1000)
+    }
+    expect(fetch).toHaveBeenCalledTimes(1)
+    await campusFeedbackPublicList({ view: 'summary' })
     expect(fetch).toHaveBeenCalledTimes(2)
   })
 })

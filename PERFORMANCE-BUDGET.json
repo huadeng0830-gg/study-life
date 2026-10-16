@@ -1,0 +1,18 @@
+{
+  "note": "Application engineering budgets, not provider quotas. Reassess using measured regressions.",
+  "homeRequestsMax": 65,
+  "homeDecodedJsBytesMax": 1126400,
+  "homeDecodedCssBytesMax": 235520,
+  "homeImageBytesMax": 65536,
+  "homeApiRequestsMax": 0,
+  "ordinaryPageApiRequestsMax": 4,
+  "ordinaryPageDatabaseRoundTripsMax": 8,
+  "publicResponseBytesMax": 2097152,
+  "privateCacheBytesMax": 2097152,
+  "apiP95TargetMs": 800,
+  "simpleReadP95TargetMs": 500,
+  "apiP99TargetMs": 1500,
+  "errorRateMax": 0.01,
+  "publicWarmCacheHitTarget": 0.8,
+  "databaseQueryReviewThresholdMs": 100
+}

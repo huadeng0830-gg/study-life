@@ -71,7 +71,8 @@ const hasOptionIssue = computed(() => responseDraft.responseType === 'decision' 
 const hasJudgmentIssue = computed(() => responseDraft.responseType === 'judgment' && (!responseDraft.selectedOption || !responseDraft.why.trim()))
 
 async function refresh({ forceRefresh = false } = {}) {
-  return page.load(() => campusMatter(String(route.params.matterId || ''), { forceRefresh }))
+  const matterId = String(route.params.matterId || '')
+  return page.load(() => campusMatter(matterId, { forceRefresh }), null, { cacheKey: ['matter', matterId] })
 }
 onMounted(refresh)
 watch(() => route.params.matterId, () => { if (route.params.matterId) void refresh() })

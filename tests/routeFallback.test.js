@@ -22,7 +22,8 @@ describe('路由加载状态', () => {
 
   it('加载失败提供重新加载出口', () => {
     const mounted = mountFallback(true)
-    expect(mounted.root.textContent).toContain('页面加载失败')
+    expect(mounted.root.querySelector('h1')?.textContent).toBe('暂时无法打开这个页面')
+    expect(mounted.root.textContent).toContain('请检查网络后重试')
     expect(mounted.root.querySelector('button')?.textContent).toContain('重新加载')
     mounted.app.unmount()
     mounted.root.remove()

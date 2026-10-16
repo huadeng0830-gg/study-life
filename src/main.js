@@ -30,7 +30,7 @@ let startupRecoveryInFlight = false
 let appBooted = false
 
 /**
- * 「有空再做」的任务（更新检查、按时段预测预加载）。
+ * 「有空再做」的任务（更新检查等）。
  *
  * 【为什么必须包一层，不能直接裸调 requestIdleCallback】iPhone/iPad 上的 Safari
  * 可能没有 `requestIdleCallback`，应按能力检测。它被裸调时抛的是
@@ -271,7 +271,7 @@ async function bootstrap({ skipGate = false } = {}) {
     })
   }
 
-  // 从这里往下全部是**可选预热**：更新检查、悬停预加载、按时段预测预加载。
+  // 从这里往下全部是**可选预热**：更新检查等。
   // 整体兜一层异常——预热是投机行为，失败不该影响任何功能，更不该升级成「启动失败」
   // 去清 Service Worker 与缓存重载整页（今天的 requestIdleCallback 事故就是这样升级的）。
   try {
@@ -282,39 +282,15 @@ async function bootstrap({ skipGate = false } = {}) {
 }
 
 /**
- * 可选预热：更新检查、鼠标悬停预加载、按时段预测预加载。跑在界面挂载之后。
- * 单独成函数只是为了在 bootstrap 末尾统一兜异常；内部逻辑与之前一致。
+ * 可选预热跑在界面挂载之后，更新检查的异常不影响已显示的页面。
  */
 function startOptionalWarmup() {
   // 更新检查不再阻塞首屏；浏览器空闲后注册 PWA，桌面端接入同一自动检查调度。
   const startUpdater = () => void import('./composables/appUpdate.js')
   whenIdle(startUpdater, { timeout: 5000, fallbackDelay: 5000, deferMs: 1200 })
 
-  // 异步组件预加载：统一走 router/routePreload.js。
-  //
-  // 【为什么不再在这里另抄一份映射表】原来 main.js 按**路由名**自建了一份
-  // routeComponentMap，只列了 6 个页面，还漏掉了 /events 与 /review；
-  // 同时它绕过了 routePreload.js 里的 connectionAllowsPrefetch 检查，
-  // 于是「省流量模式 / 2G 网络」的用户照样会被后台下载课程表和账本 ——
-  // 恰好是那条检查当初要拦的代价最大的一笔。
-  // 现在统一由 routePreload.js 提供（按路径），省流量判断也只在一处。
-  // 侧栏的悬停/按下预热（Sidebar.vue warmRoute）本来就走它，两边口径终于一致。
-  //
-  // 基于用户行为模式预测预加载（如每天早上打开课程表）
-  const hour = new Date().getHours()
-  if (hour >= 6 && hour <= 10) {
-    // 早上预加载课程表和待办
-    whenIdle(() => {
-      preloadRoute('/schedule', { idleOnly: true })
-      preloadRoute('/tasks', { idleOnly: true })
-    }, { timeout: 8000, fallbackDelay: 5000, deferMs: 3000 })
-  } else if (hour >= 18 && hour <= 22) {
-    // 晚上预加载账本和复盘
-    whenIdle(() => {
-      preloadRoute('/bills', { idleOnly: true })
-      preloadRoute('/exams', { idleOnly: true })
-    }, { timeout: 8000, fallbackDelay: 5000, deferMs: 3000 })
-  }
+  // 按钟点猜测下一页会在移动端额外下载整组业务页面，且与侧栏预取重叠。
+  // 保留实际书签启动、导航指针/聚焦预载；后台空闲预取由侧栏统一预算。
 }
 
 bootstrap().catch((error) => {

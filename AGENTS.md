@@ -4,6 +4,11 @@
 
 - 版本与更新工作默认只处理 Web/PWA。除非用户在当前会话明确要求，否则不要构建、打包或发布 Windows/Electron/Tauri 桌面版本，也不要为桌面版单独打标签。
 
+## 免费资源与性能规则
+
+- 新增 API、数据库查询/列表、Realtime、刷新、缓存、图片、日志或 Worker 前，遵循 [性能开发规则](docs/PERFORMANCE-RULES.md)，核对请求复用、字段/分页/索引、账号隔离、清理与配额成本。
+- 工程阈值见 PERFORMANCE-BUDGET.json；供应商配额仅在带核查日期的 FREE-TIER-CAPACITY.md 维护。性能测试需区分虚构负载、生产基线与部署后数据，不为达标削减功能或权限。
+
 ## GitHub 发布、隐私与数据安全规则
 
 这是强制规则，不是建议。凡涉及 `git add`、`git commit`、`git push`、GitHub 发布、Release、打包或开源整理，都必须先完成本节检查。

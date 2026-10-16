@@ -53,11 +53,19 @@ async function readJson(response: Response) {
 }
 
 export async function handlePublicApi(request: Request, env: Env, ctx: ExecutionContext, fetcher: typeof fetch = fetch, cache: Cache = caches.default): Promise<Response> {
+  if (request.url.length > 2048) return json({ code: 'invalid_input', error: '请求地址过长。' }, 414)
+  const startedAt = performance.now()
   const url = new URL(request.url)
   const origin = request.headers.get('Origin') || ''
   const allowed = new Set(env.ALLOWED_ORIGINS.split(',').map(value => value.trim()).filter(Boolean))
   if (origin && !allowed.has(origin)) return json({ code: 'forbidden', error: '此来源未获授权。' }, 403)
   const respond = (body: unknown, status = 200) => withCors(json(body, status), origin)
+  const unavailable = (status = 503, retryAfter = 2) => {
+    const response = respond({ code: status === 429 ? 'rate_limited' : 'service_unavailable', error: '公开建议暂时无法读取，请稍后重试。' }, status)
+    response.headers.set('Retry-After', String(retryAfter))
+    response.headers.set('Access-Control-Expose-Headers', 'Retry-After, X-Public-Cache, Server-Timing')
+    return response
+  }
   if (request.method === 'OPTIONS') {
     if (request.headers.get('Access-Control-Request-Method') !== 'GET') return respond({ code: 'method_not_allowed' }, 405)
     const response = respond(null, 200)
@@ -90,9 +98,27 @@ export async function handlePublicApi(request: Request, env: Env, ctx: Execution
   const cacheUrl = new URL('/v1/feedback', url.origin)
   cacheUrl.search = new URLSearchParams({ status, category, q, sort, view, id, limit: String(limit), offset: String(offset) }).toString()
   const cacheKey = new Request(cacheUrl)
+  // Internal cooldown stores only a deadline/status, never a response body,
+  // credentials, a user ID or a private error. It is local to this CDN location.
+  const cooldownUrl = new URL('/__public_feedback_upstream_cooldown', url.origin)
+  cooldownUrl.searchParams.set('upstream', config.origin)
+  const cooldownKey = new Request(cooldownUrl)
   try {
     const hit = await cache.match(cacheKey)
-    if (hit) return withCors(hit, origin)
+    if (hit) {
+      const response = withCors(hit, origin)
+      response.headers.set('X-Public-Cache', 'HIT')
+      response.headers.set('Server-Timing', `cache;desc="HIT", total;dur=${(performance.now() - startedAt).toFixed(1)}`)
+      response.headers.set('Access-Control-Expose-Headers', 'Retry-After, X-Public-Cache, Server-Timing')
+      return response
+    }
+    const cooldown = await cache.match(cooldownKey)
+    const remaining = cooldown ? Math.ceil((Number(cooldown.headers.get('X-Retry-At')) - Date.now()) / 1000) : 0
+    if (remaining > 0 && remaining <= 30) {
+      const response = unavailable(cooldown?.headers.get('X-Upstream-Status') === '429' ? 429 : 503, remaining)
+      response.headers.set('X-Public-Cache', 'COOLDOWN')
+      return response
+    }
   } catch { /* Cache eviction or failure must not disable the public API. */ }
   const upstream = new URL('/rest/v1/campus_feedback_suggestions', config.origin)
   upstream.search = new URLSearchParams({ select: fields.join(','), visibility: 'eq.public', order: sort === 'supported' ? 'like_count.desc,created_at.asc,id.asc' : sort === 'newest' ? 'created_at.desc,id.asc' : 'updated_at.desc,id.asc', limit: String(limit), offset: String(offset), ...(status ? { status: `eq.${status}` } : {}), ...(category ? { category: `eq.${category}` } : {}), ...(id ? { id: `eq.${id}` } : {}), ...(q ? { or: '(title.imatch.' + JSON.stringify('***=' + q) + ',body.imatch.' + JSON.stringify('***=' + q) + ')' } : {}) }).toString()
@@ -100,11 +126,18 @@ export async function handlePublicApi(request: Request, env: Env, ctx: Execution
   const timeout = setTimeout(() => controller.abort(), 8000)
   let stage = 'fetch'
   let upstreamStatus = 0
+  let retryAfter = 2
+  const upstreamStartedAt = performance.now()
   try {
     const response = await fetcher(upstream, { headers: { apikey: config.key, Accept: 'application/json', Prefer: 'count=exact' }, signal: controller.signal, redirect: 'manual' })
     upstreamStatus = response.status
+    if (upstreamStatus === 429) {
+      const value = response.headers.get('Retry-After') || ''
+      const seconds = /^\d+$/.test(value) ? Number(value) : Math.ceil((Date.parse(value) - Date.now()) / 1000)
+      retryAfter = Number.isFinite(seconds) ? Math.min(30, Math.max(1, seconds)) : 5
+    }
     stage = 'status'
-    if (!response.ok) throw new Error('upstream_unavailable')
+    if (!response.ok) { await response.body?.cancel(); throw new Error('upstream_unavailable') }
     stage = 'decode'
     const rows: unknown = await readJson(response)
     stage = 'shape'
@@ -118,13 +151,21 @@ export async function handlePublicApi(request: Request, env: Env, ctx: Execution
     const cached = result.clone()
     cached.headers.set('Cache-Control', `public, max-age=${CACHE_SECONDS}`)
     ctx.waitUntil(cache.put(cacheKey, cached).catch(() => {}))
-    return withCors(result, origin)
+    const responseWithCors = withCors(result, origin)
+    responseWithCors.headers.set('X-Public-Cache', 'MISS')
+    responseWithCors.headers.set('Server-Timing', `upstream;dur=${(performance.now() - upstreamStartedAt).toFixed(1)}, total;dur=${(performance.now() - startedAt).toFixed(1)}`)
+    responseWithCors.headers.set('Access-Control-Expose-Headers', 'Retry-After, X-Public-Cache, Server-Timing')
+    return responseWithCors
   } catch (error) {
     // Do not log bodies, public text, credentials or upstream error messages.
     const reason = error instanceof Error && error.message.includes('Illegal invocation') ? 'illegal_invocation'
       : error instanceof Error && error.name === 'AbortError' ? 'timeout' : 'upstream_or_response'
     console.warn(JSON.stringify({ event: 'public_api_unavailable', stage, upstreamStatus, reason }))
-    return respond({ code: 'service_unavailable', error: '公开建议暂时无法读取，请稍后重试。' }, 503)
+    if (controller.signal.aborted || stage === 'fetch' || (stage === 'status' && (upstreamStatus === 429 || upstreamStatus >= 500))) {
+      const marker = new Response(null, { headers: { 'Cache-Control': `public, max-age=${retryAfter}`, 'X-Retry-At': String(Date.now() + retryAfter * 1000), 'X-Upstream-Status': String(upstreamStatus) } })
+      ctx.waitUntil(cache.put(cooldownKey, marker).catch(() => {}))
+    }
+    return unavailable(upstreamStatus === 429 ? 429 : 503, retryAfter)
   } finally { clearTimeout(timeout) }
 }
 

@@ -113,7 +113,8 @@
 }
 .task:hover {
   border-color: var(--border-strong);
-  box-shadow: var(--shadow-md);
+  background: var(--bg-tint);
+  box-shadow: none;
 }
 .reschedule-link { flex: 0 0 auto; padding-inline: 5px; color: var(--primary); }
 .reschedule-form { display: flex; flex-direction: column; gap: 14px; }

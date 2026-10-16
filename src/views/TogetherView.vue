@@ -1,4 +1,6 @@
 <script setup>
+import PageHeader from '../components/PageHeader.vue'
+import AppIcon from '../components/AppIcon.vue'
 import ActionButton from '../components/ActionButton.vue'
 import { campusNotificationRoute } from '../composables/campusContentModel.js'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
@@ -572,14 +574,11 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="together-page">
-    <header class="together-header">
-      <div>
-        <p class="eyebrow">三两事 · 好友协作</p>
-        <h1>一起约</h1>
-        <p class="page-intro">只分享双方都空闲的时间，不展示课程、日程或完整邮箱。</p>
-      </div>
+    <PageHeader class="together-header" title="一起约" description="找到共同空闲，安排一次见面。个人课表与日程保持私密。">
+      <template #actions>
       <ActionButton tone="ghost" class="btn btn-ghost refresh-button" type="button" :disabled="pageLoading || actionBusy || availabilityBusy" kind="important" feedback="external" :show-error="false" :action="() => refreshCurrentTab()">刷新</ActionButton>
-    </header>
+      </template>
+    </PageHeader>
 
     <div class="together-tabs" role="group" aria-label="好友协作功能">
       <button v-for="tab in tabs" :key="tab.id" type="button" :aria-pressed="activeTab === tab.id" :class="{ active: activeTab === tab.id }" @click="activeTab = tab.id">
@@ -590,7 +589,7 @@ onBeforeUnmount(() => {
     <p v-if="notice" class="together-notice" :class="`notice-${notice.kind}`">{{ notice.text }}</p>
 
     <section v-if="!accountUser" class="together-card account-gate">
-      <div class="gate-icon">👤</div>
+      <div class="gate-icon" aria-hidden="true"><AppIcon name="together" /></div>
       <h2>登录后开始与好友协作</h2>
       <p>登录和验证邮箱后，你可以添加好友、查找共同空闲时间并发送邀约。本机课表仍可照常使用。</p>
       <button type="button" class="btn btn-primary" @click="accountOpen = true">打开账号</button>

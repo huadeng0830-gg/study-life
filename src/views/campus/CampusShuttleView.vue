@@ -30,7 +30,7 @@ const exception = ref({ serviceDate: localDate(), exceptionType: 'suspended', de
 const now = ref(Date.now())
 let clockTimer = 0
 
-async function refresh() { return page.load(() => campusShuttles()) }
+async function refresh() { return page.load(() => campusShuttles(), null, { cacheKey: ['shuttle'] }) }
 onMounted(() => { void refresh(); clockTimer = window.setInterval(() => { now.value = Date.now() }, 60000) })
 onUnmounted(() => window.clearInterval(clockTimer))
 

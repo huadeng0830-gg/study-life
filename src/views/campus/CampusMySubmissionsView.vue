@@ -22,7 +22,7 @@ watch(() => accountUser.value?.id, () => { confirm.close(); withdrawing.value = 
 const items = computed(() => flattenCampusSubmissions(page.data.value))
 const canResubmit = (item) => CAMPUS_RESUBMITTABLE_STATUSES.includes(item.status) && Boolean(item.resubmitType || item.domainKey === 'courseReviews')
 
-async function refresh({ forceRefresh = false } = {}) { return page.load(() => campusLifeMine({}, { forceRefresh })) }
+async function refresh({ forceRefresh = false } = {}) { return page.load(() => campusLifeMine({ view: 'summary' }, { forceRefresh }), null, { cacheKey: ['mine', 'summary'] }) }
 
 function askWithdraw(item) {
   confirm.ask({

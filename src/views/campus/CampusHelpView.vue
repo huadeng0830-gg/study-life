@@ -40,7 +40,7 @@ async function refresh() {
   return page.load(async () => {
     const [publicResult, applicationResult, mineResult] = await Promise.all([campusHelpTasks(), listCampusHelpApplications(), campusLifeMine({ domains: ["helpTasks"] })])
     return { tasks: publicResult.tasks || [], applications: applicationResult.applications || [], mine: mineResult.helpTasks || [], activeTasks: applicationResult.activeTasks || [] }
-  })
+  }, null, { cacheKey: ['help'] })
 }
 onMounted(() => { void refresh() })
 

@@ -157,6 +157,9 @@ export function campusNotificationRoute(item) {
  * 于是解析失败时会渲染出 `undefined`。
  */
 export function campusErrorMessage(cause, fallback) {
-  if (cause && typeof cause === 'object' && typeof cause.message === 'string' && cause.message.trim()) return cause.message
+  if (cause && typeof cause === 'object' && typeof cause.message === 'string' && cause.message.trim()) {
+    if (/^(?:failed to fetch|networkerror when attempting to fetch resource|load failed|network request failed)\.?$/i.test(cause.message.trim())) return `${fallback || '暂时无法连接服务。'}请检查网络后重试。`
+    return cause.message
+  }
   return fallback
 }

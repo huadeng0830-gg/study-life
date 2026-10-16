@@ -90,6 +90,12 @@ export default defineConfig(({ mode }) => {
               // The account SDK is dynamically imported on demand; keep it out of the app shell cache.
               { name: 'supabase-vendor', test: /[\\/]node_modules[\\/](@supabase)[\\/]/ },
               { name: 'ocr-vendor', test: /[\\/]node_modules[\\/]tesseract\.js[\\/]/ },
+              // Merge only the static entry graph, preserving lazy routes and
+              // heavy optional libraries. This avoids many tiny startup fetches.
+              { name: 'startup-core', test: /[\\/]src[\\/]/, tags: ['$initial'] },
+              // Preserve entry-specific code while merging neighboring tiny
+              // shared state modules; avoid pulling entire feature views forward.
+              { name: 'workspace-shared', test: /[\\/]src[\\/]composables[\\/]/, minShareCount: 2, entriesAware: true, entriesAwareMergeThreshold: 12000 },
             ],
         },
       },

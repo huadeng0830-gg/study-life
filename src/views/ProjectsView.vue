@@ -1,4 +1,6 @@
 <script setup>
+import PageHeader from '../components/PageHeader.vue'
+import AppIcon from '../components/AppIcon.vue'
 import ActionButton from '../components/ActionButton.vue'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { createCollaborationContext } from '../composables/collaborationContext.js'
@@ -1079,17 +1081,13 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="page projects-page">
-    <header class="page-head projects-head">
-      <div>
-        <p class="eyebrow">三两事 · 项目协作</p>
-        <h1>齐行</h1>
-        <p class="page-subtitle">一个人可以管理项目，需要时再邀请队友一起推进。</p>
-      </div>
-      <div class="projects-head-actions">
+    <PageHeader class="page-head projects-head" title="齐行">
+      <p class="page-subtitle">一个人可以管理项目，需要时再邀请队友一起推进。</p>
+      <template #actions><div class="projects-head-actions">
         <ActionButton tone="ghost" class="btn btn-ghost" type="button" :disabled="pageLoading" kind="important" feedback="external" :show-error="false" :action="() => refresh()">刷新</ActionButton>
         <button class="btn btn-primary" type="button" :disabled="!isSignedIn" @click="openCreateProject">新建项目</button>
-      </div>
-    </header>
+      </div></template>
+    </PageHeader>
 
     <div v-if="notice" class="projects-notice" :class="`is-${notice.kind}`">
       <span>{{ notice.text }}</span><button v-if="lastDeletedProjectId" class="projects-undo" type="button" :disabled="actionBusy === 'restore-deleted'" @click="undoDeleteProject">撤销删除</button><button type="button" aria-label="关闭提示" @click="notice = null">×</button>
@@ -1101,7 +1099,7 @@ onBeforeUnmount(() => {
     <p v-if="inboxError" class="projects-form-hint" role="status">{{ inboxError }}</p>
 
     <section v-if="!isSignedIn" class="projects-signin panel">
-      <div class="projects-signin-icon" aria-hidden="true">🧩</div>
+      <div class="projects-signin-icon" aria-hidden="true"><AppIcon name="projects" /></div>
       <div>
         <h2>登录后创建和同步项目</h2>
         <p>项目数据独立于个人课表与私人待办。登录后可以先自己管理项目，也可以邀请队友加入。</p>
@@ -1375,7 +1373,7 @@ onBeforeUnmount(() => {
         </section>
 
         <section v-else class="projects-welcome panel">
-          <div class="projects-welcome-mark" aria-hidden="true">🧩</div>
+          <div class="projects-welcome-mark" aria-hidden="true"><AppIcon name="projects" /></div>
           <h2>{{ pageLoading ? '正在载入项目…' : '从一个项目开始' }}</h2>
           <p>{{ pageLoading ? '正在同步你的项目和待处理事项。' : '课程作业、竞赛、科研、软件开发或活动筹备，都可以先从一个简单项目开始。' }}</p>
           <button v-if="!pageLoading" class="btn btn-primary" type="button" @click="openCreateProject">新建项目</button>

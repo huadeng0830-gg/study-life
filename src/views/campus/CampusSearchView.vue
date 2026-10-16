@@ -28,7 +28,7 @@ async function search() {
   await runSearch(term, category.value, 0)
 }
 async function runSearch(term, type, index) {
-  const result = await page.load(() => campusLifeSearch(term, { type, page: index }))
+  const result = await page.load(signal => campusLifeSearch(term, { type, page: index }, { signal }), null, { cacheKey: ['search', term, type, index] })
   if (result) submitted.value = { term, type }
 }
 function changePage(index) { return runSearch(submitted.value.term, submitted.value.type, index) }

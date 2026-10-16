@@ -585,24 +585,13 @@ describe('渐变底与模板内联底', () => {
     expect(offenders).toEqual([])
   })
 
-  it('渐变判据真的跑到了东西', () => {
+  it('背景渐变仍受检查，普通文案不再依赖装饰渐变', () => {
     const { stats } = gradientSurfaceOffenders(styles())
     expect(stats.gradientRules, '一条渐变规则都没扫到').toBeGreaterThanOrEqual(10)
-    // 【第三十九轮：这条下限从 3 下调到 2，是被证明后的结果，不是为了让改动通过】
-    // 原来那个 3 里混着一条**永远匹配不到任何节点**的规则：App.vue 的
-    //   `.brand-mark { color:#fff; background:linear-gradient(145deg, var(--brand-grad-a), var(--brand-grad-b)) }`
-    // 两条独立依据：
-    //   1. 归属：Sidebar.vue:409 的 `<span class="brand-mark">UP</span>` 位于 `.brand`（408）内部，
-    //      而 Sidebar.vue 的模板根节点是 `<aside class="sidebar">`（407）⇒ `.brand-mark` 是**内部节点**类；
-    //   2. 宿主模板零出现：App.vue 的模板区里 `brand-mark` 出现 **0** 次 ⇒ 删除前那条规则编译出来是
-    //      `.brand-mark[data-v-<app>]`，而 Vue 的 scoped CSS 只把父作用域属性加在**子组件根节点**上，
-    //      所以它匹配不到任何元素（同批 40 条规则一并按 tests/scopedChildReachability.test.js 的判据清除）。
-    // 实测（把删除前的样式块替回 App.vue 复现）：gradientRules / gradientWithColor / stopsChecked
-    // = 13 / 3 / 12 → 12 / 2 / 12；只把 `.brand-mark` 这一条注回去，统计立刻回到 13 / 3 / 12，
-    // 说明差的就是它一条 ⇒ **2 就是真实生效的条数**，下限压到 3 是把死规则当成"守到了东西"。
-    // 判据本身的判别力不受影响：下面的夹具自证（该报的仍会报）照旧。
-    expect(stats.gradientWithColor, '没有一条渐变规则同时给字色，判据在守空气').toBeGreaterThanOrEqual(2)
-    expect(stats.stopsChecked, '一个色停都没核').toBeGreaterThanOrEqual(10)
+    // 产品界面重构移除了首页与品牌标记的两条装饰渐变。不能为了满足旧的
+    // 数量下限把渐变加回来；下方好/坏夹具继续证明文字色停检查的判别力。
+    expect(stats.gradientWithColor, '正文表面应使用语义实色，渐变仅留给用户选择的背景与皮肤').toBe(0)
+    expect(stats.stopsChecked, '没有渐变文字面时，不应制造色停与文字的配对').toBe(0)
   })
 
   it('渐变判定力自证：最浅色停压不住就报，压得住或没字色就不报', () => {

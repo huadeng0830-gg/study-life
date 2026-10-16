@@ -1,12 +1,11 @@
 @import './styles/action-feedback.css';
 @import './styles/shadcn.css';
-
 :root {
   color-scheme: light;
-  --bg: #f1f5f2;
-  --card: #fbfdfb;
-  --text: #1d312d;
-  --muted: #596a64;
+  --bg: #f6f7fa;
+  --card: #ffffff;
+  --text: #202735;
+  --muted: #586174;
   /* 主色按 WCAG AA 对比度校准；复核见 scripts/audit-contrast.mjs。 */
   --primary: #3d63d8;
   --primary-hover: #3151b8;
@@ -19,18 +18,36 @@
   /* 主色与危险色按钮的前景色；深色模式会调整主色前景。 */
   --on-primary: #ffffff;
   --on-danger: #ffffff;
-  --border: #d9e3dd;
+  --border: #e0e4ec;
   --brand-grad-a: #3d63d8;
   --brand-grad-b: #7855dc;
-  --shadow-sm: 0 1px 2px rgba(24, 58, 48, 0.045);
-  --shadow-md: 0 12px 30px rgba(24, 58, 48, 0.075);
-
+  --elevation-0: none;
+  --elevation-1: 0 1px 2px rgb(25 38 65 / 4%);
+  --elevation-2: 0 8px 24px rgb(25 38 65 / 10%);
+  --elevation-3: 0 24px 64px rgb(25 38 65 / 16%);
+  --shadow-sm: var(--elevation-1);
+  --shadow-md: var(--elevation-2);
   /* V2 semantic tokens used by shared components and public styles. */
-  --border-strong: #cbd8d1;
-  --ink-soft: #42564f;
-  --ink-faint: #596b64;
+  --border-strong: #c7cedb;
+  --ink-soft: #414d61;
+  --ink-faint: #626c7d;
   --ink: var(--text);
-  --bg-tint: #e9f0ec;
+  --bg-tint: #eef1f6;
+  --surface-secondary: var(--bg-tint);
+  --surface-elevated: var(--card);
+  --separator: var(--border);
+  --accent: var(--primary);
+  --info: var(--primary);
+  --sidebar-background: color-mix(in srgb, var(--bg-tint) 60%, var(--card));
+  --type-display: 36px;
+  --type-large-title: 30px;
+  --type-title: 26px;
+  --type-headline: 18px;
+  --type-body: 15px;
+  --type-callout: 14px;
+  --type-subheadline: 13px;
+  --type-footnote: 12px;
+  --type-caption: 11px;
   /* Type, weight, and radius scales shared by the component styles. */
   --radius-2: 2px;
   --radius-3: 3px;
@@ -51,17 +68,16 @@
   --radius-circle: 50%;
   --card-radius: var(--radius-surface);
   --radius-s: var(--radius-9);
-
-  --fs-8: 8px;
-  --fs-9: 9px;
-  --fs-9-5: 9.5px;
-  --fs-10: 10px;
-  --fs-10-5: 10.5px;
-  --fs-11: 11px;
-  --fs-11-5: 11.5px;
-  --fs-12: 12px;
-  --fs-12-5: 12.5px;
-  --fs-13: 13px;
+  --fs-8: var(--type-caption);
+  --fs-9: var(--type-caption);
+  --fs-9-5: var(--type-caption);
+  --fs-10: var(--type-caption);
+  --fs-10-5: var(--type-footnote);
+  --fs-11: var(--type-footnote);
+  --fs-11-5: var(--type-footnote);
+  --fs-12: var(--type-footnote);
+  --fs-12-5: var(--type-subheadline);
+  --fs-13: var(--type-subheadline);
   --fs-13-5: 13.5px;
   --fs-14: 14px;
   --fs-14-5: 14.5px;
@@ -82,10 +98,9 @@
   --fs-30: 30px;
   --fs-32: 32px;
   --fs-38: 38px;
-  --fs-page-title: var(--fs-23);
-  --fs-body: var(--fs-14);
-  --fs-aux: var(--fs-12-5);
-
+  --fs-page-title: var(--type-title);
+  --fs-body: var(--type-body);
+  --fs-aux: var(--type-subheadline);
   --fw-400: 400;
   --fw-450: 450;
   --fw-500: 500;
@@ -96,13 +111,11 @@
   --fw-800: 800;
   --fw-850: 850;
   --fw-900: 900;
-
   /* Tailwind v4 spacing scale used by shadcn arbitrary grid/gap utilities. */
   --spacing: 4px;
-
   /* Foundation contract. Legacy numeric tokens remain compatible; new shared
      components consume these roles instead of inventing their own scales. */
-  --font-sans: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Microsoft YaHei UI', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif;
   --line-body: 1.6;
   --line-heading: 1.4;
   --space-1: var(--spacing);
@@ -111,18 +124,24 @@
   --space-4: calc(var(--spacing) * 4);
   --space-5: calc(var(--spacing) * 5);
   --space-6: calc(var(--spacing) * 6);
+  --space-8: calc(var(--spacing) * 8);
+  --space-10: calc(var(--spacing) * 10);
+  --space-12: calc(var(--spacing) * 12);
   --control-height: 40px;
   --control-compact: 32px;
   --control-large: 44px;
   --radius-control: var(--radius-8);
   --radius-surface: var(--radius-12);
+  --radius-small: var(--radius-4);
+  --radius-overlay: var(--radius-16);
   --border-width: 1px;
   --surface-padding: var(--space-5);
   --icon-size: 16px;
-  --shadow-overlay: 0 12px 32px color-mix(in srgb, var(--text) 12%, transparent);
-
+  --shadow-overlay: var(--elevation-3);
+  --container-wide: 1440px;
+  --container-reading: 1080px;
+  --layout-gap: var(--space-6);
   --focus-ring: rgba(61, 99, 216, 0.28);
-
   /* Shared motion durations and curves; JS counterparts live in motion.js. */
   --dur-instant: 90ms;
   --dur-fast: 150ms;
@@ -137,36 +156,32 @@
   --action-fade: 150ms;
   --action-ease: ease-in-out;
   --action-success: var(--success);
-
   /* Keyboard focus pairs a solid outline with a contrasting halo; verified across themes. */
   --focus-solid: #2b5bd7;
   --focus-halo: rgba(255, 255, 255, 0.92);
   --focus-width: 2px;
   --focus-offset: 2px;
-
   /* Coarse pointers use 44px targets while desktop keeps compact density. */
   --tap-min: 44px;
-
   /* shadcn semantic roles bridge to the existing theme tokens. */
   --ui-background: var(--bg);
   --ui-foreground: var(--text);
-  --ui-card: var(--card);
+  --ui-card: var(--surface-elevated);
   --ui-card-foreground: var(--text);
-  --ui-primary: var(--primary);
+  --ui-primary: var(--accent);
   --ui-primary-foreground: var(--on-primary);
-  --ui-secondary: var(--bg-tint);
+  --ui-secondary: var(--surface-secondary);
   --ui-secondary-foreground: var(--text);
   --ui-muted: var(--bg-tint);
   --ui-muted-foreground: var(--muted);
   --ui-accent: var(--primary-soft);
   --ui-accent-foreground: var(--primary);
   --ui-destructive: var(--danger);
-  --ui-border: var(--border);
+  --ui-border: var(--separator);
   --ui-input: color-mix(in srgb, var(--ink-faint) 80%, var(--card));
   --ui-ring: var(--focus-solid);
   --ui-radius: var(--radius-surface);
 }
-
 /* 深色主题：焦点实色提亮，光环压暗，保证在深色卡片上仍然清晰。 */
 :root[data-theme='dark'] {
   color-scheme: dark;
@@ -183,7 +198,6 @@
 :root[data-theme='purple'] { --focus-solid: #6d28d9; }
 :root[data-theme='green'] { --focus-solid: #0a7a56; }
 :root[data-theme='pink'] { --focus-solid: #be185d; }
-
 /* ---------- 主题色切换 ---------- */
 :root[data-theme='purple'] {
   --primary: #7a37e8;
@@ -209,13 +223,11 @@
 :root[data-theme='custom'] {
   /* 自定义主题颜色由 theme.js 运行时写入 CSS 变量，这里只作占位 */
 }
-
 * {
   margin: 0;
   padding: 0;
   box-sizing: border-box;
 }
-
 html,
 body {
   min-height: 100%;
@@ -223,8 +235,9 @@ body {
   color: var(--ui-foreground);
   font-family: var(--font-sans);
   font-size: var(--fs-15);
+  line-height: var(--line-body);
+  -webkit-text-size-adjust: 100%;
 }
-
 /* Shared screen-reader-only utility. Component-scoped copies do not apply to
    App.vue live regions or labels that participate in non-scoped layouts. */
 .sr-only {
@@ -238,7 +251,6 @@ body {
   white-space: nowrap !important;
   border: 0 !important;
 }
-
 /* Reused by small secondary copy across pages, including together.css users. */
 .muted { color: var(--ui-muted-foreground); }
 
@@ -250,16 +262,13 @@ body {
     min-height: 100dvh;
   }
 }
-
 button {
   font-family: inherit;
   cursor: pointer;
 }
-
 button:disabled {
   cursor: not-allowed;
 }
-
 input,
 select,
 textarea {
@@ -283,7 +292,6 @@ textarea {
     font-size: 16px !important;
   }
 }
-
 input:focus,
 select:focus,
 textarea:focus {
@@ -304,7 +312,6 @@ select:user-invalid,
 [aria-invalid='true'] {
   border-color: var(--danger);
 }
-
 input:user-invalid:focus,
 textarea:user-invalid:focus,
 select:user-invalid:focus,
@@ -353,27 +360,30 @@ a:focus:not(:focus-visible),
 summary:focus:not(:focus-visible) {
   outline: none;
 }
-
 .btn {
   position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
   min-height: var(--control-height);
   line-height: 20px;
   text-decoration: none;
   border: none;
   border-radius: var(--radius-control);
-  padding: 9px 18px;
+  padding: var(--space-2) var(--space-4);
+  background: var(--ui-secondary);
+  color: var(--ui-secondary-foreground);
   font-size: var(--fs-body);
   font-weight: var(--fw-600);
   transition: background var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard), transform var(--dur-fast) var(--ease-standard),
     box-shadow var(--dur-fast) var(--ease-standard), opacity var(--dur-fast) var(--ease-standard);
 }
-
 .btn:hover {
   transform: none;
 }
-
 .btn:active {
-  transform: scale(0.98);
+  transform: translateY(1px);
   transition-duration: var(--dur-instant);
 }
 
@@ -408,22 +418,18 @@ summary:focus:not(:focus-visible) {
     min-width: var(--tap-min);
   }
 }
-
 .btn-primary {
   background: var(--ui-primary);
   color: var(--ui-primary-foreground, #fff);
   box-shadow: none;
 }
-
 .btn-primary:hover {
   background: var(--primary-hover);
 }
-
 .btn-ghost {
   background: var(--ui-accent);
   color: var(--ui-accent-foreground);
 }
-
 .btn-ghost:hover {
   background: color-mix(in srgb, var(--ui-accent-foreground) 14%, var(--ui-accent));
 }
@@ -435,11 +441,9 @@ summary:focus:not(:focus-visible) {
   background: color-mix(in srgb, var(--ui-destructive) 14%, var(--ui-card));
   color: var(--ui-destructive);
 }
-
 .btn-danger:hover {
   background: color-mix(in srgb, var(--ui-destructive) 24%, var(--ui-card));
 }
-
 .card {
   color: var(--ui-card-foreground);
   background: var(--ui-card);
@@ -448,22 +452,17 @@ summary:focus:not(:focus-visible) {
   padding: var(--surface-padding);
   box-shadow: var(--shadow-sm);
 }
-
 .btn-secondary {
   color: var(--ui-secondary-foreground);
   background: var(--ui-secondary);
 }
-
 .btn-secondary:hover { background: color-mix(in srgb, var(--ui-border) 42%, var(--ui-secondary)); }
-
 .btn-outline {
   border: 1px solid var(--ui-border);
   color: var(--ui-foreground);
   background: var(--ui-card);
 }
-
 .btn-outline:hover { background: var(--ui-muted); }
-
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -473,7 +472,6 @@ summary:focus:not(:focus-visible) {
     animation: none !important;
   }
 }
-
 :root[data-performance='reduced'] *,
 :root[data-performance='reduced'] *::before,
 :root[data-performance='reduced'] *::after {
@@ -512,7 +510,6 @@ summary:focus:not(:focus-visible) {
     --focus-ring: rgba(143, 176, 255, 0.4);
   }
 }
-
 :root[data-contrast='high'] {
   --border: #8b97ae;
   --border-strong: #55617c;
@@ -522,7 +519,6 @@ summary:focus:not(:focus-visible) {
   --bg-tint: #e8ecf3;
   --focus-ring: rgba(43, 91, 215, 0.34);
 }
-
 :root[data-contrast='high'][data-theme='dark'] {
   --border: #64749a;
   --border-strong: #93a5c8;
@@ -597,20 +593,21 @@ summary:focus:not(:focus-visible) {
   display: flex;
   align-items: flex-end;
   justify-content: space-between;
-  gap: 18px 24px;
-  margin-bottom: 20px;
+  gap: var(--space-4) var(--space-6);
+  margin-bottom: var(--space-6);
+  flex-wrap: wrap;
 }
 .page-head-main {
   min-width: 0;
 }
 .page-title {
   font-size: var(--fs-page-title);
-  font-weight: var(--fw-800);
+  font-weight: var(--fw-700);
   letter-spacing: -0.02em;
   line-height: 1.25;
 }
 .page-desc {
-  margin-top: 4px;
+  margin-top: var(--space-2);
   color: var(--ink-faint);
   font-size: var(--fs-aux);
   line-height: 1.5;
@@ -618,7 +615,7 @@ summary:focus:not(:focus-visible) {
 .page-actions {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--space-2);
   flex-wrap: wrap;
 }
 
@@ -707,7 +704,6 @@ summary:focus:not(:focus-visible) {
   color: var(--danger);
   background: color-mix(in srgb, var(--danger) 12%, var(--card));
 }
-
 .startup-error {
   display: grid;
   place-items: center;
@@ -966,7 +962,6 @@ summary:focus:not(:focus-visible) {
     break-after: avoid;
   }
 }
-
 @page {
   margin: 12mm;
 }

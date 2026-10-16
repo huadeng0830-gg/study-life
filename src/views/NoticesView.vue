@@ -1,4 +1,5 @@
 <script setup>
+import PageHeader from '../components/PageHeader.vue'
 import { computed, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { policyDateKey } from '../composables/settingsPolicy.js'
@@ -114,13 +115,9 @@ function linkLabel(link) {
 
 <template>
   <div class="page notice-archive-page">
-    <header class="page-head">
-      <div class="page-head-main">
-        <h1 class="page-title">通知档案</h1>
-        <p class="page-desc">原文留在本机，按来源和主题查找。这里只记录自己的通知，不提供点赞或评论。</p>
-      </div>
-      <div class="page-actions"><button class="btn btn-ghost" type="button" @click="router.push('/tasks')">返回待办</button></div>
-    </header>
+    <PageHeader class="page-head" title="通知档案" description="原文留在本机，按来源和主题查找。这里只记录自己的通知，不提供点赞或评论。">
+      <template #actions><button class="btn btn-ghost" type="button" @click="router.push('/tasks')">返回待办</button></template>
+    </PageHeader>
 
     <section class="archive-add card">
       <h2>收下一条通知</h2>

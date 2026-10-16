@@ -117,7 +117,7 @@ export function createPlatformAdminHandler({ service, allowedOrigins = [], logge
         case 'overview':
           return json({ data: await service.getOverview() }, 200, corsOrigin)
         case 'reviewers_list':
-          return json({ data: await service.listReviewers({ page: positivePage(payload.page), userId: payload.userId ? requiredUuid(payload.userId, '审核账号') : '' }) }, 200, corsOrigin)
+          return json({ data: await service.listReviewers({ page: positivePage(payload.page), userId: payload.userId ? requiredUuid(payload.userId, '审核账号') : '', actorId: user.id }) }, 200, corsOrigin)
         case 'reviewer_set': {
           const userId = requiredUuid(payload.userId, '审核账号')
           const school = requiredText(payload.school, '授权学校', 100)

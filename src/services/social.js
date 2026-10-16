@@ -1,10 +1,9 @@
-import { watch } from 'vue'
 import { accountUser } from '../composables/accountAuth.js'
 import { hasVerifiedContactEmail } from '../composables/accountVerification.js'
 import { accountSyncStatus, syncAccountNow } from '../composables/accountSyncState.js'
 import { accountSyncViaAccount } from '../composables/accountSyncMode.js'
 import { getSupabaseClient } from './supabase.js'
-import { createReadCache } from './readCache.js'
+import { campusReadCache as readCache, campusReadAccountRevision, invalidateCampusReads } from './campusReadCache.js'
 import { EDGE_FUNCTION_TIMEOUT_MS } from './cloudConfig.js'
 
 const campusReads = new Set([
@@ -14,21 +13,21 @@ const campusReads = new Set([
   'favorite_list',
   'matter_overview', 'matter_list', 'matter_detail',
 ])
-const readCache = createReadCache()
-let accountGeneration = 0
-// Synchronous invalidation also catches logout → login to the same account.
-watch(() => accountUser.value?.id || '', () => {
-  accountGeneration += 1
-  readCache.clear()
-}, { flush: 'sync' })
-
-async function cachedCampusRequest(action, payload, request, options = { area: '校园服务' }) {
+// These reads need live authorization/current state on every call, but reading
+// notifications or an admin screen must not invalidate unrelated campus data.
+const uncachedCampusReads = new Set(['governance_access', 'moderation_queue', 'moderation_history', 'message_list', 'reports_mine'])
+const uncachedSocialReads = new Set([
+  'email_search', 'friends_list', 'availability_query', 'invitations_list',
+  'notifications_list', 'campus_place_invites_list',
+  'project_time_availability', 'project_meetings_list',
+])
+async function cachedCampusRequest(action, payload, request, options = { area: '校园服务' }, signal) {
   const user = signedInUser(options)
-  const generation = accountGeneration
-  if (!navigator.onLine) return request()
+  const generation = campusReadAccountRevision()
+  if (!navigator.onLine) return request(signal)
   const key = JSON.stringify([user.id, action, payload])
-  const result = await readCache.read(key, request)
-  if (accountGeneration !== generation) throw new SocialError('account_changed', '登录状态已变化，请重新打开页面。', 401)
+  const result = await readCache.read(key, request, { signal })
+  if (campusReadAccountRevision() !== generation) throw new SocialError('account_changed', '登录状态已变化，请重新打开页面。', 401)
   return result
 }
 
@@ -110,24 +109,30 @@ async function parseFunctionError(error) {
   return { code: 'service_unavailable', message: '', status: 0 }
 }
 
-async function requestFunction(functionName, action, payload, { requireVerified = true, area = '好友协作', messageAction = action } = {}) {
+async function requestFunction(functionName, action, payload, { requireVerified = true, area = '好友协作', messageAction = action, signal } = {}) {
+  if (signal?.aborted) throw new DOMException('Read cancelled', 'AbortError')
   const user = signedInUser({ requireVerified, area })
   if (!navigator.onLine) throw new SocialError('offline', '当前离线，操作尚未保存；联网后请重试。', 0)
   const client = await getSupabaseClient()
   const { data: authData, error: authError } = await client.auth.getSession()
   const session = authData?.session
+  if (signal?.aborted) throw new DOMException('Read cancelled', 'AbortError')
   if (authError || !session?.access_token || !currentSessionMatches(user.id, session)) {
+    invalidateCampusReads()
     throw new SocialError('unauthorized', '登录已失效，请重新登录。', 401)
   }
   // The SDK may resolve its default token after an account switch. Bind this
   // mutation to the session that authorized the user's original action.
   const { data, error } = await client.functions.invoke(functionName, {
     timeout: EDGE_FUNCTION_TIMEOUT_MS,
+    signal,
     body: { action, payload }, headers: { Authorization: `Bearer ${session.access_token}` },
   })
+  if (signal?.aborted) throw new DOMException('Read cancelled', 'AbortError')
   if (accountUser.value?.id !== user.id) throw new SocialError('account_changed', '登录账号已切换，本次操作已取消。', 401)
   if (error) {
     const detail = await parseFunctionError(error)
+    if (detail.status === 401 || detail.status === 403) invalidateCampusReads()
     throw new SocialError(detail.code, messageFor(detail.code, detail.message, messageAction), detail.status)
   }
   if (!data || typeof data !== 'object' || !('data' in data)) {
@@ -140,24 +145,27 @@ export function socialRequest(action, payload = {}) {
   const options = { requireVerified: !['profile_get', 'profile_save'].includes(action), area: '好友协作' }
   const request = () => requestFunction('campus-social', action, payload, options)
   if (['profile_get', 'campus_places_list'].includes(action)) return cachedCampusRequest(`social:${action}`, payload, request, options)
+  if (uncachedSocialReads.has(action)) return request()
   // Profile edits can change school/campus scope; never reuse earlier lists.
-  readCache.clear()
-  return request().finally(() => readCache.clear())
+  invalidateCampusReads()
+  return request().finally(invalidateCampusReads)
 }
 
-export function campusLifeRequest(action, payload = {}, { forceRefresh = false } = {}) {
-  const request = () => requestFunction('campus-life', action, payload, { area: '校园服务', messageAction: `campus_life_${action}` })
+export function campusLifeRequest(action, payload = {}, { forceRefresh = false, signal } = {}) {
+  const request = upstreamSignal => requestFunction('campus-life', action, payload, { area: '校园服务', messageAction: `campus_life_${action}`, signal: upstreamSignal })
   if (forceRefresh) readCache.clear()
-  if (campusReads.has(action)) return cachedCampusRequest(action, payload, request)
+  if (campusReads.has(action)) return cachedCampusRequest(action, payload, request, { area: '校园服务' }, signal)
+  if (uncachedCampusReads.has(action)) return request(signal)
   // Invalidate before AND after a write: a read started while the write was
   // pending must not repopulate the next page with the pre-write response.
-  readCache.clear()
-  return request().finally(() => readCache.clear())
+  invalidateCampusReads()
+  return request().finally(invalidateCampusReads)
 }
 
 // Public feedback can be read before login. The function still verifies every
 // mutation itself; this helper sends the current session only when one exists.
-export async function campusCommunityRequest(action, payload = {}) {
+export async function campusCommunityRequest(action, payload = {}, { signal } = {}) {
+  if (signal?.aborted) throw new DOMException('Read cancelled', 'AbortError')
   if (!navigator.onLine) throw new SocialError('offline', '当前离线，操作尚未保存；联网后请重试。', 0)
   const client = await getSupabaseClient()
   const { data: authData, error: authError } = await client.auth.getSession()
@@ -165,7 +173,9 @@ export async function campusCommunityRequest(action, payload = {}) {
   const session = authData?.session
   const callerId = accountUser.value?.id || ''
   const headers = session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {}
-  const { data, error } = await client.functions.invoke('campus-community', { body: { action, payload }, headers, timeout: EDGE_FUNCTION_TIMEOUT_MS })
+  if (signal?.aborted) throw new DOMException('Read cancelled', 'AbortError')
+  const { data, error } = await client.functions.invoke('campus-community', { body: { action, payload }, headers, timeout: EDGE_FUNCTION_TIMEOUT_MS, signal })
+  if (signal?.aborted) throw new DOMException('Read cancelled', 'AbortError')
   if (callerId && accountUser.value?.id !== callerId) throw new SocialError('account_changed', '登录账号已切换，本次操作已取消。', 401)
   if (error) {
     const detail = await parseFunctionError(error)
@@ -202,10 +212,53 @@ export function cancelCampusPlaceInvite(inviteId) { return socialRequest('campus
 export async function subscribeSocialNotifications(userId, onChange) {
   const client = await getSupabaseClient()
   if (accountUser.value?.id !== userId) return () => {}
-  const channel = client.channel(`social-notices-${userId}`)
-    .on('postgres_changes', {
-      event: '*', schema: 'public', table: 'social_notifications', filter: `recipient_id=eq.${userId}`,
-    }, onChange)
-    .subscribe()
-  return () => { void client.removeChannel(channel) }
+  let channel = null
+  let disposed = false
+  let removing = null
+  let suspended = false
+  const usable = () => !disposed && accountUser.value?.id === userId
+    && document.visibilityState !== 'hidden' && navigator.onLine !== false
+  const notify = (...args) => { if (usable()) onChange(...args) }
+  function reconcile() {
+    if (!usable()) {
+      if (!disposed && accountUser.value?.id === userId) suspended = true
+      if (channel) {
+        const previous = channel
+        channel = null
+        suspended = true
+        // Never overlap two same-name channels while unsubscribe is pending.
+        removing = Promise.resolve(client.removeChannel(previous)).catch(() => {}).finally(() => {
+          removing = null
+          reconcile()
+        })
+      }
+      return
+    }
+    if (channel || removing) return
+    const next = client.channel(`social-notices-${userId}`)
+      .on('postgres_changes', {
+        event: '*', schema: 'public', table: 'social_notifications', filter: `recipient_id=eq.${userId}`,
+      }, (...args) => { if (channel === next) notify(...args) })
+    channel = next
+    next.subscribe(status => {
+      // Catch up only after the live subscription is ready, closing the gap
+      // between the snapshot read and receiving subsequent database events.
+      if (status === 'SUBSCRIBED' && channel === next && usable() && suspended) {
+        suspended = false
+        notify()
+      }
+    })
+  }
+  document.addEventListener('visibilitychange', reconcile)
+  window.addEventListener('online', reconcile)
+  window.addEventListener('offline', reconcile)
+  reconcile()
+  return () => {
+    if (disposed) return
+    disposed = true
+    document.removeEventListener('visibilitychange', reconcile)
+    window.removeEventListener('online', reconcile)
+    window.removeEventListener('offline', reconcile)
+    reconcile()
+  }
 }

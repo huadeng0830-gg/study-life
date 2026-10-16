@@ -1,4 +1,5 @@
 <script setup>
+import PageHeader from '../components/PageHeader.vue'
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import CampusHome from '../components/CampusHome.vue'
@@ -589,16 +590,12 @@ function searchCampusPlaces(category = 'all') {
 
 <template>
   <div class="page places-page">
-    <header class="page-head">
-      <div class="page-head-main">
-        <RouterLink class="text-button" to="/campus">校园总览</RouterLink>
-        <h1 class="page-title">校园地点</h1>
-        <p class="page-desc">查找并共建校园地点信息。地点资料提交审核后公开；到访日期、消费金额和私人备注始终留在本机。</p>
-      </div>
-      <div v-if="section !== 'home'" class="page-actions">
+    <PageHeader class="page-head" title="校园地点" description="查找并共建校园地点信息。地点资料提交审核后公开；到访日期、消费金额和私人备注始终留在本机。">
+      <RouterLink class="text-button" to="/campus">校园总览</RouterLink>
+      <template #actions>
         <button class="btn btn-primary" type="button" :aria-expanded="showPlaceForm && section === 'mine'" aria-controls="place-create-form" @click="showPlaceForm && section === 'mine' ? showPlaceForm = false : beginNewPlace()">{{ showPlaceForm && section === 'mine' ? '收起' : '添加地点' }}</button>
-      </div>
-    </header>
+      </template>
+    </PageHeader>
 
     <nav class="place-tabs" aria-label="校园生活分类">
       <button type="button" :aria-pressed="section === 'home'" @click="switchSection('home')">首页</button>

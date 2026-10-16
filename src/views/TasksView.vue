@@ -1,8 +1,9 @@
 <script setup>
+import PageHeader from '../components/PageHeader.vue'
 import { computed, onBeforeUnmount, ref, useId, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Button } from '../components/ui/button'
-import { Field, FieldGroup, FieldLabel } from '../components/ui/field'
+import { Field, FieldDescription, FieldGroup, FieldLabel } from '../components/ui/field'
 import { useMediaQuery } from '@vueuse/core'
 import { ToggleGroup, ToggleGroupItem } from '../components/ui/toggle-group'
 import { Plus, Sparkles, ClipboardPaste, List, Columns3, CalendarDays, SlidersHorizontal } from '@lucide/vue'
@@ -704,13 +705,9 @@ function updateTaskCheckpointField(field, value) {
 </script>
 
 <template>
-  <div class="page tasks-page" @click.capture="dismissTaskTools">
-    <header class="page-head">
-      <div class="page-head-main">
-        <h1 class="page-title">待办</h1>
-        <p class="page-desc">记下要做的事，按下一步时间管理截止与阶段安排。</p>
-      </div>
-      <div class="page-actions">
+  <div class="page tasks-page stack" @click.capture="dismissTaskTools">
+    <PageHeader class="page-head" title="待办" description="记下要做的事，按下一步时间管理截止与阶段安排。">
+      <template #actions>
         <Button variant="ghost" :aria-expanded="showHistory" @click="setHistory">{{ showHistory ? '返回当前' : `历史 ${counts.archived || ''}` }}</Button>
         <details ref="taskTools" class="task-tools" @keydown.esc.stop.prevent="closeTaskTools">
           <summary class="btn btn-ghost">更多操作</summary>
@@ -722,8 +719,8 @@ function updateTaskCheckpointField(field, value) {
           </div>
         </details>
         <Button aria-keyshortcuts="N" title="快捷键：N" @click="openAdd"><Plus data-icon="inline-start" />添加待办</Button>
-      </div>
-    </header>
+      </template>
+    </PageHeader>
 
     <LearningNavigation current="tasks" />
 
@@ -956,18 +953,11 @@ function updateTaskCheckpointField(field, value) {
       <form :id="editorFormId" class="form" novalidate @submit.prevent="save">
         <FieldGroup class="gap-4">
         <Field :data-invalid="errorField === 'title' || undefined">
-        <FieldLabel for="tasks-title">待办内容 *</FieldLabel>
+        <FieldLabel for="tasks-title">要做什么</FieldLabel>
         <input id="tasks-title" ref="titleInput" v-model="form.title" maxlength="200" placeholder="例如：完成高数第三章作业" :aria-invalid="errorField === 'title' || undefined" :aria-describedby="errorField === 'title' ? 'tasks-form-error' : undefined" @input="clearFormError('title')" />
+        <FieldDescription>只需填写内容，日期和其他信息都可以稍后补充。</FieldDescription>
 
         </Field>
-        <Field>
-        <FieldLabel for="tasks-course">所属课程或类别</FieldLabel>
-        <input id="tasks-course" v-model="form.course" list="course-options" placeholder="选填，可直接输入" @change="linkCourseFromName" />
-        <datalist id="course-options">
-          <option v-for="name in courseNames" :key="name" :value="name"></option>
-        </datalist>
-        </Field>
-
         <div class="form-row deadline-row">
           <div>
             <label for="tasks-due-date">截止日期</label>
@@ -981,9 +971,17 @@ function updateTaskCheckpointField(field, value) {
 
         <div class="date-shortcuts" role="group" aria-label="快速选择截止日期"><button type="button" :aria-pressed="form.dueDate === appToday" @click="setFormDueDate(0)">今天</button><button type="button" :aria-pressed="form.dueDate === addAppDays(appToday, 1)" @click="setFormDueDate(1)">明天</button><button type="button" :aria-pressed="form.dueDate === addAppDays(appToday, 7)" @click="setFormDueDate(7)">一周后</button><button type="button" :aria-pressed="!form.dueDate" @click="setFormDueDate(null)">暂不安排</button></div>
         <small v-if="!taskHasTime(form)" class="repeat-hint">未设置日期的事项会留在“待安排日期”，随时可以补上。</small>
-        <TaskTimeEditor v-model="form.timeStages" :error-field="errorField" :focus-stage-id="editingStageId" :now-ms="appNow.getTime()" @change="clearFormError(errorField)" />
+        <details class="task-details" :open="Boolean(form.timeStages.length || errorField.startsWith('timeStages.') || editingStageId)"><summary>安排起止时间或多个阶段 <small>可选</small></summary><TaskTimeEditor v-model="form.timeStages" :error-field="errorField" :focus-stage-id="editingStageId" :now-ms="appNow.getTime()" @change="clearFormError(errorField)" /></details>
         <TaskTimeShift v-if="taskHasTime(form)" :task="form" :now-ms="appNow.getTime()" @apply="applyTimeShift" @undo="applyTimeShift" />
 
+        <details class="task-details task-context" :open="Boolean(form.course || form.note || form.priority !== 'normal')">
+        <summary>课程、优先级与备注 <small>可选</small></summary>
+        <FieldGroup class="gap-4">
+        <Field>
+        <FieldLabel for="tasks-course">所属课程或类别</FieldLabel>
+        <input id="tasks-course" v-model="form.course" list="course-options" placeholder="选填，可直接输入" @change="linkCourseFromName" />
+        <datalist id="course-options"><option v-for="name in courseNames" :key="name" :value="name"></option></datalist>
+        </Field>
         <Field>
         <FieldLabel for="tasks-priority">优先级</FieldLabel>
         <select id="tasks-priority" v-model="form.priority">
@@ -998,6 +996,8 @@ function updateTaskCheckpointField(field, value) {
         <textarea id="tasks-note" v-model="form.note" rows="2" placeholder="选填，记下要求、地点或准备事项"></textarea>
 
         </Field>
+        </FieldGroup>
+        </details>
         <details class="task-details" :open="Boolean((editingId && (form.repeat !== 'none' || form.estimateMinutes || form.actualMinutes)) || ['estimateMinutes', 'actualMinutes', 'reminderMinutes', 'repeatEndDate'].includes(errorField))">
         <summary>时长、重复与提醒 <small>按需设置</small></summary>
         <div class="form-row">
@@ -1022,9 +1022,9 @@ function updateTaskCheckpointField(field, value) {
       </form>
       <template #foot>
         <div class="actions">
-          <Button v-if="editingId" type="button" variant="destructive" class="whitespace-normal" @click="remove">删除</Button>
+          <Button v-if="editingId" type="button" variant="destructive" class="whitespace-normal" @click="remove">删除待办</Button>
           <Button type="button" variant="outline" class="whitespace-normal" @click="showForm = false">取消</Button>
-          <Button type="submit" :form="editorFormId" class="whitespace-normal">保存</Button>
+          <Button type="submit" :form="editorFormId" class="whitespace-normal">{{ editingId ? '保存更改' : '创建待办' }}</Button>
         </div>
       </template>
     </Modal>

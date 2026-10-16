@@ -77,11 +77,12 @@ export function preloadRouteLink(event) {
 
 export function connectionAllowsPrefetch() {
   if (typeof navigator === 'undefined') return false
+  if (navigator.onLine === false || (typeof document !== 'undefined' && document.visibilityState === 'hidden')) return false
   const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection
   // Network Information API 不可用时无法判断弱网；保守地跳过后台预取。
   if (!connection) return false
   if (connection.saveData) return false
-  return !/^(slow-2g|2g)$/i.test(connection.effectiveType || '')
+  return connection.effectiveType === '4g'
 }
 
 export function preloadRoute(path, { idleOnly = false } = {}) {
@@ -93,5 +94,5 @@ export function preloadRoute(path, { idleOnly = false } = {}) {
 // 明确意图时再加载，避免移动网络和低内存设备被后台下载拖慢。
 export function preloadCommonRoutes() {
   if (!connectionAllowsPrefetch()) return
-  for (const path of ['/tasks', '/exams', '/lists']) void preloadRoute(path, { idleOnly: true })
+  void preloadRoute('/tasks', { idleOnly: true })
 }

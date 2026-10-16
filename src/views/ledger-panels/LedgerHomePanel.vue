@@ -764,4 +764,7 @@ const moneyHero = moneyRow
 .spend-metric b {
   font-size:var(--fs-15)}
 }
+@media (max-width:900px), (pointer:coarse) {
+  .cat-bar-row.cat-bar-link { min-height:var(--tap-min); }
+}
 </style>

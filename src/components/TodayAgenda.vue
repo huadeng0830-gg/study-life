@@ -88,7 +88,7 @@ const summary = computed(() => {
         <h2 id="today-agenda-title">今日安排</h2>
         <span class="agenda-summary">{{ summary }}</span>
       </div>
-      <RouterLink class="agenda-link" to="/schedule">查看课表 →</RouterLink>
+      <RouterLink class="agenda-link" to="/schedule">课程表</RouterLink>
     </header>
 
     <ul v-if="items.length" class="agenda-list" aria-label="今日课程与日程">
@@ -108,9 +108,8 @@ const summary = computed(() => {
       </li>
     </ul>
 
-    <EmptyState v-else icon="☀" title="今天没有固定安排" description="空出的时间可以留给待办，也可以先规划下一步。" :level="3">
-      <RouterLink class="btn btn-ghost" to="/schedule">查看课表</RouterLink>
-      <RouterLink class="btn btn-primary" to="/events">管理日程</RouterLink>
+    <EmptyState v-else compact icon="events" title="今天的时间由你安排" description="课程和日程会按时间出现在这里。" :level="3">
+      <RouterLink class="btn btn-outline" to="/events">添加日程</RouterLink>
     </EmptyState>
   </section>
 </template>
@@ -159,7 +158,7 @@ const summary = computed(() => {
 }
 @media (max-width: 900px), (pointer: coarse) and (max-height: 520px) {
   .agenda-head { align-items: center; flex-wrap: wrap; }
-  .agenda-link { display: inline-flex; align-items: center; min-height: 44px; }
+  .agenda-link { display: inline-flex; align-items: center; min-height: var(--tap-min); min-width:var(--tap-min); }
   .agenda-entry { grid-template-columns: 8px minmax(0, 1fr); align-items: start; padding-block: 12px; }
   .agenda-time { grid-column: 2; white-space: normal; overflow-wrap: anywhere; }
   .agenda-rail { grid-column: 1; grid-row: 1 / span 2; }

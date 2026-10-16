@@ -87,6 +87,27 @@ describe('navigation registry and saved layouts', () => {
     expect(mobileNavigation.value).toEqual(previousMobile)
   })
 
+  it('upgrades only the untouched previous six-group layout and preserves personal edits', () => {
+    const previous = [
+      { id: 'workspace', label: '今日', items: ['today'] },
+      { id: 'learning', label: '学习', items: ['schedule', 'course', 'tasks', 'exams'] },
+      { id: 'schedule', label: '日程', items: ['events', 'together'] },
+      { id: 'qixing', label: '齐行', items: ['projects'] },
+      { id: 'campus', label: '校园', items: ['places'] },
+      { id: 'other', label: '其他', items: ['lists', 'bills', 'review', 'feedback'] },
+    ]
+    expect(normalizeDesktopNavigation(previous)).toEqual(DEFAULT_DESKTOP_NAVIGATION)
+    const renamed = structuredClone(previous)
+    renamed[1].label = '我的课程'
+    expect(normalizeDesktopNavigation(renamed)).toEqual(renamed)
+    const reordered = structuredClone(previous)
+    reordered[1].items.reverse()
+    expect(normalizeDesktopNavigation(reordered)).toEqual(reordered)
+    const hidden = structuredClone(previous)
+    hidden[5].items.pop()
+    expect(normalizeDesktopNavigation(hidden)).toEqual(hidden)
+  })
+
   it('opens the navigation editor and applies phone and desktop edits immediately', async () => {
     const { mountApp, settle } = await import('./helpers/mountApp.js')
       const app = await mountApp({ hash: '/' })

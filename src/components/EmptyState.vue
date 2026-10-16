@@ -1,4 +1,6 @@
 <script setup>
+import AppIcon from './AppIcon.vue'
+import { Button } from './ui/button'
 defineProps({
   icon: { type: String, default: '✦' },
   title: { type: String, required: true },
@@ -9,14 +11,15 @@ defineProps({
   // 标题层级。空态通常挂在页面 h1 之下，用 h2 才不跳级；
   // 但在弹窗或卡片里作为次级块时 h3 更合适，所以做成可配置。
   level: { type: Number, default: 3 },
+  compact: { type: Boolean, default: false },
 })
 
 const emit = defineEmits(['primary', 'secondary'])
 </script>
 
 <template>
-  <div class="empty-state">
-    <span class="es-icon" aria-hidden="true">{{ icon }}</span>
+  <div class="empty-state" :class="{ 'is-compact': compact }">
+    <span class="es-icon" aria-hidden="true"><AppIcon :name="icon" /></span>
     <div class="es-copy">
       <h3 v-if="level === 3">{{ title }}</h3>
       <h2 v-else-if="level === 2">{{ title }}</h2>
@@ -25,8 +28,8 @@ const emit = defineEmits(['primary', 'secondary'])
       <small v-if="hint">{{ hint }}</small>
     </div>
     <div v-if="primaryLabel || secondaryLabel || $slots.default" class="es-actions">
-      <button v-if="secondaryLabel" type="button" class="btn btn-ghost" @click="emit('secondary')">{{ secondaryLabel }}</button>
-      <button v-if="primaryLabel" type="button" class="btn btn-primary" @click="emit('primary')">{{ primaryLabel }}</button>
+      <Button v-if="secondaryLabel" type="button" variant="outline" @click="emit('secondary')">{{ secondaryLabel }}</Button>
+      <Button v-if="primaryLabel" type="button" @click="emit('primary')">{{ primaryLabel }}</Button>
       <slot />
     </div>
   </div>
@@ -37,8 +40,8 @@ const emit = defineEmits(['primary', 'secondary'])
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 7px;
-  padding: 26px 20px;
+  gap: var(--space-3);
+  padding: var(--space-8) var(--space-5);
   text-align: center;
 }
 .es-icon {
@@ -48,31 +51,13 @@ const emit = defineEmits(['primary', 'secondary'])
   height: 44px;
   color: var(--primary);
   font-size: var(--fs-21);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-13);
+  border: 0;
+  border-radius: var(--radius-control);
   background: var(--bg-tint);
 }
 
-/* 呼吸感：非常轻的缩放 + 亮度起伏，用来在空页面上给一个"这里还活着"的信号。
-   刻意放进 no-preference 里——开了「减少动效」的用户连这个都不该看到，
-   不依赖全局那条 !important 降级规则。 */
-@media (prefers-reduced-motion: no-preference) {
-  .es-icon {
-    animation: es-breathe 4.2s var(--ease-standard, cubic-bezier(0.2, 0.8, 0.2, 1)) infinite;
-  }
-}
-
-@keyframes es-breathe {
-  0%,
-  100% {
-    transform: scale(1);
-    box-shadow: 0 0 0 0 var(--focus-ring, rgba(69, 111, 232, 0.16));
-  }
-  50% {
-    transform: scale(1.055);
-    box-shadow: 0 0 0 7px transparent;
-  }
-}
+/* Empty content stays still: only a user's action should draw attention.
+   This replaces the old repeating scale/shadow animation. */
 
 @media (prefers-reduced-motion: reduce) {
   .es-icon {
@@ -85,19 +70,20 @@ const emit = defineEmits(['primary', 'secondary'])
   animation: none;
 }
 .es-copy {
-  max-width: 420px;
+  max-width: 42ch;
+  overflow-wrap: anywhere;
 }
 .es-copy h2 {
-  font-size: var(--fs-15-5);
+  font-size: var(--type-headline);
   font-weight: var(--fw-700);
 }
 .es-copy h3,
 .es-copy h4 {
-  font-size: var(--fs-14-5);
+  font-size: var(--type-callout);
   font-weight: var(--fw-700);
 }
 .es-copy p {
-  margin-top: 3px;
+  margin-top: var(--space-1);
   color: var(--ink-soft);
   font-size: var(--fs-12-5);
   line-height: 1.55;
@@ -109,7 +95,12 @@ const emit = defineEmits(['primary', 'secondary'])
 }
 .es-actions {
   display: flex;
-  gap: 8px;
-  margin-top: 8px;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--space-2);
+  margin-top: var(--space-1);
 }
+.empty-state.is-compact { display: grid; grid-template-columns: 32px minmax(0, 1fr); align-items: start; padding: var(--space-4) 0; text-align: left; }
+.is-compact .es-icon { width: 32px; height: 32px; grid-row: 1 / span 2; }
+.is-compact .es-actions { grid-column: 2; justify-content: flex-start; }
 </style>

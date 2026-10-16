@@ -7,7 +7,7 @@
     <p class="route-not-found-code">404</p>
     <h1>页面不存在</h1>
     <p>这个入口已经移除或暂时不可用，本机数据仍然安全保留。</p>
-    <router-link class="btn btn-primary" to="/">返回首页</router-link>
+    <router-link class="btn btn-primary" to="/">回到今天</router-link>
   </div>
 </template>
 

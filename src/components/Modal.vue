@@ -402,7 +402,7 @@ onBeforeUnmount(cleanup)
   display: flex;
   flex-direction: column;
   background: var(--card);
-  border-radius: var(--radius-surface);
+  border-radius: var(--radius-overlay);
   width: 420px;
   max-width: 100%;
   max-height: 85vh;
@@ -431,8 +431,8 @@ onBeforeUnmount(cleanup)
   background: transparent;
   font-size: var(--fs-16);
   color: var(--muted);
-  width: 32px;
-  height: 32px;
+  width: 44px;
+  height: 44px;
   border-radius: var(--radius-8);
 }
 .close:hover {
@@ -444,11 +444,11 @@ onBeforeUnmount(cleanup)
   overflow-y: auto;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
-  padding: 18px max(22px, env(safe-area-inset-right, 0px)) 22px max(22px, env(safe-area-inset-left, 0px));
+  padding: var(--space-5) max(var(--space-6), env(safe-area-inset-right, 0px)) var(--space-6) max(var(--space-6), env(safe-area-inset-left, 0px));
 }
 .modal-foot {
   flex: 0 0 auto;
-  padding: 12px max(22px, env(safe-area-inset-right, 0px)) calc(14px + env(safe-area-inset-bottom, 0px)) max(22px, env(safe-area-inset-left, 0px));
+  padding: var(--space-3) max(var(--space-6), env(safe-area-inset-right, 0px)) calc(var(--space-4) + env(safe-area-inset-bottom, 0px)) max(var(--space-6), env(safe-area-inset-left, 0px));
   border-top: 1px solid var(--border);
   background: var(--card);
 }

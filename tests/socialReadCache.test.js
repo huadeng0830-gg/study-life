@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { ref } from 'vue'
+import { effectScope, ref } from 'vue'
 import { FunctionsClient } from '@supabase/functions-js'
 
 const mocks = vi.hoisted(() => ({ invoke: vi.fn(), getSession: vi.fn() }))
@@ -11,6 +11,7 @@ vi.mock('../src/composables/accountSyncMode.js', () => ({ accountSyncViaAccount:
 vi.mock('../src/services/supabase.js', () => ({ getSupabaseClient: async () => ({ auth: { getSession: mocks.getSession }, functions: { invoke: mocks.invoke } }) }))
 import { accountUser } from '../src/composables/accountAuth.js'
 import { campusLifeRequest, listCampusPlaces, socialRequest } from '../src/services/social.js'
+import { useCampusLifePage } from '../src/composables/campusLifePage.js'
 
 beforeEach(() => {
   vi.useFakeTimers()
@@ -42,10 +43,13 @@ describe('campus reads on a constrained connection', () => {
     results[0].listings[0].title = 'Changed in one view'
     expect(results[1].listings[0].title).toBe('Fictional listing')
   })
-  it('expires after 15 seconds and separates filters', async () => {
+  it('reuses reads for a minute and separates filters', async () => {
     await campusLifeRequest('market_list', { page: 0 })
     await campusLifeRequest('market_list', { page: 1 })
     vi.advanceTimersByTime(15001)
+    await campusLifeRequest('market_list', { page: 0 })
+    expect(mocks.invoke).toHaveBeenCalledTimes(2)
+    vi.advanceTimersByTime(45000)
     await campusLifeRequest('market_list', { page: 0 })
     expect(mocks.invoke).toHaveBeenCalledTimes(3)
   })
@@ -75,6 +79,32 @@ describe('campus reads on a constrained connection', () => {
     await socialRequest('project_list')
     await socialRequest('project_list')
     expect(mocks.invoke).toHaveBeenCalledTimes(4)
+  })
+  it('notification and permission reads do not evict the campus list cache', async () => {
+    await campusLifeRequest('market_list')
+    await socialRequest('notifications_list')
+    await campusLifeRequest('governance_access')
+    await campusLifeRequest('market_list')
+    expect(mocks.invoke).toHaveBeenCalledTimes(3)
+  })
+  it('restores report screens through the real transport while checking for updates', async () => {
+    const firstScope = effectScope(), nextScope = effectScope()
+    try {
+      mocks.invoke.mockResolvedValueOnce({ data: { data: { reports: [{ id: 'fictional-report', status: 'pending' }] } } })
+      const first = firstScope.run(useCampusLifePage)
+      await first.load(() => campusLifeRequest('reports_mine', { page: 0 }), null, { cacheKey: ['reports', 0] })
+      firstScope.stop()
+      let finish
+      mocks.invoke.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+      const next = nextScope.run(useCampusLifePage)
+      const pending = next.load(() => campusLifeRequest('reports_mine', { page: 0 }), null, { cacheKey: ['reports', 0] })
+      expect(next.data.value.reports[0].status).toBe('pending')
+      await vi.waitFor(() => expect(finish).toBeTypeOf('function'))
+      finish({ data: { data: { reports: [{ id: 'fictional-report', status: 'resolved' }] } } })
+      await pending
+      expect(next.data.value.reports[0].status).toBe('resolved')
+      expect(mocks.invoke).toHaveBeenCalledTimes(2)
+    } finally { firstScope.stop(); nextScope.stop() }
   })
   it('school profile reads on each layout do not invalidate the list cache', async () => {
     await socialRequest('profile_get')

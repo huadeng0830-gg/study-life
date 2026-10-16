@@ -4,6 +4,8 @@ import { retireLegacySyncState } from './composables/retireLegacySyncState.js'
 import { defineAsyncComponent, computed, onBeforeUnmount, onMounted, ref, watch, watchEffect } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Sidebar from './components/Sidebar.vue'
+import { useOnline } from '@vueuse/core'
+import AppIcon from './components/AppIcon.vue'
 import FocusReturn from './components/FocusReturn.vue'
 import TaskCenter from './components/TaskCenter.vue'
 import WallpaperLayer from './components/WallpaperLayer.vue'
@@ -40,6 +42,7 @@ import { openSearch, searchOpen } from './composables/globalSearch.js'
 import { adminTitleForRoute } from './composables/adminWorkspaceModel.js'
 import { desktopShortcutRoutes } from './router/navigation.js'
 import { preloadRouteLink } from './router/routePreload.js'
+import { overlayCount, overlayStackRevision } from './composables/overlayStack.js'
 retireLegacySyncState()
 const UpdateNotes = defineAsyncComponent(() => import('./components/UpdateNotes.vue'))
 const QuickRecordPanel = defineAsyncComponent(() => import('./components/QuickRecordPanel.vue'))
@@ -47,6 +50,9 @@ const QuickRecordPanel = defineAsyncComponent(() => import('./components/QuickRe
 const route = useRoute()
 const router = useRouter()
 const sidebarRef = ref(null)
+const online = useOnline()
+watch(online, (connected) => announce(connected ? '网络已恢复。' : '当前离线，本机记录仍可使用。'))
+const overlayActive = computed(() => { overlayStackRevision.value; return overlayCount() > 0 })
 // 待办与课程数据可能较大，同步读取延后到首帧渲染之后完成（see onMounted），
 // 让手机端先画出基本入口。标题与课程迁移也随数据就绪后一并建立。
 let tasks = null
@@ -72,10 +78,15 @@ const errorToastOffset = useFloatingOffset(errorToastSlot, 56)
 
 const { toast: quickRecordToast } = useToastQueue()
 
-watch(() => Boolean(quickRecordToast.value), (open) => {
-  if (open) attachFloatingSlot(quickToastSlot)
-  else detachFloatingSlot(quickToastSlot)
-})
+// A previous save must not cover a new form. Give its undo action five full
+// seconds after the form closes, rather than expiring while it is hidden.
+watch([() => quickRecordToast.value, overlayActive], ([toast, blocked]) => {
+  window.clearTimeout(quickRecordToastTimer)
+  if (toast && !blocked) {
+    attachFloatingSlot(quickToastSlot)
+    quickRecordToastTimer = window.setTimeout(() => { quickRecordToast.value = null }, 5000)
+  } else detachFloatingSlot(quickToastSlot)
+}, { flush: 'sync' })
 // 快速记录成功提示也是「插入即带内容」的 toast，播报走常驻的礼貌通道。
 // 监听**消息文本**而不是上面那个布尔值：连记两笔时 toast 一直是显示的，
 // 布尔值不变、不会触发 watcher，第二笔的播报就丢了——而那同样是"记成功了"的确认。
@@ -227,8 +238,6 @@ function openQuickRecord() {
 function closeQuickRecord() { showQuickRecord.value = false }
 function showQuickRecordToast(payload) {
   quickRecordToast.value = { ...payload, identity: captureAccountDataIdentity() }
-  window.clearTimeout(quickRecordToastTimer)
-  quickRecordToastTimer = window.setTimeout(() => { quickRecordToast.value = null }, 5000)
 }
 function onQuickRecordSaved(payload) {
   showQuickRecordToast(payload)
@@ -455,6 +464,7 @@ function t(key) {
           <kbd aria-hidden="true">Ctrl/⌘ K</kbd>
         </button>
       </header>
+      <p v-if="!online" class="connection-notice"><AppIcon name="data" /><span>当前离线，课程、待办和本机记录仍可使用。校园内容与账号同步需要联网。</span></p>
       <!-- 聚焦态（`?focus=` / `?section=`）下的返回入口。放在 router-view **之外**，
           因为它是外壳级的一条出口，不属于任何单个页面；只在聚焦时渲染，
           所以平时对布局与焦点序都没有影响。 -->
@@ -466,7 +476,7 @@ function t(key) {
       <router-view v-slot="{ Component, route: activeRoute }">
         <Transition name="page" mode="out-in">
           <KeepAlive :include="cachedPageNames" :max="pageCacheSize">
-            <component :is="Component" :key="activeRoute.name" />
+            <component :is="Component" :key="activeRoute.name" :data-page-path="activeRoute.path" />
           </KeepAlive>
         </Transition>
       </router-view>
@@ -520,7 +530,7 @@ function t(key) {
 
   <Transition name="quick-record-toast">
     <!-- 同五处外壳级提示：不带行内实时区域，发声交给常驻的礼貌播报区（见 script 里那段 watcher）。 -->
-    <div v-if="quickRecordToast" class="quick-record-toast" :style="{ '--stack-offset': `${quickToastOffset}px` }">
+    <div v-if="quickRecordToast && !overlayActive" class="quick-record-toast" :style="{ '--stack-offset': `${quickToastOffset}px` }">
       <span>✓ {{ quickRecordToast.message }}</span>
       <button v-if="quickRecordToast.entityId" type="button" @click="viewQuickRecordEntity">查看</button>
       <button v-if="quickRecordToast.undo" type="button" @click="undoQuickRecord">撤销</button>
@@ -561,23 +571,8 @@ function t(key) {
 /* 第三十七轮说明：本样式块曾因一次删除器 bug 被破坏，内容由删除前的构建产物
    （dist/assets 的编译 CSS，去掉 scope 属性后反压缩）整体重建，**原有注释在重建中丢失**。
    第三十八轮已按 scope 归属清掉其中属于别组件的同值副本。新增规则时请照常写注释。 */
-.sidebar {
-  background:#183a35;
-  border-right:1px solid #2c5048;
-  z-index:20;
-  width:242px;
-  height:100vh;
-  height: 100dvh;
-  transition:width var(--dur-base) var(--ease-standard), flex-basis var(--dur-base) var(--ease-standard);
-  flex-direction:column;
-  flex:0 0 242px;
-  padding:20px 14px;
-  display:flex;
-  position:sticky;
-  top:0}
-.sidebar.collapsed {
-  flex-basis:76px;
-  width:76px}
+/* Sidebar.vue owns its desktop size and surface. Keeping a second copy here
+   made theme and density changes depend on stylesheet insertion order. */
 /* 第三十九轮：这里原先还有 25 条引用 **Sidebar.vue 内部节点** 类的规则（.brand / .brand-mark /
    .nav / .nav-item / .data-item / .icon / .backup-dot / .collapse-btn / .footer / .kbd-hint /
    .sidebar-foot / .sidebar-action-row / .quick-add-button / .quick-add-symbol / .theme-row /
@@ -699,11 +694,12 @@ to {
   flex:1;
   width:100%;
   min-width:0;
-  max-width:1440px;
+  max-width:var(--container-wide);
   margin:0 auto;
   /* 横向也要让开刘海/灵动岛：index.html 是 viewport-fit=cover，横屏时左右会顶边。
      max(…, env(safe-area-inset-*)) 在无安全区时退回原固定值，桌面不受影响。 */
-  padding:32px clamp(32px, 4vw, 60px) 52px clamp(32px, 4vw, 60px)}
+  padding:var(--space-4) clamp(24px, 3vw, 48px) var(--space-12)}
+.connection-notice { display:flex; align-items:flex-start; gap:var(--space-2); margin-bottom:var(--space-4); padding:var(--space-3) var(--space-4); border:1px solid var(--border-strong); border-left:3px solid var(--info); border-radius:var(--radius-control); background:var(--card); color:var(--ink-soft); font-size:var(--type-subheadline); }
 .desktop-toolbar { display:none; }
 .desktop-search-trigger,
 .desktop-record-trigger {
@@ -764,8 +760,9 @@ to {
     display:flex;
     align-items:center;
     gap:12px;
-    margin:0 0 20px;
-    padding:10px 0 13px;
+    margin:0 0 var(--space-6);
+    padding:var(--space-3) 0 var(--space-4);
+    border-bottom:1px solid var(--border);
     background:var(--bg)}
   .desktop-search-trigger,
   .desktop-record-trigger { border-radius:var(--radius-9); }
@@ -844,10 +841,10 @@ to {
 
 .content-mid {
   max-width:1220px;
-  padding:30px clamp(28px, 3.5vw, 52px) 46px clamp(28px, 3.5vw, 52px)}
+  padding:var(--space-4) clamp(24px, 3vw, 40px) var(--space-12)}
 .content-narrow {
-  max-width:1080px;
-  padding:30px clamp(26px, 3vw, 44px) 44px clamp(26px, 3vw, 44px)}
+  max-width:var(--container-reading);
+  padding:var(--space-4) clamp(24px, 3vw, 40px) var(--space-12)}
 }
 @media (max-width: 900px), (pointer: coarse) and (max-height: 520px) {
   .layout {
@@ -966,9 +963,8 @@ to {
   opacity:0;
   transform:translate(-50%,10px)}
 .page-enter-active,.page-leave-active {
-  transition:opacity var(--dur-base) var(--ease-standard), transform var(--dur-base) var(--ease-standard)}
+  transition:opacity var(--dur-fast) var(--ease-standard)}
 .page-enter-from,.page-leave-to {
-  opacity:0;
-  transform:translateY(8px)}
+  opacity:0}
 
 </style>

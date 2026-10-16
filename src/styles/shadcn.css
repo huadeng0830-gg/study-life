@@ -71,6 +71,7 @@
 @media (pointer: coarse) { .text-button { min-height: var(--tap-min); min-width: var(--tap-min); } }
 
 .ui-button {
+  text-decoration: none;
   min-height: var(--control-height);
   padding: var(--space-2) var(--space-4);
   gap: var(--space-2);
@@ -91,6 +92,8 @@
 .ui-button svg { width: var(--icon-size); height: var(--icon-size); pointer-events: none; flex-shrink: 0; }
 .ui-button:active:not(:disabled):not([aria-disabled='true']) { transform: translateY(1px); }
 .ui-button:disabled { cursor: not-allowed; }
+.ui-button[data-variant='link'] { text-underline-offset: 4px; }
+.ui-button[data-variant='link']:hover { text-decoration: underline; }
 .ui-toggle {
   min-width: var(--control-compact);
   min-height: var(--control-compact);

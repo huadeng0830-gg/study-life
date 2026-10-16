@@ -1,4 +1,5 @@
 <script setup>
+import PageHeader from '../../components/PageHeader.vue'
 import { computed, onMounted, ref, watch } from 'vue'
 import { accountOpen, accountUser } from '../../composables/accountAuth.js'
 import { hasVerifiedContactEmail } from '../../composables/accountVerification.js'
@@ -73,7 +74,8 @@ async function replyToApplication() {
 
 </script>
 
-<template><div class="page reviewer-application-page"><header class="page-head"><div><RouterLink to="/campus">校园</RouterLink><h1 class="page-title">申请校园审核员</h1><p class="page-desc">参与校园内容审核，查看申请进度与管理员说明。</p></div></header><p v-if="error" role="alert">{{ error }}</p><p v-if="notice" role="status">{{ notice }}</p>    <section v-if="hasVerifiedEmail" id="reviewer-application" class="reviewer-invite">
+<template><div class="page reviewer-application-page"><PageHeader class="page-head" title="申请校园审核员" description="参与校园内容审核，查看申请进度与管理员说明。">
+      <RouterLink to="/campus">校园</RouterLink></PageHeader><p v-if="error" role="alert">{{ error }}</p><p v-if="notice" role="status">{{ notice }}</p>    <section v-if="hasVerifiedEmail" id="reviewer-application" class="reviewer-invite">
       <div><span class="compose-index">贡献豆获取方式</span><h2>参与校园审核</h2><p>已验证邮箱并填写学校资料后可申请；审核范围由总管理员审批和设置。{{ CAMPUS_BEAN_RULES.summary }}</p><p>每位审核员每月随机抽查约 10%。发现实质错判时会说明理由并更正；只追回未花掉的贡献豆，不足部分从后续审核奖励中抵扣。30 天内出现 2 次实质错判会提醒总管理员评估权限。</p><p>另一种获得方式：{{ CAMPUS_BEAN_RULES.feedback }}每条只发一次。</p><p v-if="application" class="reviewer-application-status">申请状态：{{ ({pending:'等待总管理员审批',approved:'已批准',declined:'暂未通过',withdrawn:'已撤回'})[application.status] || application.status }} · {{ application.scope_school || application.school }} {{ application.scope_campus || application.campus }}</p><p v-if="application?.owner_note" class="reviewer-application-status">管理员说明：{{ application.owner_note }}</p><p v-if="application?.applicant_response" class="reviewer-application-status">我已补充：{{ application.applicant_response }}</p></div>
       <form v-if="application?.status === 'pending' && application.owner_note" class="reviewer-application-form" @submit.prevent="replyToApplication"><label>补充材料<textarea v-model="applicantResponse" maxlength="1000" rows="3" placeholder="根据管理员要求补充说明或证明信息" /></label><Button type="submit" :disabled="replyingToApplication">{{ replyingToApplication ? '正在提交…' : '提交补充材料' }}</Button></form>
       <Button v-if="!application || ['declined','withdrawn'].includes(application.status)" variant="outline" :aria-expanded="applicationOpen" @click="applicationOpen = !applicationOpen">{{ applicationOpen ? '收起申请' : application ? '重新申请' : '申请成为审核员' }}</Button>

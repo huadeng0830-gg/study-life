@@ -16,6 +16,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createApp, h, nextTick } from 'vue'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { accountUser } from '../src/composables/accountAuth.js'
+import { invalidateCampusReads } from '../src/services/campusReadCache.js'
 
 const serviceState = vi.hoisted(() => ({
   calls: {},
@@ -147,6 +148,7 @@ const stubChoices = {
 }
 
 beforeEach(() => {
+  invalidateCampusReads()
   serviceState.calls = {}
   serviceState.responses = {}
   serviceState.accountSectionRequests = []
@@ -156,6 +158,22 @@ beforeEach(() => {
 })
 
 describe('校园长期使用流程', () => {
+  it('返回校园指南时先显示已读内容，慢请求完成后更新页面', async () => {
+    const { default: view } = await import('../src/views/campus/CampusGuidesView.vue')
+    const fixture = { id: 'fictional-guide', title: '虚构校园指南', body: '虚构公开内容', category: 'other', created_at: '2026-10-01T00:00:00Z' }
+    serviceState.responses.campusGuides = { guides: [fixture] }
+    await mountView(view)
+    expect(host.textContent).toContain('虚构校园指南')
+    app.unmount(); host.remove(); app = null; host = null
+    let finish
+    serviceState.responses.campusGuides = () => new Promise(resolve => { finish = resolve })
+    await mountView(view)
+    expect(host.textContent).toContain('虚构校园指南')
+    expect(host.querySelector('.campus-life-loading')).toBeNull()
+    finish({ guides: [{ ...fixture, title: '虚构校园指南的新版本' }] })
+    await settle()
+    expect(host.textContent).toContain('虚构校园指南的新版本')
+  })
   it('审核申请和公开建议同时读取时，不会互相作废而一直加载', async () => {
     let finish
     serviceState.responses.campusFeedbackPublicList = () => new Promise((resolve) => { finish = resolve })

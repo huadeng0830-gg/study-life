@@ -1,4 +1,6 @@
 <script setup>
+import PageHeader from '../components/PageHeader.vue'
+import AppIcon from '../components/AppIcon.vue'
 import { computed, nextTick, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import EmptyState from '../components/EmptyState.vue'
@@ -511,14 +513,10 @@ function emptyAction() {
 
 <template>
   <div class="page lists-page">
-    <header class="page-head">
-      <div class="page-head-main">
-        <h1 class="page-title">清单</h1>
-        <p class="page-desc">把要买、要带、要做的事，一项项安排好。</p>
-        <p v-if="lists.length" class="page-count">{{ lists.length }} 份清单<span>·</span>{{ totalPending }} 项待完成</p>
-      </div>
-      <div class="page-actions"><button type="button" class="btn btn-primary" @click="openCreateList()">＋ 新建清单</button></div>
-    </header>
+    <PageHeader class="page-head" title="清单" description="把要买、要带、要做的事，一项项安排好。">
+      <p v-if="lists.length" class="page-count">{{ lists.length }} 份清单<span>·</span>{{ totalPending }} 项待完成</p>
+      <template #actions><button type="button" class="btn btn-primary" @click="openCreateList()">＋ 新建清单</button></template>
+    </PageHeader>
 
     <template v-if="!lists.length">
       <EmptyState :level="2" class="card empty-box" icon="📋" title="从一份小清单开始" description="购物、出行或房间整理，都可以随手记下，再逐项勾选。" primary-label="新建第一份清单" @primary="openCreateList()" />
@@ -526,7 +524,7 @@ function emptyAction() {
         <h2>也可以从模板开始</h2>
         <div class="starter-grid">
           <button v-for="entry in CHECKLIST_TEMPLATES" :key="entry.id" type="button" class="starter-card" @click="openCreateList(entry.id)">
-            <span class="starter-icon" aria-hidden="true">{{ typeInfo(entry.type).icon }}</span>
+            <span class="starter-icon" aria-hidden="true"><AppIcon :name="typeInfo(entry.type).icon" /></span>
             <b>{{ entry.name }}</b><small>{{ entry.description }}</small><span>{{ entry.items.length }} 项 · 自由修改</span>
           </button>
         </div>
@@ -882,8 +880,6 @@ button:disabled { opacity: .45; cursor: not-allowed; }
 }
 @media (max-width: 520px) {
   .page-head { align-items: flex-start; flex-direction: column; gap: 12px; }
-  .page-actions { width: 100%; }
-  .page-actions .btn { width: 100%; }
   .summary-grid { grid-auto-flow: row; grid-template-columns: 1fr 1fr; padding: 12px 0; }
   .summary-grid > div:last-child:nth-child(3) { grid-column: 1 / -1; border-left: 0; border-top: 1px solid var(--border); margin-top: 12px; padding-top: 12px; }
   .summary-grid > div:last-child:nth-child(3) b { font-size: var(--fs-22); }

@@ -15,7 +15,7 @@ const pageIndex = ref(0)
 
 async function refresh(index = pageIndex.value) {
   pageIndex.value = Math.max(0, index)
-  return page.load(() => campusMyReports(pageIndex.value))
+  return page.load(() => campusMyReports(pageIndex.value), null, { cacheKey: ['reports', pageIndex.value] })
 }
 onMounted(() => { void refresh() })
 

@@ -1,5 +1,6 @@
 <script setup>
 import SkeletonBlock from './SkeletonBlock.vue'
+import AppIcon from './AppIcon.vue'
 
 const props = defineProps({ error: Boolean })
 
@@ -9,10 +10,12 @@ function retry() {
 </script>
 
 <template>
-  <section class="route-fallback" :class="{ error: props.error }" :aria-live="props.error ? 'assertive' : 'polite'">
+  <section class="route-fallback" :class="{ error: props.error }" :aria-busy="!props.error" :aria-live="props.error ? 'assertive' : 'polite'">
     <template v-if="props.error">
-      <p>页面加载失败，本机数据仍然保留。</p>
-      <button type="button" class="btn" @click="retry">重新加载</button>
+      <AppIcon name="more" />
+      <h1>暂时无法打开这个页面</h1>
+      <p>请检查网络后重试。本机课程和记录仍然保留。</p>
+      <div class="rf-actions"><button type="button" class="btn btn-primary" @click="retry">重新加载页面</button><RouterLink class="btn btn-outline" to="/">回到今天</RouterLink></div>
     </template>
 
     <template v-else>
@@ -36,11 +39,13 @@ function retry() {
 <style scoped>
 .route-fallback {
   display: grid;
-  gap: 14px;
+  gap: var(--space-4);
   width: min(760px, 100%);
   margin: 0 auto;
-  padding: 22px;
+  padding: var(--space-10) var(--space-6);
 }
+.route-fallback h1 { font-size: var(--type-title); }
+.rf-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--space-3); }
 .route-fallback.error {
   justify-items: center;
   align-content: center;

@@ -8,13 +8,13 @@ import { useNavigationViewModel } from '../src/composables/navigationViewModel.j
 import { SETTINGS_NAVIGATION_LABEL } from '../src/composables/settingsPolicy.js'
 
 describe('导航信息架构', () => {
-  it('只把真实页面注册为导航项，一级分组聚焦四个核心空间，低频页面收进其他', () => {
+  it('只把真实页面注册为导航项，三个分组按学习、生活和校园协作组织', () => {
     expect(navigationRegistry).toHaveLength(13)
     expect(new Set(navigationRegistry.map((item) => item.path)).size).toBe(navigationRegistry.length)
-    expect(desktopNavigationGroups.map((group) => group.label)).toEqual(['今日', '学习', '日程', '齐行', '校园', '其他'])
-    expect(desktopNavigationGroups.find((group) => group.id === 'learning').items.map((item) => item.id)).toEqual(['schedule', 'course', 'tasks', 'exams'])
-    expect(desktopNavigationGroups.find((group) => group.id === 'campus').items.map((item) => item.id)).toEqual(['places'])
-    expect(desktopNavigationGroups.find((group) => group.id === 'other').items.map((item) => item.id)).toEqual(['lists', 'bills', 'review', 'feedback'])
+    expect(desktopNavigationGroups.map((group) => group.label)).toEqual(['学习与计划', '生活与回顾', '校园与协作'])
+    expect(desktopNavigationGroups.find((group) => group.id === 'workspace').items.map((item) => item.id)).toEqual(['today', 'schedule', 'course', 'tasks', 'exams', 'events'])
+    expect(desktopNavigationGroups.find((group) => group.id === 'campus').items.map((item) => item.id)).toEqual(['places', 'together', 'projects', 'feedback'])
+    expect(desktopNavigationGroups.find((group) => group.id === 'life').items.map((item) => item.id)).toEqual(['lists', 'bills', 'review'])
     expect(routes.find((route) => route.path === '/places')?.redirect).toBe('/campus/places')
     expect(navigationRegistry.find((item) => item.id === 'schedule').mobileLabel).toBe('课表')
     expect(routes.find((route) => route.path === '/notes')?.redirect).toBe('/')
@@ -75,7 +75,7 @@ describe('导航信息架构', () => {
 it('反馈只有独立入口，校园旧地址已删除', () => {
   expect(routes.some(route => route.path === '/campus/feedback')).toBe(false)
   expect(routeLoaders['/campus/feedback']).toBeUndefined()
-  expect(navigationRegistry.find(item => item.id === 'feedback')).toMatchObject({ path: '/feedback', groupId: 'other' })
+  expect(navigationRegistry.find(item => item.id === 'feedback')).toMatchObject({ path: '/feedback', groupId: 'campus' })
   const model = useNavigationViewModel({ path: '/feedback' }, '我的账号')
   expect(model.moreGroups.value.flatMap(group => group.items).some(item => item.id === 'feedback')).toBe(true)
   expect(model.bottomItems.value.filter(model.isBottomItemActive)).toHaveLength(0)

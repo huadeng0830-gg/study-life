@@ -571,18 +571,20 @@ describe('全仓扫描：非法命中只剩已登记的残留', () => {
 describe('活规则不许被一起删掉（清理的边界）', () => {
   const appCss = scopedBlocksOf(readFileSync(join(srcDir, 'App.vue'), 'utf8')).join('\n')
   const appRules = splitCssRules(stripCssComments(appCss)).rules.filter((rule) => rule.kind === 'rule')
+  const sidebarCss = readFileSync(join(srcDir, 'components', 'Sidebar.css'), 'utf8')
+  const sidebarRules = splitCssRules(stripCssComments(sidebarCss)).rules.filter((rule) => rule.kind === 'rule')
 
   it('三条真正生效的侧边栏规则都还在', () => {
-    // 依据：.sidebar 是 Sidebar.vue 的模板根标签 → 父作用域属性会落在它身上。
-    expect(appRules.map((rule) => rule.selector), '少了 .sidebar 的规则').toContain('.sidebar')
-    expect(appRules.map((rule) => rule.selector), '少了 .sidebar.collapsed 的规则').toContain('.sidebar.collapsed')
+    // 尺寸与表面现在只在 Sidebar.css 定义，避免父组件的重复规则互相覆盖。
+    expect(sidebarRules.map((rule) => rule.selector), '少了 .sidebar 的规则').toContain('.sidebar')
+    expect(sidebarRules.map((rule) => rule.selector), '少了 .sidebar.collapsed 的规则').toContain('.sidebar.collapsed')
     // ≤900px 那次「把侧边栏变成底栏」的 @media 规则必须还在，且仍在媒体查询里
     const bottomBar = appRules.find((rule) => rule.selector === '.sidebar,.sidebar.collapsed')
     expect(bottomBar, '找不到把侧边栏变成底栏的那条规则').toBeTruthy()
     expect(bottomBar.context, '底栏规则必须仍然包在 ≤900px 的媒体查询里').toMatch(/@media[^{]*max-width:\s*900px/)
     expect(bottomBar.body, '底栏规则的关键声明丢了').toMatch(/position\s*:\s*fixed/)
     // .sidebar 的 z-index 是层叠阶梯上的一档（tests/sidebarDrawer.test.js 也盯着它）
-    const sidebarRule = appRules.find((rule) => rule.selector === '.sidebar')
+    const sidebarRule = sidebarRules.find((rule) => rule.selector === '.sidebar')
     expect(sidebarRule.body, '.sidebar 的 z-index 丢了').toMatch(/z-index\s*:\s*20/)
   })
 

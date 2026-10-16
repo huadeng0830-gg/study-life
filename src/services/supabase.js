@@ -1,3 +1,5 @@
+import { measuredSupabaseFetch } from './apiMetrics.js'
+
 export const ACCOUNT_STORAGE_KEY = 'study-life-auth'
 
 export function getSupabaseConfig(env = import.meta.env) {
@@ -42,7 +44,7 @@ export async function getSupabaseClient() {
   if (!config) throw new Error('account_unavailable')
   if (!clientPromise) {
     clientPromise = import('@supabase/supabase-js')
-      .then(({ createClient }) => createClient(config.url, config.key, supabaseClientOptions()))
+      .then(({ createClient }) => createClient(config.url, config.key, { ...supabaseClientOptions(), global: { fetch: measuredSupabaseFetch } }))
       .catch((error) => {
         clientPromise = null
         throw error

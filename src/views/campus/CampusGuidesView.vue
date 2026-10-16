@@ -12,7 +12,7 @@ import { campusGuides } from '../../services/campusLife.js'
 const page = useCampusLifePage()
 const query = ref('')
 const category = ref('')
-async function refresh() { return page.load(async () => (await campusGuides()).guides || []) }
+async function refresh() { return page.load(async () => (await campusGuides()).guides || [], null, { cacheKey: ['guides'] }) }
 onMounted(() => { void refresh() })
 const categoryLabels = { new_student: '新生入学', administration: '校园办事', dormitory: '宿舍生活', food: '食堂攻略', printing: '打印与学习资源', transport: '校园交通', facilities: '校园设施', exam: '考试与选课', graduation: '毕业季', safety: '校园安全', other: '其他' }
 const sourceLabels = { official_public: '官方公开信息 · 已附来源', student_experience: '学生经验 · 非官方规定', merchant_submission: '商户投稿 · 非官方信息' }

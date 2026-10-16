@@ -1,4 +1,5 @@
 <script setup>
+import PageHeader from '../components/PageHeader.vue'
 import { ThumbsUp } from '@lucide/vue'
 import { useFeedbackSupport } from '../composables/feedbackSupport.js'
 import { computed, onMounted, reactive, ref, watch } from 'vue'
@@ -40,7 +41,7 @@ async function openFeedback(item, event) {
   detailOpen.value = true; selectedItem.value = null; detailError.value = ''; detailLoading.value = true
   const revision = detailRequest.begin()
   try {
-    const result = await campusFeedbackPublicList({ id: item.id, limit: 1, view: 'detail' })
+    const result = await campusFeedbackPublicList({ id: item.id, limit: 1, view: 'detail' }, { signal: detailRequest.signal() })
     if (!detailRequest.live(revision)) return
     selectedItem.value = result.items?.find(row => row.id === item.id) || null
     if (!selectedItem.value) detailError.value = '这条反馈已不再公开，请刷新列表。'
@@ -92,7 +93,7 @@ async function refresh({ forceRefresh = false } = {}) {
   loading.value = true
   loadError.value = ''
   try {
-    const result = await campusFeedbackPublicList({ status: selectedStatus.value, category: selectedCategory.value, q: search.value, sort: sort.value, view: 'summary', limit: pageSize, offset: offset.value }, { forceRefresh })
+    const result = await campusFeedbackPublicList({ status: selectedStatus.value, category: selectedCategory.value, q: search.value, sort: sort.value, view: 'summary', limit: pageSize, offset: offset.value }, { forceRefresh, signal: request.signal() })
     if (request.live(revision)) {
       const count = Number.isInteger(result.total) ? result.total : (result.items || []).length
       if (offset.value > 0 && offset.value >= count) { offset.value = Math.max(0, Math.floor((count - 1) / pageSize) * pageSize); return refresh() }
@@ -198,7 +199,9 @@ function handlePrivateThreadToggle(event, item) {
 
 <template>
   <div class="page feedback-page">
-    <header class="page-head"><div class="page-head-main"><h1 class="page-title">反馈与建议</h1><p class="page-desc">提交问题与建议，查看公开处理进展。</p></div><div class="feedback-head-actions"><Button v-if="access?.owner" as-child variant="outline"><RouterLink to="/admin/feedback">处理反馈</RouterLink></Button><Button v-if="signedIn" variant="outline" @click="openMine">我的反馈</Button><Button @click="focusComposer">提交反馈</Button></div></header>
+    <PageHeader class="page-head" title="反馈与建议" description="提交问题与建议，查看公开处理进展。">
+      <template #actions><div class="feedback-head-actions"><Button v-if="access?.owner" as-child variant="outline"><RouterLink to="/admin/feedback">处理反馈</RouterLink></Button><Button v-if="signedIn" variant="outline" @click="openMine">我的反馈</Button><Button @click="focusComposer">提交反馈</Button></div></template>
+    </PageHeader>
 
     <Alert v-if="error" variant="destructive" role="alert"><AlertTitle>操作未完成</AlertTitle><AlertDescription>{{ error }}</AlertDescription></Alert>
     <Alert v-if="notice" role="status"><AlertTitle>已收到</AlertTitle><AlertDescription>{{ notice }}</AlertDescription></Alert>
@@ -258,6 +261,6 @@ function handlePrivateThreadToggle(event, item) {
 @media(max-width:760px){.feedback-page .page-head,.feedback-section-heading{flex-direction:column;align-items:flex-start}.feedback-compose,.feedback-row,.my-feedback-row{grid-template-columns:minmax(0,1fr)}.feedback-compose{padding:18px;gap:18px}.feedback-row{gap:10px}.feedback-head-actions,.feedback-filters{width:100%;flex-wrap:wrap}.feedback-filters [data-slot=field]{flex:1;min-width:160px}.feedback-head-actions>*{flex:1}.feedback-body-input{font-size:16px}.feedback-detail h3{font-size:var(--fs-17)}}
 .feedback-search{display:flex;gap:10px;max-width:680px}.feedback-search>input{min-width:0;flex:1}.feedback-section-heading h2 small{margin-left:8px;color:var(--muted);font-size:var(--fs-13);font-weight:normal}.feedback-results{margin:0;color:var(--muted);font-size:var(--fs-12)}.feedback-table-head,.feedback-row-open{display:grid;grid-template-columns:minmax(0,1fr) 100px 110px;gap:16px;align-items:center}.feedback-table-head{padding:12px;color:var(--muted);font-size:var(--fs-11);border-bottom:1px solid var(--border)}.feedback-row-open{width:100%;min-height:76px;padding:13px 12px;border:0;background:transparent;color:var(--text);text-align:left;font:inherit;cursor:pointer}.feedback-row-open:hover{background:var(--bg-tint)}.feedback-row-open:focus-visible{outline:2px solid var(--primary);outline-offset:-2px}.feedback-row-open>time{color:var(--muted);font-size:var(--fs-11)}.feedback-row-open>[data-slot=badge]{justify-self:start}.feedback-row-main{display:grid;gap:6px;min-width:0}.feedback-row-main>b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:var(--fs-13);font-weight:var(--fw-650)}.feedback-row-main .feedback-row-meta{font-size:var(--fs-11)}.feedback-row-meta>span{margin-left:8px}.feedback-detail{min-width:0}.feedback-filters{justify-content:flex-start;flex-wrap:wrap}.feedback-filters>[data-slot=field]{min-width:130px;max-width:230px}.feedback-page [data-slot=dialog-content]{min-width:0}@media(max-width:520px){.feedback-table-head{display:none}.feedback-row-open{grid-template-columns:minmax(0,1fr) auto;gap:8px 12px;min-height:82px}.feedback-row-open>time{grid-column:1/-1;font-size:var(--fs-10)}.feedback-filters{display:grid;grid-template-columns:1fr 1fr;align-items:end}.feedback-filters>[data-slot=field]{min-width:0;max-width:none;width:100%}.feedback-filters [data-slot=native-select-wrapper]{max-width:100%;width:100%}.feedback-filters>[data-slot=field]:nth-child(3){grid-column:1/-1}.feedback-row-main .feedback-row-meta{overflow:hidden;white-space:nowrap;text-overflow:ellipsis;display:block}.feedback-row-main>b{font-size:var(--fs-14)}}
 
-@media(max-width:520px){.feedback-page{gap:18px}.feedback-page .page-head{flex-direction:row;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:0}.feedback-page .page-head-main{flex:1;min-width:150px}.feedback-head-actions{width:auto}.feedback-head-actions>*{flex:none}.feedback-page .page-desc{font-size:var(--fs-12)}.feedback-section-heading{flex-direction:row;align-items:center}.feedback-section-heading h2{font-size:var(--fs-18)}.feedback-public{gap:14px}.feedback-filters{grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.feedback-filters>[data-slot=field]:nth-child(3){grid-column:auto}.feedback-filters [data-slot=native-select]{font-size:var(--fs-12);padding-left:8px}.feedback-filters>[data-slot=button]{grid-column:1/-1;justify-self:start}.feedback-row-open{padding-left:4px;padding-right:4px}}
+@media(max-width:520px){.feedback-page{gap:18px}.feedback-page .page-head{flex-direction:row;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:0}.feedback-head-actions{width:auto}.feedback-head-actions>*{flex:none}.feedback-section-heading{flex-direction:row;align-items:center}.feedback-section-heading h2{font-size:var(--fs-18)}.feedback-public{gap:14px}.feedback-filters{grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.feedback-filters>[data-slot=field]:nth-child(3){grid-column:auto}.feedback-filters [data-slot=native-select]{font-size:var(--fs-12);padding-left:8px}.feedback-filters>[data-slot=button]{grid-column:1/-1;justify-self:start}.feedback-row-open{padding-left:4px;padding-right:4px}}
 .feedback-row{display:grid;grid-template-columns:56px minmax(0,1fr);align-items:center;gap:16px}.feedback-table-head{grid-template-columns:56px minmax(0,1fr) 100px 110px}.feedback-support{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;min-height:48px;min-width:44px;margin:8px 4px;border:1px solid var(--border);border-radius:var(--radius-8);background:var(--card);color:var(--muted);font:inherit;font-size:var(--fs-12);font-variant-numeric:tabular-nums;cursor:pointer}.feedback-support.supported{color:var(--primary);background:var(--primary-soft);border-color:var(--primary)}.feedback-support:disabled{opacity:.6;cursor:wait}.feedback-support:focus-visible{outline:var(--focus-width) solid var(--focus-solid);outline-offset:var(--focus-offset)}@media(max-width:520px){.feedback-row{grid-template-columns:48px minmax(0,1fr);gap:10px}.feedback-row-open{min-width:0}.feedback-support{margin-left:0;margin-right:0}}
 </style>

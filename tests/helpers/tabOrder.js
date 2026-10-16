@@ -120,6 +120,12 @@ export function tabOrderIssues(elements) {
       }
       const toggleGroup = item.el.closest('[data-slot="toggle-group"]')
       if (toggleGroup && toggleGroup.tabIndex >= 0) continue
+      const radioGroup = item.el.closest('[role="radiogroup"]')
+      if (radioGroup && item.el.getAttribute('role') === 'radio') {
+        if ([...radioGroup.querySelectorAll('[role="radio"]')].some(radio => radio.tabIndex >= 0)) continue
+        out.push(`<${item.tag}${describe(item.el)}> 所在的 radiogroup 整组都不在 Tab 序列里：键盘用户到不了这组选择`)
+        continue
+      }
       out.push(`可交互的 <${item.tag}${describe(item.el)}> 带 tabindex="-1"：键盘用户 Tab 不到它`)
       continue
     }

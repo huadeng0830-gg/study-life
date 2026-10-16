@@ -337,6 +337,24 @@ async function listGuides(scope: { school: string; campus: string }) {
 }
 
 async function getMine(userId: string, payload: any = {}) {
+  if (payload.view !== undefined && !['summary', 'detail'].includes(payload.view)) throw new ApiError('invalid_input', '投稿视图无效。')
+  const summary = payload.view === 'summary'
+  // Full projections retain rejected-content editing fields. The overview does
+  // not need large bodies, private relationship IDs or route child collections.
+  const detailColumns: Record<string, string> = {
+    teachers: 'id,school,campus,name,department,research_directions,official_intro,source_url,review_status,review_reason,revision,created_at,updated_at',
+    courses: 'id,school,campus,name,department,description,source_url,review_status,review_reason,revision,created_at,updated_at',
+    assignments: 'id,course_id,teacher_id,school,campus,term,source_url,review_status,review_reason,revision,created_at,updated_at',
+    listings: 'id,school,campus,listing_type,category,title,description,condition,price_cents,meetup_area,status,review_reason,revision,created_at,updated_at',
+    helpTasks: 'id,school,campus,task_type,title,description,pickup_area,delivery_area,deadline,status,review_reason,revision,created_at,updated_at',
+    shuttleRoutes: 'id,school,campus,name,source_url,effective_from,effective_to,status,review_reason,revision,created_at,updated_at',
+    shuttleCorrections: 'id,route_id,school,detail,source_url,status,created_at,revision,review_reason',
+    shuttleExceptions: 'id,route_id,service_date,exception_type,departure_time,direction,note,source_url,status,created_at,revision,review_reason',
+    lostFound: 'id,school,campus,mode,category,title,description,approximate_location,occurred_at,status,review_reason,created_at,updated_at,revision',
+    events: 'id,school,campus,title,description,starts_at,ends_at,location,organizer,signup_url,capacity,source_url,review_status,status,review_reason,created_at,updated_at,revision',
+    guides: 'id,school,campus,title,category,body,source_type,source_url,expires_on,review_status,review_reason,created_at,updated_at,revision',
+  }
+  const summaryTitles: Record<string, string> = { teachers: 'name', courses: 'name', assignments: 'term', listings: 'title', helpTasks: 'title', shuttleRoutes: 'name', shuttleCorrections: 'detail', shuttleExceptions: 'service_date,exception_type', lostFound: 'title,mode', events: 'title', guides: 'title' }
   const tables = [
     ['teachers', 'campus_teachers'], ['courses', 'campus_courses'], ['assignments', 'campus_teaching_assignments'],
     ['listings', 'campus_market_listings'], ['helpTasks', 'campus_help_tasks'], ['shuttleRoutes', 'campus_shuttle_routes'],
@@ -347,16 +365,25 @@ async function getMine(userId: string, payload: any = {}) {
   const allowed = [...tables.map(([key]) => key), 'places', 'courseReviews']
   if (domains !== undefined && (!Array.isArray(domains) || domains.length > allowed.length || domains.some((key: any) => !allowed.includes(key)))) throw new ApiError('invalid_input', '投稿分类无效。')
   const wants = (key: string) => domains === undefined || domains.includes(key)
-  const entries = await Promise.all(tables.filter(([key]) => wants(key)).map(async ([key, table]) => {
-    const result = await admin.from(table).select('*').eq('owner_id', userId)
-      .order(['shuttleCorrections', 'shuttleExceptions'].includes(key) ? 'created_at' : 'updated_at', { ascending: false }).limit(100)
-    return [key, dataOrThrow(result) || []]
-  }))
+  const selected = tables.filter(([key]) => wants(key))
+  const entries: [string, any[]][] = []
+  // Fixed domain fan-out, not per-row queries. Keep the entire response while
+  // bounding simultaneous upstream requests on the free database instance.
+  for (let start = 0; start < selected.length; start += 3) {
+    entries.push(...await Promise.all(selected.slice(start, start + 3).map(async ([key, table]): Promise<[string, any[]]> => {
+      const createdOnly = ['shuttleCorrections', 'shuttleExceptions'].includes(key)
+      const status = ['teachers', 'courses', 'assignments', 'events', 'guides'].includes(key) ? 'review_status' : 'status'
+      const columns = summary ? `id,${summaryTitles[key]},${status},review_reason,revision,created_at${createdOnly ? '' : ',updated_at'}` : detailColumns[key]
+      const result = await admin.from(table).select(columns).eq('owner_id', userId)
+        .order(createdOnly ? 'created_at' : 'updated_at', { ascending: false }).limit(100)
+      return [key, dataOrThrow(result) || []]
+    })))
+  }
   const reviewResult = wants('courseReviews') ? await admin.from('campus_course_reviews').select('id,assignment_id,clarity,organization,learning,workload,assessment,note,review_status,review_reason,revision,updated_at')
     .eq('user_id', userId).order('updated_at', { ascending: false }).limit(100) : null
   const mine = Object.fromEntries(entries) as Record<string, any[]>
   const routes = mine.shuttleRoutes || []
-  if (routes.length) {
+  if (routes.length && !summary) {
     const routeIds = routes.map((item) => item.id)
     const [stopsResult, departuresResult] = await Promise.all([
       admin.from('campus_shuttle_stops').select('route_id,direction,position,name').in('route_id', routeIds).order('position'),

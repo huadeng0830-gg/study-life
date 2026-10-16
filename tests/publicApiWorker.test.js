@@ -11,10 +11,54 @@ beforeEach(() => {
   ctx = { waitUntil: promise => pending.push(promise) }
   vi.spyOn(console, 'warn').mockImplementation(() => {})
 })
-afterEach(() => vi.restoreAllMocks())
+afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks() })
 const run = (req = request(), config = env) => handlePublicApi(req, config, ctx, fetcher, cache)
 
 describe('Cloudflare public feedback API', () => {
+  it('cools down after a successful upstream status whose response body times out', async () => {
+    vi.useFakeTimers()
+    fetcher.mockImplementationOnce(async (_url, { signal }) => new Response(new ReadableStream({
+      start(controller) { signal.addEventListener('abort', () => controller.error(new DOMException('Timed out', 'AbortError')), { once: true }) },
+    }), { headers: { 'Content-Range': '0-0/1' } }))
+    const reading = run()
+    await vi.advanceTimersByTimeAsync(8000)
+    expect((await reading).status).toBe(503)
+    await Promise.all(pending)
+    const next = await run(request('/v1/feedback?q=after-timeout'))
+    expect(next.status).toBe(503)
+    expect(next.headers.get('X-Public-Cache')).toBe('COOLDOWN')
+    expect(fetcher).toHaveBeenCalledTimes(1)
+  })
+  it('preserves upstream rate limits and avoids new upstream requests during a short public cooldown', async () => {
+    fetcher.mockResolvedValueOnce(new Response('provider-private-error', { status: 429, headers: { 'Retry-After': '4' } }))
+    const first = await run()
+    expect(first.status).toBe(429)
+    expect(first.headers.get('Retry-After')).toBe('4')
+    expect(first.headers.get('Cache-Control')).toBe('no-store')
+    expect(await first.text()).not.toContain('provider-private-error')
+    await Promise.all(pending)
+    const next = await run(request('/v1/feedback?q=another-query'))
+    expect(next.status).toBe(429)
+    expect(fetcher).toHaveBeenCalledTimes(1)
+    const internal = cache.put.mock.calls[0][1]
+    expect(await internal.clone().text()).toBe('')
+    expect(internal.headers.has('Access-Control-Allow-Origin')).toBe(false)
+  })
+  it('reports public cache status and does not serve 304 data from a private request context', async () => {
+    const first = await run()
+    expect(first.headers.get('X-Public-Cache')).toBe('MISS')
+    expect(first.headers.get('Server-Timing')).toContain('upstream;dur=')
+    await Promise.all(pending)
+    const hit = await run()
+    expect(hit.headers.get('X-Public-Cache')).toBe('HIT')
+    expect(hit.headers.get('Cache-Control')).toBe('no-store')
+  })
+  it('rejects an oversized URL before any upstream or cache work', async () => {
+    const response = await run(request('/v1/feedback?q=' + 'x'.repeat(4096)))
+    expect(response.status).toBe(414)
+    expect(fetcher).not.toHaveBeenCalled()
+    expect(cache.match).not.toHaveBeenCalled()
+  })
   it('ranks support globally before pagination while exposing only public counts', async () => {
     fetcher.mockResolvedValue(new Response(JSON.stringify([{ id: 'fictional', like_count: 12, user_id: 'private-voter' }]), { headers: { 'Content-Range': '0-0/1000' } }))
     const response = await run(request('/v1/feedback?view=summary&sort=supported&limit=20'))

@@ -27,6 +27,7 @@ import FocusPanel from '../components/FocusPanel.vue'
 import HomeProductivityPanel from '../components/HomeProductivityPanel.vue'
 import Modal from '../components/Modal.vue'
 import { Button } from '../components/ui/button'
+import AppIcon from '../components/AppIcon.vue'
 import { useStoredRef } from '../composables/store/index.js'
 import { animationsEnabled } from '../composables/motion.js'
 import { coursesForDates } from '../composables/store/schedule.js'
@@ -73,6 +74,9 @@ onBeforeUnmount(() => {
 })
 const domain = useDomainCommands()
 const { courses, tasks, milestones: exams, bills, transactions, events } = domain
+// Stored arrays notify through triggerRef after in-place edits. Give the child
+// fresh array props so its computed agenda also updates without a route reload.
+const agendaData = computed(() => ({ courses: [...courses.value], events: [...events.value] }))
 const { fx: ledgerFx } = useLedgerFx()
 const router = useRouter()
 const route = useRoute()
@@ -126,6 +130,17 @@ watch(appToday, () => { moodNote.value = todayMood.value?.note ?? '' }, { immedi
 function chooseMood(mood) {
   moodLog.value = logMood(todayKey(), mood, moodNote.value, moodLog.value)
   showExperienceMessage('今天的心情已记录')
+}
+function moveMood(event) {
+  const keys = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End']
+  if (!keys.includes(event.key)) return
+  event.preventDefault()
+  const buttons = [...event.currentTarget.querySelectorAll('[role="radio"]')]
+  const current = buttons.indexOf(event.target)
+  const offset = event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 1
+  const index = event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1 : (current + offset + buttons.length) % buttons.length
+  buttons[index]?.focus()
+  if (MOOD_OPTIONS[index]) chooseMood(MOOD_OPTIONS[index])
 }
 function updateMoodNote() {
   if (!todayMood.value) return
@@ -351,10 +366,11 @@ function countdownLabel(item) {
 
 <template>
   <div class="today-layout">
-  <div class="page today-page">
+  <div class="page today-page" :class="{ 'has-focus-request': focusRequest }">
     <header class="page-head today-page-head">
       <div class="head-copy">
-        <h1 class="greeting">{{ greeting() }}<template v-if="currentQuote">，{{ currentQuote }}</template></h1>
+        <h1 class="greeting">{{ greeting() }}，把今天安排好。</h1>
+        <p v-if="currentQuote" class="today-quote">{{ currentQuote }}</p>
         <p class="page-desc today-context">
           <time class="today-context-date" :datetime="todayKey()">{{ dateText }}</time>
           <span class="today-context-chip">第 {{ weekNum }} 周</span>
@@ -368,13 +384,12 @@ function countdownLabel(item) {
           <span>{{ festiveNarrative.message }}</span>
         </p>
       </div>
-      <div class="head-actions"><Button variant="ghost" class="replay-btn" @click="showMemory = true">↺ 回放</Button></div>
+      <div class="head-actions"><Button variant="ghost" class="replay-btn" @click="showMemory = true"><AppIcon name="review" />回放</Button></div>
     </header>
 
     <template v-if="entryReady">
       <p v-if="experienceMessage" class="experience-message" role="status">✓ {{ experienceMessage }}</p>
       <p v-if="focusMessage" class="experience-message" role="status">{{ focusMessage }}</p>
-      <HomeProductivityPanel v-if="!focusRequest" />
 
       <template v-for="id in visibleHomeModuleIds" :key="id">
         <template v-if="id === 'next'">
@@ -387,12 +402,12 @@ function countdownLabel(item) {
                 <span v-if="nextUp.state === 'live'" class="next-state live">▶ {{ nextTimingLabel }}</span>
                 <span v-else-if="nextTimingLabel" class="next-state">{{ nextTimingLabel }}</span>
               </template>
-              <template v-else><span class="next-empty-line">今天暂时没有紧接着要处理的事项。</span><strong class="next-title is-muted">可以自由安排时间</strong></template>
+              <template v-else><strong class="next-title is-muted">留一点时间，给想做的事</strong><span class="next-empty-line">记下一个小目标，或从下面开始专注。</span></template>
             </div>
             <Button v-if="nextUp.kind !== 'none'" class="next-action whitespace-normal" @click="openNext">{{ nextUp.kind === 'course' ? '查看课程表' : nextUp.kind === 'task' ? '处理待办' : nextUp.kind === 'event' ? '查看日程' : '查看详情' }}</Button>
-            <Button v-else as-child class="next-action whitespace-normal"><RouterLink to="/tasks?new=1">＋ 新建待办</RouterLink></Button>
+            <Button v-else as-child class="next-action whitespace-normal"><RouterLink to="/tasks?new=1"><AppIcon name="capture" />记一条待办</RouterLink></Button>
           </section>
-          <TodayAgenda :courses="courses" :events="events" :today="todayKey()" :now="now" />
+          <TodayAgenda :courses="agendaData.courses" :events="agendaData.events" :today="todayKey()" :now="now" />
         </template>
 
         <TodayActionList
@@ -437,6 +452,8 @@ function countdownLabel(item) {
         <FocusPanel v-else-if="id === 'focus'" :request="focusRequest" @prepared="onFocusPrepared" />
       </template>
 
+      <HomeProductivityPanel v-if="!focusRequest" />
+
       <div ref="socialCalendarAnchor" class="social-calendar-anchor">
         <SocialCalendarEvents v-if="canShowSocialCalendar && shouldLoadSocialCalendar" scope="today" />
       </div>
@@ -446,20 +463,21 @@ function countdownLabel(item) {
       <section class="today-mood-lower mood-strip" aria-label="今日心情">
         <div class="mood-toolbar">
           <span class="mood-label">今天感觉怎么样？</span>
-          <div class="mood-options" role="radiogroup" aria-label="选择今日心情">
+          <div class="mood-options" role="radiogroup" aria-label="选择今日心情" @keydown="moveMood">
             <button
-              v-for="mood in MOOD_OPTIONS"
+              v-for="(mood, index) in MOOD_OPTIONS"
               :key="mood"
               type="button"
               class="mood-btn"
               :class="{ on: todayMood?.mood === mood }"
               :aria-checked="todayMood?.mood === mood"
               role="radio"
+              :tabindex="todayMood?.mood === mood || (!todayMood && index === 0) ? 0 : -1"
               :aria-label="`记录心情 ${mood}`"
               @click="chooseMood(mood)"
             >{{ mood }}</button>
           </div>
-          <input v-model="moodNote" class="mood-note" maxlength="80" placeholder="可选短备注" aria-label="今日心情备注" @change="updateMoodNote" />
+          <input v-if="todayMood" v-model="moodNote" class="mood-note" maxlength="80" placeholder="留一句话（可选）" aria-label="今日心情备注" @change="updateMoodNote" />
           <span v-if="todayMood" class="mood-hint">已记录</span>
         </div>
       </section>

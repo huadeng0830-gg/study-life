@@ -2,8 +2,15 @@
 .focus-panel {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: 10px;
+  gap: var(--space-4);
+  padding: var(--space-5);
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-surface);
 }
+.panel-head { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: var(--space-2); }
+.panel-head h2 { font-size: var(--type-headline); font-weight: var(--fw-650); }
+.panel-progress { color: var(--muted); font-size: var(--type-footnote); }
 .focus-flash {
   margin: 0;
   padding: 8px 12px;
@@ -78,13 +85,13 @@
 }
 .focus-clock {
   color: var(--primary);
-  font-size: clamp(30px, 3vw, 38px);
+  font-size: clamp(30px, 3vw, var(--type-display));
   letter-spacing: 0.04em;
   font-variant-numeric: tabular-nums;
   line-height: 1.15;
 }
 .focus-clock.overtime {
-  color: #0ea271;
+  color: var(--success);
 }
 .focus-target {
   display: flex;
@@ -153,6 +160,7 @@
   border-color: var(--primary);
   background: var(--primary-soft);
   color: var(--primary);
+  box-shadow: inset 0 0 0 1px var(--primary);
 }
 .start-btn {
   min-height: 48px;

@@ -16,7 +16,7 @@ const domain = useDomainCommands()
 const actions = useCampusBusyKeys()
 const addedIds = ref(new Set())
 watch(() => accountUser.value?.id, () => { addedIds.value = new Set() }, { flush: 'sync' })
-async function refresh() { return page.load(async () => (await campusEvents()).events || []) }
+async function refresh() { return page.load(async () => (await campusEvents()).events || [], null, { cacheKey: ['events'] }) }
 onMounted(() => { void refresh() })
 
 function startLabel(value) { return campusWeekdayDateTimeLabel(value, '时间待核实') }

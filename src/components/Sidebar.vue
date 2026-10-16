@@ -31,6 +31,7 @@ import {
   resolveDrawerRelease,
 } from '../composables/drawerDrag.js'
 import Toast from './Toast.vue'
+import AppIcon from './AppIcon.vue'
 
 // 工具弹窗严格按需加载，避免页面切换时争抢网络和主线程。
 const loadAccountPanel = () => import('./AccountPanel.vue')
@@ -144,8 +145,6 @@ onMounted(() => {
   if (window.matchMedia('(min-width: 901px)').matches) {
     warmupTimer = window.setTimeout(() => {
       const warm = () => {
-        warmTool('appearance')
-        warmTool('data')
         preloadCommonRoutes()
       }
       if ('requestIdleCallback' in window) window.requestIdleCallback(warm, { timeout: 1800 })
@@ -432,19 +431,20 @@ function openMobileTool(key) {
     <nav class="nav desktop-nav" aria-label="主要导航">
       <section v-for="group in navGroups" :key="group.id" class="nav-group">
         <button type="button" class="nav-group-title" :aria-controls="`nav-group-${group.id}`" :aria-expanded="!group.collapsed" :title="collapsed ? group.label : undefined" @click="toggleNavigationGroup(group.id)">{{ group.label }}<span class="nav-group-chevron" aria-hidden="true">{{ group.collapsed ? '＋' : '−' }}</span></button>
-        <div v-show="!group.collapsed" :id="`nav-group-${group.id}`" class="nav-group-items">
+        <div v-show="collapsed || !group.collapsed" :id="`nav-group-${group.id}`" class="nav-group-items">
           <router-link
             v-for="item in group.items"
             :key="item.id"
             :to="item.path"
             class="nav-item"
             exact-active-class="active"
+            :aria-label="item.label"
             :title="collapsed ? item.label : undefined"
             @pointerenter="warmRoute(item.path)"
             @pointerdown="warmRoute(item.path)"
             @focus="warmRoute(item.path)"
           >
-            <span class="icon">{{ item.icon }}</span>
+            <span class="icon"><AppIcon :name="item.id" /></span>
             <span class="nav-label">{{ item.label }}</span>
           </router-link>
         </div>
@@ -461,14 +461,14 @@ function openMobileTool(key) {
           :aria-label="item.mobileLabel || item.label"
           @pointerdown="warmRoute(item.path)"
         >
-          <span>{{ item.icon }}</span><small>{{ item.mobileLabel || item.label }}</small>
+          <span><AppIcon :name="item.id" /></span><small>{{ item.mobileLabel || item.label }}</small>
         </router-link>
       </template>
       <button class="mobile-nav-item capture-trigger" type="button" aria-label="快速记录" aria-haspopup="dialog" @pointerenter="warmTool('capture')" @pointerdown="warmTool('capture')" @focus="warmTool('capture')" @click="openMobileTool('capture')">
-        <span aria-hidden="true">＋</span><small>快速记录</small>
+        <span aria-hidden="true"><AppIcon name="capture" /></span><small>快速记录</small>
       </button>
       <button ref="moreTriggerEl" class="mobile-nav-item more-trigger" :class="{ active: showMobileMore || mobileMoreHasCurrentPage }" type="button" :aria-expanded="showMobileMore" @click="showMobileMore = !showMobileMore">
-        <span>⋯</span><small>更多</small>
+        <span><AppIcon name="more" /></span><small>更多</small>
       </button>
     </nav>
 
@@ -500,9 +500,9 @@ function openMobileTool(key) {
           <h3>{{ group.label }}</h3>
           <div class="mobile-more-grid">
             <router-link v-for="item in group.items" :key="item.path" :to="item.path" class="mobile-more-item" :class="{ subdued: item.subdued }" @click="closeMobileMore()" @pointerdown="warmRoute(item.path)">
-              <span>{{ item.icon }}</span><small>{{ item.label }}</small>
+              <span><AppIcon :name="item.id" /></span><small>{{ item.label }}</small>
             </router-link>
-            <button v-for="item in group.tools" :key="item.key" type="button" class="mobile-more-item" :class="{ subdued: !['account', 'update'].includes(item.key) }" @click="openMobileTool(item.key)" @pointerdown="warmTool(item.key)"><span>{{ item.icon }}</span><small>{{ item.key === 'account' ? accountLabel : item.label }}</small><em v-if="item.key === 'account'">{{ accountUser ? '已登录' : '未登录' }}</em></button>
+            <button v-for="item in group.tools" :key="item.key" type="button" class="mobile-more-item" :class="{ subdued: !['account', 'update'].includes(item.key) }" @click="openMobileTool(item.key)" @pointerdown="warmTool(item.key)"><span><AppIcon :name="item.key" /></span><small>{{ item.key === 'account' ? accountLabel : item.label }}</small><em v-if="item.key === 'account'">{{ accountUser ? '已登录' : '未登录' }}</em></button>
           </div>
         </div>
       </section>
@@ -522,21 +522,23 @@ function openMobileTool(key) {
     </button>
 
     <div class="sidebar-foot">
-      <span class="tools-title">设置与工具</span>
       <button type="button" class="nav-item data-item account-entry" :aria-label="`${accountLabel}${accountUser ? '，已登录' : '，未登录'}`" :title="accountLabel" :aria-expanded="accountOpen" @pointerenter="warmTool('account')" @focus="warmTool('account')" @click="accountOpen = true">
-        <span class="icon" aria-hidden="true">👤</span>
+        <span class="icon" aria-hidden="true"><AppIcon name="account" /></span>
         <span class="nav-label">{{ accountLabel }}</span>
       </button>
-      <button type="button" class="nav-item data-item sidebar-search-action" @pointerenter="warmTool('search')" @focus="warmTool('search')" @click="showSearch = true">
-        <span class="icon">🔍</span>
+      <details class="sidebar-settings">
+        <summary class="nav-item" aria-label="设置与工具" title="设置与工具"><span class="icon"><AppIcon name="admin" /></span><span class="nav-label">设置与工具</span><span class="settings-chevron" aria-hidden="true">⌄</span></summary>
+        <div class="sidebar-settings-content">
+      <button type="button" class="nav-item data-item sidebar-search-action" aria-label="搜索" title="搜索（/）" @pointerenter="warmTool('search')" @focus="warmTool('search')" @click="showSearch = true">
+        <span class="icon"><AppIcon name="search" /></span>
         <span class="nav-label">搜索</span>
       </button>
       <div class="sidebar-action-row">
-        <button type="button" class="nav-item data-item appearance-item" @pointerenter="warmTool('appearance')" @focus="warmTool('appearance')" @click="showAppearance = true">
-          <span class="icon">🎨</span>
+        <button type="button" class="nav-item data-item appearance-item" aria-label="个性化" title="个性化" @pointerenter="warmTool('appearance')" @focus="warmTool('appearance')" @click="showAppearance = true">
+          <span class="icon"><AppIcon name="appearance" /></span>
           <span class="nav-label">个性化</span>
         </button>
-        <button type="button" class="nav-item data-item appearance-item" aria-label="编辑导航" title="编辑导航" @pointerenter="warmTool('navigation')" @focus="warmTool('navigation')" @click="openNavigationSettings"><span class="icon" aria-hidden="true">☷</span><span class="nav-label">编辑导航</span></button>
+        <button type="button" class="nav-item data-item appearance-item" aria-label="编辑导航" title="编辑导航" @pointerenter="warmTool('navigation')" @focus="warmTool('navigation')" @click="openNavigationSettings"><span class="icon" aria-hidden="true"><AppIcon name="navigation" /></span><span class="nav-label">编辑导航</span></button>
         <button
           type="button"
           class="quick-add-button tap-target"
@@ -550,27 +552,27 @@ function openMobileTool(key) {
           <span class="quick-add-label">记录</span>
         </button>
       </div>
-      <button type="button" class="nav-item data-item festive-item" @pointerenter="warmTool('festive')" @focus="warmTool('festive')" @click="showFestiveSettings = true">
-        <span class="icon" aria-hidden="true">🎉</span>
+      <button type="button" class="nav-item data-item festive-item" aria-label="氛围与纪念日" title="氛围与纪念日" @pointerenter="warmTool('festive')" @focus="warmTool('festive')" @click="showFestiveSettings = true">
+        <span class="icon" aria-hidden="true"><AppIcon name="festive" /></span>
         <span class="nav-label">氛围与纪念日</span>
       </button>
-      <router-link v-if="!navGroups.some(group => group.items.some(item => item.id === 'feedback'))" to="/feedback" class="nav-item data-item" exact-active-class="active" @pointerenter="warmRoute('/feedback')"><span class="icon" aria-hidden="true">💬</span><span class="nav-label">反馈与建议</span></router-link>
-      <router-link to="/admin" class="nav-item data-item" exact-active-class="active" title="管理中心" @pointerenter="warmRoute('/admin')" @pointerdown="warmRoute('/admin')" @focus="warmRoute('/admin')">
-        <span class="icon" aria-hidden="true">⚙️</span>
+      <router-link v-if="!navGroups.some(group => group.items.some(item => item.id === 'feedback'))" to="/feedback" class="nav-item data-item" exact-active-class="active" aria-label="反馈与建议" title="反馈与建议" @pointerenter="warmRoute('/feedback')"><span class="icon" aria-hidden="true"><AppIcon name="feedback" /></span><span class="nav-label">反馈与建议</span></router-link>
+      <router-link to="/admin" class="nav-item data-item" exact-active-class="active" aria-label="管理中心" title="管理中心" @pointerenter="warmRoute('/admin')" @pointerdown="warmRoute('/admin')" @focus="warmRoute('/admin')">
+        <span class="icon" aria-hidden="true"><AppIcon name="admin" /></span>
         <span class="nav-label">管理中心</span>
       </router-link>
-      <button type="button" class="nav-item data-item" @pointerenter="warmTool('data')" @focus="warmTool('data')" @click="openDataManager">
-        <span class="icon">💾<i v-if="needsBackup" class="backup-dot"></i></span>
+      <button type="button" class="nav-item data-item" :aria-label="needsBackup ? '数据管理，需要备份' : '数据管理'" title="数据管理" @pointerenter="warmTool('data')" @focus="warmTool('data')" @click="openDataManager">
+        <span class="icon"><AppIcon name="data" /><i v-if="needsBackup" class="backup-dot"></i></span>
         <span class="nav-label">数据管理</span>
       </button>
-      <button type="button" class="nav-item data-item" @click="showQuickRecordSettings = true">
-        <span class="icon">⚡</span><span class="nav-label">{{ SETTINGS_NAVIGATION_LABEL }}</span>
+      <button type="button" class="nav-item data-item" :aria-label="SETTINGS_NAVIGATION_LABEL" :title="SETTINGS_NAVIGATION_LABEL" @click="showQuickRecordSettings = true">
+        <span class="icon"><AppIcon name="quick-record" /></span><span class="nav-label">{{ SETTINGS_NAVIGATION_LABEL }}</span>
       </button>
-<button type="button" class="nav-item data-item" @pointerenter="warmTool('focus')" @focus="warmTool('focus')" @click="showFocusSettings = true">
-          <span class="icon">⏱</span><span class="nav-label">专注设置</span>
+      <button type="button" class="nav-item data-item" aria-label="专注设置" title="专注设置" @pointerenter="warmTool('focus')" @focus="warmTool('focus')" @click="showFocusSettings = true">
+          <span class="icon"><AppIcon name="focus" /></span><span class="nav-label">专注设置</span>
         </button>
-      <button type="button" class="nav-item data-item" @pointerenter="warmTool('update')" @focus="warmTool('update')" @click="showVersionUpdate = true">
-        <span class="icon" aria-hidden="true">↻<i v-if="updateReminderVisible" class="update-dot"></i></span>
+      <button type="button" class="nav-item data-item" :aria-label="updateReminderVisible ? '版本与更新，有新版本' : '版本与更新'" title="版本与更新" @pointerenter="warmTool('update')" @focus="warmTool('update')" @click="showVersionUpdate = true">
+        <span class="icon" aria-hidden="true"><AppIcon name="update" /><i v-if="updateReminderVisible" class="update-dot"></i></span>
         <span class="nav-label">版本与更新 <small v-if="updateReminderVisible" class="update-reminder-label">有新版本</small></span>
       </button>
 
@@ -592,6 +594,8 @@ function openMobileTool(key) {
         </div>
       </div>
 
+        </div>
+      </details>
       <div class="footer">
         本地存储 · 可随时备份
         <span class="kbd-hint">按 1-9 快速切换页面</span>

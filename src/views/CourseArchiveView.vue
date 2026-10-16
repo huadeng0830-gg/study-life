@@ -193,7 +193,7 @@ watch(() => [route.query.focus, route.query.section, courseId.value, timeline.va
     <LearningNavigation current="course" />
 
     <template v-if="!courseId">
-      <section class="overview-stats" aria-label="在学课程概览">
+      <section v-if="profiles.length" class="overview-stats" aria-label="在学课程概览">
         <div class="overview-stat panel"><span>待完成事项</span><strong>{{ totals.pending }}<small>项</small></strong><p>{{ activeProfiles.length }} 门在学课程</p></div>
         <div class="overview-stat panel" :class="{ 'stat-urgent': totals.overdue }"><span>逾期待办</span><strong>{{ totals.overdue }}<small>项</small></strong><p>{{ totals.overdue ? '先给这些事项安排下一步' : '目前没有逾期待办' }}</p></div>
         <div class="overview-stat panel"><span>近期节点</span><strong>{{ totals.upcoming }}<small>个</small></strong><p>未来 7 天的考试与日程</p></div>

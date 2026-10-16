@@ -57,7 +57,7 @@ describe('navigation editor interactions', () => {
     tabs.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }))
     await nextTick()
     expect(document.activeElement.getAttribute('aria-selected')).toBe('true')
-    const groupName = byLabel('学习分组名称')
+    const groupName = byLabel('学习与计划分组名称')
     groupName.focus()
     groupName.value = '自定义学习'
     groupName.dispatchEvent(new Event('input', { bubbles: true }))
@@ -65,7 +65,7 @@ describe('navigation editor interactions', () => {
     expect(document.querySelector('.desktop-nav-preview').textContent).toContain('自定义学习')
     byLabel('撤销上一步').click()
     await nextTick()
-    expect(byLabel('学习分组名称')).toBeTruthy()
+    expect(byLabel('学习与计划分组名称')).toBeTruthy()
     byLabel('重做上一步').click()
     await nextTick()
     expect(byLabel('自定义学习分组名称')).toBeTruthy()
@@ -73,7 +73,7 @@ describe('navigation editor interactions', () => {
     document.querySelector('.nav-save').click()
     await vi.waitFor(() => expect(document.querySelector('.navigation-feedback')?.textContent).toContain('已保存'), { timeout: 2000 })
     expect(mobileNavigation.value).toEqual(['tasks', 'places'])
-    expect(desktopNavigation.value[1].label).toBe('自定义学习')
+    expect(desktopNavigation.value[0].label).toBe('自定义学习')
     // Keep the focused button in place during its result animation; its
     // synchronous action guard and aria-disabled still prevent another write.
     expect(document.querySelector('.nav-save').getAttribute('aria-disabled')).toBe('true')
@@ -100,7 +100,7 @@ describe('navigation editor interactions', () => {
 
   it('saves when leaving, while an invalid group name keeps the dialog and draft open', async () => {
     const app = await mount('desktop')
-    const name = byLabel('学习分组名称')
+    const name = byLabel('学习与计划分组名称')
     name.value = ''
     name.dispatchEvent(new Event('input', { bubbles: true }))
     await nextTick()
@@ -152,18 +152,18 @@ describe('navigation editor interactions', () => {
 
   it('moves every page to the selected destination before removing a nonempty group, and can undo it', async () => {
     await mount('desktop')
-    byLabel('移除学习分组').click()
+    byLabel('移除学习与计划分组').click()
     await nextTick()
     const destination = byLabel('移除分组后页面的目标分组')
-    destination.value = 'qixing'
+    destination.value = 'campus'
     destination.dispatchEvent(new Event('change', { bubbles: true }))
     await clickText('移动页面并移除分组')
-    const group = document.querySelector('[aria-label="齐行分组名称"]').closest('section')
-    expect([...group.querySelectorAll('[data-nav-id]')].map((item) => item.dataset.navId)).toEqual(['projects', 'schedule', 'course', 'tasks', 'exams'])
-    expect(byLabel('学习分组名称')).toBeNull()
+    const group = document.querySelector('[aria-label="校园与协作分组名称"]').closest('section')
+    expect([...group.querySelectorAll('[data-nav-id]')].map((item) => item.dataset.navId)).toEqual([...DEFAULT_DESKTOP_NAVIGATION.find(group => group.id === 'campus').items, ...DEFAULT_DESKTOP_NAVIGATION[0].items])
+    expect(byLabel('学习与计划分组名称')).toBeNull()
     byLabel('撤销上一步').click()
     await nextTick()
-    expect(byLabel('学习分组名称')).toBeTruthy()
+    expect(byLabel('学习与计划分组名称')).toBeTruthy()
     expect(desktopNavigation.value).toEqual(DEFAULT_DESKTOP_NAVIGATION)
   })
 

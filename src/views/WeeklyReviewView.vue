@@ -1,4 +1,5 @@
 <script setup>
+import PageHeader from '../components/PageHeader.vue'
 import LearningNavigation from '../components/learning/LearningNavigation.vue'
 import { Badge } from '../components/ui/badge'
 import { Button } from '../components/ui/button'
@@ -211,11 +212,8 @@ function saveReflectionNow() {
 
 <template>
   <div class="page review-page">
-    <header class="page-head review-page-head">
-      <div class="page-head-main">
-        <h1 class="page-title">{{ weekName }}回顾</h1>
-        <p class="page-desc">看见进展，留下一件下周想做好的事。</p>
-      </div>
+    <PageHeader class="review-page-head" :title="`${weekName}回顾`" description="看见进展，留下一件下周想做好的事。">
+      <template #actions>
       <div class="review-head-actions">
         <div class="week-switcher" role="group" aria-label="切换回顾周">
           <Button variant="ghost" size="icon-sm" class="week-nav-button" type="button" aria-label="回顾上一周" title="上一周" @click="moveReviewWeek(reviewOffset - 1)"><ChevronLeftIcon /></Button>
@@ -225,7 +223,8 @@ function saveReflectionNow() {
         <Button variant="ghost" class="current-week-button" type="button" :disabled="reviewOffset === 0" @click="moveReviewWeek(0)">回到本周</Button>
         <Button as-child variant="outline"><router-link to="/">回到今天</router-link></Button>
       </div>
-    </header>
+      </template>
+    </PageHeader>
 
     <LearningNavigation current="review" />
 

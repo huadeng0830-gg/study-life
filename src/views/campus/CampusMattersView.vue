@@ -37,7 +37,7 @@ async function load({ forceRefresh = false } = {}) {
   return page.load(async () => {
     if (view.value !== 'all') return campusMatters({ view: view.value }, { forceRefresh })
     return campusMatterOverview({ forceRefresh })
-  })
+  }, null, { cacheKey: ['matters', view.value] })
 }
 
 function displayDate(value) { return value ? String(value).slice(0, 10) : '' }

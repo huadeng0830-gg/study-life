@@ -129,7 +129,7 @@ describe('课程进度的实际操作', () => {
     const title = dialog.querySelector('#tasks-title')
     title.value = '新建示例课程待办'
     title.dispatchEvent(new Event('input', { bubbles: true }))
-    button(dialog, '保存').click()
+    button(dialog, '创建待办').click()
     await settle()
     expect(domain.tasks.value.find((task) => task.title === '新建示例课程待办')).toMatchObject({ courseId: 'c1', course: '示例数学' })
     expect(router.currentRoute.value.query).not.toHaveProperty('new')

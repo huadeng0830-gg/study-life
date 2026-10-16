@@ -683,7 +683,7 @@ describe('行为层：确认与取消都要真的分叉', () => {
     // 编辑表单同样 Teleport 到 body，从浮层里按 #tasks-title 定位。
     const formModal = () => [...document.querySelectorAll('.overlay .modal')].find((modal) => modal.querySelector('#tasks-title'))
     const titleInput = () => formModal().querySelector('#tasks-title')
-    const saveButton = () => [...formModal().querySelectorAll('button')].find((button) => button.textContent.trim() === '保存')
+    const saveButton = () => [...formModal().querySelectorAll('button')].find((button) => button.textContent.trim() === '保存更改')
 
     // 点卡片打开编辑表单（卡片上的 openEdit）
     main.querySelector('.card.task').click()

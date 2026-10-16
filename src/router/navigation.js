@@ -10,8 +10,8 @@ export const navigationRegistry = Object.freeze(routes
   .map((route) => Object.freeze({
     id: route.meta.navigation.id,
     path: route.path,
-    label: route.meta.title,
-    mobileLabel: route.meta.navigation.mobileLabel || route.meta.title,
+    label: route.meta.navigation.label || route.meta.title,
+    mobileLabel: route.meta.navigation.mobileLabel || route.meta.navigation.label || route.meta.title,
     icon: route.meta.navigation.icon,
     groupId: route.meta.navigation.groupId,
     groupLabel: route.meta.navigation.groupLabel,
@@ -31,12 +31,9 @@ export function availableNavigationItems(user = null) {
 }
 
 const DEFAULT_DESKTOP_GROUPS = Object.freeze([
-  Object.freeze({ id: 'workspace', label: '今日' }),
-  Object.freeze({ id: 'learning', label: '学习' }),
-  Object.freeze({ id: 'schedule', label: '日程' }),
-  Object.freeze({ id: 'qixing', label: '齐行' }),
-  Object.freeze({ id: 'campus', label: '校园' }),
-  Object.freeze({ id: 'other', label: '其他' }),
+  Object.freeze({ id: 'workspace', label: '学习与计划' }),
+  Object.freeze({ id: 'life', label: '生活与回顾' }),
+  Object.freeze({ id: 'campus', label: '校园与协作' }),
 ])
 
 export const desktopNavigationGroups = Object.freeze(DEFAULT_DESKTOP_GROUPS.map((group) => Object.freeze({

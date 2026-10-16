@@ -51,7 +51,7 @@ async function refresh(index = currentPage.value) {
   return page.load(async () => {
     const [publicResult, interestResult, mineResult] = await Promise.all([campusMarketListings(filters), listMarketInterests(), campusLifeMine({ domains: ["listings"] })])
     return { ...publicResult, listings: publicResult.listings || [], interests: interestResult.interests || [], mine: mineResult.listings || [] }
-  })
+  }, null, { cacheKey: ['market', filters] })
 }
 async function changePage(index) {
   selectedId.value = ''; contactId.value = ''; contactNote.value = ''

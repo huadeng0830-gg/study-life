@@ -1,6 +1,7 @@
 import { onScopeDispose, ref, watch } from 'vue'
 import { accountUser } from './accountAuth.js'
 import { campusErrorMessage } from './campusContentModel.js'
+import { campusReadRevision, readCampusSnapshot, saveCampusSnapshot } from '../services/campusReadCache.js'
 
 /**
  * Read-then-act page state for a campus screen.
@@ -58,13 +59,15 @@ export function useCampusLifePage({ reloadOnAccountChange = true } = {}) {
   let active = true
   let lastRequest = null
   let actionGeneration = 0
-  onScopeDispose(() => { active = false; generation += 1; ownerGeneration += 1 })
+  let readController = null
+  onScopeDispose(() => { active = false; generation += 1; ownerGeneration += 1; readController?.abort() })
 
   function currentUser() { return accountUser.value?.id || '' }
   function isLiveRead(revision, userId) { return active && revision === generation && currentUser() === userId }
   function isLiveWrite(owner, userId) { return active && owner === ownerGeneration && currentUser() === userId }
 
   watch(currentUser, () => {
+    readController?.abort()
     generation += 1
     ownerGeneration += 1
     data.value = null
@@ -75,28 +78,40 @@ export function useCampusLifePage({ reloadOnAccountChange = true } = {}) {
     const owner = ownerGeneration
     // Re-read for the newly signed-in account. `lastRequest` is the reason the
     // page can be rebuilt from scratch instead of each view re-wiring a watcher.
-    if (lastRequest && reloadOnAccountChange) void Promise.resolve().then(() => { if (active && owner === ownerGeneration) return load(lastRequest) })
+    if (lastRequest && reloadOnAccountChange) void Promise.resolve().then(() => {
+      if (active && owner === ownerGeneration) return load(lastRequest.request, null, { cacheKey: lastRequest.cacheKey })
+    })
   }, { flush: 'sync' })
 
-  async function load(request, initial = null) {
-    lastRequest = request
+  async function load(request, initial = null, { cacheKey = null } = {}) {
+    readController?.abort()
+    const controller = new AbortController()
+    readController = controller
+    lastRequest = { request, cacheKey }
     const revision = ++generation
     const userId = currentUser()
+    const cacheRevision = campusReadRevision()
+    const snapshotKey = cacheKey === null || !userId ? null : JSON.stringify([userId, cacheKey])
     loading.value = true
     error.value = ''
     // A refresh supersedes whatever the last write left behind: the user is
     // looking at the result of that action now, whichever way it went.
     actionError.value = ''
     if (initial !== null) data.value = initial
+    // Restore before the first await. The real request still runs, so a stale
+    // screen is replaced as soon as the fresh response arrives.
+    else if (data.value === null && snapshotKey) data.value = readCampusSnapshot(snapshotKey)
     try {
-      const result = await request()
+      const result = await request(controller.signal)
       if (!isLiveRead(revision, userId)) return null
       data.value = result
+      if (snapshotKey) saveCampusSnapshot(snapshotKey, result, cacheRevision)
       return result
     } catch (cause) {
-      if (isLiveRead(revision, userId)) error.value = campusErrorMessage(cause, '暂时无法读取校园信息。')
+      if (isLiveRead(revision, userId) && cause?.name !== 'AbortError') error.value = campusErrorMessage(cause, '暂时无法读取校园信息。')
       return null
     } finally {
+      if (readController === controller) readController = null
       if (isLiveRead(revision, userId)) loading.value = false
     }
   }

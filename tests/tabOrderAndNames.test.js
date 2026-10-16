@@ -92,6 +92,20 @@ describe('渲染后的 Tab 顺序与可访问名称', () => {
     expect(problems).toEqual([])
   }, 15_000)
 
+  it('心情单选组用方向键、Home 和 End 切换，并始终只有一个 Tab 停靠点', async () => {
+    mounted = await mountApp({ routes })
+    const group = document.querySelector('[role="radiogroup"][aria-label="选择今日心情"]')
+    const radios = [...group.querySelectorAll('[role="radio"]')]
+    radios[0].focus()
+    for (const [key, index] of [['ArrowRight', 1], ['End', radios.length - 1], ['Home', 0]]) {
+      document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }))
+      await settle()
+      expect(document.activeElement).toBe(radios[index])
+      expect(radios[index].getAttribute('aria-checked')).toBe('true')
+      expect(group.querySelectorAll('[tabindex="0"]')).toHaveLength(1)
+    }
+  })
+
   it('跳过链接是第一个 Tab 停靠点，并指向真实存在的 main', async () => {
     mounted = await mountApp({ routes })
     for (const record of PAGES) {
@@ -254,6 +268,22 @@ describe('夹具', () => {
     // 有名字的按钮内部用 aria-hidden 的符号，也不许误报
     expect(issues.some((line) => line.includes('有名字'))).toBe(false)
     expect(issues).toHaveLength(3)
+  })
+
+  it('单选组同样需要可到达的入口，整组 -1 仍然报错', () => {
+    host = mountFixture(`
+      <div role="radiogroup">
+        <button role="radio" aria-checked="true" tabindex="0">当前心情</button>
+        <button role="radio" aria-checked="false" tabindex="-1">其他心情</button>
+      </div>
+      <div role="radiogroup">
+        <button role="radio" aria-checked="false" tabindex="-1">无法到达</button>
+      </div>
+    `)
+    const issues = tabOrderIssues(focusableElements(host, isVisible))
+    expect(issues).toHaveLength(1)
+    expect(issues[0]).toContain('无法到达')
+    expect(issues[0]).toContain('整组都不在 Tab 序列里')
   })
 
   it('roving tabindex：组内留了停靠点就不报，整组都排除才报', () => {

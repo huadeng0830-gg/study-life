@@ -1,6 +1,6 @@
 import { campusLifeRequest } from './social.js'
 
-export const campusLifeSearch = (query, filters = {}) => campusLifeRequest('search', { ...filters, query })
+export const campusLifeSearch = (query, filters = {}, options = {}) => campusLifeRequest('search', { ...filters, query }, options)
 export const campusLifeMine = (filters = {}, options = {}) => campusLifeRequest('mine_list', filters, options)
 export const withdrawCampusContent = (targetType, targetId, revision) => campusLifeRequest('content_withdraw', { targetType, targetId, revision })
 export const resubmitCampusContent = (targetType, targetId, revision, content) => campusLifeRequest('content_resubmit', { targetType, targetId, revision, content })

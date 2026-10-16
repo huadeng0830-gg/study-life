@@ -1,6 +1,7 @@
 <script setup>
 import { reminderAction } from '../composables/domain/selectors.js'
 import { Button } from './ui/button'
+import AppIcon from './AppIcon.vue'
 
 defineProps({
   mode: { type: String, required: true },
@@ -20,18 +21,18 @@ function actionLabel(item) {
   <template v-if="mode === 'actions'">
     <section v-if="items.length" class="action-panel" aria-label="现在该做">
       <div class="panel-head">
-        <div><h2>今天最重要</h2><span class="panel-subtitle">今天优先 · 近期事项补充 · 最多 3 项</span></div>
-        <Button as-child variant="ghost" class="panel-link"><RouterLink to="/tasks">查看待办 →</RouterLink></Button>
+        <div><h2>今天最重要</h2><span class="panel-subtitle">先完成眼前的一件事</span></div>
+        <Button as-child variant="ghost" class="panel-link"><RouterLink to="/tasks">全部待办</RouterLink></Button>
       </div>
       <div class="action-list">
         <div v-for="item in items" :key="item.key" class="action-row">
-          <span class="action-mark" aria-hidden="true">○</span>
+          <span class="action-mark" aria-hidden="true"><AppIcon name="tasks" /></span>
           <div class="action-copy"><b>{{ item.title }}</b><span>{{ meta(item) }}</span></div>
           <Button variant="secondary" class="reminder-action whitespace-normal" @click="emit('activate', item)">{{ actionLabel(item) }}</Button>
         </div>
       </div>
     </section>
-    <p v-else-if="empty" class="quiet-empty">今天暂时没有需要马上处理的事项。</p>
+    <section v-else-if="empty" class="action-panel action-empty" aria-label="现在该做"><div class="panel-head"><h2>今天最重要</h2><Button as-child variant="ghost"><RouterLink to="/tasks">全部待办</RouterLink></Button></div><p class="quiet-empty">没有待处理的紧急事项。给今天留一个小目标吧。</p></section>
   </template>
 
   <section v-else-if="items.length" class="action-panel risk-panel" aria-label="需要注意">
@@ -48,10 +49,11 @@ function actionLabel(item) {
 
 <style scoped>
 .action-panel {
-  padding: 16px 18px;
-  border: 1px solid var(--border);
-  border-radius: var(--card-radius);
-  background: var(--card);
+  padding: 0 0 var(--space-4);
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
 }
 .panel-head {
   display: flex;
@@ -60,7 +62,7 @@ function actionLabel(item) {
   gap: 10px;
   margin-bottom: 10px;
 }
-.panel-head h2 { font-size: var(--fs-15-5); }
+.panel-head h2 { font-size: var(--type-headline); font-weight: var(--fw-650); }
 .panel-head > div { min-width: 0; }
 .panel-link {
   color: var(--primary);
@@ -108,21 +110,18 @@ function actionLabel(item) {
   min-width: 0;
 }
 .action-copy b {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
   overflow: hidden;
   font-size: var(--fs-13-5);
   text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
 }
 .action-copy span { color: var(--ink-soft); font-size: var(--fs-11-5); }
 .quiet-empty {
-  grid-column: 1 / -1;
-  justify-self: start;
-  width: fit-content;
-  max-width: 100%;
-  padding: 14px 16px;
-  border: 1px dashed var(--border-strong);
-  border-radius: var(--card-radius);
-  background: var(--bg-tint);
+  margin: 0;
+  padding: var(--space-2) 0;
   color: var(--ink-soft);
   font-size: var(--fs-13);
 }
@@ -138,7 +137,7 @@ function actionLabel(item) {
   text-decoration: none;
 }
 @media (max-width: 520px) {
-  .action-panel { padding: 14px; }
+  .action-panel { padding: 0 0 var(--space-4); }
   .action-row { min-height: 52px; }
 }
 @media (max-width: 900px), (pointer: coarse) and (max-height: 520px) {

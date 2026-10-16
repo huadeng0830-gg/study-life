@@ -85,10 +85,10 @@ describe('404 页渲染在外壳 main 内部', () => {
     expect(main.querySelector('h1')?.textContent).toBe('页面不存在')
     expect(main.querySelector('.route-not-found-code')?.textContent).toBe('404')
 
-    // 「返回首页」得是真链接
+    // 「回到今天」得是真链接
     const link = main.querySelector('a')
-    expect(link, '返回首页应当是 router-link 渲染出的 <a>').toBeTruthy()
+    expect(link, '回到今天应当是 router-link 渲染出的 <a>').toBeTruthy()
     expect(link.getAttribute('href')).toContain('#/')
-    expect(link.textContent).toBe('返回首页')
+    expect(link.textContent).toBe('回到今天')
   })
 })

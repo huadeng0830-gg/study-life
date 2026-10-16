@@ -48,7 +48,7 @@ const FLOWS = [
     route: '/tasks',
     label: '待办',
     open: '添加待办',
-    submit: '保存',
+    submit: '创建待办',
     fill: [['#tasks-title', '验收用待办最小输入']],
   },
   {
@@ -182,15 +182,19 @@ try {
       const title = flow.fill[0][1]
       try {
         // 每条流程从干净的 localStorage 开始，避免上一条的残留造成假阳性。
-        await send('Page.navigate', { url: `${origin}/#/`, frameId: undefined })
-        await until('document.readyState === "complete"', 'boot')
-        await evaluate(`Object.keys(localStorage).filter(k => k.startsWith('sl_')).forEach(k => localStorage.removeItem(k))`)
+        await send('Page.navigate', { url: 'about:blank' })
+        await until('location.href === "about:blank"', 'leave previous flow')
         await send('Page.navigate', { url: `${origin}/#${flow.route}` })
+        await until(`location.hash === ${JSON.stringify('#' + flow.route)} && Boolean(document.querySelector('#app[data-v-app] main'))`, 'boot')
+        await evaluate(`Object.keys(localStorage).filter(k => k.startsWith('sl_')).forEach(k => localStorage.removeItem(k))`)
+        // A real reload also clears module/KeepAlive state. A same-hash
+        // Page.navigate would otherwise reuse a previous flow's open dialog.
+        await send('Page.reload', { ignoreCache: false })
         await until(`Boolean(document.querySelector('main')) && !document.querySelector('.startup-error')`, `${flow.route} mounted`)
         await sleep(500)
 
         await clickByText(flow.open, 'main')
-        await sleep(600)
+        await until(`Boolean(document.querySelector(${JSON.stringify(flow.fill[0][0])}))`, 'entry field')
         step('打开录入界面', await evaluate(`Boolean(document.querySelector('dialog[open], [role="dialog"], form'))`))
 
         for (const [selector, value] of flow.fill) {
@@ -216,6 +220,8 @@ try {
         step('保存过程没有运行时错误', consoleErrors.length === errorsBefore, consoleErrors.slice(errorsBefore).join(' | ') || null)
 
         // 刷新：这是最容易丢数据的一步，也是本地存储类应用最常见的真实故障。
+        await send('Page.navigate', { url: 'about:blank' })
+        await until('location.href === "about:blank"', 'leave before persistence check')
         await send('Page.navigate', { url: `${origin}/#${flow.route}` })
         await until(`Boolean(document.querySelector('main')) && !document.querySelector('.startup-error')`, `${flow.route} reloaded`)
         await sleep(700)

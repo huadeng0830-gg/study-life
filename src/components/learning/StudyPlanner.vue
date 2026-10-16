@@ -13,7 +13,7 @@ import { formatFocusDuration } from '../../composables/focusTimer.js'
 import { isScheduleDate } from '../../composables/store/schedule.js'
 import { addAppDays, appNow, appToday, getAppToday } from '../../composables/timeContext.js'
 
-const props = defineProps({ compact: { type: Boolean, default: false } })
+defineProps({ compact: { type: Boolean, default: false } })
 const domain = useDomainCommands()
 const router = useRouter()
 const chosenDate = ref('')
@@ -32,7 +32,6 @@ const upcomingReviews = computed(() => domain.milestones.value.filter((item) => 
   .map((item) => ({ item, countdown: countdownState(item, appNow.value) }))
   .filter(({ countdown }) => countdown.target && !countdown.isPast && getAppToday(countdown.target) <= addAppDays(appToday.value, 14))
   .sort((a, b) => a.countdown.sortValue - b.countdown.sortValue).slice(0, 3))
-const visible = computed(() => !props.compact || plan.value.suggestions.length || plan.value.blocks.length || upcomingReviews.value.length || message.value)
 
 watch(date, () => { message.value = ''; undoEvent.value = null; undoIdentitySnapshot.value = null; expanded.value = false })
 
@@ -85,7 +84,7 @@ function startReview(item) {
 </script>
 
 <template>
-  <section v-if="visible" class="study-planner" :class="{ compact }" aria-label="学习计划">
+  <section class="study-planner" :class="{ compact }" aria-label="学习计划">
     <header class="study-header">
       <div><h2>{{ compact ? '今日学习安排' : '利用课表空档，安排下一步' }}</h2><p>避开课程和日程，前后留出 10 分钟；长任务分段推进。</p></div>
       <RouterLink v-if="compact" class="text-link" to="/schedule">打开课表 →</RouterLink>
@@ -155,7 +154,7 @@ h3 small { color: var(--ink-faint); font-size: var(--fs-11); font-weight: var(--
 .study-row { display: grid; grid-template-columns: 120px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 11px 12px; border: 1px solid var(--border); border-radius: var(--radius-10); background: var(--bg-tint); }
 .study-time, .study-copy { display: grid; gap: 4px; min-width: 0; }
 .study-time b, .study-copy a { color: var(--text); font-size: var(--fs-12); font-weight: var(--fw-700); }
-.study-copy a { text-decoration: none; overflow-wrap: anywhere; }
+.study-copy a { display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden; text-decoration: none; overflow-wrap: anywhere; }
 .study-copy a:hover { color: var(--primary); text-decoration: underline; }
 .study-time small, .study-copy small { color: var(--ink-soft); font-size: var(--fs-11); line-height: 1.5; overflow-wrap: anywhere; }
 .study-actions { justify-content: flex-end; }
@@ -172,5 +171,6 @@ h3 small { color: var(--ink-faint); font-size: var(--fs-11); font-weight: var(--
   .study-actions { grid-column: 1 / -1; justify-content: flex-start; }
   .compact { padding: 13px; }
   .text-link { min-height: var(--tap-min); }
+  .study-copy a { min-height:var(--tap-min); align-content:center; }
 }
 </style>

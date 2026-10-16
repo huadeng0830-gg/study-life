@@ -1,11 +1,39 @@
-/* Shared workbench surfaces: quieter edges let the content carry the hierarchy. */
-.card {
-  border-color: var(--border);
-  box-shadow: 0 1px 2px rgba(24, 58, 48, 0.035);
-}
+/* Shared layout recipes. Feature styles own their content; this file owns
+   the rhythm between sections and the native-control compatibility layer. */
+.route-view { min-width: 0; }
+.route-view > .page { min-width: 0; }
+.card { border-color: var(--border); box-shadow: var(--elevation-0); }
+.stack { display: flex; flex-direction: column; gap: var(--layout-gap); min-width: 0; }
+.cluster { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
+.content-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: var(--layout-gap); }
+.section-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-3); }
+.section-heading h2 { font-size: var(--type-headline); font-weight: var(--fw-650); }
+.section-heading p { color: var(--muted); font-size: var(--type-subheadline); }
 
-@media (min-width: 901px) {
-  .desktop-toolbar {
-    border-bottom: 1px solid color-mix(in srgb, var(--border) 76%, transparent);
-  }
+/* Unknown, unusually long and translated content must not widen the shell. */
+:where(.page-title, .page-desc, .page-head-main, .campus-life-heading, .form) { overflow-wrap: anywhere; }
+:where(.page-actions, .form-row, .modal-foot) { min-width: 0; }
+:where(input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='color']), select, textarea) { max-width: 100%; }
+:where(textarea) { line-height: var(--line-body); resize: vertical; }
+:where(button, a, summary) { touch-action: manipulation; }
+.btn svg { width: var(--icon-size); height: var(--icon-size); flex: none; }
+.segmented > button { min-height: var(--control-height); }
+.segmented > button.on { box-shadow: var(--elevation-1); }
+
+/* A title and a few controls fit on a small phone without a full-width
+   primary action pushing the content out of the first viewport. */
+@media (max-width: 520px) {
+  .page-head { align-items: flex-start; gap: var(--space-4); }
+  .page-actions { max-width: 100%; gap: var(--space-2); }
+  :where(.page-actions) > :where(.btn, .ui-button) { white-space: normal; }
+  .segmented { max-width: 100%; flex-wrap: wrap; }
+  :where(.form-row) { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 900px), (pointer: coarse) {
+  /* Outrank legacy page density rules, including scoped selectors. Dense
+     calendar cells retain their own grid sizing. */
+  :root :is(.btn, .ui-button, .tap-target, .text-button, .segmented > button, .filter-tab, .link-btn):not([hidden]) { min-height: var(--tap-min); min-width: var(--tap-min); }
+  :where(.chip, summary) { min-height: var(--tap-min); }
+  :where(input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='color']), select) { min-height: var(--tap-min); }
+  :where(input, select, textarea) { font-size: 16px; }
 }

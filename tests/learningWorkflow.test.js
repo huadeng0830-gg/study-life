@@ -73,6 +73,55 @@ afterEach(async () => {
 })
 
 describe('以课表为中心的实际学习流程', () => {
+  it('首页安排在原地新增、编辑和删除课程或日程后立即刷新', async () => {
+    await mount('/')
+    await vi.waitFor(() => expect(host.querySelector('.today-agenda')).toBeTruthy())
+    const agenda = host.querySelector('.today-agenda')
+    const count = agenda.querySelectorAll('.agenda-row').length
+    const event = domain.createEvent({ title:'新加入的示例讨论', date:'2026-10-09', time:'14:00', endTime:'14:30' })
+    const course = domain.createCourse({ name:'新加入的示例课程', day:4, start:'p2', end:'p3', startWeek:1, endWeek:16 })
+    await settle()
+    expect(agenda.querySelectorAll('.agenda-row')).toHaveLength(count + 2)
+    expect(agenda.textContent).toContain('新加入的示例讨论')
+    expect(agenda.textContent).toContain('新加入的示例课程')
+    domain.updateEvent(event.id, { title:'改过名称的示例讨论' })
+    await settle()
+    expect(agenda.textContent).toContain('改过名称的示例讨论')
+    expect(agenda.textContent).not.toContain('新加入的示例讨论')
+    domain.deleteEvent(event.id)
+    domain.deleteCourse(course.id)
+    await settle()
+    expect(agenda.querySelectorAll('.agenda-row')).toHaveLength(count)
+    expect(agenda.textContent).not.toContain('新加入的示例课程')
+  })
+
+  it('首页只导入了课程时，展开学习建议仍然提供下一步引导', async () => {
+    await mount('/')
+    for (const task of [...domain.tasks.value]) domain.deleteTask(task.id)
+    for (const milestone of [...domain.milestones.value]) domain.deleteMilestone(milestone.id)
+    await settle()
+    await vi.waitFor(() => expect(host.querySelector('.planner-disclosure .study-planner')).toBeTruthy())
+    const disclosure = host.querySelector('.planner-disclosure')
+    disclosure.open = true
+    expect(disclosure.querySelector('.study-empty').textContent).toContain('还没有待推进的课程事项')
+  })
+
+  it('删除最后一条学习待办后，首页仍可查看和撤回已经安排的时段', async () => {
+    await mount('/')
+    for (const task of [...domain.tasks.value]) domain.deleteTask(task.id)
+    for (const milestone of [...domain.milestones.value]) domain.deleteMilestone(milestone.id)
+    for (const course of [...domain.courses.value]) domain.deleteCourse(course.id)
+    domain.createEvent({ title:'已安排的虚构学习时段', date:'2026-10-09', time:'10:10', endTime:'10:35', sourceType:'study-block', sourceId:'removed-task' })
+    await settle()
+    await vi.waitFor(() => expect(host.querySelector('.planner-disclosure .planned-row')).toBeTruthy())
+    const disclosure = host.querySelector('.planner-disclosure')
+    disclosure.open = true
+    expect(disclosure.textContent).toContain('待办已移除')
+    button(disclosure, '撤回时段').click()
+    await settle()
+    expect(domain.events.value).toHaveLength(0)
+  })
+
   it('opens with the timetable before the collapsed learning plan and shows course task badges', async () => {
     await mount()
     expect(host.querySelector('h1').textContent).toBe('课程表')

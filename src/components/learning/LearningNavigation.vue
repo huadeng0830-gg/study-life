@@ -26,13 +26,14 @@ const pages = [
 </template>
 
 <style scoped>
-.learning-navigation { padding: 4px; border: 1px solid var(--border); border-radius: var(--radius-12); background: var(--card); }
+.learning-navigation { display: none; padding: 0 0 var(--space-3); border: 0; border-bottom: 1px solid var(--border); border-radius: 0; background: transparent; }
 .learning-navigation nav { display: flex; gap: 4px; }
 .learning-navigation summary { display: none; }
-.learning-navigation a { display: flex; flex: 1; align-items: center; justify-content: center; min-height: 36px; padding: 5px 9px; border-radius: var(--radius-9); color: var(--ink-soft); font-size: var(--fs-12); font-weight: var(--fw-700); text-decoration: none; white-space: nowrap; }
+.learning-navigation a { display: flex; flex: 0 1 auto; align-items: center; justify-content: center; min-height: var(--control-height); padding: var(--space-2) var(--space-4); border-radius: var(--radius-control); color: var(--ink-soft); font-size: var(--type-subheadline); font-weight: var(--fw-500); text-decoration: none; white-space: nowrap; }
 .learning-navigation a.selected { color: var(--primary); background: var(--primary-soft); }
 .learning-navigation a:hover { color: var(--primary); }
 @media (max-width: 900px), (pointer: coarse) and (max-height: 520px) {
+  .learning-navigation { display: block; }
   .learning-navigation summary { display: list-item; min-height: 44px; padding: 10px 12px; cursor: pointer; color: var(--ink-soft); font-size: var(--fs-body); }
   .learning-navigation nav { flex-wrap: wrap; gap: 4px; padding: 4px; }
   .learning-navigation a { flex: 1 1 100px; min-height: 44px; padding: 8px; font-size: var(--fs-body); white-space: normal; }

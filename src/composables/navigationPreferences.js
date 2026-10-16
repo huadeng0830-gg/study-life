@@ -27,6 +27,16 @@ const LEGACY_DEFAULT_DESKTOP_NAVIGATION = Object.freeze([
   { id: 'records', label: '记录', items: ['lists', 'bills'] },
   { id: 'review', label: '回顾', items: ['review'] },
 ])
+// Only migrate the exact untouched previous default. A renamed group, a
+// reordered item, or an intentionally hidden destination belongs to the user.
+const PREVIOUS_DESKTOP_NAVIGATION = Object.freeze([
+  { id: 'workspace', label: '今日', items: ['today'] },
+  { id: 'learning', label: '学习', items: ['schedule', 'course', 'tasks', 'exams'] },
+  { id: 'schedule', label: '日程', items: ['events', 'together'] },
+  { id: 'qixing', label: '齐行', items: ['projects'] },
+  { id: 'campus', label: '校园', items: ['places'] },
+  { id: 'other', label: '其他', items: ['lists', 'bills', 'review', 'feedback'] },
+])
 
 const registeredItems = new Map(navigationRegistry
   .filter((item) => item.available && item.pinnable)
@@ -62,7 +72,8 @@ function normalizeGroupId(value, index) {
 }
 
 export function normalizeDesktopNavigation(value) {
-  if (Array.isArray(value) && JSON.stringify(value) === JSON.stringify(LEGACY_DEFAULT_DESKTOP_NAVIGATION)) {
+  if (Array.isArray(value) && [LEGACY_DEFAULT_DESKTOP_NAVIGATION, PREVIOUS_DESKTOP_NAVIGATION]
+    .some((layout) => JSON.stringify(value) === JSON.stringify(layout))) {
     return DEFAULT_DESKTOP_NAVIGATION.map((group) => ({ ...group, items: [...group.items] }))
   }
   if (!Array.isArray(value) || value.length === 0) return DEFAULT_DESKTOP_NAVIGATION.map((group) => ({ ...group, items: [...group.items] }))

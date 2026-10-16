@@ -198,19 +198,27 @@ async function wallet(userId: string) {
   return { wallet: result.data, ledger: ledger.data || [] }
 }
 
-async function ownerApplications() {
+async function ownerApplications(actorId: string) {
   const { data, error } = await admin.from('campus_reviewer_applications')
     .select('id,user_id,school,campus,reason,status,owner_note,applicant_response,scope_school,scope_campus,created_at,updated_at')
     .order('created_at', { ascending: true }).limit(200)
   if (error) throw error
-  const applications = await Promise.all((data || []).map(async (item) => {
-    const account = await admin.auth.admin.getUserById(item.user_id)
-    return { ...item, email: account.data.user?.email || '' }
-  }))
+  const emails = await userEmails(actorId, (data || []).map(item => item.user_id))
+  const applications = (data || []).map(item => ({ ...item, email: emails.get(item.user_id) || '' }))
   return { applications }
 }
 
-async function listAudits(payload: any) {
+// Called only after owner() has authorized this request. The RPC is executable
+// by service_role alone and returns no account metadata beyond these labels.
+async function userEmails(actorId: string, userIds: string[]) {
+  const ids = [...new Set(userIds)]
+  if (!ids.length) return new Map<string, string>()
+  const { data, error } = await admin.rpc('platform_admin_user_emails', { p_actor: actorId, p_user_ids: ids })
+  if (error) throw error
+  return new Map<string, string>((data || []).map((row: { user_id: string; email: string }) => [row.user_id, row.email]))
+}
+
+async function listAudits(payload: any, actorId: string) {
   const month = /^\d{4}-\d{2}$/.test(String(payload.month || '')) ? `${payload.month}-01` : new Date().toISOString().slice(0, 7) + '-01'
   let query = admin.from('campus_review_audits')
     .select('id,moderation_event_id,reviewer_id,sample_month,outcome,owner_reason,reopened,audited_at,created_at')
@@ -224,11 +232,7 @@ async function listAudits(payload: any) {
   if (events.error) throw events.error
   const eventById = new Map((events.data || []).map((item: any) => [item.id, item]))
   const reviewerIds = [...new Set((data || []).map((row) => row.reviewer_id))]
-  const reviewers = await Promise.all(reviewerIds.map(async (id) => {
-    const account = await admin.auth.admin.getUserById(id)
-    return [id, account.data.user?.email || '']
-  }))
-  const emailById = new Map(reviewers)
+  const emailById = await userEmails(actorId, reviewerIds)
   return { month: month.slice(0, 7), items: (data || []).map((row) => ({ ...row, event: eventById.get(row.moderation_event_id), reviewerEmail: emailById.get(row.reviewer_id) || '' })) }
 }
 
@@ -306,7 +310,7 @@ async function handle(request: Request, action: string, payload: any) {
   if (action === 'message_thread') return privateMessages((await userFor(request)).id, payload)
   const user = await requireVerified(request)
   await owner(user.id)
-  if (action === 'reviewer_applications') return ownerApplications()
+  if (action === 'reviewer_applications') return ownerApplications(user.id)
   if (action === 'reviewer_application_decide') {
     const result = await admin.rpc('campus_review_reviewer_application', {
       p_actor: user.id, p_application: uuid(payload.applicationId, '申请'),
@@ -323,7 +327,7 @@ async function handle(request: Request, action: string, payload: any) {
     if (result.error) throw result.error
     return result.data
   }
-  if (action === 'audit_list') return listAudits(payload)
+  if (action === 'audit_list') return listAudits(payload, user.id)
   if (action === 'audit_resolve') {
     const result = await admin.rpc('campus_resolve_review_audit', {
       p_actor: user.id, p_audit: uuid(payload.auditId, '抽查记录'), p_correct: payload.correct === true,
@@ -349,13 +353,33 @@ async function handle(request: Request, action: string, payload: any) {
   throw new CommunityError('invalid_input', '社区服务操作无效。')
 }
 
+async function readBoundedBody(request: Request) {
+  if (Number(request.headers.get('content-length') || 0) > 32_768) throw new CommunityError('invalid_input', '请求内容过大。', 413)
+  if (!request.body) return ''
+  const reader = request.body.getReader()
+  const chunks: Uint8Array[] = []
+  let length = 0
+  try {
+    while (true) {
+      const { value, done } = await reader.read()
+      if (done) break
+      length += value.byteLength
+      if (length > 32_768) { await reader.cancel().catch(() => {}); throw new CommunityError('invalid_input', '请求内容过大。', 413) }
+      chunks.push(value)
+    }
+  } finally { reader.releaseLock() }
+  const bytes = new Uint8Array(length)
+  let position = 0
+  for (const chunk of chunks) { bytes.set(chunk, position); position += chunk.byteLength }
+  return new Response(bytes).text()
+}
+
 Deno.serve(async (request: Request) => {
   if (request.method === 'OPTIONS') return respond(request, {})
   if (request.method !== 'POST') return respond(request, { error: '仅支持 POST。', code: 'method_not_allowed' }, 405)
   if (!url || !serviceKey) return respond(request, { error: '社区服务尚未配置。', code: 'service_unavailable' }, 503)
   try {
-    const raw = await request.text()
-    if (raw.length > 32_768) throw new CommunityError('invalid_input', '请求内容过大。', 413)
+    const raw = await readBoundedBody(request)
     let body: any
     try { body = JSON.parse(raw) } catch { throw new CommunityError('invalid_input', '请求内容无效。') }
     if (typeof body?.action !== 'string') throw new CommunityError('invalid_input', '请求内容无效。')

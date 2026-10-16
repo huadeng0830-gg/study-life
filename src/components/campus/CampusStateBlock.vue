@@ -1,5 +1,6 @@
 <script setup>
 import { computed } from 'vue'
+import { accountUser } from '../../composables/accountAuth.js'
 import CampusEmptyState from './CampusEmptyState.vue'
 import CampusLoadingState from './CampusLoadingState.vue'
 
@@ -42,12 +43,16 @@ const emit = defineEmits(['retry'])
 
 // First load only. A refresh keeps showing what is already on screen.
 const showLoading = computed(() => props.loading && !props.loaded)
+// The layout already provides the account action. Retrying a protected read
+// cannot help a guest, so keep its unavailable-content state informational.
+const loginRequired = computed(() => !accountUser.value?.id && /^请先登录账号/.test(props.error))
 const showError = computed(() => Boolean(props.error))
 const showEmpty = computed(() => props.empty)
 </script>
 
 <template>
   <CampusLoadingState v-if="showLoading">{{ loadingText }}</CampusLoadingState>
+  <p v-else-if="loginRequired" class="campus-life-inline-state" role="status">同校内容将在登录后显示。</p>
   <p v-else-if="showError" class="campus-life-inline-state error" role="alert">
     {{ error }}
     <button class="text-button" type="button" :disabled="loading" @click="emit('retry')">{{ retryLabel }}</button>

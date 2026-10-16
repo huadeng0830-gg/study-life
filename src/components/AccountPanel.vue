@@ -290,13 +290,9 @@ onBeforeUnmount(() => {
 <template>
   <Modal :open="props.open" title="我的账号" :title-level="2" medium @close="close">
     <div class="account-panel">
-      <div v-if="!accountUser" class="account-welcome">
-        <span class="account-avatar" aria-hidden="true">我</span>
-        <div><h3>{{ mode === 'recovery' ? '找回你的账号' : mode === 'register' ? '把记录带到更多设备' : '欢迎回来' }}</h3><p class="account-description">登录后同步课程、待办与日常记录，已有的本机记录会合并保留。</p></div>
-      </div>
       <p v-if="registrationOpen === false && !accountUser" class="account-service-note" role="status">当前已暂停新用户注册，已有账号仍可登录。</p>
       <p v-if="!accountAvailable" class="account-service-note">此版本未包含账号服务，无法注册或登录。本机功能仍可使用。</p>
-      <Alert v-show="formError" variant="destructive" class="account-error-alert"><AlertDescription id="account-form-error">{{ formError }}</AlertDescription></Alert>
+      <Alert v-if="formError" variant="destructive" class="account-error-alert"><AlertDescription id="account-form-error">{{ formError }}</AlertDescription></Alert>
       <p v-if="feedback" class="account-feedback account-success"><span class="account-feedback-icon" aria-hidden="true">✓</span><span>{{ feedback }}</span></p>
 
       <template v-if="accountUser">
@@ -373,7 +369,7 @@ onBeforeUnmount(() => {
             <p class="account-help">首次使用会创建账号；已有记录会按账号同步规则合并。</p>
           </div>
           <p v-if="!emailSignupEnabled && mode === 'login'" class="account-help">{{ oauthProviders.length ? '已有邮箱账号仍可在下方登录。' : '目前支持已有邮箱账号登录；不登录也可继续在本机使用。' }}</p>
-          <div v-if="mode !== 'recovery'" class="account-mode" role="group" aria-label="账号操作">
+          <div v-if="mode !== 'recovery' && emailSignupEnabled" class="account-mode" role="group" aria-label="账号操作">
             <button type="button" class="btn" :class="{ 'btn-primary': mode === 'login' }" :aria-pressed="mode === 'login'" :disabled="busy" @click="changeMode('login')">登录</button>
             <button v-if="emailSignupEnabled" type="button" class="btn" :class="{ 'btn-primary': mode === 'register' }" :aria-pressed="mode === 'register'" :disabled="busy" @click="changeMode('register')">注册</button>
           </div>
@@ -417,21 +413,18 @@ onBeforeUnmount(() => {
 <style scoped>
 .account-panel { display: grid; gap: 16px; }
 .account-panel p { margin: 0; line-height: 1.6; }
-.account-description, .account-help, .account-privacy { color: var(--muted); }
+.account-help, .account-privacy { color: var(--muted); }
 .account-help, .account-privacy { font-size: var(--fs-13); }
 .account-service-note { padding:10px 12px; border:1px solid color-mix(in srgb, var(--warning) 26%, var(--border)); border-radius:var(--radius-8); color:var(--warning); background:color-mix(in srgb, var(--warning) 7%, var(--card)); }
-.account-welcome { display: flex; align-items: center; gap: 14px; padding: 4px 0 8px; }
-.account-welcome h3 { margin: 0 0 4px; font-size: var(--fs-20); }
-.account-description { font-size: var(--fs-13); }
 .account-avatar { display: grid; place-items: center; width: 52px; height: 52px; flex-shrink: 0; border-radius: var(--radius-16); background: var(--primary-soft); color: var(--primary); font-size: var(--fs-23); font-weight: var(--fw-700); }
 .account-mode { display: flex; gap: 6px; padding: 4px; border-radius: var(--radius-12); background: var(--bg); }
 .account-mode .btn { flex: 1; }
 .account-mode .btn:not(.btn-primary) { border-color: transparent; background: transparent; }
-.account-auth-card { display:grid; gap:0; padding:0; border-color:var(--border); border-radius:var(--radius-12); background:var(--card); box-shadow:var(--shadow-sm); }
-.account-auth-header { display:grid; gap:6px; padding:16px 16px 0; }
+.account-auth-card { display:grid; gap:0; padding:0; border:0; border-radius:0; background:transparent; box-shadow:none; }
+.account-auth-header { display:grid; gap:var(--space-2); padding:0; }
 .account-auth-header :deep([data-slot="card-title"]) { margin:0; color:var(--text); font-size:var(--fs-17); font-weight:var(--fw-750); }
 .account-auth-header :deep([data-slot="card-description"]) { color:var(--muted); font-size:var(--fs-13); line-height:1.55; }
-.account-auth-content { display:grid; gap:16px; padding:16px; }
+.account-auth-content { display:grid; gap:var(--space-4); padding:var(--space-5) 0 0; }
 .account-oauth { display: flex; flex-direction: column; gap: 8px; }
 .account-form, .account-field, .account-confirmation { display: grid; gap: 8px; }
 .account-form { gap: 16px; }
@@ -478,6 +471,5 @@ onBeforeUnmount(() => {
   .account-auth-header { padding:14px 14px 0; }
   .account-auth-content { padding:14px; }
   .account-details > div { grid-template-columns:84px minmax(0,1fr); gap:8px; }
-  .account-welcome h3 { font-size: var(--fs-18); }
 }
 </style>

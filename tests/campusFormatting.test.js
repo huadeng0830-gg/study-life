@@ -138,6 +138,12 @@ describe('校园领域表', () => {
     expect(campusErrorMessage(new Error(''), '兜底')).toBe('兜底')
     expect(campusErrorMessage(new Error('   '), '兜底')).toBe('兜底')
     expect(campusErrorMessage(new TypeError('x is not a function'), '兜底')).toBe('x is not a function')
+    for (const message of ['Failed to fetch', 'Load failed', 'NetworkError when attempting to fetch resource.']) {
+      expect(campusErrorMessage(new TypeError(message), '列表暂时无法读取。')).toBe('列表暂时无法读取。请检查网络后重试。')
+    }
+    for (const message of ['Upload failed: file exceeds the size limit', 'Download failed: permission denied']) {
+      expect(campusErrorMessage(new Error(message), '保存没有完成。')).toBe(message)
+    }
     // 没有 message 的异常（fetch 失败、字符串 throw）以前会渲染出 "undefined"。
     expect(campusErrorMessage(new Error(), '兜底')).toBe('兜底')
     expect(campusErrorMessage('字符串异常', '兜底')).toBe('兜底')

@@ -51,17 +51,17 @@ const service = {
     return data ? { reviewer: true, scope: { school: data.school, campus: data.campus } } : { reviewer: false, scope: null }
   },
 
-  async listReviewers({ page = 1, userId = '' } = {}) {
+  async listReviewers({ page = 1, userId = '', actorId = '' } = {}) {
     const client = requireAdminClient()
     let query = client.from('campus_reviewer_grants').select('user_id,school,campus,active,revision,updated_at', { count: 'exact' })
     if (userId) query = query.eq('user_id', userId)
     const { data, error, count } = await query.order('updated_at', { ascending: false }).order('user_id').range((page - 1) * 25, page * 25 - 1)
     if (error) throw error
-    const reviewers = await Promise.all((data || []).map(async (grant) => {
-      const { data: account, error: accountError } = await client.auth.admin.getUserById(grant.user_id)
-      if (accountError) throw accountError
-      return { ...grant, email: account?.user?.email || '账号已不可用' }
-    }))
+    const ids = [...new Set((data || []).map(grant => grant.user_id))]
+    const accounts = ids.length ? await client.rpc('platform_admin_user_emails', { p_actor: actorId, p_user_ids: ids }) : { data: [], error: null }
+    if (accounts.error) throw accounts.error
+    const emails = new Map((accounts.data || []).map((row: { user_id: string; email: string }) => [row.user_id, row.email]))
+    const reviewers = (data || []).map(grant => ({ ...grant, email: emails.get(grant.user_id) || '账号已不可用' }))
     return { reviewers, total: count || 0, page }
   },
 

@@ -1,4 +1,5 @@
 <script setup>
+import PageHeader from '../components/PageHeader.vue'
 import { defineAsyncComponent, ref, computed, onBeforeUnmount, onDeactivated } from 'vue'
 import { Badge } from '../components/ui/badge'
 import { Button } from '../components/ui/button'
@@ -249,25 +250,21 @@ function confirmDeleteCourse() {
 
 <template>
   <div class="page schedule-page">
-    <header class="schedule-heading">
-      <div class="schedule-title-copy">
-        <p class="schedule-eyebrow">学习安排</p>
-        <div class="schedule-title-line">
-          <h1 class="page-title">课程表</h1>
+    <PageHeader class="schedule-heading" title="课程表">
           <Badge v-if="showArchivedCourses" variant="secondary" class="archive-badge">历史课程</Badge>
-        </div>
         <p class="schedule-subtitle" aria-live="polite">
           <strong>{{ viewWeek < 1 ? '开学前' : `第 ${viewWeek} 周` }}</strong>
           <span>{{ weekDateRange }}</span>
           <span aria-hidden="true">·</span>
           <span>{{ weekCourseCount }} 门课程，{{ weekTeachingDayCount }} 个上课日</span>
         </p>
-      </div>
+      <template #actions>
       <div class="head-btns">
         <Button variant="outline" size="sm" class="btn btn-ghost" :aria-pressed="showArchivedCourses" @click="showArchivedCourses = !showArchivedCourses">{{ showArchivedCourses ? '返回当前课程' : '历史课程' }}</Button>
         <Button variant="outline" size="sm" class="btn btn-ghost" :aria-expanded="showScheduleSettings" aria-controls="schedule-settings" @click="showScheduleSettings = !showScheduleSettings">{{ showScheduleSettings ? '收起设置' : '课表设置' }}</Button>
       </div>
-    </header>
+      </template>
+    </PageHeader>
 
     <LearningNavigation current="schedule" />
 
@@ -814,16 +811,6 @@ function confirmDeleteCourse() {
   gap: 20px;
   padding: 2px 0;
 }
-.schedule-title-copy { display: grid; gap: 5px; min-width: 0; }
-.schedule-eyebrow {
-  color: var(--primary);
-  font-size: var(--fs-11);
-  font-weight: var(--fw-800);
-  letter-spacing: .08em;
-  text-transform: uppercase;
-}
-.schedule-title-line { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; }
-.schedule-title-line .page-title { line-height: 1.2; }
 .archive-badge {
   padding: 4px 9px;
   border-radius: var(--radius-pill);

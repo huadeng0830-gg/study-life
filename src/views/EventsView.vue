@@ -1,4 +1,5 @@
 <script setup>
+import PageHeader from '../components/PageHeader.vue'
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Modal from '../components/Modal.vue'
@@ -183,15 +184,15 @@ watch(() => events.value.find((event) => event.id === detail.value?.id), (event)
 
 <template>
   <div class="page events-page">
-    <header class="page-header compact-page-header">
-      <div><span class="eyebrow">EVENTS</span><h1>日程</h1><p>安排好接下来的时间，让每一次约定都有着落。</p></div>
-      <div class="events-header-actions">
+    <PageHeader class="page-header compact-page-header" title="日程">
+      <p>安排好接下来的时间，让每一次约定都有着落。</p>
+      <template #actions><div class="events-header-actions">
         <router-link class="btn btn-ghost" to="/together">一起约</router-link>
         <button type="button" class="btn btn-ghost" @click="importOpen = true">导入日程</button>
         <button type="button" class="btn btn-primary" @click="createForScope">＋ 新建日程</button>
-      </div>
-    </header>
-    <section class="events-overview" aria-label="日程概览">
+      </div></template>
+    </PageHeader>
+    <section v-if="events.length" class="events-overview" aria-label="日程概览">
       <div class="events-next panel">
         <div class="next-heading"><span class="eyebrow">{{ nextEvent && stateOf(nextEvent).key === 'ongoing' ? '正在进行' : '接下来' }}</span><span class="next-date">{{ nextEvent ? dayLabel(nextEvent.date) : '给时间留一点期待' }}</span></div>
         <button v-if="nextEvent" type="button" class="next-event-link" @click="detail = nextEvent"><strong>{{ nextEvent.title }}</strong><span>{{ timeRangeOf(nextEvent) }}<template v-if="nextEvent.location"> · {{ nextEvent.location }}</template><span aria-hidden="true"> →</span></span></button>
@@ -407,6 +408,9 @@ watch(() => events.value.find((event) => event.id === detail.value?.id), (event)
   .agenda-header { align-items:flex-start; }
   .agenda-actions { justify-content:flex-end; }
   .events-header-actions { gap:5px; }
+}
+@media (max-width:900px), (pointer:coarse) {
+  .events-view-switch button, .event-title, .event-card-actions button { min-height:var(--tap-min); min-width:var(--tap-min); }
 }
 @media print { .events-header-actions, .events-toolbar, .event-card-actions, .agenda-actions, .add-day-event { display:none; } }
 </style>

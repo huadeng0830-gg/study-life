@@ -1,4 +1,5 @@
 <script setup>
+import PageHeader from '../components/PageHeader.vue'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Modal from '../components/Modal.vue'
@@ -566,15 +567,11 @@ const {
 
 <template>
   <div class="page" :class="{ 'has-fab': tab === 'ledger' }" @click.capture="closeSwipe">
-    <header class="page-head">
-      <div class="page-head-main">
-        <h1 class="page-title">账本</h1>
-        <p class="page-desc">看清近期花费，处理固定账单，记下刚刚发生的一笔。</p>
-      </div>
-      <div class="page-actions">
+    <PageHeader class="page-head" title="账本" description="看清近期花费，处理固定账单，记下刚刚发生的一笔。">
+      <template #actions>
         <button class="btn btn-ghost" type="button" @click="openCategoryManager">分类管理</button>
-      </div>
-    </header>
+      </template>
+    </PageHeader>
     <p v-if="focusMessage" class="notice-success" role="status">{{ focusMessage }}</p>
 
     <div class="segmented ledger-tabs" role="tablist" aria-label="账本分区" @keydown="onLedgerTabKeydown">

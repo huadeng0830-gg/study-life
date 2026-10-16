@@ -22,21 +22,22 @@ import { accountUser } from './accountAuth.js'
 export function useCampusRequest() {
   let generation = 0
   let active = true
+  let controller = null
 
-  onScopeDispose(() => { active = false; generation += 1 })
+  onScopeDispose(() => { active = false; invalidate() })
 
-  watch(() => accountUser.value?.id || '', () => { generation += 1 }, { flush: 'sync' })
+  watch(() => accountUser.value?.id || '', invalidate, { flush: 'sync' })
 
   /** 标记一次新的请求；返回的令牌用于稍后判断结果是否仍然有效。 */
-  function begin() { return ++generation }
+  function begin() { controller?.abort(); controller = new AbortController(); return ++generation }
 
   /** 令牌是否仍属于当前屏幕。 */
   function live(revision) { return active && revision === generation }
 
   /** 让所有在途请求失效，用于账号切换或界面重置。 */
-  function invalidate() { generation += 1 }
+  function invalidate() { generation += 1; controller?.abort(); controller = null }
 
-  return { begin, live, invalidate }
+  return { begin, live, invalidate, signal: () => controller?.signal }
 }
 
 /**
