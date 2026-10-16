@@ -1,6 +1,6 @@
 const MAX_BODY_BYTES = 8_192
 const MAX_REASON_LENGTH = 500
-const ACTIONS = new Set(['identity', 'overview', 'users_list', 'audit_list', 'user_suspend', 'user_restore', 'places_pending', 'place_review', 'place_review_audit', 'reviewers_list', 'reviewer_set', 'registration_get', 'registration_set'])
+const ACTIONS = new Set(['identity', 'overview', 'users_list', 'audit_list', 'user_suspend', 'user_restore', 'user_restriction_set', 'places_pending', 'place_review', 'place_review_audit', 'reviewers_list', 'reviewer_set', 'registration_get', 'registration_set'])
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 export class PlatformAdminError extends Error {
@@ -165,6 +165,24 @@ export function createPlatformAdminHandler({ service, allowedOrigins = [], logge
             suspended: body.action === 'user_suspend',
             reason,
           })
+          return json({ data: result }, 200, corsOrigin)
+        }
+        case 'user_restriction_set': {
+          const targetUserId = requiredUuid(payload.userId, '账号')
+          if (targetUserId === user.id) throw new PlatformAdminError('self_action_forbidden', '不能限制当前平台所有者账号。', 403)
+          if (!['account', 'publish'].includes(payload.scope) || typeof payload.enabled !== 'boolean') throw new PlatformAdminError('invalid_input', '限制类型无效。')
+          const reason = requiredText(payload.reason, '处理原因')
+          const expectedRevision = payload.expectedRevision == null ? null : requiredUuid(payload.expectedRevision, '状态版本')
+          const hasDuration = payload.durationSeconds != null
+          const hasDeadline = payload.expiresAt != null
+          const permanent = payload.permanent === true
+          if (payload.permanent != null && typeof payload.permanent !== 'boolean') throw new PlatformAdminError('invalid_input', '永久限制选项无效。')
+          if (payload.enabled ? Number(hasDuration) + Number(hasDeadline) + Number(permanent) !== 1 : hasDuration || hasDeadline || permanent) throw new PlatformAdminError('invalid_input', '请选择一种有效时长。')
+          if (hasDuration && (!Number.isSafeInteger(payload.durationSeconds) || payload.durationSeconds < 60 || payload.durationSeconds > 3153600000)) throw new PlatformAdminError('invalid_input', '时长需要在 1 分钟至 100 年之间。')
+          if (hasDeadline && (typeof payload.expiresAt !== 'string' || !/(?:Z|[+-]\d{2}:\d{2})$/i.test(payload.expiresAt) || !Number.isFinite(Date.parse(payload.expiresAt)) || Date.parse(payload.expiresAt) < Date.now() + 60000 || Date.parse(payload.expiresAt) > Date.now() + 3153600000000)) throw new PlatformAdminError('invalid_input', '解除时间无效。')
+          const result = await service.setUserRestriction({ actorUserId: user.id, targetUserId, scope: payload.scope,
+            enabled: payload.enabled, reason, expectedRevision, durationSeconds: payload.durationSeconds ?? null,
+            expiresAt: payload.expiresAt ?? null, permanent })
           return json({ data: result }, 200, corsOrigin)
         }
         default:

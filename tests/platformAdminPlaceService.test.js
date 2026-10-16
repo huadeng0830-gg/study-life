@@ -3,6 +3,7 @@ import { createRequire } from 'node:module'
 import vm from 'node:vm'
 import ts from 'typescript'
 import { describe, expect, it, vi } from 'vitest'
+import * as restrictions from '../supabase/functions/platform-admin/restrictions.js'
 
 const actor = '71bbaaa0-1ef1-4ad4-9b77-90b792846c10'
 const placeId = '1f80fded-15f4-4b07-a262-3be8b47463d9'
@@ -75,6 +76,7 @@ function platformAdmin({ places = [], onInsert, rpcError = null } = {}) {
       if (name === 'npm:@supabase/supabase-js@2.117.2') return { createClient: () => admin }
       if (name === './handler.js') return nodeRequire('../supabase/functions/platform-admin/handler.js')
       if (name === './users.js') return { countAuthUsers: vi.fn(), searchAuthUsers: vi.fn() }
+      if (name === './restrictions.js') return restrictions
       throw new Error(`Unexpected platform-admin dependency: ${name}`)
     },
     exports: {}, Date, Request, Response, Headers, TextEncoder, TextDecoder, console, crypto,

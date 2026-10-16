@@ -29,7 +29,8 @@ import {
   reloadAfterError,
 } from './composables/globalError.js'
 import { isTaskActionable } from './composables/domain/state.js'
-import { hasPersistedAccountSession, initializeAccountAuth } from './composables/accountAuth.js'
+import { accountUser, hasPersistedAccountSession, initializeAccountAuth } from './composables/accountAuth.js'
+import { accountCloudRestricted, restrictionSnapshotKnown } from './composables/accountRestrictions.js'
 import { assertAccountDataIdentity, captureAccountDataIdentity } from './composables/accountSyncIdentity.js'
 import { accountSyncStatus, accountSyncError } from './composables/accountSyncState.js'
 import { localSafeMode } from './composables/localSafeMode.js'
@@ -46,8 +47,10 @@ import { overlayCount, overlayStackRevision } from './composables/overlayStack.j
 retireLegacySyncState()
 const UpdateNotes = defineAsyncComponent(() => import('./components/UpdateNotes.vue'))
 const QuickRecordPanel = defineAsyncComponent(() => import('./components/QuickRecordPanel.vue'))
+const AccountRestrictionNotice = defineAsyncComponent(() => import('./components/account/AccountRestrictionNotice.vue'))
 
 const route = useRoute()
+const restrictedCloudPage = computed(() => Boolean(accountUser.value) && (accountCloudRestricted.value || !restrictionSnapshotKnown.value) && /^\/(?:campus|together|feedback|social|projects?|platform-admin|admin)(?:\/|$)/.test(route.path))
 const router = useRouter()
 const sidebarRef = ref(null)
 const online = useOnline()
@@ -465,6 +468,7 @@ function t(key) {
         </button>
       </header>
       <p v-if="!online" class="connection-notice"><AppIcon name="data" /><span>当前离线，课程、待办和本机记录仍可使用。校园内容与账号同步需要联网。</span></p>
+      <AccountRestrictionNotice v-if="accountUser" :blocked="restrictedCloudPage" />
       <!-- 聚焦态（`?focus=` / `?section=`）下的返回入口。放在 router-view **之外**，
           因为它是外壳级的一条出口，不属于任何单个页面；只在聚焦时渲染，
           所以平时对布局与焦点序都没有影响。 -->
@@ -473,7 +477,7 @@ function t(key) {
            <transition>/<keep-alive>，那样写每次切路由都会在控制台打一条警告，
            而且过渡与 keep-alive 的包含关系也不按预期生效（作者以为有页面切换动画，其实没有）。
            官方写法是 router-view 用 v-slot 拿到组件，再在**内部**套 Transition / KeepAlive。 -->
-      <router-view v-slot="{ Component, route: activeRoute }">
+      <router-view v-if="!restrictedCloudPage" v-slot="{ Component, route: activeRoute }">
         <Transition name="page" mode="out-in">
           <KeepAlive :include="cachedPageNames" :max="pageCacheSize">
             <component :is="Component" :key="activeRoute.name" :data-page-path="activeRoute.path" />

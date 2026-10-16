@@ -7,6 +7,8 @@ import AccountSyncPanel from './data/AccountSyncPanel.vue'
 import AccountPasswordForm from './account/AccountPasswordForm.vue'
 import AccountSessionActions from './account/AccountSessionActions.vue'
 import AccountCommunitySettings from './account/AccountCommunitySettings.vue'
+import AccountRestrictionStatus from './account/AccountRestrictionStatus.vue'
+import { accountCloudRestricted, accountRestrictions, restrictionSnapshotKnown, refreshAccountRestrictions } from '../composables/accountRestrictions.js'
 import { getAccountAuthOptions } from '../services/cloudConfig.js'
 import {
   accountAuthError, accountAvailable, accountBusy, accountCallbackError, accountInitialSection, accountUser,
@@ -26,9 +28,11 @@ import { Button } from '@/components/ui/button'
 const DataManager = defineAsyncComponent(() => import('./DataManager.vue'))
 
 const props = defineProps({ open: Boolean })
+const accountRestrictionsPresent = computed(() => Object.keys(accountRestrictions.value?.restrictions || {}).length > 0)
+watch(() => [props.open, accountUser.value?.id], ([open, user]) => { if (open && user) void refreshAccountRestrictions() }, { immediate: true })
 const authOptions = getAccountAuthOptions()
 const oauthProviders = window.studyLifeDesktop?.isDesktop ? [] : authOptions.providers
-const registrationOpen = ref(null)
+const registrationOpen = ref(/** @type {boolean|null} */(null))
 const emailSignupEnabled = computed(() => authOptions.emailSignup && authOptions.emailDelivery && registrationOpen.value !== false)
 watch(() => props.open, async open => { if (open && !accountUser.value && accountAvailable.value) { try { registrationOpen.value = await readRegistrationStatus() } catch { registrationOpen.value = null } } }, { immediate: true })
 const passwordAccount = computed(() => !accountUser.value?.app_metadata?.providers?.length || accountUser.value.app_metadata.providers.includes('email'))
@@ -299,8 +303,10 @@ onBeforeUnmount(() => {
         <section class="account-summary" aria-labelledby="account-summary-title">
           <span class="account-avatar" aria-hidden="true">{{ avatarText }}</span>
           <div class="account-identity"><h3 id="account-summary-title" ref="summaryHeading" tabindex="-1">{{ accountName }}</h3><p class="account-email">{{ displayedAccountEmail }}</p></div>
-          <Badge as="span" variant="outline" class="account-badge">已登录</Badge>
+          <Badge as="span" variant="outline" class="account-badge">{{ accountCloudRestricted ? '账号受限' : '已登录' }}</Badge>
         </section>
+          <template v-if="!accountPasswordRecovery && (accountCloudRestricted || !restrictionSnapshotKnown)"><AccountRestrictionStatus embedded /><div class="account-card"><AccountSessionActions :busy="busy" @sign-out="signOut" @backup="backupOpen = true" /></div></template>
+          <template v-else>
           <div v-if="!accountPasswordRecovery" class="account-mode" role="group" aria-label="账号设置分区">
             <button type="button" class="btn" :class="{ 'btn-primary': activeSection === 'overview' }" :aria-pressed="activeSection === 'overview'" :disabled="busy" @click="activeSection = 'overview'">账号概览</button>
             <button type="button" class="btn" :class="{ 'btn-primary': activeSection === 'profile' }" :aria-pressed="activeSection === 'profile'" :disabled="busy" @click="activeSection = 'profile'">个人资料</button>
@@ -308,6 +314,7 @@ onBeforeUnmount(() => {
             <button type="button" class="btn" :class="{ 'btn-primary': activeSection === 'security' }" :aria-pressed="activeSection === 'security'" :disabled="busy" @click="activeSection = 'security'">账号安全</button>
           </div>
           <template v-if="activeSection === 'overview' && !accountPasswordRecovery">
+            <AccountRestrictionStatus v-if="accountRestrictionsPresent" compact />
             <section class="account-card" aria-labelledby="account-details-title">
               <h3 id="account-details-title">账号信息</h3>
               <dl class="account-details">
@@ -333,6 +340,7 @@ onBeforeUnmount(() => {
               <p v-if="resendSeconds > 0" class="account-help">邮件发送冷却中，{{ resendSeconds }} 秒后可再次请求。</p>
               <div class="account-card"><AccountSessionActions :busy="busy" @sign-out="signOut" @backup="backupOpen = true" /></div>
             </template>
+          </template>
           </template>
       </template>
 

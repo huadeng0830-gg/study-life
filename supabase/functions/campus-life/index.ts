@@ -1,5 +1,6 @@
 /// <reference types="jsr:@supabase/functions-js/edge-runtime.d.ts" />
 import { createClient } from 'npm:@supabase/supabase-js@2.117.2'
+import { assertAccountAccess } from '../_shared/accountRestrictions.js'
 import { campusScopeMatches, canTransitionCampusHelp, containsPrivateCampusDetails, campusSearchSources, campusSearchFilter } from './rules.js'
 
 const supabaseUrl = Deno.env.get('SUPABASE_URL') || ''
@@ -1555,6 +1556,7 @@ Deno.serve(async (request: Request) => {
     }
     if (!body || typeof body.action !== 'string') throw new ApiError('invalid_input', '请求内容无效。')
     const user = await authenticate(request)
+    await assertAccountAccess(admin, user.id, 'campus-life', body.action, body.payload, ApiError)
     const data = await handle(user, body.action, body.payload || {})
     return withCors(request, reply({ data }))
   } catch (error) {

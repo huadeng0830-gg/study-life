@@ -3,6 +3,7 @@ import vm from 'node:vm'
 import ts from 'typescript'
 import { describe, expect, it, vi } from 'vitest'
 import * as rules from '../supabase/functions/campus-community/rules.js'
+import { accountRestrictionGuard, withUnrestrictedAccount } from './helpers/edgeAccountAccess.js'
 
 const actor = '00000001-0000-4000-8000-000000000001'
 const suggestion = '10000001-0000-4000-8000-000000000001'
@@ -47,7 +48,7 @@ function edge({ owner = false, nickname = '虚构昵称', suggestions = [], vote
   }
   vm.runInNewContext(compiled, {
     Deno: { env: { get: name => ({ SUPABASE_URL: 'https://fictional.example.invalid', SUPABASE_SERVICE_ROLE_KEY: 'fictional' })[name] }, serve: callback => { handler = callback } },
-    require: name => name === './rules.js' ? rules : { createClient: () => admin },
+    require: name => name === './rules.js' ? rules : name === '../_shared/accountRestrictions.js' ? accountRestrictionGuard : { createClient: () => withUnrestrictedAccount(admin) },
     exports: {}, Request, Response, Headers, console,
   })
   const call = async (action, payload = {}, authenticated = true) => {

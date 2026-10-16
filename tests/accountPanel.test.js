@@ -4,6 +4,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const adapter = vi.hoisted(() => ({ getSupabaseClient: vi.fn(), getSupabaseConfig: vi.fn(), verifyAccountCurrentPassword: vi.fn() }))
 vi.mock('../src/services/supabase.js', () => adapter)
+// Auth/form tests use an unrestricted, already verified moderation snapshot.
+// Restricted/unknown/racing snapshots are exercised in accountRestrictions.test.js.
+vi.mock('../src/composables/accountRestrictions.js', async () => {
+  const { ref } = await import('vue')
+  return { accountCloudRestricted: ref(false), accountRestrictions: ref(null), restrictionSnapshotKnown: ref(true), refreshAccountRestrictions: vi.fn() }
+})
 vi.mock('../src/services/campusCommunity.js', () => ({
   campusBeanWallet: vi.fn().mockResolvedValue({ wallet: { purchased: 0, contribution: 0, contributionDebt: 0 }, ledger: [] }),
 }))

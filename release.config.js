@@ -4,6 +4,41 @@
 // RELEASE_UPDATES 仅保留最近 3 条内置说明，完整的简短发布历史保存在 release-history.json。
 export const RELEASE_UPDATES = Object.freeze([
   {
+    version: '1.11.2',
+    legacyVersion: '2026年10月16日-版本6',
+    channel: 'stable',
+    summary: '账号封禁与禁发支持自定义期限，处理通知清晰可见',
+    signature: '1c8dd69e8a',
+    changes: {
+      features: [],
+      improvements: [
+      '账号封禁与禁止发布独立管理，支持任意分钟、小时、天和指定解除时间',
+      '增加永久限制、单独提前解除和到期自动恢复',
+      '账号展示处理原因、剩余期限和解除通知，封禁后进入告知页',
+      '管理弹窗适配手机和桌面，确认前可预览解除时间',
+      ],
+      fixes: [
+      '防止过期管理页面覆盖新限制',
+      '封禁期间暂停云端同步，退出前保留备份确认',
+      '统一约束旧会话、内容重提与文件访问路径',
+      ],
+      security: [
+      '限制状态与审计通知原子保存，账号仅能查询本人的处理说明',
+      ],
+      breaking: [],
+    },
+    notes: [
+      '账号封禁与禁止发布独立管理，支持任意分钟、小时、天和指定解除时间',
+      '增加永久限制、单独提前解除和到期自动恢复',
+      '账号展示处理原因、剩余期限和解除通知，封禁后进入告知页',
+      '管理弹窗适配手机和桌面，确认前可预览解除时间',
+      '防止过期管理页面覆盖新限制',
+      '封禁期间暂停云端同步，退出前保留备份确认',
+      '统一约束旧会话、内容重提与文件访问路径',
+      '限制状态与审计通知原子保存，账号仅能查询本人的处理说明',
+    ],
+  },
+  {
     version: '1.11.1',
     legacyVersion: '2026年10月16日-版本5',
     channel: 'stable',
@@ -77,47 +112,16 @@ export const RELEASE_UPDATES = Object.freeze([
       '新增、编辑或删除课程与日程后，今日安排立即刷新',
     ],
   },
-  {
-    version: '1.10.1',
-    legacyVersion: '2026年10月16日-版本3',
-    channel: 'stable',
-    summary: '校园事务与免费版加载性能优化',
-    signature: '09e7d3ac82',
-    changes: {
-      features: [
-      '校园怎么办支持真实问题、回应建议、关键澄清、行动待办和结果反馈',
-      ],
-      improvements: [
-      '校园与公开反馈短时复用并合并重复请求，降低免费版云端消耗',
-      '怎么办首页五组内容合并读取，只下载页面需要的摘要',
-      '页面预热与静态分包缓存减少切换等待，健康同步避免反复切回时重复探测',
-      ],
-      fixes: [
-      '主动刷新绕过本机短时缓存，网络请求超时后结束等待且不自动重发写入',
-      '修复校园事务数据库迁移、匿名身份展示和通知、未审核回应与回答隔离及回答自审问题',
-      ],
-      security: [],
-      breaking: [],
-    },
-    notes: [
-      '校园怎么办支持真实问题、回应建议、关键澄清、行动待办和结果反馈',
-      '校园与公开反馈短时复用并合并重复请求，降低免费版云端消耗',
-      '怎么办首页五组内容合并读取，只下载页面需要的摘要',
-      '页面预热与静态分包缓存减少切换等待，健康同步避免反复切回时重复探测',
-      '主动刷新绕过本机短时缓存，网络请求超时后结束等待且不自动重发写入',
-      '修复校园事务数据库迁移、匿名身份展示和通知、未审核回应与回答隔离及回答自审问题',
-    ],
-  },
 ])
 
 // SemVer 是面向用户和发布的正式版本。日期式标识只用于旧网页客户端的升级兼容。
-export const APP_VERSION = '1.11.1'
+export const APP_VERSION = '1.11.2'
 export const RELEASE_VERSION = APP_VERSION
 export const RELEASE_CHANNEL = 'stable'
 export const LEGACY_RELEASE_VERSION = RELEASE_UPDATES[0].legacyVersion || RELEASE_UPDATES[0].version
 
 // 与第一条签名保持一致，交给 vite.config.js 校验源码一致性。
-export const RELEASE_SOURCE_SIGNATURE = '0f49be9a02'
+export const RELEASE_SOURCE_SIGNATURE = '1c8dd69e8a'
 
 // 兼容旧引用：当前版本的更新说明。
 export const RELEASE_NOTES = RELEASE_UPDATES[0].notes

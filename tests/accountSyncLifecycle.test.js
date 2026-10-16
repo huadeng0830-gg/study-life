@@ -3,6 +3,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const fake = vi.hoisted(() => ({
   start: vi.fn(), stop: vi.fn(), read: vi.fn(), prepare: vi.fn(), recover: vi.fn(),
 }))
+vi.mock('../src/composables/accountRestrictions.js', async () => {
+  const { ref } = await import('vue')
+  return { accountCloudRestricted: ref(false) }
+})
 vi.mock('../src/composables/accountAuth.js', async () => {
   const { ref, shallowRef } = await import('vue')
   return { accountAvailable: ref(true), accountReady: ref(false), accountUser: shallowRef(null) }
@@ -14,6 +18,8 @@ beforeEach(async () => {
   vi.resetModules(); vi.clearAllMocks(); localStorage.clear()
   auth = await import('../src/composables/accountAuth.js')
   auth.accountReady.value = false; auth.accountUser.value = null; auth.accountAvailable.value = true
+  const moderation = await import('../src/composables/accountRestrictions.js')
+  moderation.accountCloudRestricted.value = false
   identity = await import('../src/composables/accountSyncIdentity.js')
   identity.setAccountDataOwner('')
   lifecycle = await import('../src/composables/accountSyncLifecycle.js')
@@ -33,6 +39,20 @@ async function login(id = 'fictional-a') {
   await lifecycle.waitForAccountSyncPreparation()
 }
 describe('账号同步生命周期', () => {
+  it('封禁等待引擎停止后保留暂停说明，解除时恢复原同步配置', async () => {
+    const { accountCloudRestricted } = await import('../src/composables/accountRestrictions.js')
+    const { accountSyncError, accountSyncStatus } = await import('../src/composables/accountSyncState.js')
+    lifecycle.startAccountSyncLifecycle(); await login()
+    fake.stop.mockImplementationOnce(async () => { await Promise.resolve(); accountSyncStatus.value = 'signed-out'; accountSyncError.value = '' })
+    accountCloudRestricted.value = true
+    await lifecycle.waitForAccountSyncPreparation()
+    expect(accountSyncStatus.value).toBe('error')
+    expect(accountSyncError.value).toContain('账号已封禁')
+    expect(fake.start).toHaveBeenCalledTimes(1)
+    accountCloudRestricted.value = false
+    await lifecycle.waitForAccountSyncPreparation()
+    expect(fake.start).toHaveBeenCalledTimes(2)
+  })
   it('等待会话恢复后开始同步，令牌刷新不重启账号数据', async () => {
     lifecycle.startAccountSyncLifecycle()
     await lifecycle.waitForAccountSyncPreparation()

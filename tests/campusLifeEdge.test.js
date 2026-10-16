@@ -3,6 +3,7 @@ import vm from 'node:vm'
 import ts from 'typescript'
 import { describe, expect, it, vi } from 'vitest'
 import * as rules from '../supabase/functions/campus-life/rules.js'
+import { accountRestrictionGuard, withUnrestrictedAccount } from './helpers/edgeAccountAccess.js'
 
 const actor = '00000001-0000-4000-8000-000000000001'
 const rowsByDefault = {
@@ -131,7 +132,8 @@ function createEdge({ user = { id: actor, email: 'student@example.test', email_c
   vm.runInNewContext(compiled, {
     Deno: { env: { get: (name) => ({ SUPABASE_URL: 'https://fictional.example.invalid', SUPABASE_SERVICE_ROLE_KEY: 'fictional-server-key' })[name] }, serve: (callback) => { handler = callback } },
     require: (name) => {
-      if (name === 'npm:@supabase/supabase-js@2.117.2') return { createClient: () => admin }
+      if (name === 'npm:@supabase/supabase-js@2.117.2') return { createClient: () => withUnrestrictedAccount(admin) }
+      if (name === '../_shared/accountRestrictions.js') return accountRestrictionGuard
       if (name === './rules.js') return rules
       throw new Error(`Unexpected Edge dependency: ${name}`)
     },

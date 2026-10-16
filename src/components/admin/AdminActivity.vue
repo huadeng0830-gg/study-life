@@ -40,7 +40,7 @@ async function refresh() {
       seen.add(id)
       next.push({
         id, category, label: place ? '地点' : source.label,
-        title: source.category === 'accounts' ? ({ 'user.suspend': '暂停账号', 'user.restore': '恢复账号', 'reviewer.grant': '授予审核权限', 'reviewer.revoke': '撤销审核权限', 'registration.open': '恢复注册', 'registration.pause': '暂停注册' })[event.action] || '账号管理' : place ? ((event.decision || event.to_status) === 'approved' ? '通过地点' : '拒绝地点') : ({ approved: '审核通过', active: '已公开', open: '已公开', rejected: '退回或下架', resolved: '举报已处理', dismissed: '举报不成立', completed: '任务完成', cancelled: '任务取消' })[event.to_status] || '校园内容处理',
+        title: source.category === 'accounts' ? ({ 'user.suspend': '封禁账号', 'user.restore': '解除账号封禁', 'user.publish_restrict': '设置禁止发布', 'user.publish_restore': '解除禁止发布', 'reviewer.grant': '授予审核权限', 'reviewer.revoke': '撤销审核权限', 'registration.open': '恢复注册', 'registration.pause': '暂停注册' })[event.action] || '账号管理' : place ? ((event.decision || event.to_status) === 'approved' ? '通过地点' : '拒绝地点') : ({ approved: '审核通过', active: '已公开', open: '已公开', rejected: '退回或下架', resolved: '举报已处理', dismissed: '举报不成立', completed: '任务完成', cancelled: '任务取消' })[event.to_status] || '校园内容处理',
         outcome: source.category === 'campus' ? '已保存' : ({ started: '处理中', succeeded: '已完成', failed: '失败' })[event.outcome] || '未知',
         failed: event.outcome === 'failed', reason: event.reason || '', createdAt: event.created_at, targetId: event.place_id || event.target_user_id || event.target_id || '',
       })

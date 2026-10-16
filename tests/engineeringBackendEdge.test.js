@@ -3,6 +3,7 @@ import vm from 'node:vm'
 import ts from 'typescript'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import * as availability from '../supabase/functions/campus-social/availability.js'
+import { accountRestrictionGuard, withUnrestrictedAccount } from './helpers/edgeAccountAccess.js'
 import * as placeModels from '../src/composables/placeModels.js'
 import { normalizeTaskWorkCheckpoint } from '../src/composables/tasks/taskWorkProgress.js'
 
@@ -55,7 +56,8 @@ function startEdge({ meetings = [], participantError = null } = {}) {
   vm.runInNewContext(compiled, {
     Deno: { env: { get: (name) => ({ SUPABASE_URL: 'https://fictional.example.invalid', SUPABASE_SERVICE_ROLE_KEY: 'fictional-server-key' })[name] }, serve: (callback) => { handler = callback } },
     require: (name) => {
-      if (name === 'npm:@supabase/supabase-js@2.117.2') return { createClient: () => admin }
+      if (name === 'npm:@supabase/supabase-js@2.117.2') return { createClient: () => withUnrestrictedAccount(admin) }
+      if (name === '../_shared/accountRestrictions.js') return accountRestrictionGuard
       if (name === './availability.js') return availability
       if (name === '../../../src/composables/tasks/taskWorkProgress.js') return { normalizeTaskWorkCheckpoint }
       if (name === '../../../src/composables/placeModels.js') return placeModels

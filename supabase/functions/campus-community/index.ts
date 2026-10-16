@@ -1,6 +1,7 @@
 /// <reference types="jsr:@supabase/functions-js/edge-runtime.d.ts" />
 import { createClient } from 'npm:@supabase/supabase-js@2.117.2'
 import { containsPrivateCampusDetails } from './rules.js'
+import { assertAccountAccess } from '../_shared/accountRestrictions.js'
 
 const url = Deno.env.get('SUPABASE_URL') || ''
 const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || ''
@@ -53,8 +54,8 @@ async function userFor(request: Request, required = true) {
   return data.user
 }
 
-async function requireVerified(request: Request) {
-  const user = await userFor(request)
+async function requireVerified(request: Request, user: any = null) {
+  user ||= await userFor(request)
   const email = String(user?.email || '').trim().toLowerCase()
   if (!user?.email_confirmed_at || !email || email.endsWith('@wechat.study-life.invalid')) {
     throw new CommunityError('email_verification_required', '请先完成邮箱验证。', 403)
@@ -299,16 +300,18 @@ async function privateMessages(userId: string, payload: any) {
 
 async function handle(request: Request, action: string, payload: any) {
   if (action === 'public_list') return listPublic(payload)
-  if (action === 'feedback_vote') return voteFeedback(await requireVerified(request), payload)
-  if (action === 'feedback_votes') return ownFeedbackVotes((await userFor(request)).id, payload)
-  if (action === 'submit') return submitSuggestion(await userFor(request), payload)
-  if (action === 'mine') return listMine((await userFor(request)).id, payload)
-  if (action === 'wallet') return wallet((await userFor(request)).id)
-  if (action === 'reviewer_apply') return applyReviewer(await requireVerified(request), payload)
-  if (action === 'reviewer_application_mine') return myReviewerApplication((await userFor(request)).id)
-  if (action === 'reviewer_application_reply') return replyToReviewerApplication(await requireVerified(request), payload)
-  if (action === 'message_thread') return privateMessages((await userFor(request)).id, payload)
-  const user = await requireVerified(request)
+  const user = await userFor(request)
+  await assertAccountAccess(admin, user.id, 'campus-community', action, payload, CommunityError)
+  if (action === 'feedback_vote') return voteFeedback(await requireVerified(request, user), payload)
+  if (action === 'feedback_votes') return ownFeedbackVotes(user.id, payload)
+  if (action === 'submit') return submitSuggestion(user, payload)
+  if (action === 'mine') return listMine(user.id, payload)
+  if (action === 'wallet') return wallet(user.id)
+  if (action === 'reviewer_apply') return applyReviewer(await requireVerified(request, user), payload)
+  if (action === 'reviewer_application_mine') return myReviewerApplication(user.id)
+  if (action === 'reviewer_application_reply') return replyToReviewerApplication(await requireVerified(request, user), payload)
+  if (action === 'message_thread') return privateMessages(user.id, payload)
+  await requireVerified(request, user)
   await owner(user.id)
   if (action === 'reviewer_applications') return ownerApplications(user.id)
   if (action === 'reviewer_application_decide') {

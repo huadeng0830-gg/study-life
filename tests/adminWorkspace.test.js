@@ -64,7 +64,7 @@ describe('统一管理工作区', () => {
     api.platform.mockImplementation(async action => action === 'identity' ? { owner: true } : action === 'audit_list' ? [{ id: 'fictional-event', action: 'user.suspend', outcome: 'succeeded', reason: '虚构的处理原因', created_at: '2026-10-16T02:00:00Z' }] : [])
     await mount('/platform-admin?section=activity')
     await vi.waitFor(() => expect(host.querySelector('.activity-list')).toBeTruthy())
-    expect(host.textContent).toContain('暂停账号')
+    expect(host.textContent).toContain('封禁账号')
     expect(host.textContent).toContain('校园记录暂不可用')
     expect(api.platform.mock.calls.map(call => call[0])).not.toContain('users_list')
   })

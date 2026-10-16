@@ -68,6 +68,7 @@ export function accountErrorMessage(error) {
   const messages = {
     account_unavailable: '账号服务暂未开放，请稍后再试。',
     invalid_credentials: '邮箱或密码不正确，请重新输入。',
+    user_banned: '此账号已被封禁，暂时无法登录。请在封禁到期后重试，或联系管理方核查。',
     email_not_confirmed: '请先打开验证邮件完成邮箱验证，再登录。',
     user_already_exists: '该邮箱已注册，请切换到登录。',
     email_exists: '该邮箱已注册，请切换到登录。',

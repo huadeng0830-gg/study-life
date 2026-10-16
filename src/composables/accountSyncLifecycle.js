@@ -3,6 +3,7 @@ import { accountAvailable, accountErrorMessage, accountReady, accountUser } from
 import { accountSyncPreparing, accountSyncPreparationError } from './accountSyncIdentity.js'
 import { accountSyncError, accountSyncStatus } from './accountSyncState.js'
 import { accountSyncViaAccount } from './accountSyncMode.js'
+import { accountCloudRestricted } from './accountRestrictions.js'
 
 let stopWatch = null
 let generation = 0
@@ -38,22 +39,29 @@ export function startAccountSyncLifecycle() {
   // 第三个来源是「用户是否选择通过账号同步」。把它放进同一个 watcher，
   // 是为了让开关的生效路径和登录/退出完全一致：都走 generation 自增 + 停旧链路
   // + 重新准备。这样就不存在"开关改了但某一轮还在跑"的中间态。
-  stopWatch = watch([accountReady, () => accountUser.value?.id || '', accountSyncViaAccount], ([ready, id, viaAccount]) => {
+  stopWatch = watch([accountReady, () => accountUser.value?.id || '', accountSyncViaAccount, accountCloudRestricted], ([ready, id, viaAccount, restricted]) => {
     const revision = ++generation
     const stopped = engine?.stopAccountSync()
-    accountSyncPreparing.value = Boolean(id && viaAccount)
+    accountSyncPreparing.value = Boolean(id && viaAccount && !restricted)
     accountSyncPreparationError.value = ''
     // 状态变了，上一轮的错误就不该继续挂在面板上。之前这一行只写 status，
     // accountSyncError 还留着上一轮的内容：账号切换或重新打开同步之后，
     // 「正在准备账号数据…」和一条红色失败原因会同时出现。
-    accountSyncError.value = ''
-    accountSyncStatus.value = !viaAccount && id ? 'disabled' : id ? 'preparing' : 'signed-out'
+    accountSyncError.value = restricted ? '账号已封禁，云端同步暂停。请在“我的账号”查看原因和解除时间，本机数据保留。' : ''
+    accountSyncStatus.value = restricted ? 'error' : !viaAccount && id ? 'disabled' : id ? 'preparing' : 'signed-out'
     // current 也要核对 viaAccount：开关是在一次准备**进行中**被拨动的，
     // 那条旧链路不能因为 id 没变就以为自己仍然有效。
-    const current = () => generation === revision && accountUser.value?.id === id && accountSyncViaAccount.value
+    const current = () => generation === revision && accountUser.value?.id === id && accountSyncViaAccount.value && !accountCloudRestricted.value
     preparation = preparation.catch(() => {}).then(async () => {
       await stopped
       if (revision !== generation || (accountAvailable.value && !ready)) return
+      if (restricted) {
+        // The asynchronous engine shutdown sets signed-out; restore the actual
+        // moderation state after shutdown rather than losing this explanation.
+        accountSyncStatus.value = 'error'
+        accountSyncError.value = '账号已封禁，云端同步暂停。请在“我的账号”查看原因和解除时间，本机数据保留。'
+        return
+      }
       if (!viaAccount) {
         // 用户主动关闭账号同步：既不准备本机副本，也不启动同步引擎。
         accountSyncStatus.value = id ? 'disabled' : 'signed-out'

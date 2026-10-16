@@ -133,6 +133,7 @@ async function requestFunction(functionName, action, payload, { requireVerified 
   if (error) {
     const detail = await parseFunctionError(error)
     if (detail.status === 401 || detail.status === 403) invalidateCampusReads()
+    if (['account_suspended', 'publishing_restricted'].includes(detail.code)) void import('../composables/accountRestrictions.js').then(({ refreshAccountRestrictions }) => refreshAccountRestrictions({ force: true }))
     throw new SocialError(detail.code, messageFor(detail.code, detail.message, messageAction), detail.status)
   }
   if (!data || typeof data !== 'object' || !('data' in data)) {

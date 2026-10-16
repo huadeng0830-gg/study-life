@@ -11,6 +11,7 @@ function metadata(row) {
     updatedByDeviceName: row?.device_name || '' }
 }
 function providerError(error, status) {
+  if (String(error?.message || '').includes('PLATFORM_ACCOUNT_')) return response({ error: '账号已封禁，云端同步暂停。请打开“我的账号”查看原因和解除时间，本机数据仍已保留。' }, 403)
   if (error?.code === 'PGRST301' || status === 401) return response({ error: '登录已失效，请重新登录。' }, 401)
   if (error?.code === '42501' || status === 403) return response({ error: '账号没有权限访问这份同步数据。' }, 403)
   if (error?.code === '23514') return response({ error: '同步数据格式或大小超出限制。' }, 400)

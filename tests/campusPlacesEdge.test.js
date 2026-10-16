@@ -3,6 +3,7 @@ import vm from 'node:vm'
 import ts from 'typescript'
 import { describe, expect, it, vi } from 'vitest'
 import { normalizePlaceRecord, PLACE_CATEGORIES, PLACE_TYPES } from '../src/composables/placeModels.js'
+import { accountRestrictionGuard, withUnrestrictedAccount } from './helpers/edgeAccountAccess.js'
 
 const actor = '00000001-0000-4000-8000-000000000001'
 const other = '00000002-0000-4000-8000-000000000002'
@@ -100,7 +101,8 @@ function edge({ tables = {} } = {}) {
   vm.runInNewContext(compiled, {
     Deno: { env: { get: (name) => ({ SUPABASE_URL: 'https://fictional.example.invalid', SUPABASE_SERVICE_ROLE_KEY: 'fictional-server-key' })[name] }, serve: (callback) => { handler = callback } },
     require: (name) => {
-      if (name === 'npm:@supabase/supabase-js@2.117.2') return { createClient: () => admin }
+      if (name === 'npm:@supabase/supabase-js@2.117.2') return { createClient: () => withUnrestrictedAccount(admin) }
+      if (name === '../_shared/accountRestrictions.js') return accountRestrictionGuard
       if (name === './availability.js') return {}
       if (name === '../../../src/composables/tasks/taskWorkProgress.js') return { normalizeTaskWorkCheckpoint: (value) => value }
       if (name === '../../../src/composables/placeModels.js') return { PLACE_CATEGORIES, PLACE_TYPES, normalizePlaceRecord }

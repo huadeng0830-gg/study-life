@@ -2,6 +2,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { createPlatformAdminHandler, PlatformAdminError } from './handler.js'
 import { countAuthUsers, publicAccount, searchAuthUsers } from './users.js'
+import { attachAccountRestrictions, setAccountRestriction } from './restrictions.js'
 
 const supabaseUrl = Deno.env.get('SUPABASE_URL') || ''
 const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || ''
@@ -123,11 +124,13 @@ const service = {
       const { data, error } = await client.auth.admin.listUsers({ page, perPage })
       if (error) throw error
       const accounts = (data?.users || []).map((user) => publicAccount(user, admins))
-      return { users: accounts, page, pageSize: perPage, total: Math.max(Number(data?.total) || 0, accounts.length), truncated: false }
+      return attachAccountRestrictions(client, { users: accounts, page, pageSize: perPage, total: Math.max(Number(data?.total) || 0, accounts.length), truncated: false })
     }
 
-    return searchAuthUsers(client, { query, requestedPage: page, admins })
+    return attachAccountRestrictions(client, await searchAuthUsers(client, { query, requestedPage: page, admins }))
   },
+
+  async setUserRestriction(payload) { return setAccountRestriction(requireAdminClient(), payload, PlatformAdminError) },
 
   async listAudit(limit) {
     const client = requireAdminClient()
@@ -184,30 +187,14 @@ const service = {
     const { data: targetResult, error: targetError } = await client.auth.admin.getUserById(targetUserId)
     if (targetError || !targetResult?.user) throw new PlatformAdminError('not_found', '没有找到这个账号，请刷新列表。', 404)
     if ((await ownerIds(client)).has(targetUserId)) throw new PlatformAdminError('forbidden', '平台所有者账号不能被暂停。', 403)
-    const target = targetResult.user
-    const currentlySuspended = Boolean(target.banned_until && Date.parse(target.banned_until) > Date.now())
+    const { data: restriction, error } = await client.from('platform_account_restrictions').select('revision,enabled,expires_at').eq('user_id', targetUserId).eq('scope', 'account').maybeSingle()
+    if (error) throw error
+    const currentlySuspended = Boolean((targetResult.user.banned_until && Date.parse(targetResult.user.banned_until) > Date.now()) || (restriction?.enabled && (!restriction.expires_at || Date.parse(restriction.expires_at) > Date.now())))
     if (currentlySuspended === suspended) throw new PlatformAdminError('state_changed', '账号状态已变化，请刷新后重试。', 409)
-
-    const action = suspended ? 'user.suspend' : 'user.restore'
-    const { data: event, error: auditError } = await client.from('platform_admin_audit').insert({
-      actor_user_id: actorUserId,
-      target_user_id: targetUserId,
-      action,
-      outcome: 'started',
-      reason,
-    }).select('id').single()
-    if (auditError || !event?.id) throw new PlatformAdminError('service_unavailable', '审计记录暂不可用，账号状态没有修改。', 503)
-
-    const { error: updateError } = await client.auth.admin.updateUserById(targetUserId,
-      { ban_duration: suspended ? '876000h' : 'none' })
-    const outcome = updateError ? 'failed' : 'succeeded'
-    const { error: completionError } = await client.from('platform_admin_audit').update({
-      outcome,
-      completed_at: new Date().toISOString(),
-    }).eq('id', event.id)
-
-    if (updateError) throw new PlatformAdminError('operation_failed', '账号状态修改失败，请稍后重试。', 502)
-    return { status: suspended ? 'suspended' : 'active', auditIncomplete: Boolean(completionError) }
+    const result = await setAccountRestriction(client, { actorUserId, targetUserId, scope: 'account', enabled: suspended,
+      reason, expectedRevision: restriction?.revision || null, permanent: suspended }, PlatformAdminError)
+    if (result.legacyBanRemaining) throw new PlatformAdminError('operation_failed', '旧版登录封禁仍有效，请刷新后重试。', 502)
+    return { ...result, status: suspended ? 'suspended' : 'active' }
   },
 }
 

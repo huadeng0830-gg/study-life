@@ -17,6 +17,7 @@ function makeHandler(overrides = {}) {
     listPlaceReviewAudit: vi.fn(async () => []),
     reviewCampusPlace: vi.fn(async ({ decision }) => ({ status: decision, auditIncomplete: false })),
     setUserSuspended: vi.fn(async () => ({ status: 'suspended', auditIncomplete: false })),
+    setUserRestriction: vi.fn(async () => ({ notificationSaved: true })),
     ...overrides,
   }
   return { handler: createPlatformAdminHandler({ service, allowedOrigins: [ALLOWED_ORIGIN], logger: { error: vi.fn() } }), service }
@@ -35,6 +36,19 @@ function request({ method = 'POST', body = {}, token = 'valid', origin = ALLOWED
 }
 
 describe('platform-admin function authorization boundary', () => {
+  it('accepts independent custom restrictions with an observed version and authenticated actor', async () => {
+    const { handler, service } = makeHandler()
+    const payload = { userId: TARGET_ID, scope: 'publish', enabled: true, reason: '虚构的处理原因', expectedRevision: REVIEW_REVISION, durationSeconds: 5400 }
+    const response = await handler(request({ body: { action: 'user_restriction_set', payload } }))
+    expect(response.status).toBe(200)
+    expect(service.setUserRestriction).toHaveBeenCalledWith({ actorUserId: OWNER.id, targetUserId: TARGET_ID, scope: 'publish', enabled: true, reason: payload.reason, expectedRevision: REVIEW_REVISION, durationSeconds: 5400, expiresAt: null, permanent: false })
+  })
+  it.each([{ scope: 'all' }, { enabled: 'true' }, { reason: ' ' }, { durationSeconds: 0 }, { durationSeconds: '60' }, { durationSeconds: 60.5 }, { durationSeconds: 3153600001 }, { permanent: true }, { expectedRevision: 'invalid' }, { userId: OWNER.id }])('rejects invalid or self restriction %j', async invalid => {
+    const { handler, service } = makeHandler()
+    const response = await handler(request({ body: { action: 'user_restriction_set', payload: { userId: TARGET_ID, scope: 'account', enabled: true, reason: '虚构原因', durationSeconds: 60, ...invalid } } }))
+    expect([400, 403]).toContain(response.status)
+    expect(service.setUserRestriction).not.toHaveBeenCalled()
+  })
   it('reserves registration controls for owners and forwards the verified actor plus concurrency version', async () => {
     const setRegistration = vi.fn(async () => ({ enabled: false, updatedAt: '2026-10-16T01:00:01Z' }))
     const getRegistration = vi.fn(async () => ({ enabled: true, updatedAt: '2026-10-16T01:00:00Z' }))

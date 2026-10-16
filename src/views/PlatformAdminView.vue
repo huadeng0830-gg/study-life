@@ -1,18 +1,20 @@
 <script setup>
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { accountAvailable, accountOpen, accountReady, accountUser, initializeAccountAuth } from '../composables/accountAuth.js'
 import { currentVersionInfo } from '../composables/versionInfo.js'
 import { PlatformAdminRequestError, platformAdminRequest } from '../services/platformAdmin.js'
 import ConfirmDialog from '../components/ConfirmDialog.vue'
 import AdminActivity from '../components/admin/AdminActivity.vue'
 import RegistrationControl from '../components/admin/RegistrationControl.vue'
+import AccountRestrictionDialog from '../components/admin/AccountRestrictionDialog.vue'
+import { restrictionActive, restrictionDate, restrictionRemaining } from '../composables/accountRestrictionModel.js'
 const props = defineProps({ section: { type: String, default: 'system' } })
 
-/** @typedef {{ id: string, email: string, createdAt: string|null, lastSignInAt: string|null, emailVerifiedAt: string|null, status: string, platformOwner: boolean }} AdminAccount */
+/** @typedef {{ id: string, email: string, createdAt: string|null, lastSignInAt: string|null, emailVerifiedAt: string|null, status: string, platformOwner: boolean, bannedUntil?:string|null, restrictions?:Record<string,{ enabled:boolean,expiresAt:string|null,reason:string,revision:string }> }} AdminAccount */
 /** @typedef {{ users: AdminAccount[], page: number, pageSize: number, total: number, truncated: boolean }} AccountPage */
 /** @typedef {{ checkedAt: string, services: { auth: string, collaborationData: string }, counts: { accounts: number|null, accountsScanned: number, accountsTruncated: boolean, activeProjects: number, collaborationProfiles: number } }} PlatformOverview */
 /** @typedef {{ id: string, school: string, name: string, campus: string, area: string, place_hint: string, place_type: string, description: string, opening_hours: string, service_info: string, public_contact: string, source_info: string, category: string, owner_id: string, review_revision: string, created_at: string, updated_at: string }} PendingPlace */
-/** @typedef {{ account: AdminAccount, suspend: boolean }} StatusChangeDialog */
+/** @typedef {{ account: AdminAccount, scope: string }} StatusChangeDialog */
 /** @typedef {{ tone: string, text: string }} FeedbackMessage */
 
 const PAGE_SIZE = 25
@@ -24,7 +26,7 @@ const pendingPlaces = ref(/** @type {PendingPlace[]} */ ([]))
 const pendingPlacePage = ref(1)
 const pendingPlaceTotal = ref(0)
 const reviewReasons = ref({})
-const placeReviewConfirmation = ref(null)
+const placeReviewConfirmation = ref(/** @type {{place:PendingPlace,decision:string,reason:string}|null} */(null))
 const placesLoading = ref(false)
 const placesError = ref('')
 const reviewActionId = ref('')
@@ -36,13 +38,12 @@ const pageError = ref('')
 const usersError = ref('')
 const feedback = ref(/** @type {FeedbackMessage|null} */ (null))
 const changeDialog = ref(/** @type {StatusChangeDialog|null} */ (null))
-const changeReason = ref('')
-const changeError = ref('')
-const changePending = ref(false)
-const dialogElement = ref(/** @type {HTMLDialogElement|null} */ (null))
+const accountClock = ref(Date.now())
 let accessRevision = 0
 let dataRevision = 0
 let searchTimer = 0
+let accountTimer = 0
+let accountRequestRevision = 0
 
 const pageCount = computed(() => Math.max(1, Math.ceil((accounts.value?.total || 0) / PAGE_SIZE)))
 const placePageCount = computed(() => Math.max(1, Math.ceil(pendingPlaceTotal.value / PLACE_PAGE_SIZE)))
@@ -64,8 +65,11 @@ const collaborationProfileSummary = computed(() => {
 })
 
 function statusLabel(status) {
-  return ({ active: '正常', suspended: '已暂停', unverified: '待验证' })[status] || '未知'
+  return ({ active: '正常', suspended: '已封禁', unverified: '待验证' })[status] || '未知'
 }
+
+function accountBlocked(account) { return restrictionActive(account.restrictions?.account, accountClock.value) || Boolean(account.bannedUntil && Date.parse(account.bannedUntil) > accountClock.value) }
+function publishingBlocked(account) { return restrictionActive(account.restrictions?.publish, accountClock.value) }
 
 function dateLabel(value) {
   if (!value) return '暂无记录'
@@ -93,15 +97,16 @@ async function loadOverview(revision = dataRevision) {
 }
 
 async function loadAccounts(revision = dataRevision) {
+  const requestRevision = ++accountRequestRevision
   usersLoading.value = true
   usersError.value = ''
   try {
     const result = await platformAdminRequest('users_list', { page: page.value, query: query.value.trim() })
-    if (revision === dataRevision) accounts.value = result
+    if (revision === dataRevision && requestRevision === accountRequestRevision) accounts.value = result
   } catch (error) {
-    if (revision === dataRevision) usersError.value = errorMessage(error, '暂时无法读取账号列表。')
+    if (revision === dataRevision && requestRevision === accountRequestRevision) usersError.value = errorMessage(error, '暂时无法读取账号列表。')
   } finally {
-    if (revision === dataRevision) usersLoading.value = false
+    if (revision === dataRevision && requestRevision === accountRequestRevision) usersLoading.value = false
   }
 }
 
@@ -135,6 +140,7 @@ async function refreshAll() {
   loading.value = true
   pageError.value = ''
   feedback.value = null
+  changeDialog.value = null
   const revision = ++dataRevision
   try {
     if (props.section === 'accounts') await loadAccounts(revision)
@@ -147,6 +153,7 @@ async function refreshAll() {
 }
 
 async function checkAccess() {
+  changeDialog.value = null
   const revision = ++accessRevision
   dataRevision += 1
   overview.value = null
@@ -246,52 +253,13 @@ async function confirmPlaceReview() {
 
 function openLogin() { accountOpen.value = true }
 
-function openStatusChange(account, suspend) {
-  changeDialog.value = { account, suspend }
-  changeReason.value = ''
-  changeError.value = ''
-}
+function openStatusChange(account, scope) { changeDialog.value = { account, scope } }
 
-function closeStatusChange(force = false) {
-  if (changePending.value && !force) return
-  if (dialogElement.value?.open) dialogElement.value.close()
-  changeDialog.value = null
-  changeError.value = ''
-}
-
-function cancelStatusChange() { closeStatusChange() }
-function onDialogClose() { changeDialog.value = null }
-
-async function confirmStatusChange() {
-  if (changePending.value || !changeDialog.value) return
-  const reason = changeReason.value.trim()
-  if (!reason) {
-    changeError.value = '请填写处理原因，操作才会进入审计记录。'
-    return
-  }
-  if (reason.length > 500) {
-    changeError.value = '原因不能超过 500 个字符。'
-    return
-  }
-  const target = changeDialog.value
-  changePending.value = true
-  changeError.value = ''
-  try {
-    const result = await platformAdminRequest(target.suspend ? 'user_suspend' : 'user_restore', {
-      userId: target.account.id,
-      reason,
-    })
-    closeStatusChange(true)
-    feedback.value = result.auditIncomplete
-      ? { tone: 'warning', text: '账号状态已变更，但审计记录未能确认完成。请刷新操作记录检查。' }
-      : { tone: 'success', text: target.suspend ? '账号已暂停，用户数据没有删除。' : '账号已恢复。' }
-    const revision = ++dataRevision
-    await loadAccounts(revision)
-  } catch (error) {
-    changeError.value = errorMessage(error, '账号状态没有确认变更，请刷新后检查。')
-  } finally {
-    changePending.value = false
-  }
+async function restrictionSaved(result) {
+  feedback.value = result.legacyBanRemaining
+    ? { tone: 'warning', text: '新限制已保存，但旧版登录封禁尚未解除，请刷新后重试；账号仍处于封禁中。' }
+    : { tone: 'success', text: `${result.label}已${result.removed ? '解除' : '保存'}，账号会收到原因和解除时间提示。` }
+  await loadAccounts(++dataRevision)
 }
 
 function changePage(delta) {
@@ -303,22 +271,18 @@ function changePage(delta) {
 
 watch(() => [accountReady.value, accountUser.value?.id], () => { void checkAccess() })
 watch(query, () => {
+  accountRequestRevision += 1
   page.value = 1
   window.clearTimeout(searchTimer)
   searchTimer = window.setTimeout(() => { if (access.value === 'owner') void loadAccounts() }, 320)
 })
-watch(changeDialog, async (value) => {
-  await nextTick()
-  if (value && dialogElement.value && !dialogElement.value.open) dialogElement.value.showModal()
-  else if (!value && dialogElement.value?.open) dialogElement.value.close()
-})
-
 onMounted(() => {
+  accountTimer = window.setInterval(() => { accountClock.value = Date.now() }, 30000)
   if (!accountReady.value) void initializeAccountAuth().then(checkAccess)
   else void checkAccess()
 })
 
-onBeforeUnmount(() => window.clearTimeout(searchTimer))
+onBeforeUnmount(() => { window.clearTimeout(searchTimer); window.clearInterval(accountTimer); dataRevision += 1; accountRequestRevision += 1; accessRevision += 1 })
 </script>
 
 <template>
@@ -400,19 +364,21 @@ onBeforeUnmount(() => window.clearTimeout(searchTimer))
             <button class="ops-button ops-button-quiet" type="button" :disabled="loading || usersLoading" @click="refreshAll">{{ loading ? '刷新中' : '刷新' }}</button>
           </div>
           <label class="ops-search"><span>按登录邮箱搜索</span><input v-model="query" type="search" autocomplete="off" placeholder="输入邮箱的一部分" maxlength="120"></label>
+          <p class="ops-account-help">账号封禁后仅可查看处理通知与使用本机数据；禁止发布单独生效。两种限制均可调整时长、提前解除，到期自动恢复。</p>
           <p v-if="usersError" class="ops-inline-error" role="alert">{{ usersError }} <button type="button" @click="loadAccounts()">重试</button></p>
           <div v-else-if="usersLoading && !accounts" class="ops-empty" role="status">正在安全读取账号信息…</div>
           <ul v-else-if="accounts?.users?.length" class="ops-account-list" :aria-busy="usersLoading">
             <li v-for="account in accounts.users" :key="account.id" class="ops-account-row">
               <div class="account-primary">
                 <b>{{ account.email || '未设置邮箱' }}</b>
-                <span class="account-status" :data-status="account.status">{{ statusLabel(account.status) }}</span>
+                <span class="account-status" :data-status="accountBlocked(account) ? 'suspended' : account.emailVerifiedAt ? 'active' : 'unverified'">{{ accountBlocked(account) ? '已封禁' : statusLabel(account.emailVerifiedAt ? 'active' : 'unverified') }}</span>
+                <span v-if="publishingBlocked(account)" class="account-status" data-status="suspended">禁止发布</span>
                 <small>注册 {{ dateLabel(account.createdAt) }}<span class="account-last-seen">最近登录 {{ dateLabel(account.lastSignInAt) }}</span></small>
+                <small v-if="accountBlocked(account)">账号封禁：{{ restrictionDate(account.restrictions?.account?.enabled ? account.restrictions.account.expiresAt : account.bannedUntil) }}<span v-if="account.restrictions?.account?.enabled">{{ restrictionRemaining(account.restrictions.account, accountClock) }}</span></small>
+                <small v-if="publishingBlocked(account)">禁发至：{{ restrictionDate(account.restrictions?.publish?.expiresAt) }} · {{ restrictionRemaining(account.restrictions?.publish, accountClock) }}</small>
               </div>
-              <button v-if="!account.platformOwner && account.status === 'active'" class="ops-button ops-button-danger" type="button" :disabled="changePending" @click="openStatusChange(account, true)">暂停</button>
-              <button v-else-if="!account.platformOwner && account.status === 'suspended'" class="ops-button ops-button-quiet" type="button" :disabled="changePending" @click="openStatusChange(account, false)">恢复</button>
+              <div v-if="!account.platformOwner" class="account-actions"><button class="ops-button ops-button-quiet" type="button" :disabled="usersLoading" @click="openStatusChange(account, 'account')">{{ accountBlocked(account) ? '调整封禁' : '封禁账号' }}</button><button class="ops-button ops-button-quiet" type="button" :disabled="usersLoading" @click="openStatusChange(account, 'publish')">{{ publishingBlocked(account) ? '调整禁发' : '禁止发布' }}</button></div>
               <span v-else-if="account.platformOwner" class="account-owner-tag">平台所有者</span>
-              <span v-else class="account-no-action">无需处理</span>
             </li>
           </ul>
           <div v-else class="ops-empty">{{ query ? '没有找到匹配邮箱的账号。' : '当前没有账号记录。' }}</div>
@@ -433,16 +399,7 @@ onBeforeUnmount(() => window.clearTimeout(searchTimer))
       <button class="ops-button ops-button-primary" type="button" @click="checkAccess">重新检查</button>
     </section>
 
-    <dialog ref="dialogElement" class="ops-dialog" :aria-labelledby="changeDialog ? 'ops-dialog-title' : undefined" @cancel.prevent="cancelStatusChange" @close="onDialogClose">
-      <form v-if="changeDialog" class="ops-dialog-form" @submit.prevent="confirmStatusChange">
-
-        <h2 id="ops-dialog-title">{{ changeDialog.suspend ? '暂停此账号？' : '恢复此账号？' }}</h2>
-        <p class="dialog-impact">{{ changeDialog.suspend ? `暂停 ${changeDialog.account.email} 后，将阻止新的登录和会话续期。已签发的访问令牌在过期前可能仍可使用；账号与本机数据不会删除，也不会修改协作项目内容。` : `恢复 ${changeDialog.account.email} 后，账号可重新登录并继续使用云服务。` }}</p>
-        <label class="ops-search dialog-reason"><span>处理原因（写入审计记录）</span><textarea v-model="changeReason" rows="3" maxlength="500" required placeholder="例如：用户确认账号被盗，已通过其他方式核实"></textarea><small>{{ changeReason.trim().length }} / 500</small></label>
-        <p v-if="changeError" class="ops-inline-error" role="alert">{{ changeError }}</p>
-        <div class="dialog-actions"><button class="ops-button ops-button-quiet" type="button" :disabled="changePending" @click="cancelStatusChange">取消</button><button class="ops-button" :class="changeDialog.suspend ? 'ops-button-danger' : 'ops-button-primary'" type="submit" :disabled="changePending">{{ changePending ? '正在处理…' : changeDialog.suspend ? '确认暂停' : '确认恢复' }}</button></div>
-      </form>
-    </dialog>
+    <AccountRestrictionDialog :target="changeDialog || undefined" @close="changeDialog = null" @saved="restrictionSaved" @stale="loadAccounts()" />
   </div>
 </template>
 
@@ -486,7 +443,9 @@ onBeforeUnmount(() => window.clearTimeout(searchTimer))
 .review-reason small { justify-self:end; color:var(--muted); font-weight:var(--fw-400); }
 .ops-columns { display:grid; grid-template-columns:minmax(0,1.55fr) minmax(270px,.9fr); align-items:start; gap:16px; }
 .ops-panel { min-width:0; padding:17px 18px; border:1px solid var(--border); border-radius:var(--radius-12); background:var(--card); box-shadow:var(--shadow-sm); }
-.ops-accounts { min-height:390px; }
+.ops-accounts { min-height:390px; grid-column:1 / -1; }
+.ops-account-help { margin:0 0 14px; color:var(--muted); font-size:var(--fs-12); line-height:1.65; }
+.account-actions { display:flex; flex-wrap:wrap; gap:8px; flex-shrink:0; }
 .ops-panel-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:14px; margin-bottom:14px; }
 .ops-button { display:inline-flex; align-items:center; justify-content:center; min-height:40px; padding:7px 12px; border:1px solid var(--border); border-radius:var(--radius-8); color:var(--text); background:var(--card); font:inherit; font-size:var(--fs-12); font-weight:var(--fw-650); cursor:pointer; }
 .ops-button:hover:not(:disabled) { border-color:var(--primary); color:var(--primary); background:var(--primary-soft); }
@@ -506,7 +465,6 @@ onBeforeUnmount(() => window.clearTimeout(searchTimer))
 .account-status[data-status='active'] { border-color:color-mix(in srgb,var(--success) 28%,var(--border)); color:var(--success); background:color-mix(in srgb,var(--success) 7%,var(--card)); }
 .account-status[data-status='suspended'] { border-color:color-mix(in srgb,var(--danger) 30%,var(--border)); color:var(--danger); background:var(--danger-soft); }
 .account-owner-tag { border-color:color-mix(in srgb,var(--primary) 27%,var(--border)); color:var(--primary); background:var(--primary-soft); }
-.account-no-action { color:var(--muted); font-size:var(--fs-11); white-space:nowrap; }
 .ops-list-note { margin:10px 0 0; color:var(--warning); font-size:var(--fs-11); line-height:1.5; }
 .ops-pagination { display:flex; align-items:center; justify-content:space-between; gap:10px; padding-top:12px; border-top:1px solid var(--border); color:var(--muted); font-size:var(--fs-10); }
 .ops-pagination > div { display:flex; gap:6px; }
@@ -521,15 +479,6 @@ onBeforeUnmount(() => window.clearTimeout(searchTimer))
 .ops-gate p { max-width:54ch; margin:0 0 5px; color:var(--muted); font-size:var(--fs-13); line-height:1.65; }
 .ops-gate-warning { border-color:color-mix(in srgb,var(--warning) 34%,var(--border)); }
 .ops-loader { width:20px; height:20px; border:2px solid var(--border); border-top-color:var(--primary); border-radius:50%; animation:ops-spin .8s linear infinite; }
-.ops-dialog { width:min(500px,calc(100vw - 28px)); max-height:min(90dvh,740px); padding:0; border:1px solid var(--border); border-radius:var(--radius-14); color:var(--text); background:var(--card); box-shadow:var(--shadow-overlay); }
-.ops-dialog::backdrop { background:color-mix(in srgb,var(--text) 36%,transparent); backdrop-filter:blur(2px); }
-.ops-dialog:focus-visible { outline:var(--focus-width) solid var(--focus-solid); outline-offset:var(--focus-offset); }
-.ops-dialog-form { display:grid; gap:10px; padding:22px; }
-.ops-dialog-form h2 { margin:0; font-size:var(--fs-19); }
-.dialog-impact { margin:0; color:var(--ink-soft); font-size:var(--fs-13); line-height:1.65; }
-.dialog-reason { margin:3px 0 0; }
-.dialog-reason textarea { min-height:94px; resize:vertical; }
-.dialog-reason small { justify-self:end; color:var(--muted); font-weight:var(--fw-400); }
 .dialog-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:4px; }
 @keyframes ops-spin { to { transform:rotate(360deg); } }
 @media (max-width:760px) {
@@ -558,7 +507,6 @@ onBeforeUnmount(() => window.clearTimeout(searchTimer))
   .ops-pagination { align-items:flex-start; flex-direction:column; }
   .ops-pagination > div { width:100%; }
   .ops-pagination .ops-button { flex:1; }
-  .ops-dialog-form { padding:18px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .ops-loader { animation:none; }

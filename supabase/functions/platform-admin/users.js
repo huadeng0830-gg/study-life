@@ -10,6 +10,7 @@ export function publicAccount(user, admins) {
     emailVerifiedAt,
     status: suspended ? 'suspended' : emailVerifiedAt ? 'active' : 'unverified',
     platformOwner: admins.has(user.id),
+    bannedUntil: user.banned_until || null,
   }
 }
 

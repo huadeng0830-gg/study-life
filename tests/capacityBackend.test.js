@@ -5,10 +5,13 @@ import { describe, expect, it, vi } from 'vitest'
 import * as communityRules from '../supabase/functions/campus-community/rules.js'
 import * as lifeRules from '../supabase/functions/campus-life/rules.js'
 import * as adminHandler from '../supabase/functions/platform-admin/handler.js'
+import * as accountRestrictions from '../supabase/functions/_shared/accountRestrictions.js'
+import * as adminRestrictions from '../supabase/functions/platform-admin/restrictions.js'
+import * as socialAvailability from '../supabase/functions/campus-social/availability.js'
 
 const actor = '00000001-0000-4000-8000-000000000001'
 const id = n => `10000001-0000-4000-8000-${String(n).padStart(12, '0')}`
-function edge(name, { tables = {}, owner = true, rpcError = null, delay = 0 } = {}) {
+function edge(name, { tables = {}, owner = true, rpcError = null, delay = 0, access = { allowed: true } } = {}) {
   let handler, active = 0, peak = 0
   const projections = []
   const users = Array.from({ length: 500 }, (_, n) => ({ user_id: id(n), email: `fictional-${n}@example.invalid` }))
@@ -17,7 +20,7 @@ function edge(name, { tables = {}, owner = true, rpcError = null, delay = 0 } = 
       getUser: async () => ({ data: { user: { id: actor, email: 'fictional@example.invalid', email_confirmed_at: '2026-10-01' } } }),
       admin: { getUserById: vi.fn(async userId => ({ data: { user: { email: users.find(u => u.user_id === userId)?.email } } })) },
     },
-    rpc: vi.fn(async () => ({ data: users, error: rpcError })),
+    rpc: vi.fn(async name => name === 'platform_account_access' ? { data: access, error: null } : { data: users, error: rpcError }),
     from: vi.fn(table => {
       const filters = []
       let columns = '*', single = false, start = 0, limit = Infinity
@@ -49,7 +52,9 @@ function edge(name, { tables = {}, owner = true, rpcError = null, delay = 0 } = 
   vm.runInNewContext(compiled, {
     Deno: { env: { get: key => key === 'SUPABASE_URL' ? 'https://fictional.example.invalid' : 'fictional-server-key' }, serve: callback => { handler = callback } },
     require: path => path === './rules.js' ? (name === 'campus-life' ? lifeRules : communityRules)
-      : path === './handler.js' ? adminHandler : path === './users.js' ? {} : { createClient: () => admin },
+      : path === '../_shared/accountRestrictions.js' ? accountRestrictions
+        : path === './restrictions.js' ? adminRestrictions : path === './availability.js' ? socialAvailability
+          : path === './handler.js' ? adminHandler : path === './users.js' ? {} : { createClient: () => admin },
     exports: {}, Request, Response, Headers, TextDecoder, TextEncoder, console, crypto,
   })
   return {
@@ -65,6 +70,14 @@ function edge(name, { tables = {}, owner = true, rpcError = null, delay = 0 } = 
 }
 
 describe('bounded backend query workloads', () => {
+  it.each([['campus-community','mine'],['campus-life','mine_list'],['campus-social','friends_list']])('rejects a previously authenticated banned actor before %s business reads', async (name, action) => {
+    const app = edge(name, { access: { allowed: false, code: 'account_suspended' } })
+    const result = await app.call(action)
+    expect(result.status).toBe(403)
+    expect(result.body.code).toBe('account_suspended')
+    expect(app.admin.from).not.toHaveBeenCalled()
+    expect(app.admin.rpc).toHaveBeenCalledExactlyOnceWith('platform_account_access', { p_actor: actor, p_publish: false })
+  })
   it('enforces the community request limit in bytes before decoding the full body', async () => {
     const app = edge('campus-community')
     const body = JSON.stringify({ action: 'public_list', payload: { ignored: '界'.repeat(12000) } })
@@ -79,8 +92,9 @@ describe('bounded backend query workloads', () => {
     expect(r.body.data.applications).toHaveLength(200)
     expect(r.body.data.applications[199].email).toBe('fictional-199@example.invalid')
     expect(app.admin.auth.admin.getUserById).not.toHaveBeenCalled()
-    expect(app.admin.rpc).toHaveBeenCalledTimes(1)
-    expect(app.admin.rpc.mock.calls[0][1].p_user_ids).toHaveLength(200)
+    expect(app.admin.rpc).toHaveBeenCalledTimes(2)
+    expect(app.admin.rpc.mock.calls.filter(call => call[0] === 'platform_admin_user_emails')).toHaveLength(1)
+    expect(app.admin.rpc.mock.calls[1][1].p_user_ids).toHaveLength(200)
   })
   it('batches audit reviewers and deduplicates identities', async () => {
     const rows = Array.from({ length: 100 }, (_, n) => ({ id: id(n), reviewer_id: id(n % 10), sample_month: '2026-10-01', moderation_event_id: id(n) }))
@@ -89,7 +103,7 @@ describe('bounded backend query workloads', () => {
     expect(r.status).toBe(200)
     expect(r.body.data.items[99].reviewerEmail).toBe('fictional-9@example.invalid')
     expect(app.admin.auth.admin.getUserById).not.toHaveBeenCalled()
-    expect(app.admin.rpc.mock.calls[0][1].p_user_ids).toHaveLength(10)
+    expect(app.admin.rpc.mock.calls[1][1].p_user_ids).toHaveLength(10)
   })
   it('loads a reviewer page without per-account Auth requests', async () => {
     const app = edge('platform-admin', { tables: { campus_reviewer_grants: Array.from({ length: 25 }, (_, n) => ({ user_id: id(n) })) } })
@@ -102,10 +116,10 @@ describe('bounded backend query workloads', () => {
   it('does not look up any emails for a non-owner or an empty page', async () => {
     const denied = edge('campus-community', { owner: false })
     expect((await denied.call('reviewer_applications')).status).toBe(403)
-    expect(denied.admin.rpc).not.toHaveBeenCalled()
+    expect(denied.admin.rpc).toHaveBeenCalledExactlyOnceWith('platform_account_access', { p_actor: actor, p_publish: false })
     const empty = edge('campus-community')
     expect((await empty.call('reviewer_applications')).status).toBe(200)
-    expect(empty.admin.rpc).not.toHaveBeenCalled()
+    expect(empty.admin.rpc).toHaveBeenCalledExactlyOnceWith('platform_account_access', { p_actor: actor, p_publish: false })
   })
   it('keeps RPC failures visible without falling back to N+1', async () => {
     const app = edge('campus-community', { tables: { campus_reviewer_applications: [{ user_id: id(0) }] }, rpcError: { code: 'unavailable' } })
