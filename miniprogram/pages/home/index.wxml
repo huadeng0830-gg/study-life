@@ -1,7 +1,24 @@
-<view class="page">
-  <view class="hero"><text class="eyebrow">STUDY LIFE · 校园共建</text><text class="hero-title">让校园生活
-更清楚一点</text><text class="hero-copy">课程、出行、互助、指南和校园建议，来自同校同学的真实经验。</text><button class="primary" bindtap="openCampus">进入校园</button></view>
-  <view class="section-heading"><text>常用入口</text><text class="muted">一起完善校园信息</text></view>
-  <view class="link-list"><button class="link-row" bindtap="openCampus"><text><text class="link-title">校园服务</text><text class="link-note">课程、集市、互助与校园指南</text></text><text class="arrow">›</text></button><button class="link-row" bindtap="openFeedback"><text><text class="link-title">反馈与建议</text><text class="link-note">查看公开进度，也可以匿名提交</text></text><text class="arrow">›</text></button><button class="link-row" bindtap="openReview"><text><text class="link-title">校园审核</text><text class="link-note">审核员处理校园投稿和举报</text></text><text class="arrow">›</text></button><button class="link-row" bindtap="openAccount"><text><text class="link-title">我的账号</text><text class="link-note">资料、审核申请和三两豆账本</text></text><text class="arrow">›</text></button></view>
-  <view class="footnote">学校与校区由用户填写，不代表官方身份认证。涉及付费的功能尚未开放。</view>
+<view class="workspace" style="{{themeStyle}}">
+  <view class="page-header"><view><text class="page-heading">{{greeting}}</text><view class="date-line"><text>{{dateText}}</text><text class="pill">{{weekLabel}}</text><text class="pill">{{campus}}</text></view></view></view>
+  <view wx:if="{{error}}" class="notice error">{{error}}</view>
+  <view class="quick-entry" bindtap="record"><view class="quick-plus">＋</view><view class="record-main"><text class="record-title">先记下来，再慢慢安排</text><text class="record-meta">待办、日程、收支或一句想法</text></view><text class="quick-arrow">›</text></view>
+  <view class="overview"><view><text class="metric">{{stats.courses}}</text><text class="metric-label">今天课程</text></view><view><text class="metric">{{stats.tasks}}</text><text class="metric-label">待完成</text></view><view bindtap="focus"><text class="metric">{{stats.focusMinutes}}</text><text class="metric-label">本周专注 / 分钟</text></view></view>
+  <view class="next-panel">
+    <text class="next-label">接下来</text><text class="next-title">{{next ? next.title : '可以自由安排时间'}}</text><text class="next-meta">{{next ? (next.time || '全天') + ' · ' + next.label : '今天暂时没有紧接着要处理的事项。'}}</text>
+    <button wx:if="{{next}}" class="action-primary compact-button" data-kind="{{next.kind}}" data-id="{{next.id}}" bindtap="edit">查看安排</button><button wx:else class="action-primary compact-button" data-kind="task" bindtap="edit">＋ 新建待办</button>
+  </view>
+  <view class="panel"><view class="panel-heading"><text class="section-title">今天的时间线</text><text class="text-link" data-kind="event" bindtap="edit">＋ 日程</text></view>
+    <view wx:if="{{!agenda.length}}" class="empty"><text class="empty-title">给今天留一点空间</text><text>添加课程或日程后，会在这里按时间排好。</text></view>
+    <view wx:for="{{agenda}}" wx:key="id" class="agenda-row {{item.ended ? 'ended' : ''}}" data-kind="{{item.kind}}" data-id="{{item.id}}" bindtap="edit"><view class="agenda-time">{{item.time || '全天'}}</view><view class="agenda-track"/><view class="record-main"><text class="record-title">{{item.title}}</text><text class="record-meta">{{item.label}}{{item.endTime ? ' · 至 ' + item.endTime : ''}}</text></view></view>
+  </view>
+  <view class="panel"><view class="panel-heading"><text class="section-title">需要做的事</text><text class="text-link" bindtap="learning">全部待办</text></view>
+    <view wx:if="{{!tasks.length}}" class="empty">今天没有待处理的待办，可以安排一点自己的时间。</view>
+    <view wx:for="{{tasks}}" wx:key="id" class="record-row"><view class="record-check" data-id="{{item.id}}" bindtap="toggle"/><view class="record-main" data-kind="task" data-id="{{item.id}}" bindtap="edit"><text class="record-title">{{item.title}}</text><text class="record-meta {{item.overdue ? 'overdue' : ''}}">{{item.overdue ? '已逾期 · ' : ''}}{{item.meta}}</text></view></view>
+  </view>
+  <view wx:if="{{milestones.length}}" class="panel"><view class="panel-heading"><text class="section-title">近期重要日期</text><text class="text-link" data-kind="milestone" bindtap="collection">全部</text></view><view wx:for="{{milestones}}" wx:key="id" class="record-row" data-kind="milestone" data-id="{{item.id}}" bindtap="edit"><view class="record-main"><text class="record-title">{{item.title}}</text><text class="record-meta">{{item.date}}</text></view><view class="days-left"><text>{{item.days}}</text><text class="small-copy">天</text></view></view></view>
+  <view class="panel"><view class="panel-heading"><text class="section-title">本周收支</text><text class="text-link" data-kind="transaction" bindtap="collection">打开账本</text></view><view class="finance-stats"><view><text class="metric-label">支出</text><text class="finance-number">{{stats.expense}}</text></view><view><text class="metric-label">收入</text><text class="finance-number">{{stats.income}}</text></view><view><text class="metric-label">结余</text><text class="finance-number">{{stats.balance}}</text></view></view><text class="small-copy">人民币 CNY · 其他币种在账本中单独展示</text></view>
+  <view class="focus-entry" bindtap="focus"><view class="icon-box"><image class="icon" src="/assets/icons/focus.svg"/></view><view class="record-main"><text class="record-title">把注意力交给一件事</text><text class="record-meta">选择待办，开始一段专注</text></view><text class="quick-arrow">›</text></view>
+  <view class="panel"><text class="section-title">今天感觉怎么样？</text><view class="mood-options"><button wx:for="{{moods}}" wx:key="*this" class="mood {{mood === item ? 'chosen' : ''}}" data-mood="{{item}}" bindtap="chooseMood">{{item}}</button></view></view>
+  <view class="review-link" bindtap="review"><text class="text-link">回顾自己的学习与生活</text><text>›</text></view>
+  <text class="sync-line">{{sync.label}}</text>
 </view>

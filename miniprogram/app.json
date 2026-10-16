@@ -1,29 +1,42 @@
 {
   "pages": [
     "pages/home/index",
+    "pages/learning/index",
+    "pages/record/index",
     "pages/campus/index",
+    "pages/more/index",
+    "pages/editor/index",
+    "pages/collection/index",
+    "pages/focus/index",
+    "pages/insights/index",
+    "pages/settings/index",
+    "pages/data/index",
+    "pages/campus-mine/index",
     "pages/directory/index",
     "pages/feedback/index",
     "pages/review/index",
-    "pages/account/index"
+    "pages/account/index",
+    "pages/admin/index"
   ],
   "window": {
     "navigationBarTitleText": "三两事",
-    "navigationBarBackgroundColor": "#f1f5f2",
+    "navigationBarBackgroundColor": "#f5f7fb",
     "navigationBarTextStyle": "black",
-    "backgroundColor": "#f1f5f2",
+    "backgroundColor": "#f5f7fb",
     "backgroundTextStyle": "light"
   },
   "tabBar": {
-    "color": "#596a64",
-    "selectedColor": "#067654",
-    "backgroundColor": "#fbfdfb",
+    "custom": true,
+    "color": "#667085",
+    "selectedColor": "#3d63d8",
+    "backgroundColor": "#ffffff",
     "borderStyle": "white",
     "list": [
-      { "pagePath": "pages/home/index", "text": "首页" },
+      { "pagePath": "pages/home/index", "text": "今天" },
+      { "pagePath": "pages/learning/index", "text": "学习" },
+      { "pagePath": "pages/record/index", "text": "记录" },
       { "pagePath": "pages/campus/index", "text": "校园" },
-      { "pagePath": "pages/feedback/index", "text": "建议" },
-      { "pagePath": "pages/account/index", "text": "我的账号" }
+      { "pagePath": "pages/more/index", "text": "更多" }
     ]
   },
   "style": "v2",

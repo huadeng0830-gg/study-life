@@ -772,10 +772,10 @@ onBeforeUnmount(() => {
 .admin-quick-links .admin-platform-link { margin-top:6px; padding-top:6px; border-top:1px solid var(--border-strong); }
 .admin-quick-links a > span:last-child { color:var(--muted); font-size:var(--fs-14); }
 .admin-link-mark { width:30px; height:30px; flex-basis:30px; border-radius:var(--radius-8); font-size:var(--fs-11); }
-.admin-version { display:grid; gap:8px; padding:14px 17px; border:1px solid var(--border); border-radius:var(--radius-12); background:var(--bg-tint); }
+.admin-version { display:grid; grid-template-columns:minmax(0,1fr); min-width:0; gap:8px; padding:14px 17px; border:1px solid var(--border); border-radius:var(--radius-12); background:var(--bg-tint); }
 .admin-version > div { display:flex; justify-content:space-between; gap:12px; font-size:var(--fs-11); }
 .admin-version > div span,.admin-version p { color:var(--muted); }
-.admin-version > div b { font-weight:var(--fw-650); font-variant-numeric:tabular-nums; }
+.admin-version > div b { min-width:0; overflow-wrap:anywhere; text-align:right; font-weight:var(--fw-650); font-variant-numeric:tabular-nums; }
 /* 只给收尾那句能力边界说明加分隔线：诊断区里嵌套的 <p> 不该跟着加分隔线。 */
 .admin-version > p { margin:3px 0 0; padding-top:9px; border-top:1px solid var(--border); font-size:var(--fs-11); line-height:1.55; }
 .admin-diagnostics { display:grid; gap:8px; margin:4px 0 0; padding-top:10px; border-top:1px solid var(--border); }

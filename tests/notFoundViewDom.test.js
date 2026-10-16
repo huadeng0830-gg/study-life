@@ -15,8 +15,8 @@
  *
  * 【为什么变异能抓到】改回 `<main>` 时 `querySelectorAll('main')` 会变成 2。
  */
-import { createApp, nextTick } from 'vue'
-import { createRouter, createWebHashHistory } from 'vue-router'
+import { createApp, h, KeepAlive, nextTick, Transition } from 'vue'
+import { createMemoryHistory, createRouter, createWebHashHistory, RouterView } from 'vue-router'
 import { afterEach, describe, expect, it } from 'vitest'
 import NotFoundView from '../src/components/NotFoundView.vue'
 
@@ -31,6 +31,30 @@ afterEach(() => {
 })
 
 describe('404 页渲染在外壳 main 内部', () => {
+  it('离开 404 后正常显示目标页，不会卡在 out-in 路由过渡', async () => {
+    const router = createRouter({
+      history: createMemoryHistory(),
+      routes: [
+        { path: '/tasks', name: 'tasks', component: { name: 'KnownPage', render: () => h('h1', '示例待办页') } },
+        { path: '/:pathMatch(.*)*', name: 'not-found', component: NotFoundView },
+      ],
+    })
+    await router.push('/missing')
+    host = document.createElement('div')
+    document.body.appendChild(host)
+    app = createApp({
+      components: { RouterView, Transition, KeepAlive },
+      template: `<RouterView v-slot="{ Component, route }"><Transition mode="out-in"><KeepAlive :include="['KnownPage']"><component :is="Component" :key="route.name" /></KeepAlive></Transition></RouterView>`,
+    }).use(router)
+    app.mount(host)
+    await nextTick()
+    expect(host.querySelector('h1')?.textContent).toBe('页面不存在')
+    await router.push('/tasks')
+    await new Promise((resolve) => setTimeout(resolve, 100))
+    await nextTick()
+    expect(host.querySelector('h1')?.textContent).toBe('示例待办页')
+  })
+
   it('文档里仍然只有一个 main，且 404 的内容没丢', async () => {
     const router = createRouter({
       history: createWebHashHistory(),

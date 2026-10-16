@@ -55,6 +55,21 @@ const form = () => document.querySelector('.event-form')
 const cardTitles = () => [...host.querySelectorAll('.event-title')].map((node) => node.textContent.trim())
 
 describe('日程页面实际交互', () => {
+  it('清空提醒提前量使用已保存的默认值，显式 0 仍表示到点提醒', async () => {
+    settings.value = { timezone: 'UTC', defaultReminders: { event: 45 } }
+    await boot()
+    for (const [value, expected] of [['', 45], ['0', 0]]) {
+      await click(byText(host, '＋ 新建日程'))
+      await fill(form().querySelector('[data-field="title"]'), `示例提醒 ${expected}`)
+      await fill(form().querySelector('[data-field="reminderMinutes"]'), value)
+      expect(byText(form(), '到点').getAttribute('aria-pressed')).toBe(String(expected === 0))
+      await click(byText(form(), '添加'))
+      expect(domain.events.value.at(-1).reminderMinutes).toBe(expected)
+    }
+    flushStoredWrites()
+    expect(JSON.parse(localStorage.getItem('sl_events')).map((event) => event.reminderMinutes)).toEqual([45, 0])
+  })
+
   it('月历选日、跨月键盘导航和新建会带入选择的日期', async () => {
     domain.events.value = [{ ...base, date: '2026-10-09' }]
     await boot()

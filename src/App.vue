@@ -28,6 +28,7 @@ import {
 } from './composables/globalError.js'
 import { isTaskActionable } from './composables/domain/state.js'
 import { hasPersistedAccountSession, initializeAccountAuth } from './composables/accountAuth.js'
+import { assertAccountDataIdentity, captureAccountDataIdentity } from './composables/accountSyncIdentity.js'
 import { accountSyncStatus, accountSyncError } from './composables/accountSyncState.js'
 import { localSafeMode } from './composables/localSafeMode.js'
 import { persistenceState, dismissPersistenceNotice } from './composables/store/core.js'
@@ -223,7 +224,7 @@ function openQuickRecord() {
 }
 function closeQuickRecord() { showQuickRecord.value = false }
 function showQuickRecordToast(payload) {
-  quickRecordToast.value = payload
+  quickRecordToast.value = { ...payload, identity: captureAccountDataIdentity() }
   window.clearTimeout(quickRecordToastTimer)
   quickRecordToastTimer = window.setTimeout(() => { quickRecordToast.value = null }, 5000)
 }
@@ -233,9 +234,15 @@ function onQuickRecordSaved(payload) {
 }
 function undoQuickRecord() {
   const undo = quickRecordToast.value?.undo
+  const identity = quickRecordToast.value?.identity
   quickRecordToast.value = null
   window.clearTimeout(quickRecordToastTimer)
-  undo?.()
+  try {
+    assertAccountDataIdentity(identity)
+    undo?.()
+  } catch {
+    announceAlert('账号或本机数据归属已变化，已取消撤销以保护当前数据。')
+  }
 }
 function viewQuickRecordEntity() {
   const entity = quickRecordToast.value

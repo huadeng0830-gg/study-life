@@ -4,6 +4,30 @@
 // RELEASE_UPDATES 仅保留最近 3 条内置说明，完整的简短发布历史保存在 release-history.json。
 export const RELEASE_UPDATES = Object.freeze([
   {
+    version: '1.8.1',
+    legacyVersion: '2026年10月15日-版本9',
+    channel: 'stable',
+    summary: '优化表单、账号隔离与全端体验',
+    signature: '9ac923d59e',
+    changes: {
+      features: [],
+      improvements: [
+      '撤销操作和清单快捷输入按账号归属隔离',
+      '校外考试日期快捷入口校验正确字段',
+      ],
+      fixes: [
+      '防止 Toast、快速记录和学习计划中的旧撤销操作跨账号生效',
+      ],
+      security: [],
+      breaking: [],
+    },
+    notes: [
+      '撤销操作和清单快捷输入按账号归属隔离',
+      '校外考试日期快捷入口校验正确字段',
+      '防止 Toast、快速记录和学习计划中的旧撤销操作跨账号生效',
+    ],
+  },
+  {
     version: '1.8.0',
     legacyVersion: '2026年10月15日-版本8',
     channel: 'stable',
@@ -62,43 +86,16 @@ export const RELEASE_UPDATES = Object.freeze([
       '收紧微信内部账号与邮箱验证功能的服务端边界',
     ],
   },
-  {
-    version: '1.6.0',
-    legacyVersion: '2026年10月15日-版本6',
-    channel: 'stable',
-    summary: '账号登录、同步用量和成果附件优化',
-    signature: 'ca2a21c303',
-    changes: {
-      features: [
-      '账号可按配置使用 GitHub 或 Google 登录',
-      ],
-      improvements: [
-      '同步增加本次会话用量估算并减少重复下载',
-      '成果附件新上传限制为 5 MB，支持大文件外部链接',
-      ],
-      fixes: [
-      '邮件服务尚未配置时隐藏不可用的注册和找回入口',
-      ],
-      security: [],
-      breaking: [],
-    },
-    notes: [
-      '账号可按配置使用 GitHub 或 Google 登录',
-      '同步增加本次会话用量估算并减少重复下载',
-      '成果附件新上传限制为 5 MB，支持大文件外部链接',
-      '邮件服务尚未配置时隐藏不可用的注册和找回入口',
-    ],
-  },
 ])
 
 // SemVer 是面向用户和发布的正式版本。日期式标识只用于旧网页客户端的升级兼容。
-export const APP_VERSION = '1.8.0'
+export const APP_VERSION = '1.8.1'
 export const RELEASE_VERSION = APP_VERSION
 export const RELEASE_CHANNEL = 'stable'
 export const LEGACY_RELEASE_VERSION = RELEASE_UPDATES[0].legacyVersion || RELEASE_UPDATES[0].version
 
 // 与第一条签名保持一致，交给 vite.config.js 校验源码一致性。
-export const RELEASE_SOURCE_SIGNATURE = 'e0577a69ee'
+export const RELEASE_SOURCE_SIGNATURE = '9ac923d59e'
 
 // 兼容旧引用：当前版本的更新说明。
 export const RELEASE_NOTES = RELEASE_UPDATES[0].notes

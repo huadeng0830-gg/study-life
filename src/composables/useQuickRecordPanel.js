@@ -5,7 +5,7 @@ import { parseQuickRecord } from './quickRecord/parser.js'
 import { QUICK_ACTIONS, QUICK_RECORD_EXAMPLES, recordTypeMeta } from './quickRecord/types.js'
 import { FINANCIAL_RECORD_TYPES, quickRecordDraftText, quickRecordKeyAction, reconcileQuickRecordDrafts, validateQuickRecord } from './quickRecord/workflow.js'
 import { quickRecordDraftKey, readQuickRecordDraft, writeQuickRecordDraft } from './quickRecord/draftStorage.js'
-import { accountDataOwner } from './accountSyncIdentity.js'
+import { accountDataOwner, assertAccountDataIdentity, captureAccountDataIdentity } from './accountSyncIdentity.js'
 import { amountToCents, catInfo, categoriesForScope, classifyTransaction, rememberCategoryOverride } from './ledger.js'
 import { settings as quickRecordSettings } from './settingsPolicy.js'
 import { useDomainCommands } from './domain/commands.js'
@@ -47,6 +47,7 @@ export function useQuickRecordPanel(props, emit) {
   const draftStatus = ref('')
   const validationAttempted = ref(false)
   const lastSaved = ref(/** @type {import('./quickRecord/contracts').QuickRecordSaveResult[]} */ ([]))
+  let lastSavedIdentity = null
   const clipboardLoading = ref(false)
   const sessionKey = computed(() => quickRecordDraftKey(accountDataOwner.value, props.context))
   let activeDraftKey = ''
@@ -368,13 +369,17 @@ export function useQuickRecordPanel(props, emit) {
     emit('close')
   }
 
-  function finishSave(results, keepOpen) {
+  function finishSave(results, keepOpen, identitySnapshot) {
     updateRecent(results.map((result) => result.type).filter(Boolean))
     const message = savedMessage(results)
-    const undo = () => results.forEach((result) => result.undo?.())
+    const undo = () => {
+      assertAccountDataIdentity(identitySnapshot)
+      results.forEach((result) => result.undo?.())
+    }
     if (keepOpen) {
       resetForNextSmartEntry()
       lastSaved.value = results
+      lastSavedIdentity = identitySnapshot
       showFeedback(`✓ ${message}`)
       return
     }
@@ -382,6 +387,7 @@ export function useQuickRecordPanel(props, emit) {
     // an unfinished draft. A successful save explicitly clears it before close.
     resetForNextSmartEntry({ focus: false })
     lastSaved.value = []
+    lastSavedIdentity = null
     flushDraft()
     emit('saved', {
       message,
@@ -417,6 +423,7 @@ export function useQuickRecordPanel(props, emit) {
       })
       return
     }
+    const identitySnapshot = captureAccountDataIdentity()
     saving.value = true
     error.value = ''
     const pending = selectedDrafts.value.map((draft) => ({
@@ -430,14 +437,18 @@ export function useQuickRecordPanel(props, emit) {
     try {
       for (const draft of pending) {
         try {
-          results.push({ ...(await save(draft)), type: draft.type })
+          assertAccountDataIdentity(identitySnapshot)
+          const saved = await save(draft)
+          results.push({ ...saved, type: draft.type })
           savedIds.push(draft.id)
+          assertAccountDataIdentity(identitySnapshot)
           if (draft.categoryEdited) rememberCategoryOverride(draft.title || draft.raw, draft.category, draft.type === 'income' ? 'income' : 'expense')
         } catch (cause) {
           drafts.value = drafts.value.filter((item) => !savedIds.includes(item.id))
           if (savedIds.length) {
             input.value = quickRecordDraftText(drafts.value)
             lastSaved.value = results
+            lastSavedIdentity = identitySnapshot
             flushDraft()
           }
         const reason = cause instanceof Error ? cause.message : '请补充必要信息'
@@ -452,13 +463,14 @@ export function useQuickRecordPanel(props, emit) {
       if (drafts.value.length) {
         input.value = quickRecordDraftText(drafts.value)
         lastSaved.value = results
+        lastSavedIdentity = identitySnapshot
         validationAttempted.value = false
         updateRecent(results.map((result) => result.type))
         showFeedback(`✓ ${savedMessage(results)}，其余 ${drafts.value.length} 项已暂存`)
         flushDraft()
         return
       }
-      finishSave(results, keepOpen)
+      finishSave(results, keepOpen, identitySnapshot)
     } finally {
       saving.value = false
     }
@@ -517,6 +529,12 @@ export function useQuickRecordPanel(props, emit) {
   function undoLastSaved() {
     const results = lastSaved.value
     lastSaved.value = []
+    const identitySnapshot = lastSavedIdentity
+    lastSavedIdentity = null
+    try { assertAccountDataIdentity(identitySnapshot) } catch (cause) {
+      error.value = cause instanceof Error ? cause.message : '账号数据已变化，已取消撤销以保护当前数据。'
+      return
+    }
     results.slice().reverse().forEach((result) => result.undo?.())
     showFeedback(`已撤销刚才保存的 ${results.length} 项记录`)
   }
@@ -541,6 +559,7 @@ export function useQuickRecordPanel(props, emit) {
     categoryEditorId.value = ''
     validationAttempted.value = false
     lastSaved.value = []
+    lastSavedIdentity = null
   }
 
   watch([input, drafts, forcedType], () => {

@@ -1,5 +1,31 @@
 [
   {
+    "version": "1.8.1",
+    "legacyVersion": "2026年10月15日-版本9",
+    "channel": "stable",
+    "publishedAt": null,
+    "title": "三两事 1.8.1",
+    "summary": "优化表单、账号隔离与全端体验",
+    "changes": {
+      "features": [],
+      "improvements": [
+        "撤销操作和清单快捷输入按账号归属隔离",
+        "校外考试日期快捷入口校验正确字段"
+      ],
+      "fixes": [
+        "防止 Toast、快速记录和学习计划中的旧撤销操作跨账号生效"
+      ],
+      "security": [],
+      "breaking": []
+    },
+    "notes": [
+      "撤销操作和清单快捷输入按账号归属隔离",
+      "校外考试日期快捷入口校验正确字段",
+      "防止 Toast、快速记录和学习计划中的旧撤销操作跨账号生效"
+    ],
+    "releaseUrl": "https://github.com/huadeng0830-gg/study-life/releases"
+  },
+  {
     "version": "1.8.0",
     "legacyVersion": "2026年10月15日-版本8",
     "channel": "stable",

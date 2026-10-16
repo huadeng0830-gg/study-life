@@ -1,0 +1,1 @@
+.focus-clock{display:block;text-align:center;font-size:110rpx;font-weight:700;letter-spacing:2rpx;color:var(--primary);padding:54rpx 0 8rpx}.focus-state{display:block;text-align:center;font-size:25rpx;color:var(--muted);margin-bottom:42rpx}.focus-choices{justify-content:center}.start{margin-top:28rpx}

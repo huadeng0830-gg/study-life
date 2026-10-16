@@ -4,7 +4,7 @@ import { registerMirrorTeardown } from './helpers/mirrorTeardown.js'
 registerMirrorTeardown()
 vi.mock('virtual:pwa-register', () => ({ registerSW: vi.fn(() => vi.fn()) }))
 
-let app, host, router, domain, vue, flushStoredWrites
+let app, host, router, domain, vue, flushStoredWrites, accountUser, accountDataOwner
 const instant = new Date('2026-10-09T01:00:00Z')
 async function settle() {
   await Promise.resolve()
@@ -46,8 +46,12 @@ async function mount(path = '/schedule') {
   await settle()
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.resetModules()
+  ;({ accountUser } = await import('../src/composables/accountAuth.js'))
+  ;({ accountDataOwner } = await import('../src/composables/accountSyncIdentity.js'))
+  accountUser.value = null
+  accountDataOwner.value = ''
   vi.useFakeTimers({ toFake: ['Date'] })
   vi.setSystemTime(instant)
   localStorage.clear()
@@ -63,6 +67,8 @@ afterEach(async () => {
   app = null
   document.querySelectorAll('.overlay, .toast').forEach((element) => element.remove())
   ;(await import('../src/composables/dataVault.js')).cancelPendingMirrorWrites()
+  accountUser.value = null
+  accountDataOwner.value = ''
   vi.useRealTimers()
 })
 
@@ -112,6 +118,27 @@ describe('以课表为中心的实际学习流程', () => {
     await settle()
     expect(domain.events.value).toHaveLength(0)
     expect(domain.tasks.value[0]).toMatchObject({ status: 'pending', dueDate: '2026-10-08' })
+  })
+
+  it('learning planner undo cannot delete a same-ID event after an account switch', async () => {
+    await mount()
+    host.querySelector('.learning-plan-toggle').click()
+    await settle()
+    const planner = host.querySelector('.study-planner')
+    button(planner, '加入日程').click()
+    await settle()
+    const inserted = domain.events.value[0]
+    expect(inserted).toBeTruthy()
+
+    accountUser.value = { id: 'fictional-account-b' }
+    domain.events.value = [{ ...inserted, title: '账号乙的同 ID 日程' }]
+    await settle()
+    button(planner, '撤销').click()
+    await settle()
+
+    expect(domain.events.value).toHaveLength(1)
+    expect(domain.events.value[0].title).toBe('账号乙的同 ID 日程')
+    expect(planner.querySelector('.study-message').textContent).toContain('本机数据归属已变化')
   })
 
   it('prepares the original task even when focus is hidden, and preserves unrelated route and appearance settings', async () => {

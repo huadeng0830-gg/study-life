@@ -1,6 +1,5 @@
-<view class="page">
+<view class="workspace" style="{{themeStyle}}">
   <view class="intro">
-    <text class="eyebrow">MY ACCOUNT</text>
     <text class="title">我的账号</text>
     <text class="copy">个人资料、校园范围、审核申请与三两豆都在这里管理。</text>
   </view>
@@ -8,27 +7,28 @@
   <view wx:if="{{notice}}" class="notice success">{{notice}}</view>
   <view wx:if="{{!loggedIn}}" class="account-box">
     <text class="box-title">微信登录</text>
-    <text class="copy">首次使用会建立账号。要关联已有资料，请先登录已验证邮箱账号再绑定微信。</text>
-    <button class="primary" loading="{{loading}}" bindtap="loginWechat">微信一键登录</button>
-    <view class="divider">或绑定已有邮箱账号</view>
-    <input placeholder="已验证的邮箱" value="{{bindEmail}}" bindinput="onEmail"/>
-    <input placeholder="邮箱账号密码" password value="{{bindPassword}}" bindinput="onPassword"/>
-    <button class="secondary" loading="{{binding}}" bindtap="bindExistingEmail">登录并绑定微信</button>
+    <text class="copy">使用当前微信建立小程序账号。小程序资料与网页端独立保存。</text>
+    <button class="primary" loading="{{loading}}" disabled="{{loading}}" bindtap="loginWechat">微信一键登录</button>
   </view>
   <block wx:else>
     <view class="account-box identity">
-      <view><text class="box-title">已登录</text><text class="copy">{{email || '微信账号'}} · {{hasVerifiedEmail ? '已绑定验证邮箱' : '尚未绑定邮箱'}}</text></view>
+      <view><text class="box-title">已使用微信登录</text><text class="copy">小程序独立账号</text></view>
       <button size="mini" class="text-button" bindtap="logout">退出</button>
     </view>
     <view class="account-box">
+      <text class="copy">账号编号：{{userId}}</text>
+      <button class="secondary" bindtap="copyUserId">复制账号编号</button>
+      <button wx:if="{{owner}}" class="primary" bindtap="openAdmin">校园管理</button>
+    </view>
+    <view class="account-box">
       <text class="box-title">个人资料</text>
-      <text class="copy">学校与校区为用户自行填写，仅用于校园筛选，不是学校官方认证。</text>
-      <input data-field="nickname" value="{{profile.nickname}}" placeholder="昵称" bindinput="onProfileInput"/>
-      <input data-field="school" value="{{profile.school}}" placeholder="学校" bindinput="onProfileInput"/>
-      <input data-field="campus" value="{{profile.campus}}" placeholder="当前校区（选填）" bindinput="onProfileInput"/>
-      <input data-field="scheduleCompleteThrough" value="{{profile.scheduleCompleteThrough}}" placeholder="课表确认完整日期 YYYY-MM-DD" bindinput="onProfileInput"/>
-      <input data-field="semesterEnd" value="{{profile.semesterEnd}}" placeholder="本学期结束日期 YYYY-MM-DD" bindinput="onProfileInput"/>
-      <button class="primary" loading="{{saving}}" bindtap="saveProfile">保存资料</button>
+      <text class="copy">学校与校区由用户填写，仅用于校园筛选，不是学校官方认证。</text>
+      <input maxlength="40" data-field="nickname" value="{{profile.nickname}}" placeholder="昵称" bindinput="onProfileInput"/>
+      <input maxlength="100" data-field="school" value="{{profile.school}}" placeholder="学校" bindinput="onProfileInput"/>
+      <input maxlength="100" data-field="campus" value="{{profile.campus}}" placeholder="当前校区（选填）" bindinput="onProfileInput"/>
+      <input maxlength="10" data-field="scheduleCompleteThrough" value="{{profile.scheduleCompleteThrough}}" placeholder="课表确认完整日期 YYYY-MM-DD" bindinput="onProfileInput"/>
+      <input maxlength="10" data-field="semesterEnd" value="{{profile.semesterEnd}}" placeholder="本学期结束日期 YYYY-MM-DD" bindinput="onProfileInput"/>
+      <button class="primary" loading="{{saving}}" disabled="{{saving}}" bindtap="saveProfile">保存资料</button>
     </view>
     <view class="account-box">
       <text class="box-title">三两豆 · 余额与获取方式</text>
@@ -36,13 +36,13 @@
         <view><text>充值豆</text><text class="bean-value">{{wallet.purchased || 0}}</text><text class="copy">充值未开放</text></view>
         <view><text>贡献豆</text><text class="bean-value">{{wallet.contribution || 0}}</text><text class="copy">不提现、不转赠</text></view>
       </view>
-      <text class="copy">充值和兑换暂未开放。资质齐备后再配置应用内数字权益目录与价格；贡献豆与充值豆分账，不换现金、不转赠。</text>
-      <text wx:if="{{wallet.contributionDebt}}" class="debt">待抵扣 {{wallet.contributionDebt}} 个贡献豆，后续贡献奖励优先抵扣，不影响充值豆。</text>
+      <text class="copy">充值和兑换暂未开放。贡献豆与充值豆分账，不换现金、不转赠。</text>
+      <text wx:if="{{wallet.contributionDebt}}" class="debt">待抵扣 {{wallet.contributionDebt}} 个贡献豆，后续审核奖励优先抵扣。</text>
       <view class="bean-rules">
         <text class="ledger-title">怎么获得贡献豆</text>
-        <text class="copy">校园审核：邮箱验证、填写学校资料并经总管理员批准后，每完成 1 条审核且写明依据得 3 个贡献豆，每日最多计入 20 条。</text>
-        <text class="copy">随机复核：每位审核员每月抽查约 10%。实质错判会说明理由后更正或重开；只追回未花掉的贡献豆，不足部分从以后审核奖励中抵扣。30 天内 2 次实质错判会提醒总管理员评估权限。</text>
-        <text class="copy">反馈建议：内容通过安全检查后匿名公开；只有总管理员确认“已解决”并设置奖励，才发 0–20 个贡献豆，每条最多发放一次。提交建议本身不保证获奖。</text>
+        <text class="copy">校园审核：微信登录、填写学校资料并经总管理员批准后，每完成 1 条审核且写明依据得 3 个贡献豆，每日最多计入 20 条。同一内容不重复奖励，总管理员不参与审核奖励。</text>
+        <text class="copy">随机复核：约 10% 的审核记录进入复核队列。实质错判经总管理员说明依据后追回奖励；不足部分从后续审核奖励中抵扣。</text>
+        <text class="copy">反馈建议：通过安全检查后匿名公开。总管理员确认“已解决”并设置奖励时，才发 0–20 个贡献豆，每条最多一次；提交本身不保证获奖。</text>
       </view>
       <view class="bean-ledger">
         <text class="ledger-title">最近变动</text>
@@ -59,18 +59,15 @@
       <text wx:if="{{application}}" class="application-status">{{application.statusLabel}} · {{application.school}} {{application.campus}}</text>
       <text wx:if="{{application && application.owner_note}}" class="copy">管理员说明：{{application.owner_note}}</text>
       <text wx:if="{{application && application.applicant_response}}" class="copy">我已补充：{{application.applicant_response}}</text>
-      <block wx:if="{{!application || application.status === 'declined' || application.status === 'withdrawn'}}">
-        <block wx:if="{{hasVerifiedEmail}}">
-          <text class="copy">申请需要已验证邮箱和学校资料，由总管理员同意后加入并设置审核范围。</text>
-          <textarea maxlength="1000" placeholder="介绍熟悉的校园范围和申请理由（至少 10 字）" value="{{reviewerReason}}" bindinput="onReviewerReason"/>
-          <button class="secondary" loading="{{applying}}" bindtap="applyReviewer">提交申请</button>
-        </block>
-        <text wx:else class="copy">请先绑定并验证一个现有邮箱账号。</text>
+      <block wx:if="{{!owner && !reviewer && (!application || application.status !== 'pending')}}">
+        <text class="copy">请先填写学校资料，介绍熟悉的校园范围，由总管理员批准并设置审核范围。</text>
+        <textarea maxlength="1000" placeholder="介绍熟悉的校园范围和申请理由（至少 10 字）" value="{{reviewerReason}}" bindinput="onReviewerReason"/>
+        <button class="secondary" loading="{{applying}}" disabled="{{applying}}" bindtap="applyReviewer">提交申请</button>
       </block>
       <block wx:if="{{application && application.status === 'pending' && application.owner_note}}">
         <text class="copy">管理员要求补充材料</text>
         <textarea maxlength="1000" placeholder="根据管理员要求补充说明或证明信息" value="{{applicantResponse}}" bindinput="onApplicantResponse"/>
-        <button class="secondary" loading="{{replying}}" bindtap="replyToApplication">提交补充材料</button>
+        <button class="secondary" loading="{{replying}}" disabled="{{replying}}" bindtap="replyToApplication">提交补充材料</button>
       </block>
     </view>
   </block>

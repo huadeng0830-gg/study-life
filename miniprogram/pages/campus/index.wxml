@@ -1,1 +1,8 @@
-<view class="page"><view class="intro"><text class="eyebrow">CAMPUS DIRECTORY</text><text class="title">校园服务</text><text class="copy">按学校与校区浏览已审核内容。请先在“我的账号”填写个人资料。</text></view><view class="category-list"><button wx:for="{{categories}}" wx:key="key" class="category" data-kind="{{item.key}}" bindtap="openCategory"><view><text class="category-title">{{item.label}}</text><text class="category-note">{{item.note}}</text></view><text class="arrow">›</text></button></view><view class="hint">校园投稿需要审核后公开。任何买卖与线下服务都由用户自行判断，平台不代收款。</view></view>
+<view class="workspace" style="{{themeStyle}}">
+  <view class="page-header"><view><text class="page-heading">校园</text><text class="subtitle">找地点、查信息，也把自己的经验留给同学。</text><view class="date-line"><text class="pill">{{school || '尚未选择学校'}}</text><text wx:if="{{campus}}" class="pill">{{campus}}</text><text class="text-link" bindtap="account">修改资料</text></view></view></view>
+  <view class="campus-search"><image class="icon" src="/assets/icons/search.svg"/><input placeholder="查找校园服务" value="{{query}}" bindinput="search"/></view>
+  <view class="service-grid"><view wx:for="{{categories}}" wx:key="key" class="service-card" data-kind="{{item.key}}" bindtap="openCategory"><view class="icon-box"><image class="icon" src="/assets/icons/{{item.icon}}.svg"/></view><text class="service-title">{{item.label}}</text><text class="service-note">{{item.note}}</text></view></view>
+  <view class="personal-links"><text class="text-link" bindtap="mine">我的投稿与举报</text><text class="text-link" bindtap="review">校园审核</text></view>
+  <view class="community-link" bindtap="feedback"><view class="record-main"><text class="record-title">一起把三两事做得更好</text><text class="record-meta">提建议、看处理进度与公开回应</text></view><text class="text-link">反馈与建议 ›</text></view>
+  <text class="body-copy">校园信息通过审核后公开。学校与校区由用户填写，不代表学校官方身份认证。</text>
+</view>

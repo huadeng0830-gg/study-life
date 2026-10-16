@@ -1,1 +1,30 @@
-<view class="page"><view wx:if="{{error}}" class="notice error">{{error}}</view><view wx:if="{{notice}}" class="notice success">{{notice}}</view><view wx:if="{{loading}}" class="state">正在读取{{title}}…</view><view wx:elif="{{!items.length}}" class="state">当前学校暂时没有公开内容。<button size="mini" bindtap="onRetry">重试</button></view><view wx:else class="rows"><view wx:for="{{items}}" wx:key="id" class="row"><text class="row-title">{{item.title || item.name || item.course_name || item.teacher_name || item.route_name || '校园内容'}}</text><text class="row-copy">{{item.description || item.body || item.note || item.department || item.meetup_area || item.approximate_location || item.status || ''}}</text><text class="row-meta">{{item.campus || item.school || ''}} {{item.updated_at || item.created_at || ''}}</text><button class="report-link" size="mini" data-id="{{item.id}}" bindtap="openReport">举报这条内容</button></view></view><view wx:if="{{reportTarget}}" class="report-sheet"><view class="sheet-head"><text>举报校园内容</text><text class="close" bindtap="closeReport">关闭</text></view><text class="report-title">{{reportTarget.title || reportTarget.name || reportTarget.course_name || '校园内容'}}</text><picker mode="selector" range="{{reportReasons}}" bindchange="onReportIndex"><view class="picker">原因：{{reportReasons[reportIndex]}}</view></picker><textarea maxlength="1000" placeholder="补充核查线索（选填）；请勿填写私人联系方式" value="{{reportDetail}}" bindinput="onReportDetail"/><button class="primary" loading="{{reporting}}" bindtap="submitReport">提交举报</button></view><button class="refresh" bindtap="load">刷新</button></view>
+<view class="workspace" style="{{themeStyle}}">
+  <view wx:if="{{error}}" class="notice error">{{error}}</view>
+  <view wx:if="{{notice}}" class="notice success">{{notice}}</view>
+  <view wx:if="{{loading}}" class="state">正在读取{{title}}…</view>
+  <view wx:elif="{{!items.length}}" class="state">当前学校暂时没有公开内容。<button size="mini" bindtap="onRetry">重试</button></view>
+  <view wx:else class="rows">
+    <view wx:for="{{items}}" wx:key="id" class="row">
+      <text class="row-title">{{item.title}}</text><text class="row-copy">{{item.body}}</text>
+      <text class="row-meta">{{item.school}} {{item.campus}} · {{item.updated_at}}</text>
+      <button class="report-link" size="mini" data-id="{{item.id}}" bindtap="openReport">举报这条内容</button>
+    </view>
+  </view>
+  <view class="pagination"><button size="mini" disabled="{{loading || !page}}" bindtap="previousPage">上一页</button><text>第 {{page + 1}} 页</text><button size="mini" disabled="{{loading || !hasMore}}" bindtap="nextPage">下一页</button></view>
+  <button class="primary" bindtap="openPost">投稿到{{title}}</button>
+  <view wx:if="{{posting}}" class="report-sheet">
+    <view class="sheet-head"><text>校园投稿</text><text class="close" bindtap="closePost">关闭</text></view>
+    <text class="row-meta">通过安全检查和校园审核后公开，请勿包含私人联系方式。</text>
+    <input class="post-title" maxlength="100" placeholder="标题（至少 2 字）" value="{{postTitle}}" bindinput="onPostTitle"/>
+    <textarea maxlength="3000" placeholder="内容（至少 10 字）；出行信息请写明来源与适用日期" value="{{postBody}}" bindinput="onPostBody"/>
+    <button class="primary" loading="{{submitting}}" disabled="{{submitting}}" bindtap="submitPost">提交审核</button>
+  </view>
+  <view wx:if="{{reportTarget}}" class="report-sheet">
+    <view class="sheet-head"><text>举报校园内容</text><text class="close" bindtap="closeReport">关闭</text></view>
+    <text class="report-title">{{reportTarget.title}}</text>
+    <picker mode="selector" range="{{reportReasons}}" bindchange="onReportIndex"><view class="picker">原因：{{reportReasons[reportIndex]}}</view></picker>
+    <textarea maxlength="1000" placeholder="补充核查线索（选填）；请勿填写私人联系方式" value="{{reportDetail}}" bindinput="onReportDetail"/>
+    <button class="primary" loading="{{reporting}}" disabled="{{reporting}}" bindtap="submitReport">提交举报</button>
+  </view>
+  <button class="refresh" bindtap="load">刷新</button>
+</view>

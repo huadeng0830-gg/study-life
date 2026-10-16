@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import { createFormIdentityGuard } from '../../composables/formIdentity.js'
 import TaskFocusLink from './TaskFocusLink.vue'
 import { useDomainCommands } from '../../composables/domain/commands.js'
 import { buildLearningDay, createLearningBlock, ensureMilestoneReviewTask } from '../../composables/learningPlan.js'
@@ -22,6 +23,8 @@ const message = ref('')
 const failed = ref(false)
 const undoEvent = ref(null)
 const undoMode = ref('')
+const undoIdentity = createFormIdentityGuard()
+const undoIdentitySnapshot = ref(null)
 const expanded = ref(false)
 const visibleBlocks = computed(() => expanded.value ? plan.value.blocks : plan.value.blocks.slice(0, 3))
 const upcomingReviews = computed(() => domain.milestones.value.filter((item) => item && !item.deletedAt && !item.tombstone && isActiveEntity(item) && item.category === '学习')
@@ -31,11 +34,13 @@ const upcomingReviews = computed(() => domain.milestones.value.filter((item) => 
   .sort((a, b) => a.countdown.sortValue - b.countdown.sortValue).slice(0, 3))
 const visible = computed(() => !props.compact || plan.value.suggestions.length || plan.value.blocks.length || upcomingReviews.value.length || message.value)
 
-watch(date, () => { message.value = ''; undoEvent.value = null; expanded.value = false })
+watch(date, () => { message.value = ''; undoEvent.value = null; undoIdentitySnapshot.value = null; expanded.value = false })
 
 function addBlock(item) {
   try {
+    const identity = undoIdentity.begin()
     undoEvent.value = createLearningBlock(domain, item)
+    undoIdentitySnapshot.value = identity
     undoMode.value = 'add'
     failed.value = false
     message.value = '已加入日程，到时可从这里继续任务。'
@@ -45,8 +50,10 @@ function addBlock(item) {
 function removeBlock(block) {
   const current = domain.events.value.find((item) => item.id === block.event.id)
   if (!current) return
+  const identity = undoIdentity.begin()
   undoEvent.value = { ...current }
   domain.deleteEvent(current.id)
+  undoIdentitySnapshot.value = identity
   undoMode.value = 'remove'
   failed.value = false
   message.value = '已撤回这个学习时段，待办可以重新安排。'
@@ -54,9 +61,17 @@ function removeBlock(block) {
 
 function undo() {
   if (!undoEvent.value) return
+  try { undoIdentity.assertCurrent(undoIdentitySnapshot.value) } catch (cause) {
+    undoEvent.value = null
+    undoIdentitySnapshot.value = null
+    failed.value = true
+    message.value = cause instanceof Error ? cause.message : '账号数据已变化，已取消撤销以保护当前数据。'
+    return
+  }
   if (undoMode.value === 'add') domain.deleteEvent(undoEvent.value.id)
   else domain.restoreDeletedEvent(undoEvent.value)
   undoEvent.value = null
+  undoIdentitySnapshot.value = null
   failed.value = false
   message.value = '已撤销上一步安排。'
 }

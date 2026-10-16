@@ -10,6 +10,8 @@ import Toast from '../components/Toast.vue'
 import { appearance } from '../composables/appearance.js'
 import { clock } from '../composables/store/index.js'
 import { useChecklistCommands } from '../composables/checklists.js'
+import { createFormIdentityGuard } from '../composables/formIdentity.js'
+import { captureAccountDataIdentity } from '../composables/accountSyncIdentity.js'
 import { clearFocusFromRoute, readFocusQuery } from '../composables/focusNavigation.js'
 import {
   CHECKLIST_CATEGORIES, CHECKLIST_TEMPLATES, CHECKLIST_UNITS, LIST_TYPES, MAX_BATCH_ITEMS,
@@ -22,6 +24,9 @@ import {
 } from '../composables/domain/checklistDuty.js'
 
 const commands = useChecklistCommands()
+const listFormIdentity = createFormIdentityGuard()
+const itemFormIdentity = createFormIdentityGuard()
+const bulkFormIdentity = createFormIdentityGuard()
 const { lists } = commands
 const route = useRoute()
 const router = useRouter()
@@ -33,6 +38,10 @@ const category = ref('')
 const sort = ref('pending')
 /** @type {import('vue').Ref<Record<string, string>>} */
 const quickDrafts = ref({})
+const quickDraftKey = (listId) => {
+  const { userId, ownerId } = captureAccountDataIdentity()
+  return JSON.stringify([userId, ownerId, listId])
+}
 /** @type {import('vue').Ref<HTMLInputElement | null>} */
 const quickInput = ref(null)
 /** @type {import('vue').Ref<HTMLDetailsElement | null>} */
@@ -102,8 +111,8 @@ const categoryOptions = computed(() => {
 })
 const hasFilters = computed(() => Boolean(query.value.trim() || category.value || filter.value !== 'all'))
 const quickName = computed({
-  get: () => activeList.value ? quickDrafts.value[activeList.value.id] || '' : '',
-  set: (value) => { if (activeList.value) quickDrafts.value[activeList.value.id] = value },
+  get: () => activeList.value ? quickDrafts.value[quickDraftKey(activeList.value.id)] || '' : '',
+  set: (value) => { if (activeList.value) quickDrafts.value[quickDraftKey(activeList.value.id)] = value },
 })
 const allVisibleSelected = computed(() => visibleItems.value.length > 0 && visibleItems.value.every((item) => selectedIds.value.has(item.id)))
 const template = computed(() => CHECKLIST_TEMPLATES.find((item) => item.id === templateId.value))
@@ -241,6 +250,7 @@ function chooseTemplate(id) {
   if (template.value?.dutyEnabled) dutyRepeatEnabled.value = template.value.repeat === 'weekly'
 }
 function openCreateList(id = '') {
+  listFormIdentity.begin()
   editingListId.value = null
   listName.value = ''; listType.value = 'general'; listBudget.value = ''; templateId.value = ''; listError.value = ''
   dutyWeekday.value = clock.value.getDay()
@@ -251,6 +261,7 @@ function openCreateList(id = '') {
   showListForm.value = true
 }
 function openEditList() {
+  listFormIdentity.begin()
   const list = activeList.value
   if (!list) return
   closeMenu()
@@ -264,6 +275,7 @@ function openEditList() {
 }
 function saveList() {
   try {
+    listFormIdentity.assertCurrent()
     const duty = isDutyForm.value
     const members = normalizeDutyMembers(dutyMembersInput.value)
     const data = {
@@ -380,6 +392,7 @@ function addQuickItem() {
   } catch (cause) { showToast(errorMessage(cause), { type: 'error' }) }
 }
 function openAddItem() {
+  itemFormIdentity.begin()
   if (!activeList.value) return
   itemListId.value = activeList.value.id
   editingItemId.value = null
@@ -390,6 +403,7 @@ function openAddItem() {
   itemError.value = ''; showItemForm.value = true
 }
 function openEditItem(item, listId = activeList.value?.id) {
+  itemFormIdentity.begin()
   itemListId.value = listId
   editingItemId.value = item.id
   itemForm.value = {
@@ -404,13 +418,14 @@ function openEditItem(item, listId = activeList.value?.id) {
 }
 function saveItem() {
   try {
+    itemFormIdentity.assertCurrent()
     const listId = itemListId.value
     if (!listId) throw new Error('请选择一份清单')
     const editing = Boolean(editingItemId.value)
     const item = editing ? commands.updateItem(listId, editingItemId.value, itemForm.value) : commands.createItem(listId, itemForm.value)
     if (!item) throw new Error('这份清单或事项已被删除，请关闭后重新选择')
     showItemForm.value = false
-    if (!editing) { quickDrafts.value[listId] = ''; revealAdded(listId, item.id) }
+    if (!editing) { quickDrafts.value[quickDraftKey(listId)] = ''; revealAdded(listId, item.id) }
     showToast(editing ? '事项已更新' : `已添加“${item.name}”`)
   } catch (cause) {
     itemError.value = errorMessage(cause); itemErrorField.value = errorField(itemError.value)
@@ -444,12 +459,14 @@ function setSelectedDone(done) {
   offerUndo(`已将 ${result.changes.length} 项标记为${done ? '已完成' : '未完成'}`, () => commands.restoreItemStates(result.listId, result.changes), result.listId)
 }
 function openBulkAdd() {
+  bulkFormIdentity.begin()
   if (!activeList.value) return
   bulkListId.value = activeList.value.id; bulkText.value = ''; skipDuplicates.value = true; bulkError.value = ''; showBulkForm.value = true
 }
 function saveBulkItems() {
   if (bulkPreview.value.errors.length || !bulkPreview.value.items.length) return
   try {
+    bulkFormIdentity.assertCurrent()
     const items = commands.createItems(bulkListId.value, bulkPreview.value.items)
     if (!items) throw new Error('这份清单已被删除，请关闭后重新选择')
     const listId = bulkListId.value

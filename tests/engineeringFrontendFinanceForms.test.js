@@ -2,9 +2,16 @@
 import { createApp, nextTick } from 'vue'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import BillFormModal from '../src/views/ledger-panels/BillFormModal.vue'
+import { accountUser } from '../src/composables/accountAuth.js'
+import { accountDataOwner } from '../src/composables/accountSyncIdentity.js'
 
 let app, host
-afterEach(() => { app?.unmount(); host?.remove(); app = null; host = null })
+const initialUser = accountUser.value
+const initialOwner = accountDataOwner.value
+afterEach(() => {
+  app?.unmount(); host?.remove(); app = null; host = null
+  accountUser.value = initialUser; accountDataOwner.value = initialOwner
+})
 async function mount(domain) {
   const notify = vi.fn()
   host = document.createElement('div'); document.body.appendChild(host)
@@ -32,5 +39,26 @@ describe('engineering audit: fixed bill form persistence feedback', () => {
     form.save(); await nextTick()
     expect(document.querySelector('[role="alert"]')?.textContent).toContain('虚构保存失败')
     expect(form.notify).not.toHaveBeenCalled()
+  })
+
+  it('does not copy a bill draft from one account into another account template list', async () => {
+    accountUser.value = { id: 'fictional-account-a' }
+    accountDataOwner.value = 'fictional-account-a'
+    const saveBill = vi.fn()
+    const form = await mount({ createBill: saveBill })
+    const name = document.querySelector('input[placeholder="例如：ChatGPT Plus、话费"]')
+    name.value = '原账号示例模板'
+    name.dispatchEvent(new Event('input', { bubbles: true }))
+
+    accountUser.value = { id: 'fictional-account-b' }
+    accountDataOwner.value = 'fictional-account-b'
+    document.querySelector('button') // settle Vue's account watcher before the action
+    await nextTick()
+    ;[...document.querySelectorAll('button')].find((button) => button.textContent.includes('存为模板')).click()
+    await nextTick()
+
+    expect(saveBill).not.toHaveBeenCalled()
+    expect(form.notify).not.toHaveBeenCalled()
+    expect(document.querySelector('[role="alert"]')?.textContent).toContain('变化')
   })
 })

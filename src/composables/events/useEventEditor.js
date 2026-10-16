@@ -6,8 +6,11 @@ import { announceAlert } from '../liveRegion.js'
 import { findUniqueCourseByName } from '../courseLinks.js'
 import { eventInputError, validEventDate, validEventTime } from './eventFields.js'
 import { findEventConflicts } from './eventConflicts.js'
+import { createFormIdentityGuard } from '../formIdentity.js'
 
 export function useEventEditor(domain, showNotice) {
+  const identity = createFormIdentityGuard()
+  let formIdentitySnapshot = null
   const formOpen = ref(false)
   const editing = ref(null)
   const formError = ref('')
@@ -45,6 +48,8 @@ export function useEventEditor(domain, showNotice) {
   })
 
   function openCreate(date = appToday.value, source = null) {
+    formIdentitySnapshot = identity.begin()
+    saveConflict.value = null
     editing.value = null
     form.value = { ...emptyForm(validEventDate(date) ? date : ''), ...(source ? {
       title: `${source.title}（副本）`, time: source.time || '', endTime: source.endTime || '',
@@ -57,6 +62,8 @@ export function useEventEditor(domain, showNotice) {
   }
 
   function openEdit(event) {
+    formIdentitySnapshot = identity.begin()
+    saveConflict.value = null
     editing.value = event
     form.value = { ...emptyForm(), ...Object.fromEntries(['title', 'date', 'time', 'endTime', 'location', 'courseId', 'courseName', 'note'].map((field) => [field, event[field] || ''])), reminderEnabled: event.reminderEnabled !== false, reminderMinutes: defaultReminderMinutes('event', event.reminderMinutes) }
     setFormError('')
@@ -83,7 +90,7 @@ export function useEventEditor(domain, showNotice) {
   function save() {
     const issue = eventInputError(form.value)
     if (issue) { setFormError(issue.message, issue.field); return }
-    const payload = { ...form.value, title: form.value.title.trim(), location: form.value.location.trim(), courseName: form.value.courseName.trim(), note: form.value.note.trim(), reminderMinutes: Number(form.value.reminderMinutes) || 0 }
+    const payload = { ...form.value, title: form.value.title.trim(), location: form.value.location.trim(), courseName: form.value.courseName.trim(), note: form.value.note.trim(), reminderMinutes: defaultReminderMinutes('event', form.value.reminderMinutes) }
     // Name-only legacy records retain their text; only an unambiguous match gains an ID.
     if (!payload.courseId) payload.courseId = findUniqueCourseByName(courseOptions.value, payload.courseName)?.id || ''
     const editingId = editing.value?.id ?? null
@@ -93,14 +100,15 @@ export function useEventEditor(domain, showNotice) {
         const existing = conflict.existing
         return `「${conflict.entityName}」 ${existing.dueTime || existing.time}${existing.endTime ? `–${existing.endTime}` : ''}`
       })
-      saveConflict.value = { payload, editingId, message: `与 ${conflicts.length} 条安排时间重叠：\n${details.join('\n')}${conflicts.length > 5 ? '\n还有其他重叠安排。' : ''}\n是否继续保存？` }
+      saveConflict.value = { payload, editingId, identitySnapshot: formIdentitySnapshot, message: `与 ${conflicts.length} 条安排时间重叠：\n${details.join('\n')}${conflicts.length > 5 ? '\n还有其他重叠安排。' : ''}\n是否继续保存？` }
       return
     }
-    commitSave(payload, editingId)
+    commitSave(payload, editingId, formIdentitySnapshot)
   }
 
-  function commitSave(payload, editingId) {
+  function commitSave(payload, editingId, identitySnapshot) {
     try {
+      identity.assertCurrent(identitySnapshot)
       if (editingId !== null) {
         if (!domain.updateEvent(editingId, payload)) throw new Error('这条日程已被删除，请重新新建')
         showNotice('已保存日程')
@@ -115,7 +123,7 @@ export function useEventEditor(domain, showNotice) {
   function confirmConflictSave() {
     const target = saveConflict.value
     saveConflict.value = null
-    if (target) commitSave(target.payload, target.editingId)
+    if (target) commitSave(target.payload, target.editingId, target.identitySnapshot)
   }
 
   return { formOpen, editing, form, formError, formErrorField, formElement, titleInput, wheelField, wheelValue, saveConflict, courseOptions, liveConflicts, openCreate, openEdit, closeForm, selectCourse, clearTime, setDuration, save, confirmConflictSave }

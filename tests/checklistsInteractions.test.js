@@ -4,18 +4,23 @@ import { createMemoryHistory, createRouter, RouterView } from 'vue-router'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import ListsView from '../src/views/ListsView.vue'
 import { useChecklistCommands } from '../src/composables/checklists.js'
+import { accountUser } from '../src/composables/accountAuth.js'
+import { accountDataOwner } from '../src/composables/accountSyncIdentity.js'
 import { clearAnnouncement } from '../src/composables/liveRegion.js'
 import { registerMirrorTeardown } from './helpers/mirrorTeardown.js'
 
 registerMirrorTeardown()
 const commands = useChecklistCommands()
+const originalUser = accountUser.value
+const originalOwner = accountDataOwner.value
 let app
 let host
 let router
-beforeEach(() => { commands.lists.value = [] })
+beforeEach(() => { accountUser.value = null; accountDataOwner.value = ''; commands.lists.value = [] })
 afterEach(() => {
   app?.unmount(); host?.remove(); document.body.innerHTML = ''; clearAnnouncement()
   commands.lists.value = []; app = null; host = null
+  accountUser.value = originalUser; accountDataOwner.value = originalOwner
 })
 async function settle() { await nextTick(); await new Promise((resolve) => setTimeout(resolve, 15)); await nextTick() }
 async function boot(path = '/lists') {
@@ -175,6 +180,22 @@ describe('清单实际交互', () => {
     await fill(host.querySelector('[aria-label="搜索当前清单事项"]'), '低糖')
     expect(itemNames()).toEqual(['牛奶'])
     expect(first.items.map((item) => item.name)).toEqual(['牛奶', '水果', '纸巾'])
+  })
+
+  it('相同清单 ID 在不同账号之间不共享快速输入草稿', async () => {
+    accountUser.value = { id: 'fictional-account-a' }; accountDataOwner.value = 'fictional-account-a'
+    commands.lists.value = [{ id: 'shared-list-id', name: '账号甲清单', type: 'general', items: [] }]
+    await boot()
+    await fill(host.querySelector('.quick-add input'), '账号甲的未保存事项')
+
+    accountUser.value = { id: 'fictional-account-b' }; accountDataOwner.value = 'fictional-account-b'
+    commands.lists.value = [{ id: 'shared-list-id', name: '账号乙清单', type: 'general', items: [] }]
+    await settle()
+    expect(host.querySelector('.quick-add input').value).toBe('')
+
+    await fill(host.querySelector('.quick-add input'), '账号乙的事项')
+    await click(byText('添加', host.querySelector('.quick-add')))
+    expect(commands.lists.value[0].items.map((item) => item.name)).toEqual(['账号乙的事项'])
   })
 
   it('重置勾选保留内容，撤销只恢复原来的完成项', async () => {

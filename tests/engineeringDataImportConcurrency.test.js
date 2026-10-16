@@ -119,6 +119,17 @@ describe('课程与作息导入保留并发的新编辑', () => {
     expect(domain.courses.value).toEqual([original])
   })
 
+  it('课表审阅期间登录身份变化会取消旧账号的待导入确认', async () => {
+    const { api, domain, original } = await courseReview()
+    const { accountUser } = await import('../src/composables/accountAuth.js')
+    const saving = api.commitCourseImport()
+    accountUser.value = { id: 'fictional-next-user' }
+    await saving
+    expect(domain.courses.value).toEqual([original])
+    expect(api.importDraft.value).toBeNull()
+    expect(api.showImportConflict.value).toBe(false)
+  })
+
   it('作息计划打开后跨标签恢复，确认旧计划不会覆盖新作息', async () => {
     const { plan, timeConfig } = await timeReview()
     const latest = clone(timeConfig.value)

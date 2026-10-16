@@ -13,6 +13,7 @@ import { useQuickEntryForm } from '../src/composables/ledgerView/useQuickEntryFo
 import { useTransactionDetail } from '../src/composables/ledgerView/useTransactionDetail.js'
 import { useLedgerExport } from '../src/composables/ledgerView/export.js'
 import { appToday } from '../src/composables/timeContext.js'
+import { flushStoredWrites } from '../src/composables/store/core.js'
 import { moneyWithCurrency } from '../src/utils/formatters.js'
 import { registerMirrorTeardown } from './helpers/mirrorTeardown.js'
 
@@ -78,6 +79,37 @@ const button = (text) => [...document.querySelectorAll('button')].find((node) =>
 const item = (overrides) => ({ id: 'example', name: '示例记录', amount: 30, date: today(), time: '12:00', cat: 'food', ...overrides })
 
 describe('ledger entry and refund correctness', () => {
+  it('preserves a cleared optional time when creating, editing and reopening a record', async () => {
+    const api = form()
+    api.openQuick({ amount: 12 })
+    api.timeInput.value = ''
+    await nextTick()
+    expect(await api.saveExpense()).toBe(true)
+    const saved = expenses.value[0]
+    expect(saved.time).toBe('')
+
+    domain.updateTransaction(saved.id, { time: '09:30', note: '示例备注' })
+    api.openQuick(saved)
+    api.timeInput.value = ''
+    api.noteInput.value = ''
+    await nextTick()
+    expect(await api.saveExpense(false, saved.id)).toBe(true)
+    expect(saved.time).toBe('')
+    expect(saved.note).toBe('')
+    flushStoredWrites()
+    const persisted = JSON.parse(localStorage.getItem('sl_expenses')).find((entry) => entry.id === saved.id)
+    expect(persisted.time).toBe('')
+    api.openQuick(persisted)
+    expect(api.timeInput.value).toBe('')
+  })
+
+  it('distinguishes an omitted transaction time from an explicitly empty time', () => {
+    expect(domain.createTransaction({ amount: 12 }).time).toMatch(/^\d{2}:\d{2}$/)
+    expect(domain.createTransaction({ amount: 12, time: '' }).time).toBe('')
+    expect(domain.createTransaction({ amount: 12, createdFrom: 'import' }).time).toBe('')
+    expect(() => domain.createTransaction({ amount: 12, time: '25:00' })).toThrow('时间格式')
+  })
+
   it('edits a recent custom split without detecting itself as a duplicate or rewriting member shares', async () => {
     const split = { total: 100, mine: 25, participants: [{ label: '我', amount: 25 }, { label: '成员甲', amount: 30 }, { label: '成员乙', amount: 45 }] }
     const original = domain.createTransaction({ name: '示例聚餐', amount: 100, date: today(), cat: 'food', split })
@@ -93,7 +125,10 @@ describe('ledger entry and refund correctness', () => {
   })
 
   it('does not treat different currencies, accounts, dates or directions as the same recent entry', async () => {
-    domain.createTransaction({ name: '示例记录', amount: 10, date: today(), currency: 'USD', account: '示例账户' })
+    const recent = domain.createTransaction({ name: '示例记录', amount: 10, date: today(), currency: 'USD', account: '示例账户' })
+    // Command stamps are strictly increasing and can briefly lead the wall clock.
+    // Pin this fixture inside the recent window so the test only varies its context.
+    recent.createdAt = new Date(Date.now() - 1000).toISOString()
     const api = form()
     const context = { name: '示例记录', amount: 10, date: today(), currency: 'USD', account: '示例账户' }
     api.openQuick(context)

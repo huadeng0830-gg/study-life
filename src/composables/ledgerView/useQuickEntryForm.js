@@ -14,8 +14,11 @@ import { currencyChoices, currencyField, normalizeCurrency, useLedgerFx } from '
 import { parseNatural } from '../ledger.js'
 import { defaultAccount, timestampOf } from '../settingsPolicy.js'
 import { appToday } from '../timeContext.js'
+import { createFormIdentityGuard } from '../formIdentity.js'
 
 export function useQuickEntryForm({ baseCurrency, domain, notify, closeSwipe, ledgerNowHM }) {
+  const identity = createFormIdentityGuard()
+  let formIdentitySnapshot = null
   const { fx } = useLedgerFx()
 
   // 弹窗开关与编辑态由页面持有（showQuick、editingId），这里只管表单里的 ref
@@ -60,7 +63,7 @@ export function useQuickEntryForm({ baseCurrency, domain, notify, closeSwipe, le
   watch([amountInput, nameInput, dateInput, timeInput, currencyInput, accountInput, directionInput, splitCount, splitMine], () => {
     formError.value = ''; errorField.value = ''
     dupWarn.value = false; forceDup.value = false
-  })
+  }, { flush: 'sync' })
 
   function resetSplitState() {
     splitCount.value = '1'
@@ -114,6 +117,7 @@ export function useQuickEntryForm({ baseCurrency, domain, notify, closeSwipe, le
   }
 
   function openQuick(prefill = {}) {
+    formIdentitySnapshot = identity.begin()
     currentEditingId.value = prefill.id ?? null
     formError.value = ''; errorField.value = ''
     amountInput.value = String(prefill.amount ?? '')
@@ -257,6 +261,7 @@ export function useQuickEntryForm({ baseCurrency, domain, notify, closeSwipe, le
     const amount = normalizeAmount(amountInput.value)
     const name = nameInput.value.trim()
     try {
+      identity.assertCurrent(formIdentitySnapshot)
       if (amount === null) {
         // 【金额非法必须看得见】原来这里只有 `amountEl.value?.focus()`，而这个 ref 在
         // 本页从未绑定到任何元素（LedgerView 没有解构它；弹窗里那个 ref 是同名的**另一个**
@@ -292,7 +297,7 @@ export function useQuickEntryForm({ baseCurrency, domain, notify, closeSwipe, le
         const previousCategory = previous?.cat || 'other'
         const target = domain.updateTransaction(editingId, {
           name, amount, cat: catInput.value || detectCategory(name, { direction: directionInput.value }),
-          date: dateInput.value || appToday.value, time: timeInput.value || ledgerNowHM(),
+          date: dateInput.value || appToday.value, time: timeInput.value,
           account: accountInput.value.trim(), note: noteInput.value.trim(),
           direction: directionInput.value, currency, split,
         })
@@ -306,7 +311,7 @@ export function useQuickEntryForm({ baseCurrency, domain, notify, closeSwipe, le
           cat: catInput.value || detectCategory(name, { direction: directionInput.value }),
           direction: directionInput.value,
           date: dateInput.value || appToday.value,
-          time: timeInput.value || ledgerNowHM(),
+          time: timeInput.value,
           note: noteInput.value.trim(), account: accountInput.value.trim(),
           source: sourceInput.value || 'manual',
           billId: billIdInput.value || '',

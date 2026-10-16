@@ -7,9 +7,12 @@ vi.mock('../src/composables/quickRecord/adapters.js', () => ({
   useQuickRecordAdapters: () => ({ courses: { value: [{ id: 'sample-math', name: '高数' }] }, save: saveMock }),
 }))
 import QuickRecordPanel from '../src/components/QuickRecordPanel.vue'
+import { accountUser } from '../src/composables/accountAuth.js'
 import { accountDataOwner } from '../src/composables/accountSyncIdentity.js'
 
 const mounts = []
+const originalUser = accountUser.value
+const originalOwner = accountDataOwner.value
 function mountPanel(props = {}) {
   const root = document.createElement('div')
   document.body.append(root)
@@ -43,6 +46,7 @@ async function edit(element, value, event = 'input') {
 
 beforeEach(() => {
   sessionStorage.clear()
+  accountUser.value = null
   accountDataOwner.value = ''
   saveMock.mockReset().mockResolvedValue({ message: '已添加示例记录', undo: vi.fn() })
 })
@@ -51,7 +55,8 @@ afterEach(() => {
   document.body.replaceChildren()
   document.body.style.overflow = ''
   sessionStorage.clear()
-  accountDataOwner.value = ''
+  accountUser.value = originalUser
+  accountDataOwner.value = originalOwner
   vi.restoreAllMocks()
 })
 
@@ -163,6 +168,20 @@ describe('快速记录完整录入体验', () => {
     expect(document.querySelector('.title-edit').value).toBe('示例修改')
   })
 
+  it('保存完成后发出的撤销回调仍绑定保存时的账号', async () => {
+    const undo = vi.fn()
+    saveMock.mockResolvedValue({ message: '已保存示例记录', undo })
+    const { events } = mountPanel()
+    await enter('午饭18元')
+    button('保存').click()
+    await vi.waitFor(() => expect(events.some((event) => typeof event === 'object')).toBe(true))
+    const payload = events.find((event) => typeof event === 'object')
+
+    accountUser.value = { id: 'fictional-account-b' }
+    expect(() => payload.undo()).toThrow('已取消自动恢复')
+    expect(undo).not.toHaveBeenCalled()
+  })
+
   it('组件卸载后重新打开仍恢复草稿，成功保存后暂存清空', async () => {
     mountPanel()
     await enter('午饭18元')
@@ -189,6 +208,22 @@ describe('快速记录完整录入体验', () => {
     expect(undo).toHaveBeenCalledOnce()
     expect(document.querySelector('.smart-input').value).toBe('公交2元')
     expect(events).toEqual([])
+  })
+
+  it('面板内的保存并继续撤销也拒绝跨账号执行', async () => {
+    const undo = vi.fn()
+    saveMock.mockResolvedValue({ message: '已保存示例记录', undo })
+    mountPanel()
+    await enter('午饭18元')
+    button('保存并继续').click()
+    await vi.waitFor(() => expect(button('撤销刚才保存')).toBeTruthy())
+
+    accountUser.value = { id: 'fictional-account-b' }
+    button('撤销刚才保存').click()
+    await nextTick()
+
+    expect(undo).not.toHaveBeenCalled()
+    expect(document.querySelector('[role="alert"]').textContent).toContain('已取消自动恢复')
   })
 
   it('移除草稿同步更新原文和选中金额合计', async () => {

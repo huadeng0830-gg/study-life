@@ -1,0 +1,6 @@
+<view class="workspace" style="{{themeStyle}}">
+  <view class="page-header"><view><text class="page-heading">更多</text><text class="subtitle">管理自己的记录与工作台。</text></view></view>
+  <view class="account-entry" bindtap="account"><view class="account-mark">三</view><view class="record-main"><text class="record-title">{{loggedIn ? '我的微信账号' : '登录，保存到微信云端'}}</text><text class="record-meta">{{loggedIn ? sync.label : '未登录也能先在本机使用'}}</text></view><text class="chevron">›</text></view>
+  <view wx:for="{{groups}}" wx:key="title" class="menu-group"><text class="group-title">{{item.title}}</text><view class="menu-panel"><view wx:for="{{item.items}}" wx:for-item="entry" wx:key="label" class="menu-row" data-kind="{{entry.kind}}" data-page="{{entry.page}}" bindtap="open"><image class="icon" src="/assets/icons/{{entry.icon}}.svg"/><text class="menu-label">{{entry.label}}</text><text class="chevron">›</text></view></view></view>
+  <text class="footnote">三两事 · 学习生活工作台</text><text class="footnote">小程序与网页版使用各自的账号空间和数据。</text>
+</view>

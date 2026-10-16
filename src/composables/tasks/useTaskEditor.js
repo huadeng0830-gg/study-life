@@ -5,6 +5,7 @@ import { normalizeTimeStages, taskDeadlineError, taskRepeatBase, taskTimePlanErr
 import { undoTaskTimeShift } from './taskTimeShift'
 import { isValidPlanningDate } from '../planningViews.js'
 import { defaultReminderMinutes } from '../settingsPolicy.js'
+import { createFormIdentityGuard } from '../formIdentity.js'
 
 function emptyForm() {
   return {
@@ -31,6 +32,8 @@ function emptyForm() {
 
 /** Owns task form state, validation, conflict confirmation, and persistence. */
 export function useTaskEditor({ domain, tasks, courses, events, onSaved = (_message, _options = {}) => {} }) {
+  const identity = createFormIdentityGuard()
+  let formIdentitySnapshot = null
   const showForm = ref(false)
   const editingId = ref(null)
   const error = ref('')
@@ -66,6 +69,8 @@ export function useTaskEditor({ domain, tasks, courses, events, onSaved = (_mess
   }
 
   function openAdd() {
+    formIdentitySnapshot = identity.begin()
+    saveConflict.value = null
     editingId.value = null
     setFormError('')
     form.value = emptyForm()
@@ -73,6 +78,8 @@ export function useTaskEditor({ domain, tasks, courses, events, onSaved = (_mess
   }
 
   function openEdit(task) {
+    formIdentitySnapshot = identity.begin()
+    saveConflict.value = null
     editingId.value = task.id
     setFormError('')
     form.value = {
@@ -97,13 +104,14 @@ export function useTaskEditor({ domain, tasks, courses, events, onSaved = (_mess
     showForm.value = true
   }
 
-  function commitSave(data, editId) {
+  function commitSave(data, editId, identitySnapshot) {
     const existing = tasks.value.find((task) => task.id === editId)
     const timing = (task) => JSON.parse(JSON.stringify({ dueDate: task.dueDate || '', dueTime: task.dueTime || '', timeStages: task.timeStages || [] }))
     const before = existing && !existing.done && existing.status !== 'completed' ? timing(existing) : null
     const beforeAnchor = existing?.repeatAnchorDay
     const beforeRepeat = existing?.repeat
     try {
+      identity.assertCurrent(identitySnapshot)
       if (editId && domain.updateTask(editId, data) === null) {
         setFormError('这条待办已不存在，请关闭后重新添加。')
         return
@@ -194,6 +202,7 @@ export function useTaskEditor({ domain, tasks, courses, events, onSaved = (_mess
     }
     // Snapshot the edit target before a conflict dialog can remain open.
     const editId = editingId.value
+    const identitySnapshot = formIdentitySnapshot
     const existingTask = tasks.value.find((task) => task.id === editId)
     if (form.value.timeStages.length || existingTask?.timeStages) data.timeStages = normalizeTimeStages(form.value.timeStages)
     if (rawReminderMinutes || existingTask?.reminderMinutes !== undefined) data.reminderMinutes = defaultReminderMinutes('task', rawReminderMinutes)
@@ -209,18 +218,18 @@ export function useTaskEditor({ domain, tasks, courses, events, onSaved = (_mess
         : detectTaskEventConflicts(target, [...tasks.value, ...events.value], data.dueDate, 'task')
       const summary = getConflictSummary(conflicts)
       if (summary.hasConflicts) {
-        saveConflict.value = { message: `${summary.message}\n${conflicts.map((item) => item.message).join('\n')}\n是否继续保存？`, data, editId }
+        saveConflict.value = { message: `${summary.message}\n${conflicts.map((item) => item.message).join('\n')}\n是否继续保存？`, data, editId, identitySnapshot }
         return
       }
     }
 
-    commitSave(data, editId)
+    commitSave(data, editId, identitySnapshot)
   }
 
   function confirmConflictSave() {
     const target = saveConflict.value
     saveConflict.value = null
-    if (target) commitSave(target.data, target.editId)
+    if (target) commitSave(target.data, target.editId, target.identitySnapshot)
   }
 
   function remove() {

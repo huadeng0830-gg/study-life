@@ -1,0 +1,5 @@
+<view class="tab-bar" style="--primary:{{primary}}">
+  <view wx:for="{{tabs}}" wx:key="path" class="tab {{selected === index ? 'active' : ''}} {{index === 2 ? 'capture' : ''}}" data-index="{{index}}" bindtap="switchTab" role="button" aria-label="{{item.label}}">
+    <view class="tab-icon"><image class="icon-image" src="/assets/icons/{{item.icon}}.svg"/></view><text class="tab-label">{{item.label}}</text>
+  </view>
+</view>

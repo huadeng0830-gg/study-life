@@ -1,0 +1,24 @@
+{
+  "description": "部署清单，不会由微信开发者工具自动应用。所有集合使用 database.rules.json 禁止客户端直读直写。",
+  "collections": ["sl_accounts", "sl_profiles", "sl_content", "sl_feedback", "sl_reports", "sl_applications", "sl_grants", "sl_wallets", "sl_ledger", "sl_limits", "sl_moderation", "sl_audits", "sl_personal_records"],
+  "indexes": [
+    { "collection": "sl_personal_records", "fields": { "user_id": 1, "id": 1, "_id": 1 } },
+    { "collection": "sl_content", "fields": { "author_id": 1, "created_at": -1, "_id": 1 } },
+    { "collection": "sl_reports", "fields": { "reporter_id": 1, "created_at": -1, "_id": 1 } },
+    { "collection": "sl_content", "fields": { "type": 1, "status": 1, "school": 1, "campus": 1, "created_at": -1, "_id": 1 } },
+    { "collection": "sl_content", "fields": { "type": 1, "status": 1, "school": 1, "created_at": -1, "_id": 1 } },
+    { "collection": "sl_content", "fields": { "status": 1, "school": 1, "campus": 1, "created_at": 1, "_id": 1 } },
+    { "collection": "sl_content", "fields": { "status": 1, "school": 1, "created_at": 1, "_id": 1 } },
+    { "collection": "sl_content", "fields": { "status": 1, "created_at": 1, "_id": 1 } },
+    { "collection": "sl_reports", "fields": { "status": 1, "school": 1, "campus": 1, "created_at": 1, "_id": 1 } },
+    { "collection": "sl_reports", "fields": { "status": 1, "school": 1, "created_at": 1, "_id": 1 } },
+    { "collection": "sl_reports", "fields": { "status": 1, "created_at": 1, "_id": 1 } },
+    { "collection": "sl_feedback", "fields": { "visibility": 1, "status": 1, "updated_at": -1, "_id": 1 } },
+    { "collection": "sl_feedback", "fields": { "visibility": 1, "updated_at": -1, "_id": 1 } },
+    { "collection": "sl_feedback", "fields": { "updated_at": -1, "_id": 1 } },
+    { "collection": "sl_applications", "fields": { "status": 1, "created_at": 1, "_id": 1 } },
+    { "collection": "sl_grants", "fields": { "active": 1, "updated_at": -1, "_id": 1 } },
+    { "collection": "sl_ledger", "fields": { "user_id": 1, "created_at": -1, "_id": 1 } },
+    { "collection": "sl_audits", "fields": { "outcome": 1, "created_at": 1, "_id": 1 } }
+  ]
+}

@@ -27,11 +27,12 @@ import { menuPlacementFor } from '../composables/menuPlacement.js'
 import { createLongPress } from '../composables/longPress.js'
 import { addAppDays, appCalendarDaysBetween, appNow, appToday } from '../composables/timeContext.js'
 import { defaultReminderMinutes } from '../composables/settingsPolicy.js'
-import { isValidPlanningDate, matchesMilestoneQuery, milestoneCalendarOccurrenceDate, selectMilestoneWorkspace } from '../composables/planningViews.js'
+import { matchesMilestoneQuery, milestoneCalendarOccurrenceDate, selectMilestoneWorkspace } from '../composables/planningViews.js'
 import { useDebouncedRef } from '../composables/useDebouncedRef.js'
 import { countdownState } from '../composables/store/countdown.js'
 import { clearFocusFromRoute, focusElementWhenReady, readFocusQuery } from '../composables/focusNavigation.js'
-import { defaultExternalExamItems, externalExamTimelineTarget, normalizeExternalExamItems } from '../composables/externalExam.js'
+import { externalExamTimelineTarget, normalizeExternalExamItems } from '../composables/externalExam.js'
+import { useMilestoneEditor } from '../composables/useMilestoneEditor.js'
 
 const CATEGORIES = ['学习', '校外考试', '生活', '纪念日', '项目', '其他']
 const domain = useDomainCommands()
@@ -48,29 +49,22 @@ const showHistory = ref(false)
 const viewMode = useStoredRef('sl_countdown_view', 'list')
 const selectedCalendarDate = ref(parseDate(appToday.value))
 const calendarPlaceholder = ref(parseDate(appToday.value))
-const showForm = ref(false)
-/** @type {import('vue').Ref<string | null>} */
-const editingId = ref(null)
-const error = ref('')
-const errorField = ref('')
-/** @type {import('vue').Ref<HTMLInputElement | null>} */
-const nameInput = ref(null)
-/** @type {import('vue').Ref<HTMLInputElement | null>} */
-const dateInput = ref(null)
 const query = ref('')
 const searchQuery = useDebouncedRef(query)
 const categoryFilter = ref('all')
 const periodFilter = ref('all')
 const sortKey = ref('date')
-const form = ref(emptyForm())
 const deleteTarget = ref(null)
 const reviewMessage = ref('')
 const focusMessage = ref('')
 const focusedMilestoneId = ref('')
 /** @type {import('vue').Ref<{ open: boolean, message: string, type: string, actionLabel: string, undoFn?: () => unknown, viewFn?: () => unknown, duration: number }>} */
 const toast = ref({ open: false, message: '', type: 'info', actionLabel: '', duration: 3200 })
-const newRequiredItemName = ref('')
 let focusHandled = ''
+
+const milestoneEditor = useMilestoneEditor({ domain, courses, showToast })
+const { showForm, editingId, error, errorField, nameInput, dateInput, form, formId: editorFormId, formElement,
+  newRequiredItemName, openAdd, openEdit, save, clearFormError, setFormDate, addRequiredItem, removeRequiredItem } = milestoneEditor
 
 watch(appToday, (todayKey, previousTodayKey) => {
   if (selectedCalendarDate.value.toString() === previousTodayKey) selectedCalendarDate.value = parseDate(todayKey)
@@ -85,40 +79,6 @@ watch(viewMode, (mode) => {
   if (mode !== 'list' && mode !== 'calendar') viewMode.value = 'list'
 }, { immediate: true })
 
-function emptyForm() {
-  return {
-    name: '',
-    date: '',
-    time: '',
-    location: '',
-    note: '',
-    category: '学习',
-    repeat: 'none',
-    pinned: false,
-    courseId: '',
-    reviewProgress: 0,
-    reminderMinutes: '',
-    registerStart: '',
-    registerDeadline: '',
-    examDate: '',
-    examTime: '',
-    venue: '',
-    campus: '',
-    seatNo: '',
-    admissionNo: '',
-    requiredItems: defaultExternalExamItems(),
-  }
-}
-
-function openAdd(kind = 'countdown') {
-  editingId.value = null
-  error.value = ''
-  errorField.value = ''
-  form.value = emptyForm()
-  if (kind === 'externalExam') form.value.category = '校外考试'
-  showForm.value = true
-}
-
 watch(() => [route.path, route.query.new, route.query.courseId], ([path, value, courseId]) => {
   if (path !== '/exams' || value !== '1') return
   openAdd()
@@ -129,119 +89,6 @@ watch(() => [route.path, route.query.new, route.query.courseId], ([path, value, 
   delete query.courseId
   void router.replace({ query })
 }, { immediate: true })
-
-function openEdit(item) {
-  editingId.value = item.id
-  error.value = ''
-  errorField.value = ''
-  form.value = {
-    name: item.name,
-    date: item.kind === 'externalExam' ? item.examDate || item.registerDeadline || item.date : item.date,
-    time: item.time ?? '',
-    location: item.location ?? '',
-    note: item.note ?? '',
-    category: item.category ?? '其他',
-    repeat: item.repeat ?? 'none',
-    pinned: Boolean(item.pinned),
-    courseId: item.courseId ?? '',
-    reviewProgress: Number(item.reviewProgress ?? 0),
-    reminderMinutes: String(item.reminderMinutes ?? ''),
-    registerStart: item.registerStart ?? '',
-    registerDeadline: item.registerDeadline ?? '',
-    examDate: item.examDate ?? (item.kind === 'externalExam' ? item.date : ''),
-    examTime: item.examTime ?? item.time ?? '',
-    venue: item.venue ?? item.location ?? '',
-    campus: item.campus ?? '',
-    seatNo: item.seatNo ?? '',
-    admissionNo: item.admissionNo ?? '',
-    requiredItems: item.kind === 'externalExam' ? normalizeExternalExamItems(item.requiredItems) : defaultExternalExamItems(),
-  }
-  newRequiredItemName.value = ''
-  showForm.value = true
-}
-
-function save() {
-  const isExternalExam = form.value.category === '校外考试'
-  const primaryDate = isExternalExam ? (form.value.examDate || form.value.registerDeadline) : form.value.date
-  if (!form.value.name.trim()) {
-    error.value = '请填写重要日期名称'
-    errorField.value = 'name'
-    void nextTick(() => nameInput.value?.focus())
-    return
-  }
-  if (!isValidPlanningDate(primaryDate)
-    || (isExternalExam && [form.value.registerStart, form.value.registerDeadline, form.value.examDate].some((date) => date && !isValidPlanningDate(date)))) {
-    error.value = '请选择有效的目标日期'
-    errorField.value = 'date'
-    void nextTick(() => dateInput.value?.focus())
-    return
-  }
-  const reminder = String(form.value.reminderMinutes).trim()
-  if (reminder && (!Number.isFinite(Number(reminder)) || Number(reminder) < 0)) {
-    error.value = '提醒提前量需要是大于或等于 0 的分钟数'
-    errorField.value = 'reminder'
-    return
-  }
-  const isStudyCountdown = form.value.category === '学习'
-  const data = {
-    name: form.value.name.trim(),
-    date: primaryDate,
-    time: isExternalExam ? form.value.examTime : form.value.time,
-    location: isExternalExam ? form.value.venue.trim() : form.value.location.trim(),
-    note: form.value.note.trim(),
-    category: form.value.category,
-    repeat: isExternalExam ? 'none' : form.value.repeat,
-    kind: isExternalExam ? 'externalExam' : form.value.category === '学习' ? 'exam' : 'countdown',
-    pinned: form.value.pinned,
-    courseId: isStudyCountdown ? form.value.courseId : '',
-    courseName: isStudyCountdown ? (courses.value.find((course) => course.id === form.value.courseId)?.name ?? '') : '',
-    reviewProgress: isStudyCountdown ? Math.max(0, Math.min(100, Number(form.value.reviewProgress) || 0)) : 0,
-    reminderMinutes: defaultReminderMinutes('milestone', reminder),
-    ...(isExternalExam ? {
-      kind: 'externalExam',
-      registerStart: form.value.registerStart,
-      registerDeadline: form.value.registerDeadline,
-      examDate: form.value.examDate,
-      examTime: form.value.examTime,
-      venue: form.value.venue.trim(),
-      campus: form.value.campus.trim(),
-      seatNo: form.value.seatNo.trim(),
-      admissionNo: form.value.admissionNo.trim(),
-      requiredItems: normalizeExternalExamItems(form.value.requiredItems),
-    } : {}),
-  }
-  if (editingId.value) {
-    if (!domain.updateMilestone(editingId.value, data)) {
-      error.value = '这条重要日期已不存在，请关闭后重新添加。'
-      return
-    }
-  } else {
-    domain.createMilestone({ ...data, createdFrom: 'manual' })
-  }
-  showForm.value = false
-  showToast(editingId.value ? '重要日期已更新' : '重要日期已添加', { type: 'success' })
-}
-
-function clearFormError(field) {
-  if (errorField.value === field) { error.value = ''; errorField.value = '' }
-}
-
-function setFormDate(offset) {
-  if (form.value.category === '校外考试') form.value.examDate = addAppDays(appToday.value, offset)
-  else form.value.date = addAppDays(appToday.value, offset)
-  clearFormError('date')
-}
-
-function addRequiredItem() {
-  const name = newRequiredItemName.value.trim()
-  if (!name) return
-  form.value.requiredItems.push({ name, quantity: 1, unit: '', checked: false })
-  newRequiredItemName.value = ''
-}
-
-function removeRequiredItem(index) {
-  form.value.requiredItems.splice(index, 1)
-}
 
 function updateExternalExamItems(item, updater) {
   const requiredItems = normalizeExternalExamItems(item.requiredItems).map((entry, index) => updater(entry, index))
@@ -890,8 +737,8 @@ function courseLabel(item) {
       </TabsContent>
     </Tabs>
 
-    <Modal v-if="showForm" :open="showForm" :title="editingId ? '编辑重要日期' : '添加重要日期'" @close="showForm = false">
-      <form class="form" novalidate @submit.prevent="save">
+    <Modal v-if="showForm" :open="showForm" :title="editingId ? '编辑重要日期' : '添加重要日期'" mobile-full-screen @close="showForm = false">
+      <form :id="editorFormId" ref="formElement" class="form" novalidate @submit.prevent="save">
         <label for="exams-name">名称 *</label>
         <input id="exams-name" ref="nameInput" v-model="form.name" maxlength="200" :aria-invalid="errorField === 'name' || undefined" :aria-describedby="errorField === 'name' ? 'dates-form-error' : undefined" placeholder="例如：期末考试、生日或项目截止日" @input="clearFormError('name')" />
 
@@ -900,12 +747,13 @@ function courseLabel(item) {
             <label v-if="form.category !== '校外考试'" for="exams-target-date">目标日期 *</label>
             <input v-if="form.category !== '校外考试'" id="exams-target-date" ref="dateInput" v-model="form.date" type="date" :aria-invalid="errorField === 'date' || undefined" :aria-describedby="errorField === 'date' ? 'dates-form-error' : undefined" @input="clearFormError('date')" />
             <label v-else for="exams-exam-date">考试日期</label>
-            <input v-if="form.category === '校外考试'" id="exams-exam-date" ref="dateInput" v-model="form.examDate" type="date" :aria-invalid="errorField === 'date' || undefined" :aria-describedby="errorField === 'date' ? 'dates-form-error' : undefined" @input="clearFormError('date')" />
+            <input v-if="form.category === '校外考试'" id="exams-exam-date" ref="dateInput" v-model="form.examDate" type="date" :aria-invalid="errorField === 'examDate' || undefined" :aria-describedby="errorField === 'examDate' ? 'dates-form-error' : undefined" @input="clearFormError('examDate')" />
           </div>
           <div>
-            <label for="exams-time">{{ form.category === '校外考试' ? '考试时间' : '具体时间' }}</label>
-            <input id="exams-time" v-if="form.category !== '校外考试'" v-model="form.time" type="time" />
-            <input id="exams-time" v-else v-model="form.examTime" type="time" />
+            <label for="exams-category">类型</label>
+            <select id="exams-category" v-model="form.category">
+              <option v-for="category in CATEGORIES" :key="category" :value="category">{{ category }}</option>
+            </select>
           </div>
         </div>
 
@@ -913,9 +761,13 @@ function courseLabel(item) {
 
         <template v-if="form.category === '校外考试'">
           <div class="form-row">
-            <div><label for="external-register-start">报名开始</label><input id="external-register-start" v-model="form.registerStart" type="date" /></div>
-            <div><label for="external-register-deadline">报名截止</label><input id="external-register-deadline" v-model="form.registerDeadline" type="date" /></div>
+            <div><label for="external-register-start">报名开始（选填）</label><input id="external-register-start" v-model="form.registerStart" type="date" :aria-invalid="errorField === 'registerStart' || undefined" :aria-describedby="errorField === 'registerStart' ? 'dates-form-error' : undefined" @input="clearFormError('registerStart')" /></div>
+            <div><label for="external-register-deadline">报名截止</label><input id="external-register-deadline" v-model="form.registerDeadline" type="date" :aria-invalid="errorField === 'registerDeadline' || undefined" :aria-describedby="errorField === 'registerDeadline' ? 'dates-form-error' : undefined" @input="clearFormError('registerDeadline')" /></div>
           </div>
+          <small class="field-hint">考试日期和报名截止日期至少填一项，其他信息可以稍后补充。</small>
+          <details class="milestone-details" :open="Boolean(editingId)">
+          <summary>考场与用品（选填）</summary>
+          <div class="milestone-extra">
           <div class="form-row">
             <div><label for="external-venue">考点 / 考场</label><Input id="external-venue" v-model="form.venue" maxlength="200" placeholder="选填，例如：市一中考点" /></div>
             <div><label for="external-campus">校区</label><Input id="external-campus" v-model="form.campus" maxlength="100" placeholder="选填" /></div>
@@ -935,14 +787,18 @@ function courseLabel(item) {
             <div class="external-exam-add-item"><Input v-model="newRequiredItemName" maxlength="60" aria-label="新增考试用品" placeholder="例如：水、透明文件袋" @keydown.enter.prevent="addRequiredItem" /><button type="button" @click="addRequiredItem">添加用品</button></div>
           </section>
           <small class="field-hint">至少填写考试日期或报名截止日期；提醒会在报名截止前 14/7/3 天、考试前 30/7/1 天触发，并在考前一晚提示检查用品。</small>
+          </div>
+          </details>
         </template>
 
+        <details class="milestone-details" :open="Boolean(editingId) || ['time', 'examTime', 'reminder'].includes(errorField)">
+        <summary>时间、提醒与更多信息（选填）</summary>
+        <div class="milestone-extra">
         <div class="form-row">
           <div>
-            <label for="exams-category">类型</label>
-            <select id="exams-category" v-model="form.category">
-              <option v-for="category in CATEGORIES" :key="category" :value="category">{{ category }}</option>
-            </select>
+            <label for="exams-time">{{ form.category === '校外考试' ? '考试时间' : '具体时间' }}（选填）</label>
+            <input id="exams-time" v-if="form.category !== '校外考试'" v-model="form.time" type="time" :aria-invalid="errorField === 'time' || undefined" :aria-describedby="errorField === 'time' ? 'dates-form-error' : undefined" @input="clearFormError('time')" />
+            <input id="exams-time" v-else v-model="form.examTime" type="time" :aria-invalid="errorField === 'examTime' || undefined" :aria-describedby="errorField === 'examTime' ? 'dates-form-error' : undefined" @input="clearFormError('examTime')" />
           </div>
           <div v-if="form.category !== '校外考试'">
             <label for="exams-repeat">重复</label>
@@ -974,15 +830,18 @@ function courseLabel(item) {
           <input v-model="form.pinned" type="checkbox" />
           在列表顶部显示
         </label>
+        </div>
+        </details>
 
         <p v-if="error" id="dates-form-error" class="error" role="alert">{{ error }}</p>
-
+      </form>
+      <template #foot>
         <div class="actions">
           <button v-if="editingId" type="button" class="btn btn-danger" @click="remove">删除</button>
           <button type="button" class="btn" @click="showForm = false">取消</button>
-          <button type="submit" class="btn btn-primary">保存</button>
+          <button type="submit" :form="editorFormId" class="btn btn-primary">保存</button>
         </div>
-      </form>
+      </template>
     </Modal>
 
     <ConfirmDialog

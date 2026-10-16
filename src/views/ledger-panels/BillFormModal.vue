@@ -154,6 +154,7 @@ import { activeCategories, detectCategory, normalizeAmount } from '../../composa
 import { currencyChoices, normalizeCurrency, useLedgerFx } from '../../composables/ledgerFx.js'
 import { templateToBillForm, useLedgerTemplateCommands } from '../../composables/ledgerTemplates.js'
 import { currencySymbol } from '../../utils/formatters.js'
+import { createFormIdentityGuard } from '../../composables/formIdentity.js'
 
 // 周期字典与 BillsPanel 收到的那份是同一组文案（页面侧另有一份同名常量）。
 const CYCLES = {
@@ -189,6 +190,8 @@ const billFieldRefs = {
 }
 const deleteBillTarget = ref(null)
 const { fx } = useLedgerFx()
+const formIdentity = createFormIdentityGuard()
+let formIdentitySnapshot = null
 
 function setBillError(message, field = '') {
   billError.value = message
@@ -211,6 +214,7 @@ function pickBillFields(b) {
 }
 /** 页面侧的唯一入口：预填（首页「创建固定账单」）或带 id 进编辑态。 */
 function open(prefill = {}, editing = null) {
+  formIdentitySnapshot = formIdentity.begin()
   editingBillId.value = editing
   billForm.value = editing
     ? { ...props.bills.find((b) => b.id === editing), ...emptyBillForm(), ...pickBillFields(props.bills.find((b) => b.id === editing)) }
@@ -247,6 +251,7 @@ function saveBillAsTemplate() {
   try {
     // 同名模板按 id 覆盖（改），避免同一个账单越存越多份。
     // `nextDate` 不在模板白名单里（见 ledgerTemplates.js），传了也不会被保存。
+    formIdentity.assertCurrent(formIdentitySnapshot)
     saveBillTemplate({ id: existing?.id, name, bill: f })
   } catch (cause) {
     setBillError(cause?.message || '存为模板失败')
@@ -275,6 +280,7 @@ function saveBill() {
     updatedAt: new Date().toISOString(),
   }
   try {
+    formIdentity.assertCurrent(formIdentitySnapshot)
     if (editingBillId.value) {
       if (!props.domain.updateBill(editingBillId.value, data)) {
         setBillError('这条固定账单已不存在，请关闭后重新选择。')

@@ -1,0 +1,10 @@
+<view class="workspace focus-page" style="{{themeStyle}}">
+  <view class="page-header"><view><text class="page-heading">专注</text><text class="subtitle">一次只做一件事。</text></view><text class="text-link" bindtap="history">历史</text></view>
+  <view wx:if="{{error}}" class="notice error">{{error}}</view>
+  <view class="panel"><text class="field-label">这次想完成什么</text><input class="field-input" maxlength="100" value="{{title}}" disabled="{{state !== 'idle'}}" data-field="title" bindinput="input" placeholder="写一段报告，或复习一节课"/><view class="form-field" style="margin-top:24rpx"><picker range="{{tasks}}" range-key="title" value="{{taskIndex}}" disabled="{{state !== 'idle'}}" bindchange="taskChange"><view class="field-picker">{{tasks[taskIndex].title}} ▾</view></picker></view>
+    <text class="focus-clock">{{clock}}</text><text class="focus-state">{{state === 'running' ? '正在专注' : state === 'paused' ? '已暂停' : state === 'finished' ? '本段专注时间到' : '准备好就开始'}}</text>
+    <view wx:if="{{state === 'idle'}}"><view class="chip-list focus-choices"><button wx:for="{{choices}}" wx:key="*this" class="chip {{minutes == item ? 'active' : ''}}" data-minutes="{{item}}" bindtap="choose">{{item}} 分钟</button></view><input class="field-input" type="number" maxlength="3" data-field="minutes" value="{{minutes}}" bindinput="input" placeholder="自定义分钟（1–180）"/><button class="action-primary start" bindtap="start">开始专注</button></view>
+    <view wx:else><textarea class="field-textarea" maxlength="1000" data-field="note" value="{{note}}" bindinput="input" placeholder="做到哪里了？下次从哪里继续？"/><view class="form-actions"><button wx:if="{{state !== 'finished'}}" class="action-secondary" bindtap="pause">{{state === 'paused' ? '继续' : '暂停'}}</button><button class="action-primary" bindtap="finish">结束并记录</button></view></view>
+  </view>
+  <text class="body-copy">离开页面不会重置计时。结束后记录实际时长，并回写关联待办的专注进度。</text>
+</view>

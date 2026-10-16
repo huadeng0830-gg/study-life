@@ -13,6 +13,8 @@ import { defaultAccount, defaultReminderMinutes, policyDateKey, policyTimeKey } 
 import { eventInputError } from '../events/eventFields.js'
 import { normalizeTimeStages, taskRepeatBase, taskStages } from '../tasks/taskTimePlan'
 import { normalizeExternalExam } from '../externalExam.js'
+import { taskInputError } from '../tasks/taskInputRules.js'
+import { milestoneInputError } from '../milestoneFields.js'
 
 let lastStamp = 0
 function stamp() {
@@ -191,6 +193,8 @@ export function useDomainCommands() {
     return repeat === 'none' ? {} : { repeatEndDate: String(endDate || '').trim() }
   }
   function createTask(value) {
+    const issue = taskInputError(value)
+    if (issue) throw new Error(issue.message)
     const now = stamp()
     const repeat = normalizeTaskRepeat(value.repeat)
     const actualMinutes = Number(value.actualMinutes)
@@ -214,10 +218,12 @@ export function useDomainCommands() {
   function updateTask(id, value) {
     const item = tasks.value.find((task) => task.id === id)
     if (!item) return null
+    const issue = taskInputError(value, item)
+    if (issue) throw new Error(issue.message)
     const previousRepeat = normalizeTaskRepeat(item.repeat)
     const previousDueDate = taskRepeatBase(item).date
     const normalized = 'timeStages' in value ? { ...value, timeStages: normalizeTimeStages(value.timeStages) } : value
-    Object.assign(item, normalized, { updatedAt: stamp() })
+    Object.assign(item, normalized, { ...(Object.hasOwn(value, 'title') ? { title: String(value.title).trim() } : {}), updatedAt: stamp() })
     if ('repeat' in value) item.repeat = normalizeTaskRepeat(item.repeat)
     if (item.repeat === 'none') {
       delete item.repeatEndDate
@@ -291,7 +297,8 @@ export function useDomainCommands() {
       ...origin(value),
     }
     if (item.kind === 'externalExam') Object.assign(item, normalizeExternalExam({ ...item, ...value, id: item.id, createdAt: now, updatedAt: now, ...origin(value) }))
-    if (!item.name || !item.date) throw new Error('请补充名称和目标日期')
+    const issue = milestoneInputError({ ...item, reminderMinutes: value.reminderMinutes })
+    if (issue) throw new Error(issue.message)
     milestones.value.push(item)
     commitMilestones()
     return item
@@ -299,8 +306,18 @@ export function useDomainCommands() {
   function updateMilestone(id, value) {
     const item = milestones.value.find((entry) => entry.id === id)
     if (!item) return null
-    Object.assign(item, value, { updatedAt: stamp() })
-    if (item.kind === 'externalExam') Object.assign(item, normalizeExternalExam(item))
+    const issue = milestoneInputError(value, item)
+    if (issue) throw new Error(issue.message)
+    const next = { ...item, ...value }
+    if (Object.hasOwn(value, 'name')) next.name = String(value.name).trim()
+    if (next.kind === 'externalExam' || next.category === '校外考试') {
+      if (Object.hasOwn(value, 'examDate')) next.date = value.examDate || next.registerDeadline || ''
+      else if (Object.hasOwn(value, 'date')) next.examDate = value.date || ''
+      else if (Object.hasOwn(value, 'registerDeadline') && !next.examDate) next.date = value.registerDeadline || ''
+      if (Object.hasOwn(value, 'venue')) next.location = value.venue || ''
+      else if (Object.hasOwn(value, 'location')) next.venue = value.location || ''
+    }
+    Object.assign(item, normalizeExternalExam(next), { updatedAt: stamp() })
     commitMilestones()
     return item
   }
@@ -354,7 +371,8 @@ export function useDomainCommands() {
     const amount = normalizeAmount(value.amount)
     const name = String(value.name || value.title || '').trim() || (direction === 'income' ? '收入' : direction === 'refund' ? '退款' : '日常支出')
     const date = value.date || policyDateKey(now)
-    const time = normalizeLedgerTime(value.time === undefined || value.time === null || value.time === ''
+    // Omitted time uses the entry default; an explicit empty string means no time.
+    const time = normalizeLedgerTime(value.time === undefined || value.time === null
       ? value.createdFrom === 'import' ? '' : policyTimeKey(now)
       : value.time)
     if (amount === null) throw new Error('金额需大于 0，且最多保留两位小数')

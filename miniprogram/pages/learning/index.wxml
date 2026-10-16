@@ -1,0 +1,19 @@
+<view class="workspace" style="{{themeStyle}}">
+  <view class="page-header"><view><text class="page-heading">学习</text><text class="subtitle">课表、待办与课程进度，一起安排。</text></view><button class="action-secondary compact-button" data-kind="course" bindtap="edit">＋ 课程</button></view>
+  <view wx:if="{{error}}" class="notice error">{{error}}</view>
+  <view class="panel">
+    <view class="panel-heading"><text class="section-title">课程表</text><picker mode="date" value="{{date}}" bindchange="changeDate"><text class="text-link">{{date}} ▾</text></picker></view>
+    <view class="week-strip"><view wx:for="{{days}}" wx:key="date" class="week-day {{item.selected ? 'selected' : ''}}" data-date="{{item.date}}" bindtap="selectDay"><text class="week-label">{{item.label}}</text><text class="week-date">{{item.day}}</text><view class="week-dot {{item.dot ? 'visible' : ''}}"/></view></view>
+    <view class="week-context"><text>{{weekLabel}}</text><text class="text-link" bindtap="openSettings">学期设置</text></view>
+    <view wx:if="{{!courses.length}}" class="empty"><text class="empty-title">这一天没有课程</text><text>先录入每周的上课时间，今天页会自动带出安排。</text><button class="action-secondary" data-kind="course" bindtap="edit">录入课程</button></view>
+    <view wx:for="{{courses}}" wx:key="id" class="course-row" data-kind="course" data-id="{{item.id}}" bindtap="edit"><view class="course-time"><text>{{item.startTime}}</text><text class="small-copy">{{item.endTime}}</text></view><view class="course-main"><text class="record-title">{{item.title}}</text><text class="record-meta">{{item.location || '地点待补充'}} {{item.teacher}}</text><text class="small-copy">第 {{item.startWeek}}–{{item.endWeek}} 周</text></view></view>
+  </view>
+  <view class="panel">
+    <view class="panel-heading"><text class="section-title">学习待办</text><text class="text-link" data-kind="task" bindtap="edit">＋ 新建</text></view>
+    <view class="chip-list"><button class="chip {{filter === 'pending' ? 'active' : ''}}" data-filter="pending" bindtap="filter">待完成</button><button class="chip {{filter === 'done' ? 'active' : ''}}" data-filter="done" bindtap="filter">已完成</button><button class="chip {{filter === 'all' ? 'active' : ''}}" data-filter="all" bindtap="filter">全部</button></view>
+    <view wx:if="{{!tasks.length}}" class="empty">当前没有这一类待办。</view>
+    <view wx:for="{{tasks}}" wx:key="id" class="record-row {{item.completed ? 'completed' : ''}}"><view class="record-check {{item.completed ? 'checked' : ''}}" data-id="{{item.id}}" bindtap="toggle">{{item.completed ? '✓' : ''}}</view><view class="record-main" data-kind="task" data-id="{{item.id}}" bindtap="edit"><text class="record-title">{{item.title}}</text><text class="record-meta">{{item.meta}}</text></view><button wx:if="{{!item.completed}}" class="row-action" data-id="{{item.id}}" bindtap="focus">专注</button></view>
+  </view>
+  <view wx:if="{{courseProgress.length}}" class="panel"><view class="panel-heading"><text class="section-title">课程进度</text><text class="text-link" bindtap="openDates">重要日期</text></view><view wx:for="{{courseProgress}}" wx:key="id" class="record-row"><view class="record-main"><text class="record-title">{{item.title}}</text><text class="record-meta">待办完成 {{item.done}} / {{item.total}} · 专注 {{item.minutes}} 分钟</text></view><text class="text-link" data-kind="course" data-id="{{item.id}}" bindtap="edit">编辑</text></view></view>
+  <text class="sync-line">{{sync.label}}</text>
+</view>

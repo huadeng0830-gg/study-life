@@ -1,5 +1,7 @@
 # 功能与验收覆盖矩阵
 
+> V5 持续验收见 [当前进度与六状态分类](optimization/V5_STATUS.md)。[本轮页面/字段矩阵](audit/product-continuation-matrix-2026-10-15.md) 与 [第一轮续作快照](audit/product-continuation-2026-10-15.md) 保留首轮日期边界；其旧浏览器数字不是后续修改的最终源码结果。
+
 > 最新逐项最终矩阵见 [optimization/COVERAGE_MATRIX.md](optimization/COVERAGE_MATRIX.md)，涵盖六栏状态及完整控件/浮层/API/表清单。当前项目验收未通过，旧阶段完成不等于最终发布通过；本文件其余内容保留历史范围。
 
 更新日期：2026-10-11。当前增量为电脑端 UI/UX 深度优化第 1 批，仅 /tasks 与 /review 两页及必要共用支撑；实现、验证及未完成页面见 [优化状态](optimization/STATUS.md) 和 [功能台账](optimization/INVENTORY.md)。R04/R09 的本批记录以新鲜构建/回归/Chromium 为准，其余原有 2026-10-10 覆盖保持历史边界。

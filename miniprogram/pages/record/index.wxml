@@ -1,0 +1,10 @@
+<view class="workspace" style="{{themeStyle}}">
+  <view class="page-header"><view><text class="page-heading">先记下来</text><text class="subtitle">把想到的事，变成可以继续处理的记录。</text></view><text class="text-link" bindtap="paste">粘贴</text></view>
+  <view wx:if="{{error}}" class="notice error">{{error}}</view>
+  <view class="capture-panel"><textarea class="capture-input" value="{{text}}" maxlength="5000" bindinput="input" placeholder="明天 18:00 交高数作业；午饭 18 元；或者，先记下一段想法…"/><view class="capture-footer"><text class="small-copy">先预览确认，再正式保存</text><text class="text-link" bindtap="clear">清空</text></view></view>
+  <view class="type-grid"><button wx:for="{{types}}" wx:key="kind" class="type-button {{selected === item.kind ? 'selected' : ''}}" data-kind="{{item.kind}}" bindtap="select"><image class="icon" src="/assets/icons/{{item.icon}}.svg"/><text>{{item.label}}</text></button></view>
+  <button class="action-primary" bindtap="preview">{{selected ? '填写' : '识别并预览'}}</button>
+  <text class="capture-hint">自动识别日期、时间和金额可能有偏差，请在下一步核对。选择类型后也可以手动填写。</text>
+  <view wx:if="{{recent.length}}" class="panel"><view class="panel-heading"><text class="section-title">最近记录</text></view><view wx:for="{{recent}}" wx:key="id" class="record-row" data-kind="{{item.kind}}" data-id="{{item.id}}" bindtap="edit"><view class="record-main"><text class="record-title">{{item.title}}</text><text class="record-meta">{{item.kindLabel}} · {{item.meta}}</text></view><text class="text-link">编辑</text></view></view>
+  <text class="sync-line">{{sync.label}}</text>
+</view>

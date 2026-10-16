@@ -11,6 +11,8 @@ export const DEFAULT_SETTINGS_POLICY = Object.freeze({
   defaultReminders: Object.freeze({ task: 1440, event: 30, milestone: 1440 }),
 })
 
+export const SETTINGS_NAVIGATION_LABEL = '记录与提醒设置'
+
 export const TIMEZONE_OPTIONS = Object.freeze([
   { value: 'local', label: '跟随系统时区' },
   { value: 'Asia/Shanghai', label: '中国标准时间（Asia/Shanghai）' },

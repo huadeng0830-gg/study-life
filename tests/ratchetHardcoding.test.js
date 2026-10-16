@@ -135,6 +135,8 @@ export const LARGE_FILE_LIMITS = Object.freeze({
   // 校外考试字段、用品清单与考试提醒集中在重要日期页面，按本轮实测行数封顶。
   'views/ExamsView.vue': 1050,
   'components/QuickRecordPanel.vue': 866,
+  // 保存与撤销现在校验账号归属快照，保护异步/延迟操作不跨账号写入；保持该模块在当前边界内。
+  'composables/useQuickRecordPanel.js': 815,
   'views/ledger-panels/LedgerHomePanel.vue': 812,
   // Existing feature modules already over 800 lines. Their observed sizes are the
   // cap; follow-up work must keep them level or reduce them, never grow these budgets.

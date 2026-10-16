@@ -1,0 +1,1 @@
+.entry{padding:24rpx 0;border-bottom:1rpx solid var(--border)}.entry:last-child{border:0}.entry .body-copy{display:block;margin-top:14rpx;white-space:pre-wrap}.field-input,.field-textarea{margin:22rpx 0}

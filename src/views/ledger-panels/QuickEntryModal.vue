@@ -274,7 +274,7 @@ function createBillFromSuggest() {
       </button>
      <div class="more-grid">
        <label>日期<input :value="dateInput" @input="e => $emit('update:dateInput', e.target.value)" type="date" /></label>
-       <label>时间<input :value="timeInput" @input="e => $emit('update:timeInput', e.target.value)" type="time" /></label>
+        <label>时间（选填）<input :value="timeInput" @input="e => $emit('update:timeInput', e.target.value)" type="time" /></label>
        <label>账户<input :value="accountInput" @input="e => $emit('update:accountInput', e.target.value)" placeholder="可不填，默认账户" /></label>
 <label>币种
           <select :value="localCurrencyInput" @input="e => { localCurrencyInput = e.target.value; $emit('update:currencyInput', e.target.value) }" aria-label="这笔记录使用的币种">

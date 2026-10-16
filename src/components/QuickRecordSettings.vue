@@ -1,7 +1,7 @@
 <script setup>
 import { computed } from 'vue'
 import Modal from './Modal.vue'
-import { settings, settingsPolicy, TIMEZONE_OPTIONS } from '../composables/settingsPolicy.js'
+import { settings, settingsPolicy, SETTINGS_NAVIGATION_LABEL, TIMEZONE_OPTIONS } from '../composables/settingsPolicy.js'
 defineProps({ open: Boolean })
 const emit = defineEmits(['close'])
 
@@ -19,16 +19,25 @@ const milestoneReminder = computed({ get: () => settingsPolicy.value.defaultRemi
 </script>
 
 <template>
-  <Modal :open="open" title="⚡ 快速记录设置" @close="emit('close')">
+  <Modal :open="open" :title="`⚡ ${SETTINGS_NAVIGATION_LABEL}`" @close="emit('close')">
     <div class="settings">
-      <label><input v-model="settings.clipboardHint" type="checkbox" /> <span><b>提示剪贴板内容</b><small>打开快速记录时仅提示可识别文本，不会自动创建记录。</small></span></label>
-      <label><span><b>日期与时间</b><small>今天页、提醒和快速记录使用同一时区计算。</small></span><select v-model="timezone"><option v-for="item in TIMEZONE_OPTIONS" :key="item.value" :value="item.value">{{ item.label }}</option></select></label>
-      <label><span><b>默认账户</b><small>未在记录中说明账户时，普通记账和快速记录都使用此值。</small></span><input v-model.trim="defaultAccount" placeholder="例如：微信 / 现金" /></label>
-      <div class="policy-grid">
-        <label><span><b>待办提醒（分钟）</b></span><input v-model.number="taskReminder" type="number" min="0" step="5" /></label>
-        <label><span><b>日程提醒（分钟）</b></span><input v-model.number="eventReminder" type="number" min="0" step="5" /></label>
-        <label><span><b>节点提醒（分钟）</b></span><input v-model.number="milestoneReminder" type="number" min="0" step="5" /></label>
-      </div>
+      <section class="settings-group" aria-labelledby="quick-record-group-title">
+        <h3 id="quick-record-group-title">快速记录</h3>
+        <label><input v-model="settings.clipboardHint" type="checkbox" /> <span><b>提示剪贴板内容</b><small>打开快速记录时仅提示可识别文本，不会自动创建记录。</small></span></label>
+      </section>
+      <section class="settings-group" aria-labelledby="record-defaults-group-title">
+        <h3 id="record-defaults-group-title">全局默认值</h3>
+        <label class="settings-row"><span><b>日期与时间</b><small>今天页、提醒和快速记录使用同一时区计算。</small></span><select v-model="timezone"><option v-for="item in TIMEZONE_OPTIONS" :key="item.value" :value="item.value">{{ item.label }}</option></select></label>
+        <label class="settings-row"><span><b>默认账户</b><small>未在记录中说明账户时，普通记账和快速记录都使用此值。</small></span><input v-model.trim="defaultAccount" placeholder="例如：微信 / 现金" /></label>
+      </section>
+      <section class="settings-group" aria-labelledby="reminder-defaults-group-title">
+        <h3 id="reminder-defaults-group-title">提醒默认值</h3>
+        <div class="policy-grid">
+          <label><span><b>待办提醒（分钟）</b></span><input v-model.number="taskReminder" type="number" min="0" step="5" /></label>
+          <label><span><b>日程提醒（分钟）</b></span><input v-model.number="eventReminder" type="number" min="0" step="5" /></label>
+          <label><span><b>节点提醒（分钟）</b></span><input v-model.number="milestoneReminder" type="number" min="0" step="5" /></label>
+        </div>
+      </section>
       <p class="hint"><small>以上提醒在 App 打开时生效；切到后台 / 系统回收后不会触发。0 = 到点才提醒。需要通知权限，可在浏览器设置里允许。</small></p>
       <p>全局入口：手机底部「＋记录」；桌面侧栏按钮或 Ctrl/Cmd + K。</p>
     </div>
@@ -36,6 +45,6 @@ const milestoneReminder = computed({ get: () => settingsPolicy.value.defaultRemi
 </template>
 
 <style scoped>
-.settings{display:flex;flex-direction:column;gap:14px}.settings label{display:flex;gap:10px;align-items:flex-start;color:var(--text)}.settings label > span{flex:1}.settings input{margin-top:3px;accent-color:var(--primary)}.settings select,.settings label > input:not([type="checkbox"]){min-width:150px}.settings b,.settings small{display:block}.settings small,.settings p{margin-top:4px;color:var(--ink-soft);font-size:var(--fs-12);line-height:1.55}.policy-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.policy-grid label{display:block}.policy-grid input{width:100%;margin-top:6px}.settings p{margin-bottom:0;padding:9px 10px;border-radius:var(--radius-8);background:var(--bg)}
-@media (max-width: 520px){.policy-grid{grid-template-columns:1fr}.settings select,.settings label > input:not([type="checkbox"]){min-width:0;width:100%}}
+.settings{display:flex;flex-direction:column;gap:14px}.settings-group{display:flex;flex-direction:column;gap:10px;min-width:0;padding:0;margin:0;border:0}.settings-group h3{margin:0;color:var(--ink);font-size:var(--fs-13);font-weight:var(--fw-750)}.settings label{display:flex;gap:10px;align-items:flex-start;color:var(--text)}.settings label > span{flex:1;min-width:0}.settings input{margin-top:3px;accent-color:var(--primary)}.settings select,.settings label > input:not([type="checkbox"]){min-width:150px}.settings b,.settings small{display:block}.settings small,.settings p{margin-top:4px;color:var(--ink-soft);font-size:var(--fs-12);line-height:1.55}.policy-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.policy-grid label{display:block}.policy-grid input{width:100%;margin-top:6px}.settings p{margin-bottom:0;padding:9px 10px;border-radius:var(--radius-8);background:var(--bg)}
+@media (max-width: 520px){.policy-grid{grid-template-columns:1fr}.settings-row{flex-direction:column}.settings select,.settings-row > input:not([type="checkbox"]){min-width:0;width:100%}}
 </style>

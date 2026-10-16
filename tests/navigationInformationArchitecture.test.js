@@ -5,6 +5,7 @@ import { desktopNavigationGroups, desktopShortcutRoutes, navigationRegistry } fr
 import { routeLoaders } from '../src/router/routePreload.js'
 import { DEFAULT_MOBILE_NAVIGATION, normalizeMobileNavigation } from '../src/composables/navigationPreferences.js'
 import { useNavigationViewModel } from '../src/composables/navigationViewModel.js'
+import { SETTINGS_NAVIGATION_LABEL } from '../src/composables/settingsPolicy.js'
 
 describe('导航信息架构', () => {
   it('只把真实页面注册为导航项，一级分组聚焦四个核心空间，低频页面收进其他', () => {
@@ -50,6 +51,15 @@ describe('导航信息架构', () => {
     expect(routeLoaders['/campus/places']).toBeTypeOf('function')
     expect(routes.find((route) => route.path === '/places')?.redirect).toBe('/campus/places')
     expect(navigationRegistry.find((item) => item.id === 'places')?.path).toBe('/campus')
+  })
+
+  it('用同一名称指向覆盖快速记录、全局默认值和提醒的设置入口', () => {
+    const navigation = useNavigationViewModel({ path: '/' }, '我的账号')
+    const tool = navigation.moreGroups.value.find((group) => group.id === 'personalization')
+      ?.tools.find((item) => item.key === 'quick-record')
+
+    expect(SETTINGS_NAVIGATION_LABEL).toBe('记录与提醒设置')
+    expect(tool?.label).toBe(SETTINGS_NAVIGATION_LABEL)
   })
 
   it.each(['/campus/feedback', '/campus/guides'])('校园子页 %s 仍由校园一级底栏承载', (path) => {

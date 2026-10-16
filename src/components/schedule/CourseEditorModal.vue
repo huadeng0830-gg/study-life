@@ -7,6 +7,7 @@ import { weekLabel } from '../../composables/store/schedule.js'
 import { isArchived, taskStatus } from '../../composables/domain/state.js'
 import { focusLocation } from '../../composables/focusNavigation.js'
 import TaskFocusLink from '../learning/TaskFocusLink.vue'
+import { createFormIdentityGuard } from '../../composables/formIdentity.js'
 
 const props = defineProps({
   open: Boolean,
@@ -41,6 +42,8 @@ const colorName = (hex) => COLOR_NAMES[hex] || hex
 const draft = reactive({})
 const error = reactive({ message: '', field: '' })
 const nameInput = ref(null)
+const formIdentity = createFormIdentityGuard()
+let formIdentitySnapshot = null
 
 // 单一入口，保证 error.message 与 error.field 不会各自漂移
 //（与 LedgerView / EventsView 同一套约定）。
@@ -54,6 +57,7 @@ function setError(message, field = '') {
 }
 
 function syncDraft() {
+  formIdentitySnapshot = formIdentity.begin()
   Object.assign(draft, JSON.parse(JSON.stringify(props.form)))
   setError('')
 }
@@ -105,6 +109,7 @@ function periodOption(id) {
 }
 
 function save() {
+  try { formIdentity.assertCurrent(formIdentitySnapshot) } catch (cause) { setError(cause.message); return }
   if (!String(draft.name ?? '').trim()) {
     setError('请填写课程名称', 'name')
     return

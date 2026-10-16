@@ -6,6 +6,7 @@ import { autoWallpaperColor, THEMES, themeKey } from '../composables/theme.js'
 import { originFromEvent, revealChange } from '../composables/motion.js'
 import { needsBackup } from '../composables/backupReminder.js'
 import { shouldShowUpdateReminder } from '../composables/updatePreferences.js'
+import { SETTINGS_NAVIGATION_LABEL } from '../composables/settingsPolicy.js'
 import { preloadCommonRoutes, preloadRoute } from '../router/routePreload.js'
 import { useNavigationViewModel } from '../composables/navigationViewModel.js'
 import { closeSearch, openSearch, searchOpen } from '../composables/globalSearch.js'
@@ -562,7 +563,7 @@ function openMobileTool(key) {
         <span class="nav-label">数据管理</span>
       </button>
       <button type="button" class="nav-item data-item" @click="showQuickRecordSettings = true">
-        <span class="icon">⚡</span><span class="nav-label">快速记录设置</span>
+        <span class="icon">⚡</span><span class="nav-label">{{ SETTINGS_NAVIGATION_LABEL }}</span>
       </button>
 <button type="button" class="nav-item data-item" @pointerenter="warmTool('focus')" @focus="warmTool('focus')" @click="showFocusSettings = true">
           <span class="icon">⏱</span><span class="nav-label">专注设置</span>

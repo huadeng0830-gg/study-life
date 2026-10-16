@@ -1,0 +1,14 @@
+{
+  "$schema": "https://static.cloudbase.net/cli/cloudbaserc.schema.json",
+  "envId": "cloud1-d4gkg8d2k03c3ad3c",
+  "functionRoot": "cloudfunctions",
+  "functions": [
+    {
+      "name": "study-life",
+      "handler": "index.main",
+      "timeout": 20,
+      "memorySize": 256,
+      "installDependency": true
+    }
+  ]
+}

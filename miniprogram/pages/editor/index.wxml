@@ -1,0 +1,14 @@
+<view class="workspace" style="{{themeStyle}}">
+  <view class="page-header"><view><text class="page-heading">{{heading}}</text><text class="subtitle">填写后保存，可随时回来修改。</text></view></view>
+  <view wx:if="{{error}}" class="notice error">{{error}}</view>
+  <view wx:for="{{fields}}" wx:key="key" class="form-field">
+    <text class="field-label">{{item.label}}</text>
+    <textarea wx:if="{{item.type === 'textarea'}}" class="field-textarea" maxlength="{{item.key === 'body' ? 12000 : 5000}}" value="{{item.value}}" data-key="{{item.key}}" bindinput="input" placeholder="{{item.label}}"/>
+    <picker wx:elif="{{item.type === 'select'}}" range="{{item.labels}}" value="{{item.selected}}" data-key="{{item.key}}" bindchange="select"><view class="field-picker">{{item.labels[item.selected]}} ▾</view></picker>
+    <view wx:elif="{{item.type === 'date' || item.type === 'time'}}"><picker mode="{{item.type}}" value="{{item.value}}" data-key="{{item.key}}" bindchange="input"><view class="field-picker">{{item.value || '选择' + item.label}} ▾</view></picker><text wx:if="{{item.value && (item.key === 'dueDate' || item.key === 'dueTime' || item.key === 'time' || item.key === 'endTime')}}" class="field-hint text-link" data-key="{{item.key}}" bindtap="clear">清空此项</text></view>
+    <input wx:else class="field-input" maxlength="{{item.key === 'title' ? 100 : 120}}" type="{{item.type}}" value="{{item.value}}" data-key="{{item.key}}" bindinput="input" placeholder="{{item.label}}"/>
+  </view>
+  <view wx:if="{{canLink}}" class="form-field"><text class="field-label">关联课程</text><picker range="{{courses}}" range-key="title" value="{{courseIndex}}" bindchange="courseChange"><view class="field-picker">{{courses[courseIndex].title}} ▾</view></picker></view>
+  <button class="action-primary" loading="{{saving}}" disabled="{{saving}}" bindtap="save">保存{{kind === 'transaction' ? '收支' : '记录'}}</button>
+  <text class="sync-line">保存后立即留在本机；登录并联网后同步到微信云端。</text>
+</view>

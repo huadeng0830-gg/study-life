@@ -1,0 +1,49 @@
+<view class="workspace" style="{{themeStyle}}">
+  <view class="intro"><text class="title">校园管理</text><text class="copy">处理审核员申请、公开建议与审核复核。每次处理都请记录依据。</text></view>
+  <view wx:if="{{error}}" class="notice error">{{error}}</view>
+  <view wx:if="{{notice}}" class="notice success">{{notice}}</view>
+  <picker disabled="{{busy}}" range="{{tabs}}" value="{{tabIndex}}" bindchange="changeMode"><view class="picker">{{tabs[tabIndex]}} ▾</view></picker>
+  <view wx:if="{{loading}}" class="state">正在读取…</view>
+  <block wx:elif="{{allowed}}">
+    <view wx:if="{{!items.length}}" class="state">本页没有记录。</view>
+    <button wx:for="{{items}}" wx:key="id" class="item" data-id="{{item.id}}" disabled="{{busy}}" bindtap="select">
+      <text class="box-title">{{item.displayTitle}}</text><text class="copy">{{item.displayBody}}</text>
+      <text class="copy">{{item.displayStatus}} · {{item.created_at || item.updated_at}}</text>
+      <text wx:if="{{mode === 'reviewers'}}" class="copy">账号 {{item.id}} · {{item.campus || '全部校区'}}</text>
+    </button>
+    <view wx:if="{{selected}}" class="form">
+      <text class="box-title">处理：{{selected.displayTitle}}</text>
+      <text class="copy">{{selected.displayBody}}</text>
+      <block wx:if="{{mode === 'applications'}}">
+        <text class="copy">申请账号：{{selected.user_id}}</text>
+        <text wx:if="{{selected.applicant_response}}" class="copy">补充材料：{{selected.applicant_response}}</text>
+        <input maxlength="100" placeholder="授权学校（批准时必填）" data-field="school" value="{{school}}" bindinput="input"/>
+        <input maxlength="100" placeholder="授权校区（留空表示全校）" data-field="campus" value="{{campus}}" bindinput="input"/>
+      </block>
+      <block wx:elif="{{mode === 'feedback'}}">
+        <picker range="{{statuses}}" value="{{statusIndex}}" bindchange="statusChange"><view class="picker">进度：{{statuses[statusIndex]}}</view></picker>
+        <picker range="{{visibilities}}" value="{{visibilityIndex}}" bindchange="visibilityChange"><view class="picker">可见范围：{{visibilities[visibilityIndex]}}</view></picker>
+        <textarea maxlength="2000" placeholder="公开回复" data-field="reply" value="{{reply}}" bindinput="input"/>
+        <text wx:if="{{selected.reward_issued}}" class="copy">已发放 {{selected.reward_beans}} 个贡献豆，不会重复发放。</text>
+        <input wx:else type="number" maxlength="2" placeholder="奖励 0–20 个贡献豆（留空暂不奖励）" data-field="reward" value="{{reward}}" bindinput="input"/>
+      </block>
+      <block wx:elif="{{mode === 'audits'}}">
+        <text class="copy">原决定：{{selected.event.from_status}} → {{selected.event.to_status}}</text>
+        <text class="copy">审核账号：{{selected.reviewer_id}} · 原依据：{{selected.event.reason}}</text>
+      </block>
+      <textarea maxlength="1000" placeholder="处理依据；不采纳建议时会公开显示" data-field="reason" value="{{reason}}" bindinput="input"/>
+      <view class="actions">
+        <block wx:if="{{mode === 'applications'}}">
+          <button data-decision="approve" disabled="{{busy}}" bindtap="act">批准</button><button data-decision="request_proof" disabled="{{busy}}" bindtap="act">要求补充</button><button data-decision="decline" disabled="{{busy}}" bindtap="act">不通过</button>
+        </block>
+        <block wx:elif="{{mode === 'feedback'}}"><button disabled="{{busy}}" loading="{{busy}}" bindtap="act">保存处理</button></block>
+        <block wx:elif="{{mode === 'audits'}}">
+          <button data-decision="correct" disabled="{{busy}}" bindtap="act">原审核正确</button><button data-decision="incorrect" disabled="{{busy}}" bindtap="act">判错并追回奖励</button><button wx:if="{{selected.event.target_type !== 'report'}}" data-decision="reopen" disabled="{{busy}}" bindtap="act">判错并重开审核</button>
+        </block>
+        <block wx:else><button disabled="{{busy}}" bindtap="act">撤销审核权限</button></block>
+      </view>
+    </view>
+    <view class="pagination"><button size="mini" disabled="{{loading || busy || !page}}" bindtap="previousPage">上一页</button><text>第 {{page + 1}} 页</text><button size="mini" disabled="{{loading || busy || !hasMore}}" bindtap="nextPage">下一页</button></view>
+  </block>
+  <button class="refresh" disabled="{{busy}}" bindtap="load">刷新</button>
+</view>

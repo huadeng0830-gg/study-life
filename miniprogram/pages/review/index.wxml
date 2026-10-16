@@ -1,1 +1,31 @@
-<view class="page"><view class="intro"><text class="eyebrow">CAMPUS REVIEW</text><text class="title">校园审核</text><text class="copy">每条最终决定都需要写明依据。正确处理奖励 3 个贡献豆，每日最多 20 条。</text></view><view wx:if="{{error}}" class="notice error">{{error}}</view><view wx:if="{{loading}}" class="state">正在读取审核授权…</view><view wx:elif="{{!loggedIn}}" class="state"><text>请先登录账号。</text><button class="secondary" bindtap="openAccount">打开我的账号</button></view><view wx:elif="{{!access || !access.reviewer}}" class="state"><text>当前账号还没有审核权限。</text><text class="copy">可在我的账号提交审核员申请，由总管理员批准并设置范围。</text><button class="secondary" bindtap="openAccount">申请成为审核员</button></view><view wx:else><view class="scope">{{access.owner ? '总管理员 · 全平台审核' : access.scope.school + ' · ' + (access.scope.campus || '全部校区')}}</view><view wx:if="{{!items.length}}" class="state">当前范围没有待处理内容。</view><view wx:for="{{items}}" wx:key="item.id" class="review-item"><view class="meta"><text class="tag">{{item.type}}</text><text>{{item.item.school}} {{item.item.campus}}</text><text>{{item.item.created_at}}</text></view><text class="item-title">{{item.item.title || item.item.name || item.item.course_name || item.item.target.title || '校园内容待核对'}}</text><text class="item-copy">{{item.item.description || item.item.body || item.item.note || item.item.detail || item.item.reason || item.item.target.description || ''}}</text><textarea maxlength="500" placeholder="写明核查事实、来源和处理依据" value="{{reasons[item.item.id]}}" data-id="{{item.item.id}}" bindinput="onReason"/><view class="actions"><block wx:if="{{item.type === 'report'}}"><button size="mini" data-id="{{item.item.id}}" data-decision="resolve" loading="{{busy === item.item.id}}" bindtap="decide">已核实处理</button><button size="mini" data-id="{{item.item.id}}" data-decision="dismiss" bindtap="decide">举报不成立</button><button size="mini" class="danger" data-id="{{item.item.id}}" data-decision="remove" bindtap="decide">下架原内容</button></block><block wx:elif="{{item.type === 'help_dispute'}}"><button size="mini" data-id="{{item.item.id}}" data-decision="completed" bindtap="decide">裁定完成</button><button size="mini" data-id="{{item.item.id}}" data-decision="cancelled" bindtap="decide">裁定取消</button></block><block wx:else><button size="mini" data-id="{{item.item.id}}" data-decision="approve" bindtap="decide">通过并发布</button><button size="mini" class="danger" data-id="{{item.item.id}}" data-decision="reject" bindtap="decide">退回修改</button></block></view></view></view><button class="refresh" bindtap="load">刷新队列</button></view>
+<view class="workspace" style="{{themeStyle}}">
+  <view class="intro"><text class="title">校园审核</text><text class="copy">每条决定都需要写明依据。每条审核奖励 3 个贡献豆，每日最多 20 条；同一内容只奖励一次。</text></view>
+  <view wx:if="{{error}}" class="notice error">{{error}}</view>
+  <view wx:if="{{loading}}" class="state">正在读取审核授权…</view>
+  <view wx:elif="{{!loggedIn}}" class="state"><text>请先登录账号。</text><button class="secondary" bindtap="openAccount">打开我的账号</button></view>
+  <view wx:elif="{{!access || !access.reviewer}}" class="state"><text>当前账号还没有审核权限。</text><text class="copy">可在我的账号提交审核员申请，由总管理员批准并设置范围。</text><button class="secondary" bindtap="openAccount">申请成为审核员</button></view>
+  <view wx:else>
+    <view class="scope">{{access.owner ? '总管理员 · 全平台审核（不参与奖励）' : access.scope.school + ' · ' + (access.scope.campus || '全部校区')}}</view>
+    <view wx:if="{{!items.length}}" class="state">本页没有可处理内容；如有下一页可继续查看。</view>
+    <view wx:for="{{items}}" wx:key="key" class="review-item">
+      <view class="meta"><text class="tag">{{item.type}}</text><text>{{item.item.school}} {{item.item.campus}}</text><text>{{item.item.created_at}}</text></view>
+      <text class="item-title">{{item.item.title || item.item.target.title || '举报待核对'}}</text>
+      <text class="item-copy">{{item.item.body || item.item.detail || item.item.reason || ''}}</text>
+      <text wx:if="{{item.type === 'report' && item.item.target}}" class="item-copy">原内容：{{item.item.target.title}} · {{item.item.target.body}}</text>
+      <textarea maxlength="500" placeholder="写明核查事实、来源和处理依据" value="{{reasons[item.item.id]}}" data-id="{{item.item.id}}" bindinput="onReason"/>
+      <view class="actions">
+        <block wx:if="{{item.type === 'report'}}">
+          <button size="mini" data-id="{{item.item.id}}" data-decision="resolve" disabled="{{busy}}" loading="{{busy === item.item.id}}" bindtap="decide">已核实处理</button>
+          <button size="mini" data-id="{{item.item.id}}" data-decision="dismiss" disabled="{{busy}}" bindtap="decide">举报不成立</button>
+          <button size="mini" class="danger" data-id="{{item.item.id}}" data-decision="remove" disabled="{{busy || !item.item.target}}" bindtap="decide">下架原内容</button>
+        </block>
+        <block wx:else>
+          <button size="mini" data-id="{{item.item.id}}" data-decision="approve" disabled="{{busy}}" loading="{{busy === item.item.id}}" bindtap="decide">通过并发布</button>
+          <button size="mini" class="danger" data-id="{{item.item.id}}" data-decision="reject" disabled="{{busy}}" bindtap="decide">退回修改</button>
+        </block>
+      </view>
+    </view>
+    <view class="pagination"><button size="mini" disabled="{{loading || !page}}" bindtap="previousPage">上一页</button><text>第 {{page + 1}} 页</text><button size="mini" disabled="{{loading || !hasMore}}" bindtap="nextPage">下一页</button></view>
+  </view>
+  <button class="refresh" bindtap="load">刷新队列</button>
+</view>

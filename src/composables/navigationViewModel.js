@@ -1,5 +1,6 @@
 import { computed, ref } from 'vue'
 import { accountUser } from './accountAuth.js'
+import { SETTINGS_NAVIGATION_LABEL } from './settingsPolicy.js'
 import { availableNavigationItems } from '../router/navigation.js'
 import { FIXED_MOBILE_NAV_ITEMS, desktopNavigation, mobileNavigation, visibleDesktopNavigation, visibleNavigationItems } from './navigationPreferences.js'
 
@@ -39,7 +40,7 @@ export function useNavigationViewModel(currentRoute, accountLabel) {
         { key: 'appearance', label: '个性化', icon: '🎨' },
         { key: 'festive', label: '氛围与纪念日', icon: '🎉' },
         { key: 'focus', label: '专注设置', icon: '⏱' },
-        { key: 'quick-record', label: '快速记录设置', icon: '⚡' },
+        { key: 'quick-record', label: SETTINGS_NAVIGATION_LABEL, icon: '⚡' },
       ] },
       { id: 'account-tools', label: '账号、数据与系统', items: [], tools: [
         { key: 'admin', label: '管理中心', icon: '⚙️' },

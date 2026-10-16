@@ -1,7 +1,8 @@
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { MAX_WEEK } from './store'
 import { periodIndex } from './store/timeConfig.js'
-import { accountDataOwner } from './accountSyncIdentity.js'
+import { accountUser } from './accountAuth.js'
+import { accountDataOwner, assertAccountDataIdentity, captureAccountDataIdentity } from './accountSyncIdentity.js'
 
 /** 「撤销本次导入」的可撤销窗口。到期后按钮必须一起消失，不能留在界面上。 */
 const IMPORT_UNDO_WINDOW_MS = 30000
@@ -80,11 +81,16 @@ export function useScheduleImportReview({
   const actionableImportItems = computed(() => (importDraft.value?.items || []).filter((item) => item.type !== 'direct'))
 
   async function beginCourseImport(incoming, meta = {}) {
+    const identity = captureAccountDataIdentity()
     const owner = accountDataOwner.value
     const generation = accountGeneration
     const snapshot = JSON.parse(JSON.stringify(courses.value))
     const api = await loadCourseImport()
     if (owner !== accountDataOwner.value || generation !== accountGeneration) return
+    try { assertAccountDataIdentity(identity) } catch {
+      batchError.value = '登录账号或本机数据归属已变化，已取消课程导入。'
+      return
+    }
     if (JSON.stringify(courses.value) !== JSON.stringify(snapshot)) {
       batchError.value = '课表已变化，请重新打开导入审阅后再确认。'
       return
@@ -93,7 +99,7 @@ export function useScheduleImportReview({
     const items = api.classifyImportItems(incoming, existing, courseConflictOptions.value)
     importDraft.value = {
       source: meta.source || 'batch', reviewCount: meta.reviewCount || 0, editingId: meta.editingId || null, existing,
-      owner, generation, snapshot, items,
+      owner, generation, identity, snapshot, items,
       decisions: Object.fromEntries(items.filter((item) => item.type === 'direct').map((item) => [item.index, 'add'])),
     }
     if (!items.some((item) => item.type !== 'direct')) { void commitCourseImport(); return }
@@ -140,6 +146,7 @@ export function useScheduleImportReview({
     try {
       const api = await loadCourseImport()
       if (draft.owner !== accountDataOwner.value || draft.generation !== accountGeneration) return
+      assertAccountDataIdentity(draft.identity)
       if (JSON.stringify(courses.value) !== JSON.stringify(draft.snapshot)) {
         batchError.value = '课表已变化，请重新打开导入审阅后再确认。'
         return
@@ -157,7 +164,7 @@ export function useScheduleImportReview({
       void import('./ocrVocabulary.js').then(({ rememberOcrCourses }) => {
         if (draft.owner === accountDataOwner.value && draft.generation === accountGeneration && JSON.stringify(courses.value) === committedFingerprint) rememberOcrCourses(plan.courses)
       })
-      lastImportUndo.value = { owner: draft.owner, snapshot: draft.snapshot, committedFingerprint, expiresAt: Date.now() + IMPORT_UNDO_WINDOW_MS }
+      lastImportUndo.value = { owner: draft.owner, identity: draft.identity, snapshot: draft.snapshot, committedFingerprint, expiresAt: Date.now() + IMPORT_UNDO_WINDOW_MS }
       scheduleUndoExpiry()
       const summary = `新增 ${plan.added} 门，替换 ${plan.replaced} 门，跳过 ${plan.skipped} 门${plan.kept ? `，保留冲突 ${plan.kept} 门` : ''}`
       if (draft.source === 'manual') { showForm.value = false; showToast(`课程已保存：${summary}`) }
@@ -167,6 +174,7 @@ export function useScheduleImportReview({
       importDraft.value = null
     } catch {
       if (draft.owner !== accountDataOwner.value || draft.generation !== accountGeneration) return
+      try { assertAccountDataIdentity(draft.identity) } catch { return }
       if (committedFingerprint && JSON.stringify(courses.value) === committedFingerprint) {
         domain.replaceCourses(draft.snapshot)
         batchError.value = '写入失败，已自动恢复导入前课表'
@@ -179,6 +187,11 @@ export function useScheduleImportReview({
     // 到期（含定时器还没跑到的那一瞬）都要把状态收干净，别留一个点了没反应的按钮。
     if (!undo || Date.now() > undo.expiresAt) { stopUndoTimer(); lastImportUndo.value = null; return }
     stopUndoTimer()
+    try { assertAccountDataIdentity(undo.identity) } catch {
+      lastImportUndo.value = null
+      message.value = '登录账号或本机数据归属已变化，本次课程导入不能撤销。'
+      return
+    }
     if (undo.owner !== accountDataOwner.value || JSON.stringify(courses.value) !== undo.committedFingerprint) {
       lastImportUndo.value = null
       message.value = '课表已有新的编辑，为保护这些改动，本次导入不能整体撤销。'
@@ -189,7 +202,7 @@ export function useScheduleImportReview({
     message.value = '已撤销本次导入，课表已恢复'
   }
 
-  watch(accountDataOwner, () => {
+  watch([accountDataOwner, () => accountUser.value?.id || ''], () => {
     accountGeneration += 1
     cancelCourseImportReview()
     stopUndoTimer()

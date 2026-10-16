@@ -9,14 +9,11 @@
 [🌐 在线体验](https://study-life.pages.dev/) · [📦 GitHub](https://github.com/huadeng0830-gg/study-life)
 
 <!-- RELEASE_STATUS:START -->
-> **当前源码版本**：网页 / PWA `1.8.0` · Windows 桌面版 `1.8.0`
+> **当前源码版本**：网页 / PWA `1.8.1` · Windows 桌面版 `1.8.1`
 > **最近更新**：
-> - 校园集市支持紧凑浏览、分类排序、分页和筛选清除
-> - 校园搜索改为数据库筛选并优化投稿按需读取
-> - 简化可约设置，默认包含周末并支持选填星期
-> - 统一校园发布校验并完善账号切换与草稿保护
-> - 修复手机端审核申请表单重叠和公开建议加载问题
-> - 修复双方邀约最短时长校验不一致
+> - 撤销操作和清单快捷输入按账号归属隔离
+> - 校外考试日期快捷入口校验正确字段
+> - 防止 Toast、快速记录和学习计划中的旧撤销操作跨账号生效
 > [下载已发布的 Windows 安装包与版本说明](https://github.com/huadeng0830-gg/study-life/releases/latest)
 <!-- RELEASE_STATUS:END -->
 

@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, watch } from 'vue'
 import { attachFloatingSlot, createFloatingSlot, detachFloatingSlot, useFloatingOffset } from '../composables/floatingStack.js'
 import { announce } from '../composables/liveRegion.js'
+import { assertAccountDataIdentity, captureAccountDataIdentity } from '../composables/accountSyncIdentity.js'
 
 // update:open 必须登记：六个调用点全都写的是 `v-model:open="toast.open"`，
 // 而这个组件原本只 emit close/action，于是 v-model 展开出来的 onUpdate:open
@@ -22,6 +23,7 @@ const props = defineProps({
 })
 
 let timer = null
+let undoIdentity = null
 
 // KeepAlive 会同时保留多个页面实例，于是多个 <Toast> 可能一起显示。
 // 用共享浮层栈给每个实例占一个坑位，同时出现时依次向上错开，
@@ -57,6 +59,13 @@ function hide() {
 
 function doAction() {
   if (props.undoFn) {
+    try {
+      assertAccountDataIdentity(undoIdentity)
+    } catch {
+      announce('账号或本机数据归属已变化，已取消撤销以保护当前数据。')
+      hide()
+      return
+    }
     props.undoFn()
     hide()
     emit('action', 'undo')
@@ -69,6 +78,10 @@ function doAction() {
 watch(() => props.open, (open) => {
   if (open) show()
   else hide()
+}, { immediate: true })
+
+watch(() => props.undoFn, (undoFn) => {
+  undoIdentity = undoFn ? captureAccountDataIdentity() : null
 }, { immediate: true })
 
 watch([() => props.open, () => props.message], ([open, message]) => {

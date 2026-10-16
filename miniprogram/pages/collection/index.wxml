@@ -1,0 +1,15 @@
+<view class="workspace" style="{{themeStyle}}">
+  <view class="page-header"><view><text class="page-heading">{{title}}</text><text class="subtitle">自己的安排和记录，随时整理。</text></view><button wx:if="{{kind !== 'focus'}}" class="action-secondary compact-button" bindtap="add">＋ 新建</button></view>
+  <view wx:if="{{error}}" class="notice error">{{error}}</view>
+  <view wx:if="{{totals}}" class="panel"><view class="panel-heading"><picker mode="date" fields="month" value="{{month + '-01'}}" bindchange="monthChange"><text class="section-title">{{month}} ▾</text></picker><text class="text-link" bindtap="openBills">固定账单</text></view><view class="two-columns"><view><text class="metric-label">本月支出 CNY</text><text class="metric">{{totals.expense}}</text></view><view><text class="metric-label">本月收入 CNY</text><text class="metric">{{totals.income}}</text></view></view><text class="subtitle">结余 {{totals.balance}}{{totals.budget ? ' · 预算剩余 ' + totals.remaining : ''}}</text><text wx:if="{{totals.excluded}}" class="field-hint">另有 {{totals.excluded}} 笔其他币种，未折算计入人民币汇总。</text></view>
+  <input class="field-input search" placeholder="搜索{{title}}" value="{{query}}" bindinput="search"/>
+  <view class="panel"><view wx:if="{{!rows.length}}" class="empty"><text class="empty-title">还没有{{title}}记录</text><text>{{kind === 'focus' ? '开始一次专注，结束后会记录在这里。' : '点击右上角新建，记录自己的第一项。'}}</text></view>
+    <view wx:for="{{rows}}" wx:key="id" class="record-row {{item.completed ? 'completed' : ''}}">
+      <view wx:if="{{kind === 'task'}}" class="record-check {{item.completed ? 'checked' : ''}}" data-id="{{item.id}}" bindtap="toggle">{{item.completed ? '✓' : ''}}</view>
+      <view class="record-main" data-id="{{item.id}}" bindtap="{{kind === 'list' ? 'showList' : 'edit'}}"><text class="record-title">{{item.title}}</text><text class="record-meta">{{item.meta}}</text><text wx:if="{{kind === 'note'}}" class="note-body">{{item.body}}</text><text wx:if="{{kind === 'transaction'}}" class="{{item.direction === 'expense' ? 'amount-expense' : 'amount-income'}}">{{item.direction === 'expense' ? '−' : '+'}}{{item.amount}} {{item.currency}}</text></view>
+      <button wx:if="{{kind === 'bill'}}" class="row-action" data-id="{{item.id}}" bindtap="pay">已支付</button><button class="row-action row-danger" data-id="{{item.id}}" bindtap="remove">删除</button>
+    </view>
+  </view>
+  <view wx:if="{{list}}" class="list-sheet"><view class="panel-heading"><text class="section-title">{{list.title}}</text><text class="text-link" bindtap="closeList">关闭</text></view><view wx:for="{{list.items}}" wx:key="id" class="record-row"><view class="record-check {{item.done ? 'checked' : ''}}" data-id="{{item.id}}" bindtap="toggleItem">{{item.done ? '✓' : ''}}</view><text class="record-title">{{item.title}}</text></view><button class="action-secondary" data-id="{{list.id}}" bindtap="edit">编辑清单</button></view>
+  <text class="sync-line">{{sync.label}}</text>
+</view>
