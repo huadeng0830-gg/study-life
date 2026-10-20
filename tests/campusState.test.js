@@ -57,11 +57,34 @@ describe('campus asynchronous account isolation', () => {
   })
   it('exposes draft storage failure and recovers on a later save', () => {
     const draft = scope.run(() => useCampusLifeDraft('test-storage', { title: '' }))
-    const store = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('quota') })
-    draft.value.value.title = '虚构草稿'
-    expect(draft.saveError.value).toContain('暂未保存')
-    expect(draft.savedRevision.value).toBe(0)
-    store.mockRestore()
+    // 【为什么直接换掉 globalThis.localStorage，而不是给 Storage.prototype 打桩】
+    // Node 22 起内置了实验性 Web Storage，它会**遮蔽** happy-dom 的 Storage：
+    // 全局 `Storage` 与 `globalThis.localStorage` 可能分属两个不同的实现，
+    // 这时给 `Storage.prototype` 打桩根本碰不到 localStorage 实例上的方法 ——
+    // "存储失败"这件事压根不会发生，断言拿到的是空串（CI 上就是这么红的）。
+    // 直接换掉实例本身：无论背后是哪一个实现，被调用的都一定是这个会抛错的替身。
+    // 全仓只有这一处需要模拟"写不进去"，其余用例都直接用 localStorage.xxx，不受影响。
+    const original = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')
+    Object.defineProperty(globalThis, 'localStorage', {
+      value: {
+        getItem: () => null,
+        setItem: () => { throw new Error('quota') },
+        removeItem: () => {},
+        clear: () => {},
+        key: () => null,
+        length: 0,
+      },
+      configurable: true,
+      writable: true,
+    })
+    try {
+      draft.value.value.title = '虚构草稿'
+      expect(draft.saveError.value).toContain('暂未保存')
+      expect(draft.savedRevision.value).toBe(0)
+    } finally {
+      if (original) Object.defineProperty(globalThis, 'localStorage', original)
+      else delete globalThis.localStorage
+    }
     draft.value.value.title = '下一份虚构草稿'
     expect(draft.saveError.value).toBe('')
     expect(draft.savedRevision.value).toBe(1)
