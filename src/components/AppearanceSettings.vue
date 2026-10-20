@@ -655,7 +655,7 @@ const previewStyle = computed(() => ({
   left:0;
   right:0}
 .preview-card {
-  -webkit-backdrop-filter:blur(4px);
+  
   backdrop-filter:blur(4px);
   color:#1f2937;
   background:#ffffffe6;

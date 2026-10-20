@@ -55,7 +55,7 @@
 .overview-item b { font-variant-numeric: tabular-nums; }
 .overview-item small { display: none; }
 .overdue-overview b { color: var(--danger); }
-.workspace-filters { display: flex; flex-direction: column; gap: 12px; padding: 16px; border: 1px solid var(--border); border-radius: var(--radius-surface); background-color: var(--glass-surface); backdrop-filter: var(--glass-filter); -webkit-backdrop-filter: var(--glass-filter); box-shadow: var(--glass-shadow); }
+.workspace-filters { display: flex; flex-direction: column; gap: 12px; padding: 16px; border: 1px solid var(--border); border-radius: var(--radius-surface); background-color: var(--glass-surface); backdrop-filter: var(--glass-filter); box-shadow: var(--glass-shadow); }
 .workspace-query-row { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
 .workspace-search { position: relative; flex: 1 1 260px; min-width: 0; }
 .workspace-search input { width: 100%; padding-right: 40px; }

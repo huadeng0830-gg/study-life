@@ -388,7 +388,7 @@ onBeforeUnmount(cleanup)
   background: rgba(30, 40, 70, 0.28);
   /* 遮罩也做一层轻雾：弹窗浮起时背景不是"被压暗"，而是"被推到后面去"。 */
   backdrop-filter: blur(6px) saturate(115%);
-  -webkit-backdrop-filter: blur(6px) saturate(115%);
+  
   display: flex;
   align-items: center;
   justify-content: center;
@@ -408,7 +408,7 @@ onBeforeUnmount(cleanup)
      所以它读起来是"浮在另一层之上"，而不是"一块贴在屏幕上的白板"。 */
   background-color: color-mix(in srgb, var(--card) 86%, transparent);
   backdrop-filter: blur(var(--glass-blur-strong)) saturate(var(--glass-saturate));
-  -webkit-backdrop-filter: blur(var(--glass-blur-strong)) saturate(var(--glass-saturate));
+  
   border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
   border-radius: var(--radius-overlay);
   width: 420px;

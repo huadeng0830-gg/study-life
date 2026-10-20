@@ -42,7 +42,7 @@
 .campus-life-panel h2 { font-size: var(--type-headline); font-weight: var(--fw-650); line-height: var(--line-heading); }
 .campus-life-panel h2 + p { max-width: 68ch; margin: var(--space-2) 0 0; font-size: var(--type-subheadline); color: var(--muted); line-height: var(--line-body); }
 .campus-life-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: var(--space-4); }
-.campus-life-card { display: flex; flex-direction: column; align-items: stretch; gap: var(--space-3); min-width: 0; padding: var(--space-5); border: 1px solid var(--border); border-radius: var(--radius-control); background-color: var(--glass-surface); backdrop-filter: var(--glass-filter); -webkit-backdrop-filter: var(--glass-filter); box-shadow: var(--glass-shadow); transition: transform var(--dur-base) var(--ease-standard), box-shadow var(--dur-base) var(--ease-standard); }
+.campus-life-card { display: flex; flex-direction: column; align-items: stretch; gap: var(--space-3); min-width: 0; padding: var(--space-5); border: 1px solid var(--border); border-radius: var(--radius-control); background-color: var(--glass-surface); backdrop-filter: var(--glass-filter); box-shadow: var(--glass-shadow); transition: transform var(--dur-base) var(--ease-standard), box-shadow var(--dur-base) var(--ease-standard); }
 .campus-life-card:hover { transform: translateY(-2px); box-shadow: var(--glass-shadow-hover); }
 .campus-life-card h3 { font-size: var(--type-headline); line-height: var(--line-heading); overflow-wrap: anywhere; }
 .campus-life-card p { margin: 0; color: var(--muted); font-size: var(--type-callout); line-height: var(--line-body); white-space: pre-wrap; overflow-wrap: anywhere; }

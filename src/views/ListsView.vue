@@ -701,14 +701,14 @@ function emptyAction() {
 .empty-box { width: 100%; }
 .starter-section h2 { margin: 4px 0 12px; font-size: var(--fs-15); }
 .starter-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
-.starter-card { display: flex; flex-direction: column; gap: 8px; padding: 20px; text-align: left; color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-14); background-color: var(--glass-surface); backdrop-filter: var(--glass-filter); -webkit-backdrop-filter: var(--glass-filter); box-shadow: var(--glass-shadow); transition: transform var(--dur-base) var(--ease-standard), box-shadow var(--dur-base) var(--ease-standard), border-color var(--dur-fast) var(--ease-standard); }
+.starter-card { display: flex; flex-direction: column; gap: 8px; padding: 20px; text-align: left; color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-14); background-color: var(--glass-surface); backdrop-filter: var(--glass-filter); box-shadow: var(--glass-shadow); transition: transform var(--dur-base) var(--ease-standard), box-shadow var(--dur-base) var(--ease-standard), border-color var(--dur-fast) var(--ease-standard); }
 .starter-card:hover { transform: translateY(-2px); border-color: color-mix(in srgb, var(--primary) 30%, var(--border)); box-shadow: var(--glass-shadow-hover); }
 .starter-card:hover { border-color: var(--primary); background: var(--primary-soft); }
 .starter-icon { font-size: var(--fs-26); }
 .starter-card b { font-size: var(--fs-15); }
 .starter-card small, .starter-card > span:last-child { font-size: var(--fs-12); color: var(--ink-soft); }
 .shopping-layout { display: grid; grid-template-columns: 236px minmax(0, 1fr); gap: 18px; align-items: start; }
-.list-sidebar { position: sticky; top: 20px; min-width: 0; padding: 14px; border: 1px solid var(--border); border-radius: var(--radius-14); background-color: var(--glass-surface); backdrop-filter: var(--glass-filter); -webkit-backdrop-filter: var(--glass-filter); box-shadow: var(--glass-shadow); }
+.list-sidebar { position: sticky; top: 20px; min-width: 0; padding: 14px; border: 1px solid var(--border); border-radius: var(--radius-14); background-color: var(--glass-surface); backdrop-filter: var(--glass-filter); box-shadow: var(--glass-shadow); }
 .sidebar-head { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
 .sidebar-head h2 { font-size: var(--fs-14); margin: 0; }
 .sidebar-head > span { padding: 1px 6px; color: var(--ink-soft); background: var(--bg-tint); border-radius: var(--radius-5); font-size: var(--fs-11); }

@@ -212,4 +212,47 @@ describe('全仓 CSS 规则（第五十一轮）', () => {
       '.skin-notebook .tt-cell 必须在 .tt-cell:hover 之后：两者特异性相同且都设 background，顺序一翻转就换底色',
     ).toBeGreaterThan(hover.start)
   })
+
+  /**
+   * 【背景：一个只有线上才会出现的坑】
+   * 玻璃层用到 `backdrop-filter`。早先每个规则都手写了**两遍**：
+   *
+   *     backdrop-filter: blur(...) saturate(...);
+   *     -webkit-backdrop-filter: blur(...) saturate(...);
+   *
+   * 开发服务器不做压缩，两遍都在，于是本机一切正常。
+   * 但生产构建走 lightningcss，cssTarget 是 safari13 —— 它把这两个名字当成**同一个属性**，
+   * 合并后**只留下带前缀的那一份**：
+   *
+   *     .card{ -webkit-backdrop-filter: blur(...) saturate(...) }
+   *
+   * 而 Chrome 并不认 `-webkit-backdrop-filter`（实测 CSS.supports 为 false），
+   * 于是**线上所有玻璃面板的折射全部失效**，只剩一层半透明底。
+   * 本机截图看不出来（dev 不压缩），只有对着线上站点读计算样式才会发现。
+   *
+   * 【约定】
+   * 源码里只写**无前缀**的那一份，前缀交给构建工具按 cssTarget 补。
+   * 这样产物里两者并存：Chrome/Firefox 走无前缀的，Safari 13 走带前缀的。
+   *
+   * 所以这里守的是"源码里不得出现 -webkit-backdrop-filter 声明"——
+   * 特性查询（@supports 条件）里出现是允许的，那不是声明。
+   */
+  it('源码里不出现 -webkit-backdrop-filter 声明（前缀交给构建工具补）', () => {
+    const offenders = []
+    for (const { file, blocks } of files) {
+      for (const css of blocks) {
+        for (const rule of splitCssRules(css).rules) {
+          if (rule.kind !== 'rule') continue
+          if (/(^|;)\s*-webkit-backdrop-filter\s*:/.test(rule.body)) {
+            offenders.push(`${file} → ${rule.selector}`)
+          }
+        }
+      }
+    }
+    expect(
+      offenders,
+      '这些规则手写了 -webkit-backdrop-filter：构建时它会和无前缀的那一份合并成只剩前缀版，'
+      + 'Chrome 认不出 -webkit-backdrop-filter，线上玻璃就没有折射。只写无前缀的一份。',
+    ).toEqual([])
+  })
 })

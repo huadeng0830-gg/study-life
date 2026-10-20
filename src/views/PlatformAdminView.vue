@@ -443,7 +443,7 @@ onBeforeUnmount(() => { window.clearTimeout(searchTimer); window.clearInterval(a
 .review-reason textarea { min-height:66px; resize:vertical; }
 .review-reason small { justify-self:end; color:var(--muted); font-weight:var(--fw-400); }
 .ops-columns { display:grid; grid-template-columns:minmax(0,1.55fr) minmax(270px,.9fr); align-items:start; gap:16px; }
-.ops-panel { min-width:0; padding:17px 18px; border:1px solid var(--border); border-radius:var(--radius-12); background-color:var(--glass-surface); backdrop-filter:var(--glass-filter); -webkit-backdrop-filter:var(--glass-filter); box-shadow:var(--glass-shadow); }
+.ops-panel { min-width:0; padding:17px 18px; border:1px solid var(--border); border-radius:var(--radius-12); background-color:var(--glass-surface); backdrop-filter:var(--glass-filter); box-shadow:var(--glass-shadow); }
 .ops-accounts { min-height:390px; grid-column:1 / -1; }
 .ops-account-help { margin:0 0 14px; color:var(--muted); font-size:var(--fs-12); line-height:1.65; }
 .account-actions { display:flex; flex-wrap:wrap; gap:8px; flex-shrink:0; }

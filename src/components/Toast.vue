@@ -131,7 +131,7 @@ const typeClass = computed(() => ({
      底下的极光被折射进来，提示不再像一张贴在屏幕上的纸条。 */
   background-color: color-mix(in srgb, var(--card) 80%, transparent);
   backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
-  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  
   border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
   box-shadow: var(--shadow-md), inset 0 1px 0 color-mix(in srgb, var(--card) var(--glass-highlight), transparent);
   pointer-events: auto;

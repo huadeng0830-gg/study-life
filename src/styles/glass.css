@@ -206,11 +206,9 @@
   .glass-surface,
   .glass-panel {
     backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
-    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
   }
   .glass-strong {
     backdrop-filter: blur(var(--glass-blur-strong)) saturate(var(--glass-saturate));
-    -webkit-backdrop-filter: blur(var(--glass-blur-strong)) saturate(var(--glass-saturate));
   }
 }
 
@@ -235,7 +233,6 @@
   .card,
   .ui-card {
     backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
-    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
   }
 }
 
@@ -349,7 +346,6 @@
     border-bottom: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
     background-color: color-mix(in srgb, var(--bg) 74%, transparent);
     backdrop-filter: var(--glass-filter);
-    -webkit-backdrop-filter: var(--glass-filter);
   }
 }
 
@@ -541,7 +537,6 @@
     .card,
     .ui-card {
       backdrop-filter: none;
-      -webkit-backdrop-filter: none;
     }
   }
 }
@@ -560,7 +555,7 @@
   .glass-surface,
   .glass-panel {
     backdrop-filter: none !important;
-    -webkit-backdrop-filter: none !important;
+    
     background: var(--card) !important;
     background-image: none !important;
     box-shadow: none !important;
