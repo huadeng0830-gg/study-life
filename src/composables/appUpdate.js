@@ -71,7 +71,28 @@ if (!desktop) registerSW({ immediate: true,
   onNeedReload: () => {},
   onNeedRefresh: () => {},
 })
+
+/**
+ * 【宿主存活守卫】
+ * 这里的定时器与监听器是**模块级**的：模块不是组件，没有卸载时机，
+ * 所以它们会一直活到进程结束。测试环境拆除时 window 会被换掉，
+ * 那一刻排好的定时器照样触发 → 抛 "window is not defined"，
+ * 而错误会落到**当时正在跑的那个文件**头上，让不相干的用例一起变红
+ * （CI 上就是这么红的：全绿的本地跑一遍，CI 却红在另外两个文件上）。
+ *
+ * 做法与 dataVault.js 的 mirrorHostAlive 同一套：首次使用时认领当时的 window，
+ * 之后只在宿主还是同一个对象时继续调度。浏览器里 window 终身不变，
+ * 行为完全不变；宿主被换掉（测试拆除、SSR、Worker）时安静收手。
+ */
+let updateHostWindow = null
+function updateHostAlive() {
+  if (typeof window === 'undefined') return false
+  updateHostWindow ??= window
+  return updateHostWindow === window
+}
+
 function silentCheck() {
+  if (!updateHostAlive()) return
   if (!updatePreferences.autoCheck) return
   if (desktop) {
     if (lastDesktopSilentCheckAt && Date.now() - lastDesktopSilentCheckAt < SILENT_CHECK_INTERVAL_MS) return
@@ -80,18 +101,23 @@ function silentCheck() {
   }
   else void checkForAppUpdate(false)
 }
-function visibilityCheck() { if (document.visibilityState === 'visible') silentCheck() }
-window.addEventListener('focus', silentCheck)
-window.addEventListener('online', silentCheck)
-document.addEventListener('visibilitychange', visibilityCheck)
+function visibilityCheck() { if (typeof document !== 'undefined' && document.visibilityState === 'visible') silentCheck() }
+if (updateHostAlive()) {
+  window.addEventListener('focus', silentCheck)
+  window.addEventListener('online', silentCheck)
+  document.addEventListener('visibilitychange', visibilityCheck)
+}
 const stopPreferenceWatch = watch(() => updatePreferences.autoCheck, (enabled) => {
   if (enabled) silentCheck()
 })
-const startupTimer = window.setTimeout(silentCheck, 2000)
-const periodicTimer = window.setInterval(silentCheck, PERIODIC_CHECK_INTERVAL_MS)
-const publishReminder = (state) => window.dispatchEvent(new CustomEvent('study-life:update-reminder', {
-  detail: { stage: state.stage, version: state.availableVersion || '' },
-}))
+const startupTimer = updateHostAlive() ? window.setTimeout(silentCheck, 2000) : 0
+const periodicTimer = updateHostAlive() ? window.setInterval(silentCheck, PERIODIC_CHECK_INTERVAL_MS) : 0
+const publishReminder = (state) => {
+  if (!updateHostAlive()) return
+  window.dispatchEvent(new CustomEvent('study-life:update-reminder', {
+    detail: { stage: state.stage, version: state.availableVersion || '' },
+  }))
+}
 const stopWebReminderWatch = watch(() => [webUpdateState.stage, webUpdateState.availableVersion], () => publishReminder(webUpdateState), { immediate: true })
 const stopDesktopReminderWatch = watch(() => [desktopUpdateState.value.stage, desktopUpdateState.value.availableVersion],
   () => publishReminder(desktopUpdateState.value), { immediate: true })
