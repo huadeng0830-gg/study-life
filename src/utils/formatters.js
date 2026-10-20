@@ -123,3 +123,54 @@ export function dayLabel(dateStr) {
   const d = new Date(dateStr + 'T00:00:00')
   return `${d.getMonth() + 1}月${d.getDate()}日`
 }
+
+// ---------------------------------------------------------------------------
+// 以下为「新增导出」：只**复用**上面的既有口径，既有导出的行为与签名一字未改。
+// 目的：把各视图里手写的 `¥${x.toFixed(2)}`、`${pad2(h)}:${pad2(m)}`、
+// `${y}-${pad2(m)}-${pad2(d)}` 收口到一处，避免同一套显示规则在仓库里各写一份。
+// ---------------------------------------------------------------------------
+
+/**
+ * 以**分**为单位的金额 → 元。数值口径完全走 `moneyRow`
+ * （千分位、两位小数、非法/缺失归零、超安全整数照原值显示），因此显示结果与
+ * `moneyRow(cents / 100)` 一致；单独具名是为了让「调用方拿到的到底是分还是元」在
+ * 调用点一眼可见——仓库里 campus 价格、学习问答汇总都是分。
+ */
+export function moneyCents(cents) {
+  return moneyRow(Number(cents) / 100)
+}
+
+/**
+ * `moneyRow` 的**数字部分**（不含 `¥`）。给需要自己决定前缀的调用方
+ * （多币种代码、正负号）复用同一套数值口径，避免再手写一份 `toFixed(2)`。
+ */
+export function moneyDigits(v) {
+  return moneyRow(v).replace(/^¥/, '')
+}
+
+/**
+ * 多币种金额（入参为**分**）：基准币种沿用 `¥`，其他币种显示「代码 + 空格 + 数字」。
+ *
+ * 刻意不复用 `moneyWithCurrency`：后者按符号表把 USD 显示成 `$`、JPY 显示成 `JP¥`，
+ * 而学习问答/上年对比这类场景既有约定是**用币种代码**（`USD 12.00`）区分币种——
+ * 换成符号会改变既有输出，属于「语义本来就不同」，所以单独具名而不是硬合并。
+ */
+export function moneyCentsWithCode(cents, currency = 'CNY') {
+  const code = String(currency ?? '').trim().toUpperCase() || 'CNY'
+  return code === 'CNY' ? moneyCents(cents) : `${code} ${moneyDigits(Number(cents) / 100)}`
+}
+
+/** 数字小时/分钟 → `HH:MM`（补齐规则与 `pad2` 一致，超过两位不截断）。 */
+export function hmText(hours, minutes) {
+  return `${pad2(hours)}:${pad2(minutes)}`
+}
+
+/** `Date` → 本地时区 `HH:MM`。 */
+export function timeText(date = new Date()) {
+  return hmText(date.getHours(), date.getMinutes())
+}
+
+/** 数字年月日 → `YYYY-MM-DD`（`month` 从 1 起，与 `Date#getMonth()` 不同，调用方需自行 +1）。 */
+export function dateParts(year, month, day) {
+  return `${year}-${pad2(month)}-${pad2(day)}`
+}

@@ -1,4 +1,5 @@
 import { coursesForDates } from '../store/schedule.js'
+import { hmText } from '../../utils/formatters.js'
 import { courseTimeRange, currentTimes, periodIndex } from '../store/timeConfig.js'
 import { isArchived, isBillDueSoon, isTaskActionable } from '../domain/state.js'
 import { addAppDays, appDateTime } from '../timeContext.js'
@@ -88,7 +89,7 @@ export function selectHomeNextUp({
     nextUp,
     nextUpTimeRange: course ? courseTimeRange(course) : '',
     nextDeparture: course && travelMinutes && startMinutes !== null && startMinutes !== undefined
-      ? `${course.campusId ? `${course.campusId} · ` : ''}建议 ${String(Math.floor(((startMinutes - travelMinutes + 1440) % 1440) / 60)).padStart(2, '0')}:${String((startMinutes - travelMinutes + 1440) % 60).padStart(2, '0')} 出发`
+      ? `${course.campusId ? `${course.campusId} · ` : ''}建议 ${hmText(Math.floor(((startMinutes - travelMinutes + 1440) % 1440) / 60), (startMinutes - travelMinutes + 1440) % 60)} 出发`
       : '',
     nextTimingLabel: course
       ? courseTiming(itemAt(nextUp.date, nextUp.time), nextUp.endAt, now).text

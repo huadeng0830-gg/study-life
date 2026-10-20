@@ -63,11 +63,4 @@ export const currentDayIndex = computed(() => {
   const day = new Date(`${appToday.value}T00:00:00Z`).getUTCDay()
   return day === 0 ? 6 : day - 1
 })
-export const startOfDay = computed(() => appDateTime(appToday.value, '00:00', appTimezone.value))
-export const endOfDay = computed(() => appDateTime(appToday.value, '23:59', appTimezone.value))
-
-export function useTimeContext() {
-  return { appNow, appToday, appTimezone, todayKey, currentWeek, currentDayIndex, startOfDay, endOfDay }
-}
-
 export { formatRelativeTime }

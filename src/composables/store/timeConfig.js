@@ -1,4 +1,6 @@
 import { useStoredRef } from './core.js'
+import { deepClone } from '../../utils/clone.js'
+import { hmText, pad2 } from '../../utils/formatters.js'
 import {
   DEFAULT_PERIOD_LABELS,
   DEFAULT_TIMES,
@@ -19,7 +21,7 @@ export function defaultTimeConfig() {
     currentSeason: 'summer',
     autoSeason: true,
     periods: DEFAULT_PERIOD_LABELS.map((label, index) => ({ id: 'p' + index, label })),
-    times: JSON.parse(JSON.stringify(DEFAULT_TIMES)),
+    times: deepClone(DEFAULT_TIMES),
   }
 }
 
@@ -53,7 +55,7 @@ export function normalizeTimes(cfg) {
   let changed = false
   const pad = (value) => {
     const [h = '0', m = '00'] = String(value ?? '').split(':')
-    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
+    return hmText(h, m)
   }
   // `useStoredRef` 的形状修复只到**顶层**：默认值是对象时它只做 `{...default, ...saved}`，
   // 嵌套值是什么就用什么。而 seasons / campuses / periods 以前是被直接 `for...of` / `.map()`
@@ -142,8 +144,7 @@ export function isValidSeasonDate(value) {
 function monthDayOf(value) {
   const date = value instanceof Date ? value : new Date(value)
   if (Number.isNaN(date.getTime())) return null
-  const pad = (number) => String(number).padStart(2, '0')
-  return `${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+  return `${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`
 }
 
 export function seasonConflicts(cfg = timeConfig.value) {
@@ -218,7 +219,7 @@ export function addCampus(name) {
   for (const season of timeConfig.value.seasons) {
     const source = timeConfig.value.times[season.id]?.[template]
     timeConfig.value.times[season.id][id] = source
-      ? JSON.parse(JSON.stringify(source))
+      ? deepClone(source)
       : timeConfig.value.periods.map(() => ({ ...FALLBACK_TIME }))
   }
   return true
@@ -260,7 +261,7 @@ export function addSeason(name, startDate) {
   for (const campus of timeConfig.value.campuses) {
     const source = timeConfig.value.times[template]?.[campus.id]
     timeConfig.value.times[id][campus.id] = source
-      ? JSON.parse(JSON.stringify(source))
+      ? deepClone(source)
       : timeConfig.value.periods.map(() => ({ ...FALLBACK_TIME }))
   }
   return true
@@ -334,10 +335,6 @@ export function currentCampusId() {
   const cfg = timeConfig.value
   const found = cfg.campuses.find((c) => c.id === cfg.currentCampus)
   return found?.id ?? cfg.campuses[0]?.id ?? null
-}
-
-export function autoSeasonId() {
-  return autoSeasonIdFor(currentCampusId())
 }
 
 export function currentSeasonId() {

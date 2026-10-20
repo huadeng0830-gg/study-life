@@ -1,6 +1,8 @@
 // Unified schedule conflict and import planning helpers.
 // These are deliberately pure so every import source reaches the same decision.
 
+import { weekMatchesWeekTypeStrict } from './timetable/index.js'
+
 export function activeWeeks(course, maxWeek = 25) {
   const explicitWeeks = Array.isArray(course?.activeWeeks) ? course.activeWeeks : course?.customWeeks
   if (Array.isArray(explicitWeeks)) {
@@ -13,7 +15,9 @@ export function activeWeeks(course, maxWeek = 25) {
   const type = course?.weekType || 'all'
   const weeks = []
   for (let week = start; week <= end; week += 1) {
-    if (type === 'all' || (type === 'odd' && week % 2 === 1) || (type === 'even' && week % 2 === 0)) weeks.push(week)
+    // 这里用**严格**版单双周判定：冲突检测必须严格，未识别的 weekType 不能
+    // 被当成「全周」（否则会凭空判出与整学期的冲突）。宽松版是 store.courseInWeek。
+    if (weekMatchesWeekTypeStrict(week, type)) weeks.push(week)
   }
   return weeks
 }

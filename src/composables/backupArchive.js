@@ -58,6 +58,7 @@ export const BACKUP_STORAGE_KEYS = Object.freeze({
   moodLog: 'sl_mood_log',
   reminderLog: 'sl_reminder_log',
   activeFocus: 'sl_focus_active',
+  lastFocusCompleted: 'sl_focus_last_completed',
   taskCenterLog: 'sl_task_center_log',
   archivedQuickNotes: 'sl_archived_quick_notes',
   notices: 'sl_notices',
@@ -70,7 +71,7 @@ export const BACKUP_STORAGE_KEYS = Object.freeze({
 export const BACKUP_MODULES = Object.freeze([
   { key: 'courses', label: '课程与课表', keys: ['sl_courses', 'sl_course_templates', 'sl_timecfg', 'sl_semester', 'sl_schedule_exceptions', 'sl_schedule_note', 'sl_ocr_vocabulary', 'sl_course_checkins'] },
   { key: 'tasks', label: '待办与快速记录', keys: ['sl_tasks', 'sl_events', 'sl_quick_record_settings', 'sl_capture_enabled', 'sl_task_center_log', 'sl_archived_quick_notes'] },
-  { key: 'focus', label: '专注记录', keys: ['sl_focus_sessions', 'sl_focus_settings', 'sl_focus_active'] },
+  { key: 'focus', label: '专注记录', keys: ['sl_focus_sessions', 'sl_focus_settings', 'sl_focus_active', 'sl_focus_last_completed'] },
   { key: 'countdown', label: '重要日期', keys: ['sl_exams', 'sl_countdown_show_past', 'sl_countdown_view'] },
   { key: 'checklists', label: '清单', keys: ['sl_checklists'] },
   { key: 'ledger', label: '账本', keys: ['sl_bills', 'sl_expenses', 'sl_ledger_categories', 'sl_ledger_freq', 'sl_ledger_fx', 'sl_ledger_budget', 'sl_ledger_templates'] },

@@ -1,12 +1,9 @@
 import { touchStoredRef, useStoredRef } from './store/core.js'
+import { createId } from '../utils/ids.js'
+import { deepClone } from '../utils/clone.js'
 
 function cloneCourses(courses) {
-  return JSON.parse(JSON.stringify(Array.isArray(courses) ? courses : []))
-}
-
-function createId() {
-  const uuid = globalThis.crypto?.randomUUID?.()
-  return uuid ? `tpl-${uuid}` : `tpl-${Date.now()}-${Math.random().toString(36).slice(2)}`
+  return deepClone(Array.isArray(courses) ? courses : [])
 }
 
 export function useCourseTemplateCommands() {

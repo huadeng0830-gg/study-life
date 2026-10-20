@@ -14,6 +14,7 @@
 import { ref } from 'vue'
 import { detectTimePlanConflicts, getConflictSummary } from '../conflictDetection.js'
 import { previewTaskTimeShift, undoTaskTimeShift } from './taskTimeShift'
+import { deepClone } from '../../utils/clone.js'
 
 /** @typedef {import('../types/domain').Task} Task */
 
@@ -28,7 +29,7 @@ export function useTaskBulkActions({ domain, tasks, selection, notify, nowMs, ge
       id: task.id,
       dueDate: task.dueDate || '',
       dueTime: task.dueTime || '',
-      timeStages: JSON.parse(JSON.stringify(task.timeStages || [])),
+      timeStages: deepClone(task.timeStages || []),
       repeat: task.repeat,
       repeatAnchorDay: task.repeatAnchorDay ?? null,
     }
@@ -108,7 +109,7 @@ export function useTaskBulkActions({ domain, tasks, selection, notify, nowMs, ge
   function remove() {
     const targets = drain()
     if (!targets.length) return
-    const snapshots = targets.map((task) => JSON.parse(JSON.stringify(task)))
+    const snapshots = targets.map((task) => deepClone(task))
     for (const task of targets) domain.deleteTask(task.id)
     notify(`已删除 ${snapshots.length} 项待办`, {
       type: 'warning',

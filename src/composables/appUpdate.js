@@ -3,7 +3,7 @@ import { computed, toRef, watch } from 'vue'
 import { APP_RELEASE } from './releaseNotes.js'
 import { APP_CHANNEL, APP_LEGACY_RELEASE, BUILD_ID, SOURCE_SIGNATURE } from './versionInfo.js'
 import { useTaskProgress } from './taskProgress.js'
-import { createWebUpdateController, WEB_UPDATE_STAGES } from './webUpdateController.js'
+import { createWebUpdateController } from './webUpdateController.js'
 import { updatePreferences } from './updatePreferences.js'
 import { flushStoredWrites } from './store/core.js'
 import { checkDesktopAppUpdate, desktopUpdateState, isDesktopApp } from './desktopAppUpdate.js'
@@ -22,23 +22,15 @@ const controller = createWebUpdateController({ currentVersion: APP_RELEASE, curr
     try { return flushStoredWrites() } catch { return { ok: false, pendingKeys: [] } }
   } })
 export const webUpdateState = controller.state
-export const UPDATE_STAGES = WEB_UPDATE_STAGES
 export const updateStage = toRef(webUpdateState, 'stage')
 export const updateMessage = toRef(webUpdateState, 'message')
 export const lastCheckedAt = toRef(webUpdateState, 'lastCheckedAt')
 export const lastCheckOutcome = toRef(webUpdateState, 'lastCheckOutcome')
 export const updateChecking = computed(() => webUpdateState.stage === 'checking')
 export const needsManualReload = computed(() => ['ready', 'manual-reload'].includes(webUpdateState.stage))
-export const updateTone = computed(() => {
-  if (webUpdateState.stage === 'error') return 'error'
-  if (['warning', 'manual-reload'].includes(webUpdateState.stage)) return 'warning'
-  if (['latest', 'completed'].includes(webUpdateState.stage)) return 'success'
-  return 'info'
-})
 export const checkForAppUpdate = (showResult = true) => controller.check(showResult)
 export const applyAppUpdate = () => controller.apply()
 export const forceRecoverToLatest = () => controller.apply(true)
-export const reloadAppToApplyUpdate = () => controller.apply()
 export const reportResourceLoadFailure = () => controller.resourceFailed()
 export function retryAppUpdate() {
   if (webUpdateState.error?.retryAction === 'wait') return controller.continueDownload()

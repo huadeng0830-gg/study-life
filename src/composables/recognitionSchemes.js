@@ -13,6 +13,7 @@
 import { computed, ref } from 'vue'
 import { timeConfig, seasonAppliesTo, seasonsForCampus } from './store/timeConfig.js'
 import { pasteText, showToast } from './timeSettingsShared.js'
+import { timeText } from '../utils/formatters.js'
 import { currentRecognitionApi, loadRecognition, schemeDisplayName, schemeStatus } from './scheduleOcrFlow.js'
 import { importPlan, importPlanOpen, importPlanOverrides, planDiffExpanded } from './timeImportPlan.js'
 import { accountDataOwner } from './accountSyncIdentity.js'
@@ -110,8 +111,7 @@ export function modesText(modes) {
 export function recognitionTimeText(createdAt) {
   const date = new Date(createdAt)
   if (Number.isNaN(date.getTime())) return ''
-  const pad = (value) => String(value).padStart(2, '0')
-  return `${pad(date.getHours())}:${pad(date.getMinutes())}`
+  return timeText(date)
 }
 
 /* ---------- 识别结果总览 / 详情编辑 ---------- */

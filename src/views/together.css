@@ -9,7 +9,7 @@
 .together-tabs button.active { color:var(--primary); background:var(--card); box-shadow:var(--shadow-sm); }
 .together-tabs button:focus-visible,.invitation-filters button:focus-visible { outline:2px solid var(--focus-solid); outline-offset:2px; }
 .unread-badge { display:inline-grid; place-items:center; min-width:19px; height:19px; padding:0 5px; border-radius:var(--radius-pill); color:var(--on-danger, #fff); background:var(--danger); font-size:var(--fs-10); }
-.together-card { min-width:0; padding:20px; border:1px solid var(--border); border-radius:var(--card-radius); background:var(--card); box-shadow:var(--shadow-sm); }
+.together-card { min-width:0; padding:20px; border:1px solid var(--border); border-radius:var(--card-radius); background-color:var(--glass-surface); backdrop-filter:var(--glass-filter); -webkit-backdrop-filter:var(--glass-filter); box-shadow:var(--glass-shadow); }
 .together-notice { margin:0 0 14px; padding:11px 14px; border:1px solid var(--border); border-radius:var(--radius-10); background:var(--bg-tint); font-size:var(--fs-13); }
 .notice-success { color:var(--success); border-color:color-mix(in srgb,var(--success) 25%,var(--border)); background:color-mix(in srgb,var(--success) 7%,var(--card)); }
 .notice-error { color:var(--danger); border-color:color-mix(in srgb,var(--danger) 25%,var(--border)); background:color-mix(in srgb,var(--danger) 6%,var(--card)); }
@@ -35,7 +35,7 @@
 .discover-option { padding:10px 12px; border-radius:var(--radius-9); background:var(--bg-tint); }
 .discover-option small { display:block; margin-top:3px; }
 .form-actions { grid-column:1/-1; display:flex; align-items:center; gap:12px; flex-wrap:wrap; }
-.profile-summary { display:flex; align-items:center; justify-content:space-between; gap:12px; margin:0 0 14px; padding:11px 15px; border:1px solid var(--border); border-radius:var(--radius-10); background:var(--card); font-size:var(--fs-13); }
+.profile-summary { display:flex; align-items:center; justify-content:space-between; gap:12px; margin:0 0 14px; padding:11px 15px; border:1px solid var(--border); border-radius:var(--radius-10); background-color:var(--glass-surface); backdrop-filter:var(--glass-filter); -webkit-backdrop-filter:var(--glass-filter); box-shadow:var(--glass-shadow); font-size:var(--fs-13); }
 .profile-summary small { display:block; margin-top:3px; color:var(--muted); font-size:var(--fs-11); }
 .text-button,.icon-button { border:0; padding:6px 8px; border-radius:var(--radius-7); background:transparent; color:var(--primary); font:inherit; font-size:var(--fs-12); font-weight:var(--fw-700); cursor:pointer; }
 .text-button:hover,.icon-button:hover { background:var(--primary-soft); }

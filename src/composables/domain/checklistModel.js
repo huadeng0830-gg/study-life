@@ -1,3 +1,5 @@
+import { moneyRow } from '../../utils/formatters.js'
+
 /** @type {Readonly<Record<string, {label: string, icon: string}>>} */
 export const LIST_TYPES = Object.freeze({
   general: { label: '通用清单', icon: '🗒️' },
@@ -185,13 +187,13 @@ export function formatChecklistText(list) {
     const details = [
       shopping || checklistQuantity(item) !== 1 ? `${checklistQuantity(item)} ${item.unit || '件'}` : '',
       item.category && item.category !== '其他' ? item.category : '',
-      shopping ? amount === null ? '未估价' : `¥${amount.toFixed(2)}` : '',
+      shopping ? amount === null ? '未估价' : moneyRow(amount) : '',
       item.note,
     ].filter(Boolean)
     return `[${item.done ? 'x' : ' '}] ${checklistItemName(item)}${details.length ? ` · ${details.join(' · ')}` : ''}`
   })
   const summary = summarizeChecklist(list)
   return [list?.name || '清单', `已完成 ${summary.done}/${summary.count} 项`, '', ...lines,
-    ...(shopping ? ['', `已估总额 ¥${summary.total.toFixed(2)}${summary.unpricedCount ? `（${summary.unpricedCount} 项未估价）` : ''}`] : []),
+    ...(shopping ? ['', `已估总额 ${moneyRow(summary.total)}${summary.unpricedCount ? `（${summary.unpricedCount} 项未估价）` : ''}`] : []),
   ].join('\n')
 }

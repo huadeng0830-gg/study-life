@@ -16,6 +16,7 @@
 // 【去重必须落盘】只用内存 Set 的话，刷新页面会重复提醒；接入云同步后两台设备
 // 还会各响一次。所以 fired 记录写进一个新的存储键，跟着数据一起同步。
 import { clock, useStoredRef } from './store/core.js'
+import { hmText } from '../utils/formatters.js'
 import { policyDateKey, policyDateTime, policyTimeKey, settings } from './settingsPolicy.js'
 import { countdownTarget } from './store/countdown.js'
 import { isArchived, isTaskActionable } from './domain/state.js'
@@ -46,7 +47,6 @@ const SCHEDULE_HORIZON_MS = 6 * 60 * 60 * 1000
 
 let logEntries = []
 let timer = null
-let started = false
 let lastSeenSignature = ''
 let reminderLogInitialized = false
 
@@ -100,7 +100,7 @@ function parseClock(value, fallback) {
   const minute = Number(match[2])
   if (!Number.isFinite(hour) || !Number.isFinite(minute)) return fallback
   if (hour > 23 || minute > 59) return fallback
-  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
+  return hmText(hour, minute)
 }
 
 function notifyPermission() {
@@ -282,17 +282,11 @@ export function startReminderScheduler() {
   }
   tick()
   timer = setInterval(tick, 60_000)
-  started = true
 }
 
 export function stopReminderScheduler() {
   if (timer) clearInterval(timer)
   timer = null
-  started = false
-}
-
-export function isReminderSchedulerRunning() {
-  return started
 }
 
 /**
@@ -313,8 +307,3 @@ export function notifyReminderDataChanged() {
 }
 
 /** 仅供测试：清空去重记录。 */
-export function resetReminderLogForTest() {
-  logEntries = []
-  lastSeenSignature = ''
-  writeLog()
-}

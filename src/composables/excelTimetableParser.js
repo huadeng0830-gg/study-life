@@ -1,5 +1,12 @@
-const DAY_TOKEN = /(?:星期|周)\s*([一二三四五六日天])/
-const DAY_BY_DIGIT = { 一: 0, 二: 1, 三: 2, 四: 3, 五: 4, 六: 5, 日: 6, 天: 6 }
+// 解析语义已收口到 timetable facade。这里的本地名 text 是历史词汇（文件内约 15 处调用），
+// 直接别名到 facade 的 Excel 归一化，避免为改名制造无关 diff。
+import {
+  normalizeCellText as text,
+  normalizePeriodText,
+  normalizeWeekText,
+  weekTypeChineseLabel,
+  weekdayIndexFromCell,
+} from './timetable/index.js'
 
 const HEADERS = {
   name: ['课程名称', '课程名', '课程', '科目', '名称', 'course', 'name'],
@@ -11,49 +18,26 @@ const HEADERS = {
   teacher: ['教师', '任课教师', '老师', 'teacher', 'instructor'],
 }
 
-function text(value) {
-  return String(value ?? '')
-    .replace(/[\u2013\u2014\u2212~～]/g, '-')
-    .replace(/[（]/g, '(')
-    .replace(/[）]/g, ')')
-    .replace(/\s+/g, ' ')
-    .trim()
-}
-
 function normalizedHeader(value) {
   return text(value).toLowerCase().replace(/[\s_\-:：()（）]/g, '')
 }
 
+// 保留原函数名：调用点只声明「需要哪种失败约定」，实现（正则/字符类/归一化）全在 facade。
+// 这里选 weekdayIndexFromCell（失败约定 null，额外接受纯数字 1-7 的表头）。
 function dayFromText(value) {
-  const normalized = text(value)
-  const matched = normalized.match(DAY_TOKEN)
-  if (matched) return DAY_BY_DIGIT[matched[1]]
-  if (/^[1-7]$/.test(normalized)) return Number(normalized) - 1
-  return null
+  return weekdayIndexFromCell(value)
 }
 
+// 选 normalizePeriodText：Excel 的「透传」约定——认不出来时原样返回文本，
+// 调用点用 `!period` 只过滤空单元格（详见 facade/period.js 文件头）。
 function normalizePeriod(value) {
-  const normalized = text(value)
-    .replace(/[Oo]/g, '0')
-    .replace(/[Il|]/g, '1')
-  const compact = normalized.match(/(?:^|\D)(0[1-9]|1[0-2])(0[1-9]|1[0-2])(?:\D|$)/)
-  if (compact) return `${Number(compact[1])}-${Number(compact[2])}节`
-  const range = normalized.match(/(?:第?\s*)?(\d{1,2})(?:\s*[-至到]\s*(\d{1,2}))?\s*(?:节|课)?/)
-  if (!range) return normalized
-  const start = Number(range[1])
-  const end = Number(range[2] || range[1])
-  if (start < 1 || end < start || end > 12) return normalized
-  return `${start}-${end}节`
+  return normalizePeriodText(value)
 }
 
+// 选 normalizeWeekText：Excel 周次列的「透传 + 全学期」约定；单/双周在这里编码成
+// 批量文本字面量（'\t单周'），不是课程对象的 'odd'。
 function normalizeWeek(value) {
-  const normalized = text(value)
-  if (!normalized) return ''
-  if (/全学期/.test(normalized)) return '全学期'
-  const matched = normalized.match(/(\d{1,2})\s*[-至到]\s*(\d{1,2})/)
-  if (matched) return `${matched[1]}-${matched[2]}周${/单周/.test(normalized) ? '\t单周' : /双周/.test(normalized) ? '\t双周' : ''}`
-  const single = normalized.match(/^(\d{1,2})\s*周?$/)
-  return single ? `${single[1]}周` : normalized
+  return normalizeWeekText(value)
 }
 
 function headerMap(row) {
@@ -85,7 +69,7 @@ function parseListSheet(rows, sheetName) {
     if (!name && row.every((cell) => !text(cell))) continue
     if (!name || day === null || !period) continue
     const week = normalizeWeek(row[selected.fields.week])
-    const weekType = text(row[selected.fields.weekType])
+    const weekType = weekTypeChineseLabel(row[selected.fields.weekType])
     const room = text(row[selected.fields.room])
     const teacher = text(row[selected.fields.teacher])
     lines.push([
@@ -93,7 +77,7 @@ function parseListSheet(rows, sheetName) {
       `周${'一二三四五六日'[day]}`,
       period,
       week || '全学期',
-      /单周/.test(weekType) ? '单周' : /双周/.test(weekType) ? '双周' : '',
+      weekType,
       room ? `地点:${room}` : '',
       teacher ? `教师:${teacher}` : '',
     ].filter(Boolean).join('\t'))

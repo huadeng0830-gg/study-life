@@ -1,4 +1,6 @@
 // 通知/自然语言解析核心：粘贴通知和语音转写共用这一条文字理解路径。
+import { dateText, hmText } from '../utils/formatters.js'
+
 const WEEKDAY = { 日: 0, 天: 0, 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6 }
 const CN_DIGITS = { 零: 0, 〇: 0, 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 }
 const PERIOD_WORDS = '凌晨|早上|上午|中午|下午|晚上|夜里|今晚|今早'
@@ -15,12 +17,8 @@ export const NOTICE_TYPE_OPTIONS = [
   { value: '通知', label: '普通通知', icon: '📣' },
 ]
 
-function pad(value) {
-  return String(value).padStart(2, '0')
-}
-
 function dateString(date) {
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+  return dateText(date)
 }
 
 function addDays(date, count) {
@@ -96,10 +94,26 @@ function isDeadlineCandidate(candidate, text) {
     return /截止|截至|最晚|之前|以前|报名截止|前/.test(context)
 }
 
+/**
+ * 找出文本里表示「第几节 / 第几节到第几节」的跨度。
+ *
+ * 这些跨度里的数字（“1-2节”“第3节”）长得像日期，但它们是节次：
+ * 通用日期正则会把 “1-2” 当成 1 月 2 日，于是截止日期凭空变成一个无关的日子。
+ * 所有调用方都要排除这些跨度，所以在源头统一计算一次。
+ */
+export function periodSpanRanges(text) {
+  const spans = []
+  for (const match of text.matchAll(/(?:第\s*)?[零〇一二两三四五六七八九十百\d]+\s*(?:[-—到至~～]\s*[零〇一二两三四五六七八九十百\d]+\s*)?节(?:课)?/g)) {
+    spans.push({ start: match.index, end: match.index + match[0].length })
+  }
+  return spans
+}
+
 /** 找出所有日期候选；选择事件日期时会排除末尾的通知发布日期。 */
 export function extractDateCandidates(value, now = new Date()) {
   const text = normalizeText(value)
   const candidates = []
+  const periodSpans = periodSpanRanges(text)
   const explicit = /(?:(\d{4})\s*(?:年|[\/-])\s*)?(\d{1,2})\s*(?:月|[\/-])\s*(\d{1,2})\s*(?:日|号)?/g
   for (const match of text.matchAll(explicit)) {
     const year = Number(match[1] || now.getFullYear())
@@ -133,8 +147,19 @@ export function extractDateCandidates(value, now = new Date()) {
     const raw = match[0]
     candidates.push({ raw, start: match.index, end: match.index + raw.length, value: relativeDateValue(raw, now), kind: /周|星期|礼拜/.test(raw) ? 'weekday' : 'relative', isPublication: false, isDeadline: isDeadlineCandidate({ start: match.index, end: match.index + raw.length }, text), ambiguous: false })
   }
+  // “还剩3天考试”“距离报名还有2天”——倒计时式日期。
+  // 过去通知理解这条链路完全没有它，于是这类通知只会得到一个没有日期的考试条目。
+  for (const match of text.matchAll(/(?:还(?:有|剩)|剩余)\s*(\d{1,3})\s*天|(\d{1,3})\s*天(?:之)?后/g)) {
+    const days = Number(match[1] ?? match[2])
+    if (!Number.isFinite(days) || days <= 0) continue
+    const raw = match[0]
+    candidates.push({ raw, start: match.index, end: match.index + raw.length, value: dateString(addDays(now, days)), kind: 'countdown', isPublication: false, isDeadline: isDeadlineCandidate({ start: match.index, end: match.index + raw.length }, text), ambiguous: false })
+  }
   const byStart = new Map()
   for (const candidate of candidates) {
+    // 节次跨度里的数字会被上面的显式日期正则当成“1 月 2 日”。在出口统一剔除，
+    // 三类候选（显式日期 / 单独日号 / 相对日期）共用这一道判断，不会各漏一处。
+    if (periodSpans.some((span) => candidate.start < span.end && candidate.end > span.start)) continue
     const previous = byStart.get(candidate.start)
     if (!previous || candidate.end - candidate.start > previous.end - previous.start) byStart.set(candidate.start, candidate)
   }
@@ -168,7 +193,7 @@ export function extractTimeCandidates(value) {
   for (const match of text.matchAll(colon)) {
     const parsed = parsePeriod(match[1] || '', Number(match[2]))
     if (parsed.value > 23 || Number(match[3]) > 59) continue
-    candidates.push({ raw: match[0], start: match.index, end: match.index + match[0].length, time: `${pad(parsed.value)}:${pad(match[3])}`, period: match[1] || '', ambiguous: parsed.ambiguous })
+    candidates.push({ raw: match[0], start: match.index, end: match.index + match[0].length, time: hmText(parsed.value, match[3]), period: match[1] || '', ambiguous: parsed.ambiguous })
   }
   const point = new RegExp(`(${PERIOD_WORDS})?\\s*((?:\\d{1,3}|[零〇一二两三四五六七八九十百]{1,4}))\\s*[点时]\\s*(半|一刻|三刻|[零〇一二两三四五六七八九十百\\d]{1,3}分?)?`, 'g')
   for (const match of text.matchAll(point)) {
@@ -178,7 +203,7 @@ export function extractTimeCandidates(value) {
     const parsed = parsePeriod(match[1] || '', hour)
     const minute = parseMinute(match[3])
     if (parsed.value > 23 || minute > 59) continue
-    candidates.push({ raw: match[0], start: match.index, end: match.index + match[0].length, time: `${pad(parsed.value)}:${pad(minute)}`, period: match[1] || '', ambiguous: parsed.ambiguous })
+    candidates.push({ raw: match[0], start: match.index, end: match.index + match[0].length, time: hmText(parsed.value, minute), period: match[1] || '', ambiguous: parsed.ambiguous })
   }
   candidates.sort((a, b) => a.start - b.start)
   for (let index = 1; index < candidates.length; index++) {
@@ -187,7 +212,7 @@ export function extractTimeCandidates(value) {
     const between = text.slice(previous.end, current.start)
     if (!current.period && /^(?:到|至|[-—~～])$/.test(between.trim()) && previous.period) {
       const parsed = parsePeriod(previous.period, Number(current.time.slice(0, 2)))
-      current.time = `${pad(parsed.value)}:${current.time.slice(3)}`
+      current.time = hmText(parsed.value, current.time.slice(3))
       current.ambiguous = parsed.ambiguous
     }
   }
@@ -199,7 +224,10 @@ export function extractLocationCandidates(value) {
   const candidates = []
   const patterns = [
     { pattern: /(?:地点|地址|会议地点)\s*[:：]\s*([^\n，,。；;]+)/g, explicit: true },
-    { pattern: /(?:在|到|于(?!\s*(?:\d{1,4}\s*(?:月|日|号|点|时)|\d{1,2}\s*[:：]|今天|明天|后天|本周|下周)))\s*([^\n，,。；;]+?)(?=\s*(?:召开|开会|开班会|举行|参加|上课|集合|签到|报到|开始|听|提交|上交|上传|完成|报名|填写|领取|携带|处理|确认|缴费|[。.!！?？]|$))/g, explicit: false },
+    // 「在」「到」必须独立成词。“现在/正在/存在/实在/来到”里的那个字不是地点介词。
+    // 边界必须写进正则本身：如果只匹配完再判断，“现在请到三教201领取…”会先被
+    // 「在」连着后面整句一起吃掉，再判断就已经晚了，后面的「到」再也匹配不到。
+    { pattern: /(?<![现正实存今每该最来])(?:在|到|于(?!\s*(?:\d{1,4}\s*(?:月|日|号|点|时)|\d{1,2}\s*[:：]|今天|明天|后天|本周|下周)))\s*([^\n，,。；;]+?)(?=\s*(?:召开|开会|开班会|举行|参加|上课|集合|签到|报到|开始|听|提交|上交|上传|完成|报名|填写|领取|携带|处理|确认|缴费|[。.!！?？]|$))/g, explicit: false },
   ]
   for (const { pattern, explicit } of patterns) {
     for (const match of text.matchAll(pattern)) {
@@ -209,6 +237,8 @@ export function extractLocationCandidates(value) {
       if (!explicit && prefix === '于' && /[关于对于由于至于基于位于鉴于]$/.test(previous)) continue
       const location = match[1].replace(/^(这里|那里)\s*/, '').trim()
       if (!location || location === '场' || /^(今天|明天|后天|上午|下午|晚上|早上)/.test(location) || extractTimeCandidates(location).length) continue
+      // 地点不该以动作词开头：“到提交前”这类残句说明这半句不是地点。
+      if (!explicit && new RegExp(`^(?:${ACTION_WORDS})`).test(location)) continue
       candidates.push({ raw: location, start: match.index, end: match.index + match[0].length, explicit })
     }
   }
@@ -260,7 +290,20 @@ function cleanTitle(value, dates, times, locations) {
     if (startsTitle && /^(召开|开会|开班会|举行|签到|上课|听)/.test(phrase)) text = phrase.replace(/^(召开|开会|开班会|举行|签到|上课|听)\s*/, '')
     else if (startsTitle && !/^(交|提交|完成|报名|填写|领取|参加|处理|确认|缴费)$/.test(phrase)) text = phrase
   }
-  text = text.replace(/截止|截至|最晚/g, ' ').replace(/\s+交$/g, '').replace(/[\n，,。；;]+/g, ' ').replace(/\s+/g, ' ').replace(/(?<=[\p{L}\p{N}])(?:至|到|在|于)(?=\s)/gu, ' ').replace(/(^|\s)(?:至|到|在|于)(?=\s|$)/g, '$1').replace(/^(?:至|到|在|于)\s*/g, '').replace(/^[:：、\s]+|[:：、\s]+$/g, '').replace(/^交(?=[^班级代])/g, '提交')
+  // 「现在/正在/实在/存在」里的「在」是词的一部分，不是地点被剥离后悬空的方位介词：
+  // 标题清理可以删悬空的「至/到/在/于」，但不能删这些词里的「在」（功能报告 1.3 残留：
+  // 标题曾被削成「现 领取实验器材」）。左边界否定断言必须写进正则本身——先匹配再判断
+  // 就已经晚了，那时「在」连同其后空白已经被替换掉。
+  text = text
+    .replace(/截止|截至|最晚/g, ' ')
+    .replace(/\s+交$/g, '')
+    .replace(/[\n，,。；;]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/(?<=[\p{L}\p{N}])(?:至|到|(?<![现正实存])在|于)(?=\s)/gu, ' ')
+    .replace(/(^|\s)(?:至|到|在|于)(?=\s|$)/g, '$1')
+    .replace(/^(?:至|到|在|于)\s*/g, '')
+    .replace(/^[:：、\s]+|[:：、\s]+$/g, '')
+    .replace(/^交(?=[^班级代])/g, '提交')
   return text.slice(0, 80) || '待处理通知'
 }
 
@@ -589,6 +632,8 @@ function selectDateCandidate(candidates, text, type) {
       else if (/截止|最晚|之前|以前/.test(context)) score -= 2
     } else if (/截止|最晚|之前|以前|提交|上交|上传|完成|报名/.test(context)) score += 3
     if (candidate.isDeadline && type !== '会议' && type !== '课程') score += 1
+    // 倒计时是相对推算出来的，不如写明的日期可靠：有别的候选时让位，只剩它时才用。
+    if (candidate.kind === 'countdown') score -= 1.5
     return { candidate, score }
   })
   return scored.sort((a, b) => b.score - a.score)[0].candidate

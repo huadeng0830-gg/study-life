@@ -2,6 +2,7 @@ import { computed, onScopeDispose, ref, shallowRef, watch } from 'vue'
 import { accountUser } from './accountAuth.js'
 import { restoreStoredValues } from './store/cloudAccess.js'
 import { availableNavigationItems } from '../router/navigation.js'
+import { deepClone } from '../utils/clone.js'
 import {
   DEFAULT_DESKTOP_NAVIGATION, DEFAULT_MOBILE_NAVIGATION,
   DESKTOP_NAVIGATION_KEY, MOBILE_NAVIGATION_KEY,
@@ -13,7 +14,7 @@ import {
 const MODES = ['mobile', 'desktop']
 const STORAGE_KEYS = { mobile: MOBILE_NAVIGATION_KEY, desktop: DESKTOP_NAVIGATION_KEY }
 const HISTORY_LIMIT = 50
-const clone = (value) => JSON.parse(JSON.stringify(value))
+const clone = (value) => deepClone(value)
 const equal = (left, right) => JSON.stringify(left) === JSON.stringify(right)
 const emptyHistory = () => ({ past: [], future: [], batch: null, batchFuture: null })
 

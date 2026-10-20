@@ -1,6 +1,15 @@
 import { periodIdFromNumber } from './courseParser.js'
+// 解析语义已收口到 timetable facade。本地名 cleanText 是历史词汇（文件内约 15 处调用），
+// 别名到 facade 的版面归一化（【】→[] 那一份），避免为改名制造无关 diff。
+import {
+  normalizeLayoutText as cleanText,
+  parseLoosePeriodRange,
+  parsePeriodRange,
+  parseWeekRangeFromTable,
+  weekTypeBatchSuffix,
+  weekdayIndexFromLabel,
+} from './timetable/index.js'
 
-const DAY_DIGITS = { 一: 0, 二: 1, 三: 2, 四: 3, 五: 4, 六: 5, 日: 6, 天: 6 }
 const CLASS_CODE = /^[\u4e00-\u9fff]{1,6}\d{4}(?:-\d+)?$/
 const HEADER_NOISE = /^(?:星期[一二三四五六日天]?|周[一二三四五六日天]|备注|节次)$/
 
@@ -9,17 +18,6 @@ const HEADER_NOISE = /^(?:星期[一二三四五六日天]?|周[一二三四五�
 function isClassCode(value) {
   const compact = String(value || '').replace(/\s/g, '')
   return CLASS_CODE.test(compact) && !/(?:楼|馆|室|堂|中心|实验|基地|校区)/.test(compact)
-}
-
-function cleanText(value) {
-  return String(value || '')
-    .replace(/[\u2013\u2014\u2212~～]/g, '-')
-    .replace(/[【]/g, '[')
-    .replace(/[】]/g, ']')
-    .replace(/[（]/g, '(')
-    .replace(/[）]/g, ')')
-    .replace(/\s+/g, ' ')
-    .trim()
 }
 
 // OCR 结果即使字段置信度较高，也可能留下括号/符号残片（例如“岭西10]”）。
@@ -56,9 +54,9 @@ function centerY(item) {
   return (Number(item?.bbox?.y0) + Number(item?.bbox?.y1)) / 2
 }
 
+// 选 weekdayIndexFromLabel：版面表头只认汉字（不接受纯数字），失败约定 null。
 function weekdayFromText(text) {
-  const match = cleanText(text).match(/(?:星期|周)\s*([一二三四五六日天])/) 
-  return match ? DAY_DIGITS[match[1]] : null
+  return weekdayIndexFromLabel(text)
 }
 
 // Weekday labels are semantic anchors, not a seven-column template. Build
@@ -101,28 +99,9 @@ function detectDayBands(layout) {
   }
 }
 
+// 选 parsePeriodRange：版面严格版（要求「节」字），失败约定 null。
 function parsePeriod(text) {
-  const normalized = cleanText(text)
-    .replace(/[Oo]/g, '0')
-    .replace(/[Il|]/g, '1')
-  const bracket = normalized.match(/[[(]([\d\s,，、/\-]{2,24})[\])]?\s*节/)
-  const list = normalized.match(/((?:0?[1-9]|1[0-2])(?:\s*-\s*(?:0?[1-9]|1[0-2])){1,5})[\])]?\s*节/)
-  const simple = normalized.match(/第?\s*(\d{1,2})(?:\s*-\s*(\d{1,2}))?\s*节/)
-  let numbers = []
-
-  const compact = normalized.match(/(?:^|\D)(0[1-9]|1[0-2])(0[1-9]|1[0-2])\s*节/)
-  if (compact) return { start: Number(compact[1]), end: Number(compact[2]) }
-
-  if (bracket) numbers = bracket[1].match(/\d{1,2}/g)?.map(Number) || []
-  else if (list) numbers = list[1].match(/\d{1,2}/g)?.map(Number) || []
-  else if (simple) numbers = [Number(simple[1]), Number(simple[2] || simple[1])]
-
-  if (numbers.length === 1 && /^\d{4,8}$/.test(bracket?.[1]?.replace(/\D/g, '') || '')) {
-    numbers = bracket[1].replace(/\D/g, '').match(/\d{2}/g).map(Number)
-  }
-  numbers = numbers.filter((number) => number >= 1 && number <= 12)
-  if (!numbers.length) return null
-  return { start: Math.min(...numbers), end: Math.max(...numbers) }
+  return parsePeriodRange(text)
 }
 
 function groupWordsIntoLines(words) {
@@ -184,18 +163,10 @@ function groupWordsIntoColumns(words) {
   return columns.sort((a, b) => a.x - b.x).map((column) => groupWordsIntoLines(column.words))
 }
 
+// 选 parseWeekRangeFromTable：版面周次（支持 [周]/(周) 与 单/双周前缀），
+// 超范围（>maxWeek 或 end<start）判失败，weekType 用课程对象编码 odd/even/all。
 function parseWeek(text, maxWeek) {
-  const normalized = cleanText(text)
-  const match = normalized.match(/(\d{1,2})\s*-\s*(\d{1,2})\s*(?:[\[(](?:单|双)?周[\])]|(?:单|双)?周)/)
-  if (!match) return null
-  const startWeek = Number(match[1])
-  const endWeek = Number(match[2])
-  if (startWeek < 1 || endWeek < startWeek || endWeek > maxWeek) return null
-  return {
-    startWeek,
-    endWeek,
-    weekType: normalized.includes('单周') ? 'odd' : normalized.includes('双周') ? 'even' : 'all',
-  }
+  return parseWeekRangeFromTable(text, maxWeek)
 }
 
 function parseInlineRecord(text, day, timeConfig, maxWeek, confidence) {
@@ -242,16 +213,9 @@ function parseInlineRecord(text, day, timeConfig, maxWeek, confidence) {
   }
 }
 
+// 选 parseLoosePeriodRange：版面宽松版，给「节」字被 OCR 吃掉的行兜底。
 function parseLoosePeriod(text) {
-  const normalized = cleanText(text)
-    .replace(/[Oo]/g, '0')
-    .replace(/[Il|]/g, '1')
-  const match = normalized.match(/(?:^|\D)((?:0?[1-9]|1[0-2])(?:\s*-\s*(?:0?[1-9]|1[0-2])){1,5})(?:\D|$)/)
-  if (!match) return null
-  const numbers = match[1].match(/\d{1,2}/g)?.map(Number)
-    .filter((number) => number >= 1 && number <= 12) || []
-  if (numbers.length < 2) return null
-  return { start: Math.min(...numbers), end: Math.max(...numbers) }
+  return parseLoosePeriodRange(text)
 }
 
 function isTeacherCandidate(text) {
@@ -431,7 +395,7 @@ function recordsForDay(lines, day, timeConfig, maxWeek) {
 }
 
 export function toBatchLine(course) {
-  const weekType = course.weekType === 'odd' ? '\t单周' : course.weekType === 'even' ? '\t双周' : ''
+  const weekType = weekTypeBatchSuffix(course.weekType)
   const room = course.room ? `\t地点:${course.room}` : ''
   const teacher = course.teacher ? `\t教师:${course.teacher}` : ''
   return `${course.name}\t周${'一二三四五六日'[course.day]}\t${course.startPeriod}-${course.endPeriod}节\t${course.startWeek}-${course.endWeek}周${weekType}${room}${teacher}`

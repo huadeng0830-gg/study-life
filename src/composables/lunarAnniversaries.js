@@ -15,6 +15,7 @@
 // （`festiveFor(todayISO, festiveConfig)`) 里那次读取会建立依赖，面板一改氛围立刻跟上；
 // 而不需要改动 App.vue / atmosphereStore.js。
 import { ref } from 'vue'
+import { dateParts, dateText } from '../utils/formatters.js'
 import {
   GREGORIAN_SUPPORT_RANGE,
   isLunarYearSupported,
@@ -128,7 +129,7 @@ function isRealDateKey(value) {
 export function toDateKey(value) {
   if (value instanceof Date) {
     if (Number.isNaN(value.getTime())) return ''
-    return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`
+    return dateText(value)
   }
   const text = String(value ?? '').trim()
   return isRealDateKey(text) ? text : ''
@@ -279,7 +280,7 @@ export function resolveLunarAnniversary(entry, today) {
   const occurrences = lunarMonthDayOccurrences(year, lunarMonth, lunarDay, isLeapMonth)
   if (occurrences.length > 0) {
     const hit = occurrences[0]
-    const dateKey = `${hit.year}-${pad2(hit.month)}-${pad2(hit.day)}`
+    const dateKey = dateParts(hit.year, hit.month, hit.day)
     const daysFromToday = daysBetweenDateKeys(todayKey, dateKey)
     return {
       ...withYear,
@@ -311,11 +312,6 @@ export function resolveLunarAnniversary(entry, today) {
   return decide(LUNAR_ANNIVERSARY_STATUS.NOT_IN_YEAR)
 }
 
-/** 'YYYY-MM-DD' 补零。 */
-function pad2(value) {
-  return String(value).padStart(2, '0')
-}
-
 /**
  * 从 today 起（含当天）向后找到农历表末尾的下一个出现，只用于 UI 的「下一次」提示。
  *
@@ -336,7 +332,7 @@ function nextOccurrenceKeyAfter(todayKey, lunarMonth, lunarDay, isLeapMonth) {
   const lastYear = GREGORIAN_SUPPORT_RANGE.max
   for (let year = startYear; year <= lastYear; year += 1) {
     for (const hit of lunarMonthDayOccurrences(year, lunarMonth, lunarDay, isLeapMonth)) {
-      const key = `${hit.year}-${pad2(hit.month)}-${pad2(hit.day)}`
+      const key = dateParts(hit.year, hit.month, hit.day)
       // 同年月日格式等长，字符串比较即时间先后。
       if (key >= todayKey) return key
     }

@@ -3,6 +3,7 @@
 // preamble rows behave consistently across importers.
 import { decodeBillText, findHeader, parseCsv, splitDateTime } from './ledgerBillImport.js'
 import { eventInputError } from './events/eventFields.js'
+import { dateText, hmText, timeText } from '../utils/formatters.js'
 
 const MAX_IMPORT_ROWS = 2000
 
@@ -52,10 +53,9 @@ function localDateTimeFromParsed(value) {
   const timestamp = Date.parse(String(value ?? '').trim())
   if (!Number.isFinite(timestamp)) return { date: '', time: '' }
   const date = new Date(timestamp)
-  const pad = (number) => String(number).padStart(2, '0')
   return {
-    date: `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`,
-    time: `${pad(date.getHours())}:${pad(date.getMinutes())}`,
+    date: dateText(date),
+    time: timeText(date),
   }
 }
 
@@ -69,12 +69,12 @@ function normalizeTime(value, dateBasis = '2000-01-01') {
     const meridiem = match[3]?.toUpperCase()
     if (minute > 59 || hour > (meridiem ? 12 : 23) || (meridiem && hour < 1)) return ''
     if (meridiem) hour = (hour % 12) + (meridiem === 'PM' ? 12 : 0)
-    return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
+    return hmText(hour, minute)
   }
   const timestamp = Date.parse(`${dateBasis || '2000-01-01'} ${text}`)
   if (!Number.isFinite(timestamp)) return ''
   const date = new Date(timestamp)
-  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
+  return timeText(date)
 }
 
 function validDateKey(value) {

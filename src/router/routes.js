@@ -5,7 +5,7 @@
  * 必须针对**同一份**真实路由表断言——另抄一份必然随实现漂移，那就不是守卫了。
  * 抽出来之后 `main.js` 只负责装配，懒加载与失败兜底的行为一字未改。
  */
-import { defineComponent, h, onBeforeUnmount, ref, shallowRef } from 'vue'
+import { defineComponent, h, onBeforeUnmount, onErrorCaptured, onActivated, ref, shallowRef } from 'vue'
 import { resolvedRouteComponent, routeLoaders } from './routePreload.js'
 import RouteFallback from '../components/RouteFallback.vue'
 import NotFoundView from '../components/NotFoundView.vue'
@@ -55,13 +55,26 @@ export const ROUTE_COMPONENT_NAMES = Object.freeze({
 const RouteLoading = { setup: () => () => h(RouteFallback, { error: false }) }
 const RouteError = { setup: () => () => h(RouteFallback, { error: true }) }
 
-/** 懒加载路由组件：加载中显示占位，加载失败显示错误态（而不是白屏）。 */
+/**
+ * 懒加载路由组件，外加一道**渲染期错误边界**。
+ *
+ * 两类失败要分开处理：
+ *  - 分包加载失败（chunk 拿不到）→ 走 `RouteError`，这是网络/发布问题；
+ *  - 渲染期异常（组件加载了但渲染时抛错）→ 同样落到 `RouteError`。
+ *
+ * 第二类过去完全没有兜底：`app.config.errorHandler` 只弹一条 toast，出错的子树仍留在界面上。
+ * 对于动辄上百 KB 的页面，一行脏数据就足以白屏，而用户除了刷新没有别的出路。
+ *
+ * 边界必须长在**这个组件内部**而不是外面再包一层：App.vue 的 KeepAlive 用 `:include`
+ * 按组件名匹配缓存，外层多一个包装组件会让所有页面都缓存失效。
+ */
 function asyncRoute(path) {
   return defineComponent({
     name: ROUTE_COMPONENT_NAMES[path] || 'LazyRouteView',
     setup() {
       const loaded = shallowRef(resolvedRouteComponent(path))
       const failed = ref(false)
+      const renderFailed = ref(false)
       let disposed = false
       const loader = routeLoaders[path]
       if (!loader) failed.value = true
@@ -70,12 +83,22 @@ function asyncRoute(path) {
           .then((module) => { if (!disposed) loaded.value = module.default })
           .catch(() => { if (!disposed) failed.value = true })
       }
+      // 返回 false 表示不再向上冒泡，避免同一次异常在边界与全局 handler 里各报一次。
+      onErrorCaptured((error) => {
+        if (renderFailed.value) return false
+        renderFailed.value = true
+        console.error(`[route] ${ROUTE_COMPONENT_NAMES[path] || path} 渲染失败`, error)
+        return false
+      })
+      // 页面被 KeepAlive 缓存后再次进入时给一次重试机会，
+      // 否则它会一直停在错误页，即使数据已经变了。
+      onActivated(() => { renderFailed.value = false })
       onBeforeUnmount(() => { disposed = true })
       // Transition/KeepAlive must keep the same DOM root while an import finishes.
       // Replacing a leaving fallback root can detach its transition anchor before
       // Vue inserts the loaded view. The inner content may change; this root stays.
       return () => h('div', { class: 'route-view' }, [loaded.value
-        ? h(loaded.value)
+        ? renderFailed.value ? h(RouteError) : h(loaded.value)
         : failed.value ? h(RouteError) : h(RouteLoading)])
     },
   })

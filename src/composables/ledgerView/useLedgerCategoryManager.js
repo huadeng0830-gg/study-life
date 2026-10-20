@@ -1,4 +1,5 @@
 import { computed, ref, watch } from 'vue'
+import { createId } from '../../utils/ids.js'
 import {
   categoriesForScope,
   commonCategories,
@@ -23,7 +24,7 @@ export function useLedgerCategoryManager({ notify }) {
   const categoryDeleteTarget = ref(null)
 
   function createCategoryId() {
-    return `custom-${globalThis.crypto?.randomUUID?.() || Math.random().toString(36).slice(2)}`
+    return createId('custom')
   }
 
   function normalizedCategoryName(value) {

@@ -1,4 +1,5 @@
 import { MAX_LEDGER_AMOUNT, normalizeAmount } from './ledgerAmount.js'
+import { deepClone } from '../utils/clone.js'
 
 const VALUE_OPTIONS = Object.freeze([
   { value: 'worth', label: '值' },
@@ -276,7 +277,7 @@ export function toPlaceInvitePayload(value) {
 
 /** Place references and local offer links include personal context, so none leave in an account snapshot. */
 export function projectAccountSyncValues(values) {
-  const result = JSON.parse(JSON.stringify(values || {}))
+  const result = deepClone(values || {})
   if (Array.isArray(result.sl_expenses)) {
     result.sl_expenses = result.sl_expenses.map((transaction) => {
       if (!transaction || typeof transaction !== 'object' || !transaction.placeId) return transaction
@@ -337,8 +338,4 @@ export function restoreLocalPlaceLinks(localValues, mergedValues) {
     }
   }
   return result
-}
-
-export function isUuid(value) {
-  return UUID_RE.test(String(value || ''))
 }

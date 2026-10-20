@@ -92,6 +92,7 @@ export const BACKUP_ONLY_KEYS = Object.freeze({
   sl_place_visits: '到访记录属于个人行为，不上传',
   sl_place_offers: '优惠链接属于个人上下文，不上传',
   sl_focus_active: '正在进行的专注计时，属于单台设备的瞬时状态',
+  sl_focus_last_completed: '刚结束那张“本次专注已完成”卡片，属于单台设备的瞬时界面状态',
   sl_task_center_log: '快捷记录操作日志，仅用于本机撤销与去重',
 })
 

@@ -22,10 +22,6 @@ export const RETIRED_APPEARANCE_FIELDS = Object.freeze([
   'foodPickerMode',
 ])
 
-export function isRetiredFoodKey(key) {
-  return RETIRED_FOOD_KEYS.includes(key)
-}
-
 export function removeRetiredAppearanceFields(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return value
   const next = { ...value }

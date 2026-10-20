@@ -1,6 +1,8 @@
 import { clock, touchStoredRef, useStoredRef } from './core.js'
+import { createId } from '../../utils/ids.js'
 import { todayStr, MAX_WEEK, dateString } from './utils.js'
 import { periodIndex } from './timeConfig.js'
+import { weekMatchesWeekTypeLoose } from '../timetable/index.js'
 
 export const semester = useStoredRef('sl_semester', {
   start: (function defaultSemesterStart() {
@@ -112,7 +114,7 @@ function isDateRange(item) {
 }
 
 function newExceptionId() {
-  return `exception-${globalThis.crypto?.randomUUID?.() || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`}`
+  return createId('exception')
 }
 
 /** 修复旧版本同日同类型共用 ID 的记录，保留每条安排的日期、课程与备注。 */
@@ -211,10 +213,9 @@ export function courseInWeek(c, week) {
   const sw = c.startWeek ?? 1
   const ew = c.endWeek ?? MAX_WEEK
   if (week < sw || week > ew) return false
-  const t = c.weekType ?? 'all'
-  if (t === 'odd') return week % 2 === 1
-  if (t === 'even') return week % 2 === 0
-  return true
+  // 单双周判定收口到 facade。这里必须用**宽松**版（未识别的 weekType 视为全周）：
+  // 旧课表/外部导入可能残留未迁移的编码，宽松版保证课程照常显示，不会整门消失。
+  return weekMatchesWeekTypeLoose(week, c.weekType)
 }
 
 /** 该例外是否作用于这一天。 */

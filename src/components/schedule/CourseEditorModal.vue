@@ -8,6 +8,7 @@ import { isArchived, taskStatus } from '../../composables/domain/state.js'
 import { focusLocation } from '../../composables/focusNavigation.js'
 import TaskFocusLink from '../learning/TaskFocusLink.vue'
 import { createFormIdentityGuard } from '../../composables/formIdentity.js'
+import { deepClone } from '../../utils/clone.js'
 
 const props = defineProps({
   open: Boolean,
@@ -58,7 +59,7 @@ function setError(message, field = '') {
 
 function syncDraft() {
   formIdentitySnapshot = formIdentity.begin()
-  Object.assign(draft, JSON.parse(JSON.stringify(props.form)))
+  Object.assign(draft, deepClone(props.form))
   setError('')
 }
 

@@ -4,7 +4,6 @@ import { desktopNavigationGroups, navigationRegistry } from '../router/navigatio
 
 export const FIXED_MOBILE_NAV_ITEMS = 2 // 「快速记录」和「更多」始终保留。
 export const MAX_MOBILE_NAV_ITEMS = 5
-export const MAX_MOBILE_NAV_ENTRIES = MAX_MOBILE_NAV_ITEMS + FIXED_MOBILE_NAV_ITEMS
 export const MAX_DESKTOP_NAV_GROUPS = 16
 export const MAX_NAV_GROUP_LABEL_LENGTH = 24
 export const MOBILE_NAVIGATION_KEY = 'sl_navigation_mobile'

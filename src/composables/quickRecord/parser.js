@@ -1,4 +1,5 @@
 import { classifyTransaction } from '../ledger.js'
+import { dateParts, hmText } from '../../utils/formatters.js'
 import {
   buildExpenseTitle,
   chineseNumber,
@@ -26,7 +27,6 @@ function uid() {
   const uuid = globalThis.crypto?.randomUUID?.()
   return uuid ? `qr-${uuid}` : `qr-${Math.random().toString(36).slice(2)}-${uidSeq++}`
 }
-function pad(value) { return String(value).padStart(2, '0') }
 function today(now) { return policyDateKey(now) }
 function currentTime(now) { return policyTimeKey(now) }
 
@@ -64,7 +64,7 @@ function timeOf(source, schedule) {
   // 没有明确上下午时，“两点”通常指下午 2 点；凌晨场景应显式写“凌晨两点”。
   if (!period && hour <= 6) hour += 12
   if (!Number.isFinite(hour) || !Number.isFinite(minute) || hour > 23 || minute > 59) return ''
-  return `${pad(hour)}:${pad(minute)}`
+  return hmText(hour, minute)
 }
 
 function cleanTaskTitle(source, fallback) {
@@ -206,7 +206,7 @@ function parseStatement(statement, { courses = [], now = new Date(), forcedType 
     if (type === 'bill') {
       const [year, month] = policyDateKey(now).split('-').map(Number)
       const day = cycle?.day || Number(policyDateKey(now).slice(8, 10))
-      base.date = schedule.date || `${year}-${pad(month)}-${pad(day)}`
+      base.date = schedule.date || dateParts(year, month, day)
     }
   } else if (type === 'countdown') {
     base.title = cleanTaskTitle(source, schedule.title)

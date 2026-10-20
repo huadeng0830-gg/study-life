@@ -1,5 +1,6 @@
 import { useStoredRef } from './store'
-import { HOME_MODULES, findHomeModuleState, normalizeHomeModuleOrder } from './homeModules.js'
+import { HOME_MODULES, normalizeHomeModuleOrder } from './homeModules.js'
+import { deepClone } from '../utils/clone.js'
 
 export { HOME_MODULES } from './homeModules.js'
 
@@ -143,10 +144,6 @@ normalize()
 //      一条本机修改，触发同步引擎的基线校验 —— accountSyncEngine 用例从 25/25 变红。
 // 所以这里刻意保持「只在加载时归一化一次」。真要再动，先跑 accountSyncEngine 全文件。
 
-export function homeModuleState(id) {
-  return findHomeModuleState(appearance.value.homeModules, id)
-}
-
 export function targetForPath(path) {
   return Object.entries(WALLPAPER_TARGETS).find(([, item]) => item.path === path)?.[0] ?? 'global'
 }
@@ -163,13 +160,13 @@ export function activeWallpaperSpec(path) {
 
 export function resetAppearanceState() {
   wallpaperConfig.value = {
-    targets: JSON.parse(JSON.stringify(defaultTargets)),
+    targets: deepClone(defaultTargets),
   }
   appearance.value = defaultAppearanceValue()
 }
 
 export function resetWallpapersOnly() {
   wallpaperConfig.value = {
-    targets: JSON.parse(JSON.stringify(defaultTargets)),
+    targets: deepClone(defaultTargets),
   }
 }

@@ -5,6 +5,7 @@ import TaskTimeShift from './TaskTimeShift.vue'
 import ConfirmDialog from '../ConfirmDialog.vue'
 import { detectTimePlanConflicts, getConflictSummary } from '../../composables/conflictDetection.js'
 import { moveTimeDate, taskDeadlineError, taskTimePlanError } from '../../composables/tasks/taskTimePlan'
+import { deepClone } from '../../utils/clone.js'
 
 const props = defineProps({
   task: { type: Object, required: true },
@@ -20,11 +21,11 @@ const props = defineProps({
 const emit = defineEmits(['close', 'save'])
 const formId = useId()
 /** @type {import('vue').Ref<import('../../composables/tasks/taskTimePlan').TaskTiming>} */
-const draft = ref(JSON.parse(JSON.stringify({ dueDate: props.initialDate || props.task.dueDate || '', dueTime: props.task.dueTime || '', timeStages: props.task.timeStages || [] })))
+const draft = ref(deepClone({ dueDate: props.initialDate || props.task.dueDate || '', dueTime: props.task.dueTime || '', timeStages: props.task.timeStages || [] }))
 const error = ref('')
 const changed = ref(Boolean(props.initialDate))
 const conflictMessage = ref('')
-function apply(plan) { draft.value = JSON.parse(JSON.stringify(plan)); changed.value = true; error.value = '' }
+function apply(plan) { draft.value = deepClone(plan); changed.value = true; error.value = '' }
 function setDate(days) { draft.value.dueDate = moveTimeDate(props.today, days); changed.value = true; error.value = '' }
 function save() {
   error.value = taskDeadlineError(draft.value)?.message || taskTimePlanError(draft.value.timeStages || [])?.message || ''

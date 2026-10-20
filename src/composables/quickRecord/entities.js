@@ -5,6 +5,14 @@ import { parseNotice } from '../noticeParser.js'
 
 const CN_DIGITS = { 零: 0, 〇: 0, 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 }
 
+// 数字后紧跟这些字符时，它是被计量的对象而不是金额。
+// 刻意**不含「块」「元」**：那才是货币单位（规则 1~5 单独带单位匹配）。
+// 同样不含「杯份张节」以外的货币近似词——宁可漏判也不要凭空生成一笔支出。
+const NON_MONEY_UNIT_NEXT = /^[年月日号点时天分秒个次人岁级楼页项章题套本件杯份张节班斤两册版期代支只条头瓶包袋串米尺克毫升升亩匹辆座栋层站路线双份袋杯套]/
+
+// 自带货币符号/单位即视为金额候选，邻接判断（前后数字、区间符号）对它一律放行。
+const CURRENCY_UNIT = /[¥￥元块]|rmb/i
+
 function cnDigit(ch) {
   if (typeof ch !== 'string') return 0
   if (/^[0-9]$/.test(ch)) return Number(ch)
@@ -54,7 +62,16 @@ export function extractAmounts(text) {
     const start = typeof match.index === 'number' ? match.index : 0
     const matchedText = String(raw ?? match[0])
     const end = start + matchedText.length
-    if (/[\d.-]/.test(source[start - 1] || '') || /[\d.]/.test(source[end] || '')) return
+    // 相邻数字/小数点说明它和别的匹配属于同一个数：「12.5」不该被拆成两次，
+    // 「1.234元」里的「4元」也不该被单独算成 4 元。这一条对带不带货币单位一视同仁。
+    if (/[\d.]/.test(source[start - 1] || '') || /[\d.]/.test(source[end] || '')) return
+    if (!CURRENCY_UNIT.test(matchedText)) {
+      // 「1-2节」「2~3点」「3到5个」里的数字是区间/时长，不是金额。
+      // 放在 addFromMatch 里统一判定，7 条规则共用，避免各自漏判。
+      // 自带货币单位的除外：「住宿费 300-500元」里的 500 明确是金额。
+      if (/^[-—–~～至到]\s*\d/.test(source.slice(end, end + 3))) return
+      if (/\d\s*[-—–~～至到]\s*$/.test(source.slice(Math.max(0, start - 3), start))) return
+    }
     if (nonMoneyRanges.some(([from, to]) => start < to && end > from)) return
     if (!(end > start) || !(amount > 0)) return
     candidates.push({ start, end, amount, raw: matchedText })
@@ -105,8 +122,10 @@ export function extractAmounts(text) {
   for (const match of source.matchAll(/(?:¥|￥)?\s*(\d+(?:\.\d{1,2})?)\s*(?:元|块|rmb)?/gi)) {
     const next = source.slice(match.index + match[0].length, match.index + match[0].length + 1)
     const previous = source[match.index - 1] || ''
-    // 数字后接时长/序号/数量单位时不是金额：5分钟、2小时、3次、4号楼等。
-    if (/^[年月日号点时天分秒个次人岁级楼页项章题套本件杯份张节]/.test(next) || /第\s*$/.test(previous)) continue
+    // 数字后接时长/序号/量词/量纲单位时不是金额：5分钟、2小时、3次、4号楼、3班、2斤、12路等。
+    if (NON_MONEY_UNIT_NEXT.test(next) || /第\s*$/.test(previous)) continue
+    // 数字后紧跟拉丁字母不是金额：“买5G套餐”“iPhone15”里的数字属于型号/规格。
+    if (/^[A-Za-z]/.test(next)) continue
     const amount = Number(match[1])
     addFromMatch(match, amount, match[0])
   }

@@ -15,6 +15,7 @@ import { buildBackupRestoreValues } from './backupRestore.js'
 import { assertAccountDataIdentity, captureAccountDataIdentity } from './accountSyncIdentity.js'
 import { withAccountDataLock } from './accountLocalData.js'
 import { detachRetiredNoteRelations } from './domain/migrations.js'
+import { deepClone } from '../utils/clone.js'
 import {
   backupWallpapersForUndo,
   discardWallpaperUndo,
@@ -392,14 +393,14 @@ async function applyRestorePayload(backup, { fromCheckpoint = false } = {}) {
     return
   }
   const selectedFields = restoreBackupSelectedFields(backup, selectedModules)
-  const restoredValues = JSON.parse(JSON.stringify(buildBackupRestoreValues(backup.data, selectedFields, BACKUP_STORAGE_KEYS)))
+  const restoredValues = deepClone(buildBackupRestoreValues(backup.data, selectedFields, BACKUP_STORAGE_KEYS))
   const expectedIdentity = backup.expectedIdentity || captureAccountDataIdentity()
   const mutationVersions = Object.fromEntries(Object.keys(restoredValues).map((key) => [key, storedMutationVersion(key)]))
   if (fromCheckpoint && backup.storedValues) {
     const knownKeys = new Set(/** @type {string[]} */ (Object.values(BACKUP_STORAGE_KEYS)))
     const allowedKeys = restoreAllowedStorageKeys(selectedModules)
     for (const [key, value] of Object.entries(backup.storedValues)) {
-      if (knownKeys.has(key) && allowedKeys.has(key)) restoredValues[key] = JSON.parse(JSON.stringify(value))
+      if (knownKeys.has(key) && allowedKeys.has(key)) restoredValues[key] = deepClone(value)
     }
   }
   for (const key of ['sl_tasks', 'sl_events']) {

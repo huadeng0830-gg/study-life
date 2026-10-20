@@ -1,5 +1,7 @@
 <script setup>
 import PageHeader from '../components/PageHeader.vue'
+import { usePageToast } from '../composables/usePageToast.js'
+import { deepClone } from '../utils/clone.js'
 import { defineAsyncComponent, ref, computed, onBeforeUnmount, onDeactivated } from 'vue'
 import { Badge } from '../components/ui/badge'
 import { Button } from '../components/ui/button'
@@ -60,11 +62,7 @@ const learningPendingCount = computed(() => courseProfiles.value.filter((item) =
 const editingProfile = computed(() => courseProfiles.value.find((item) => String(item.course.id) === String(editingId.value)))
 const courseTemplateCommands = useCourseTemplateCommands()
 const { templates: courseTemplates } = courseTemplateCommands
-const toast = ref({ open: false, message: '', type: 'info', actionLabel: '', undoFn: null, viewFn: null, duration: 3200 })
-
-function showToast(message, { type = 'info', actionLabel = '', undoFn = null, viewFn = null, duration = 3200 } = {}) {
-  toast.value = { open: true, message, type, actionLabel, undoFn, viewFn, duration }
-}
+const { toast, showToast } = usePageToast()
 
 /* ---- ConfirmDialog：字面量与绑定目标必须与 <ConfirmDialog> 同文件 ----
    tests/confirmDialogMigration.test.js 会对每一处 @confirm / @close 逐个对账，
@@ -220,7 +218,7 @@ function confirmImportCourseTemplate() {
   if (!target) return
   const stamp = Date.now()
   const copies = target.courses.map((course, index) => ({
-    ...JSON.parse(JSON.stringify(course)),
+    ...deepClone(course),
     id: `c${stamp}_tpl_${index}`,
   }))
   beginCourseImport(copies, { source: 'template' })

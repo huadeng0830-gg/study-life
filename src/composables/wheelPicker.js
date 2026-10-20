@@ -5,6 +5,8 @@
  * 这样「松手后自动对齐到哪一格」可以脱离浏览器直接单测。
  */
 
+import { hmText } from '../utils/formatters.js'
+
 export const WHEEL_ITEM_HEIGHT = 44
 export const WHEEL_VISIBLE_ROWS = 5
 
@@ -93,5 +95,5 @@ export function parseTimeValue(text, fallback = { hour: 9, minute: 0 }) {
 export function formatTimeValue(hour, minute) {
   const h = Math.min(23, Math.max(0, Math.trunc(Number(hour) || 0)))
   const m = Math.min(59, Math.max(0, Math.trunc(Number(minute) || 0)))
-  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
+  return hmText(h, m)
 }

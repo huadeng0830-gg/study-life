@@ -1,5 +1,6 @@
 <script setup>
 import PageHeader from '../components/PageHeader.vue'
+import { usePageToast } from '../composables/usePageToast.js'
 import AppIcon from '../components/AppIcon.vue'
 import { computed, nextTick, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -24,6 +25,8 @@ import {
   currentSemesterStartDate, DUTY_WEEKDAYS, dutyMemberChoices, firstDutyDateOnOrAfter,
   normalizeDutyMembers, summarizeDutyCounts,
 } from '../composables/domain/checklistDuty.js'
+import { errorMessage as sharedErrorMessage } from '../utils/errors.js'
+import { dateText, moneyRow } from '../utils/formatters.js'
 
 const commands = useChecklistCommands()
 const listFormIdentity = createFormIdentityGuard()
@@ -85,11 +88,10 @@ const bulkError = ref('')
 /** @type {import('vue').Ref<{kind: string, listId: string, name: string, ids: string[], itemName: string} | null>} */
 const confirmTarget = ref(null)
 /** @type {import('vue').Ref<{open: boolean, message: string, type: string, actionLabel: string, undoFn?: () => unknown}>} */
-const toast = ref({ open: false, message: '', type: 'info', actionLabel: '', undoFn: undefined })
+const { toast, showToast } = usePageToast('success', { labelUndo: true })
 let handledFocus = ''
 
 const typeInfo = (type) => Object.keys(LIST_TYPES).includes(type) ? LIST_TYPES[type] : LIST_TYPES.general
-const money = (value) => `¥${Number(value || 0).toFixed(2)}`
 const findList = (id) => lists.value.find((list) => list.id === id)
 const activeList = computed(() => findList(activeId.value) ?? lists.value[0] ?? null)
 const summaries = computed(() => new Map(lists.value.map((list) => [list.id, summarizeChecklist(list)])))
@@ -127,13 +129,9 @@ const existingDutyMembers = computed(() => {
 })
 const selectedDutyMembers = computed(() => normalizeDutyMembers(dutyMembersInput.value))
 const dutySemesterStart = computed(() => activeList.value?.semesterStartDate || currentSemesterStartDate(clock.value))
-const dateKey = (date) => {
-  const pad = (value) => String(value).padStart(2, '0')
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
-}
 const dutyStats = computed(() => {
   void lists.value
-  return summarizeDutyCounts(lists.value, { semesterStartDate: dutySemesterStart.value, throughDate: dateKey(clock.value) })
+  return summarizeDutyCounts(lists.value, { semesterStartDate: dutySemesterStart.value, throughDate: dateText(clock.value) })
 })
 const dutyStatsText = computed(() => {
   const assignments = dutyStats.value.byMember.map((entry) => `${entry.name} ${entry.count} 次`).join('、') || '暂无已排班次数'
@@ -185,10 +183,6 @@ function updatedText(list) {
   if (minutes < 1440) return `${Math.floor(minutes / 60)} 小时前更新`
   return `${Math.floor(minutes / 1440)} 天前更新`
 }
-/** @param {string} message @param {{type?: string, undoFn?: () => unknown}} options */
-function showToast(message, { type = 'success', undoFn = undefined } = {}) {
-  toast.value = { open: true, message, type, actionLabel: undoFn ? '撤销' : '', undoFn }
-}
 function offerUndo(message, action, listId) {
   showToast(message, { undoFn: () => {
     let restored = null
@@ -203,7 +197,7 @@ function offerUndo(message, action, listId) {
 }
 function focusError(prefix, field) { nextTick(() => document.getElementById(`${prefix}-${field}`)?.focus()) }
 function errorField(message) { return message.includes('数量') ? 'quantity' : message.includes('单价') ? 'price' : message.includes('预算') ? 'budget' : 'name' }
-function errorMessage(cause) { return cause instanceof Error ? cause.message : '操作失败，请重试' }
+function errorMessage(cause) { return sharedErrorMessage(cause, '操作失败，请重试') }
 function revealAdded(listId, id) {
   activeId.value = listId
   clearFilters()
@@ -571,14 +565,14 @@ function emptyAction() {
         <div class="summary-grid">
           <div class="progress-summary"><span>完成进度</span><b>{{ stats.percent }}<small>%</small></b><span>{{ stats.done }} / {{ stats.count }} 项已完成</span><div class="summary-progress" role="progressbar" aria-label="清单完成进度" :aria-valuenow="stats.percent" :aria-valuemin="0" :aria-valuemax="100"><i :style="{ width: stats.percent + '%' }"></i></div></div>
           <div><span>待完成事项</span><b>{{ stats.remaining }}<small>项</small></b><span>{{ stats.count && !stats.remaining ? '全部完成了 ✓' : '逐项勾选，不再遗漏' }}</span></div>
-          <div v-if="activeList.type === 'shopping'"><span>{{ stats.unpricedCount ? '已估总额' : '预计总额' }}</span><b class="summary-money">{{ money(stats.total) }}</b><span>待购 {{ money(stats.pendingTotal) }} · 已购 {{ money(stats.boughtTotal) }}</span></div>
+          <div v-if="activeList.type === 'shopping'"><span>{{ stats.unpricedCount ? '已估总额' : '预计总额' }}</span><b class="summary-money">{{ moneyRow(stats.total) }}</b><span>待购 {{ moneyRow(stats.pendingTotal) }} · 已购 {{ moneyRow(stats.boughtTotal) }}</span></div>
         </div>
         <p v-if="activeList.dutyEnabled" class="duty-overview" role="status">
           <span>{{ activeList.repeat === 'weekly' ? `每周${DUTY_WEEKDAYS.find(item => item.value === activeList.repeatWeekday)?.label || '指定星期'}` : '单次排班' }} · {{ dutyStatsText }}（{{ dutySemesterStart }} 起）</span>
         </p>
         <div v-if="activeList.type === 'shopping' && (stats.unpricedCount || stats.budget !== null)" class="shopping-insight" :class="{ 'over-budget': budgetExceeded }">
           <span v-if="stats.unpricedCount">{{ stats.unpricedCount }} 项未估价，金额为已估价事项的小计</span>
-          <span v-if="stats.budget !== null">预算 {{ money(stats.budget) }} · {{ budgetExceeded ? `超出 ${money(-(stats.budgetRemaining ?? 0))}` : `剩余 ${money(stats.budgetRemaining)}` }}</span>
+          <span v-if="stats.budget !== null">预算 {{ moneyRow(stats.budget) }} · {{ budgetExceeded ? `超出 ${moneyRow(-(stats.budgetRemaining ?? 0))}` : `剩余 ${moneyRow(stats.budgetRemaining)}` }}</span>
         </div>
 
         <form class="quick-add" @submit.prevent="addQuickItem">
@@ -617,7 +611,7 @@ function emptyAction() {
                   {{ item.dueDate || activeList.occurrenceDate || '未排日期' }}<template v-if="item.assignedTo"> · 负责：{{ item.assignedTo }}</template><template v-if="item.substitutedBy"> · <template v-if="item.assignedTo">{{ item.assignedTo }}由{{ item.substitutedBy }}代班</template><template v-else>代班：{{ item.substitutedBy }}</template></template>
                 </small>
               </button>
-              <strong v-if="activeList.type === 'shopping'" class="item-price" :class="{ unpriced: checklistAmount(item) === null }">{{ checklistAmount(item) === null ? '未估价' : money(checklistAmount(item)) }}</strong>
+              <strong v-if="activeList.type === 'shopping'" class="item-price" :class="{ unpriced: checklistAmount(item) === null }">{{ checklistAmount(item) === null ? '未估价' : moneyRow(checklistAmount(item)) }}</strong>
             </article>
           </SwipeActionItem>
         </VirtualList>
@@ -676,7 +670,7 @@ function emptyAction() {
           <div><label for="lists-item-unit">单位</label><input id="lists-item-unit" v-model="itemForm.unit" list="checklist-units" maxlength="20" placeholder="件" /><datalist id="checklist-units"><option v-for="unit in CHECKLIST_UNITS" :key="unit" :value="unit" /></datalist></div>
           <div v-if="formList?.type === 'shopping'"><label for="lists-item-price">单价（元）</label><input id="lists-item-price" v-model="itemForm.price" type="number" inputmode="decimal" min="0" max="100000000" step="0.01" placeholder="选填" :aria-invalid="itemError && itemErrorField === 'price' ? true : undefined" :aria-describedby="itemError ? 'lists-item-error' : undefined" @input="itemError = ''" /></div>
         </div>
-        <p v-if="formList?.type === 'shopping'" class="form-hint">{{ itemSubtotal === null ? '填写单价后自动计算小计；未估价事项不计入预计金额。' : `本项小计 ${money(itemSubtotal)}` }}</p>
+        <p v-if="formList?.type === 'shopping'" class="form-hint">{{ itemSubtotal === null ? '填写单价后自动计算小计；未估价事项不计入预计金额。' : `本项小计 ${moneyRow(itemSubtotal)}` }}</p>
         <label for="lists-item-category">分类</label><input id="lists-item-category" v-model="itemForm.category" list="checklist-categories" maxlength="30" placeholder="选择或输入分类" /><datalist id="checklist-categories"><option v-for="value in [...new Set([...CHECKLIST_CATEGORIES, ...checklistItems(formList).map(item => item.category).filter(Boolean)])]" :key="value" :value="value" /></datalist>
         <label for="lists-item-note">备注</label><textarea id="lists-item-note" v-model="itemForm.note" rows="3" maxlength="2000" placeholder="规格、放置位置或其他需要记住的事" />
         <p v-if="itemError" id="lists-item-error" class="error" role="alert">{{ itemError }}</p>
@@ -707,13 +701,14 @@ function emptyAction() {
 .empty-box { width: 100%; }
 .starter-section h2 { margin: 4px 0 12px; font-size: var(--fs-15); }
 .starter-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
-.starter-card { display: flex; flex-direction: column; gap: 8px; padding: 20px; text-align: left; color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-14); background: var(--card); }
+.starter-card { display: flex; flex-direction: column; gap: 8px; padding: 20px; text-align: left; color: var(--text); border: 1px solid var(--border); border-radius: var(--radius-14); background-color: var(--glass-surface); backdrop-filter: var(--glass-filter); -webkit-backdrop-filter: var(--glass-filter); box-shadow: var(--glass-shadow); transition: transform var(--dur-base) var(--ease-standard), box-shadow var(--dur-base) var(--ease-standard), border-color var(--dur-fast) var(--ease-standard); }
+.starter-card:hover { transform: translateY(-2px); border-color: color-mix(in srgb, var(--primary) 30%, var(--border)); box-shadow: var(--glass-shadow-hover); }
 .starter-card:hover { border-color: var(--primary); background: var(--primary-soft); }
 .starter-icon { font-size: var(--fs-26); }
 .starter-card b { font-size: var(--fs-15); }
 .starter-card small, .starter-card > span:last-child { font-size: var(--fs-12); color: var(--ink-soft); }
 .shopping-layout { display: grid; grid-template-columns: 236px minmax(0, 1fr); gap: 18px; align-items: start; }
-.list-sidebar { position: sticky; top: 20px; min-width: 0; padding: 14px; border: 1px solid var(--border); border-radius: var(--radius-14); background: var(--card); }
+.list-sidebar { position: sticky; top: 20px; min-width: 0; padding: 14px; border: 1px solid var(--border); border-radius: var(--radius-14); background-color: var(--glass-surface); backdrop-filter: var(--glass-filter); -webkit-backdrop-filter: var(--glass-filter); box-shadow: var(--glass-shadow); }
 .sidebar-head { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
 .sidebar-head h2 { font-size: var(--fs-14); margin: 0; }
 .sidebar-head > span { padding: 1px 6px; color: var(--ink-soft); background: var(--bg-tint); border-radius: var(--radius-5); font-size: var(--fs-11); }

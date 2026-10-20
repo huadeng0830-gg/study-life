@@ -1,5 +1,7 @@
 <script setup>
 import PageHeader from '../components/PageHeader.vue'
+import { usePageToast } from '../composables/usePageToast.js'
+import { pad2 } from '../utils/formatters.js'
 import { computed, nextTick, ref, onActivated, onBeforeUnmount, onDeactivated, onMounted, watch } from 'vue'
 import { parseDate } from '@internationalized/date'
 import { useRoute, useRouter } from 'vue-router'
@@ -60,7 +62,7 @@ const reviewMessage = ref('')
 const focusMessage = ref('')
 const focusedMilestoneId = ref('')
 /** @type {import('vue').Ref<{ open: boolean, message: string, type: string, actionLabel: string, undoFn?: () => unknown, viewFn?: () => unknown, duration: number }>} */
-const toast = ref({ open: false, message: '', type: 'info', actionLabel: '', duration: 3200 })
+const { toast, showToast } = usePageToast()
 let focusHandled = ''
 
 const milestoneEditor = useMilestoneEditor({ domain, courses, showToast })
@@ -114,10 +116,6 @@ function remove() {
 }
 
 /** @param {string} message @param {{ type?: string, actionLabel?: string, undoFn?: () => unknown, viewFn?: () => unknown, duration?: number }} [options] */
-function showToast(message, { type = 'info', actionLabel = '', undoFn = undefined, viewFn = undefined, duration = 3200 } = {}) {
-  toast.value = { open: true, message, type, actionLabel, undoFn, viewFn, duration }
-}
-
 const courseNamesById = computed(() => new Map(courses.value.map((course) => [course.id, course.name])))
 const timelineMilestones = computed(() => exams.value.map((item) => {
   if (item.kind !== 'externalExam') return item
@@ -324,7 +322,6 @@ onBeforeUnmount(deactivateViewListeners)
 
 // ---------- 卡片展示辅助：日期牌 / 短日期 / 时间轴 ----------
 const WEEKDAYS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
-const pad2 = (v) => String(v).padStart(2, '0')
 const todayKey = computed(() => appToday.value)
 
 // 日期牌：目标月 / 日（无法解析时显示 --）

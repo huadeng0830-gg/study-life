@@ -1,5 +1,6 @@
 import { computed, ref, watch } from 'vue'
 import { appToday } from '../timeContext.js'
+import { hmText } from '../../utils/formatters.js'
 import { defaultReminderMinutes } from '../settingsPolicy.js'
 import { isArchived } from '../domain/state.js'
 import { announceAlert } from '../liveRegion.js'
@@ -84,7 +85,7 @@ export function useEventEditor(domain, showNotice) {
     if (!validEventTime(form.value.time)) { setFormError('请先选择开始时间', 'time'); return }
     const total = Number(form.value.time.slice(0, 2)) * 60 + Number(form.value.time.slice(3)) + minutes
     if (total >= 1440) { setFormError('这个时长会跨到次日，请调整开始时间或拆分日程', 'endTime'); return }
-    form.value.endTime = `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`
+    form.value.endTime = hmText(Math.floor(total / 60), total % 60)
   }
 
   function save() {

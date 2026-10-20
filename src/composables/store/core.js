@@ -1,7 +1,9 @@
 import { effectScope, nextTick, ref, triggerRef, watch, shallowRef } from 'vue'
+import { checkStoredRefContract, recordStoredListenerConfig, storedListenerConfigs } from './contractDiagnostics.js'
 import { recordSilentError } from '../globalError.js'
 import { isSyncKey } from '../syncKeys.js'
-import { registerStoredSnapshotAccessors } from './snapshotAccess.js'
+import { deepClone } from '../../utils/clone.js'
+import { registerStoredRefValueReader, registerStoredSnapshotAccessors } from './snapshotAccess.js'
 import { clearDataVault, mirrorLocalValue, mirrorLocalValues, setMirrorTimingHandler } from '../dataVault.js'
 import { clearPendingWriteOwner as clearPendingWriteOwnerState, clearRecoveryDraft, recoveryDraftOwner, storeRecoveryDraft } from './persistenceDrafts.js'
 import { createOwnerTransitionFence } from './ownerTransitionFence.js'
@@ -464,18 +466,18 @@ export function normalizeStoredValue(saved, defaultValue) {
         .sort(([a], [b]) => Number(a) - Number(b))
       if (numericEntries.length) return { value: numericEntries.map(([, value]) => value), repaired: true }
     }
-    return { value: JSON.parse(JSON.stringify(defaultValue)), repaired: true }
+    return { value: deepClone(defaultValue), repaired: true }
   }
   if (isPlainObject(defaultValue)) {
     if (!isPlainObject(saved)) {
-      return { value: JSON.parse(JSON.stringify(defaultValue)), repaired: true }
+      return { value: deepClone(defaultValue), repaired: true }
     }
-    const value = { ...JSON.parse(JSON.stringify(defaultValue)), ...saved }
+    const value = { ...deepClone(defaultValue), ...saved }
     return { value, repaired: JSON.stringify(value) !== JSON.stringify(saved) }
   }
   return typeof saved === typeof defaultValue
     ? { value: saved, repaired: false }
-    : { value: JSON.parse(JSON.stringify(defaultValue)), repaired: true }
+    : { value: deepClone(defaultValue), repaired: true }
 }
 
 /**
@@ -485,17 +487,26 @@ export function normalizeStoredValue(saved, defaultValue) {
  * @template T
  * @param {string} key 以 `sl_` 开头的存储键
  * @param {T} defaultValue 默认值（同时决定数据修复的形状基准）
- * @param {{ deep?: boolean, shallow?: boolean }} options 
- *   - deep: 是否深层监听（默认对非显式提交键开启）
- *   - shallow: 是否使用 shallowRef（大集合建议开启，需配合 touchStoredRef 显式提交）
+ * @param {{ deep?: boolean, shallow?: boolean }} options deep: 是否深层监听（默认对非显式提交键开启）；
+ *   shallow: 是否使用 shallowRef（大集合建议开启，需配合 touchStoredRef 显式提交）
  * @returns {import('vue').Ref<T>}
  */
+
+/** 只读入口：读内存里的 ref，**绝不声明**新键（见 snapshotAccess 的说明）。 */
+registerStoredRefValueReader((key) => storedRefs.get(key)?.value)
+
 export function useStoredRef(key, defaultValue, options = {}) {
-  if (storedRefs.has(key)) return storedRefs.get(key)
+  if (storedRefs.has(key)) {
+    // 同键重复声明：先到的调用方说了算，后来者的默认值与 options 都被静默丢弃。
+    // 判定与告警规则见 store/contractDiagnostics.js（含为什么这件事值得报警）。
+    checkStoredRefContract({ key, defaultValue, options, listenerConfigs: storedListenerConfigs, defaults: storedDefaults, explicitCommitKeys: EXPLICIT_COMMIT_KEYS })
+    return storedRefs.get(key)
+  }
   const isExplicitCommit = EXPLICIT_COMMIT_KEYS.has(key)
-  storedDefaults.set(key, JSON.parse(JSON.stringify(defaultValue)))
+  storedDefaults.set(key, deepClone(defaultValue))
   const deep = options.deep ?? !isExplicitCommit
   const shallow = options.shallow ?? isExplicitCommit
+  recordStoredListenerConfig(key, options, EXPLICIT_COMMIT_KEYS)
 
   let saved = null
   let savedRaw = null
@@ -509,7 +520,7 @@ export function useStoredRef(key, defaultValue, options = {}) {
     savedRaw = null
   }
   const normalized = saved === null
-    ? { value: JSON.parse(JSON.stringify(defaultValue)), repaired: false }
+    ? { value: deepClone(defaultValue), repaired: false }
     : normalizeStoredValue(saved, defaultValue)
   const state = shallow ? shallowRef(normalized.value) : ref(normalized.value)
   if (normalized.repaired) {
@@ -556,7 +567,7 @@ export async function clearStoredDataByPrefix(prefix = 'sl_') {
     if (state && storedDefaults.has(key)) {
       suppressedRestoreRefs.add(state)
       suppressed.push(state)
-      state.value = JSON.parse(JSON.stringify(storedDefaults.get(key)))
+      state.value = deepClone(storedDefaults.get(key))
     }
   }
   await nextTick()
@@ -645,7 +656,7 @@ export async function restoreStoredValues(values, { markChanged = true, assertBe
   const suppressedRefs = []
   const previousStates = new Map(entries.flatMap(([key]) => (
     storedRefs.has(key)
-      ? [[key, JSON.parse(JSON.stringify(storedRefs.get(key).value))]]
+      ? [[key, deepClone(storedRefs.get(key).value)]]
       : []
   )))
   try {
@@ -757,7 +768,7 @@ if (typeof window !== 'undefined') {
           reportPersistenceFailure(new Error('Concurrent localStorage edit'), key, 'conflict')
           continue
         }
-        const value = saved === null ? JSON.parse(JSON.stringify(fallback)) : normalizeStoredValue(saved, fallback).value
+        const value = saved === null ? deepClone(fallback) : normalizeStoredValue(saved, fallback).value
         const raw = JSON.stringify(value)
         cancelPendingWrite(key)
         if (event.newValue === null) writtenFingerprints.delete(key)

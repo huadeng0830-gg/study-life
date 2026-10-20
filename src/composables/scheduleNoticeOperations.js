@@ -6,6 +6,7 @@ import {
   scheduleExceptions,
 } from './store/schedule.js'
 import { periodIndex, timeConfig } from './store/timeConfig.js'
+import { deepClone } from '../utils/clone.js'
 
 function isoDay(date) {
   const day = new Date(`${date}T00:00:00`).getDay()
@@ -90,7 +91,7 @@ export function findScheduleProposalConflicts(inputs, exceptions = scheduleExcep
 }
 
 function copyRecord(value) {
-  return JSON.parse(JSON.stringify(value))
+  return deepClone(value)
 }
 
 function shiftDate(value, days) {

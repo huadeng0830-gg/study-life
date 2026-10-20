@@ -1,4 +1,5 @@
 import { deviceProfile } from './deviceIdentity.js'
+import { deepClone, deepCloneOptional } from '../utils/clone.js'
 
 // 只有这些集合按实体合并；设置、日志和界面偏好仍作为单个同步对象处理。
 /** @type {Record<string, string>} */
@@ -77,7 +78,9 @@ export function stableEntityId(key, item) {
  * @returns {T}
  */
 export function cloneSyncValue(value) {
-  return value === undefined ? undefined : JSON.parse(JSON.stringify(value))
+  // 原写法是 `value === undefined ? undefined : JSON.parse(JSON.stringify(value))`：
+  // 就是带 undefined 透传的 JSON 往返，与 deepCloneOptional 逐字等价（见 utils/clone.js）。
+  return deepCloneOptional(value)
 }
 
 function stableValue(value) {
@@ -90,13 +93,18 @@ function stableValue(value) {
 // Pull 时从 JSON.parse 的结果反向核对。只要对象里出现 undefined 属性、数组空洞或
 // Date，往返前后的文本就不同，指纹必然不一致。所有指纹都先按同样的往返归一化，
 // 才能保证“同一份数据”在加密两侧得到同一个指纹。
+//
+// 【为什么这里可以安全地换成 deepClone】本函数要的正是「JSON 往返归一化」这一条语义，
+// 而 deepClone 的实现就是 `JSON.parse(JSON.stringify(v))`（见 utils/clone.js），
+// 逐字等价；**键排序不在这里**——那是下面 stableValue 的职责，一行未动。
+// 保留 try/catch：循环引用等往返失败时仍按原样返回。
 /**
  * @param {unknown} value
  * @returns {unknown}
  */
 export function canonicalSyncValue(value) {
   if (value === undefined) return undefined
-  try { return JSON.parse(JSON.stringify(value)) } catch { return value }
+  try { return deepClone(value) } catch { return value }
 }
 
 // manifest 哈希协议版本。旧版客户端写入的 manifest 既没有这个字段，分类集合也

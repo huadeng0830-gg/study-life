@@ -1,5 +1,7 @@
 .course-progress-page { display: flex; flex-direction: column; gap: 20px; }
-.panel { background: var(--card); border: 1px solid var(--border); border-radius: var(--card-radius); box-shadow: var(--shadow-sm); }
+/* 面板是这一页承载信息的主体：改成磨砂玻璃后，课程卡片之间就有了前后层次，
+   而不是一排同样重量的白块。 */
+.panel { background-color: var(--glass-surface); backdrop-filter: var(--glass-filter); -webkit-backdrop-filter: var(--glass-filter); border: 1px solid var(--border); border-radius: var(--card-radius); box-shadow: var(--glass-shadow); }
 .course-progress-page a.btn { display: inline-flex; align-items: center; justify-content: center; min-height: 40px; }
 .course-progress-page a.btn:not(.btn-primary):not(.btn-ghost) { color: var(--text); border: 1px solid var(--border); background: var(--card); }
 .course-page-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }

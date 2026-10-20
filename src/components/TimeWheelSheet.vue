@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import Modal from './Modal.vue'
 import WheelPicker from './WheelPicker.vue'
 import { buildWheelValues, formatTimeValue, parseTimeValue, wheelIndexForValue, wheelValueAtIndex } from '../composables/wheelPicker.js'
+import { pad2 } from '../utils/formatters.js'
 
 /**
  * 时间滚轮面板：点一下时间字段，从底部升起双列滚轮。
@@ -53,10 +54,6 @@ watch(() => props.open, (open) => {
 
 const preview = computed(() => formatTimeValue(hour.value, minute.value))
 
-function pad(value) {
-  return String(value).padStart(2, '0')
-}
-
 function confirm() {
   emit('update:modelValue', preview.value)
   emit('close')
@@ -74,12 +71,12 @@ function clear() {
       <p class="time-wheel-preview" role="status" aria-live="polite">{{ preview }}</p>
       <div class="time-wheel-row">
         <div class="time-wheel-column">
-          <WheelPicker v-model="hour" :values="hourValues" label="小时" :format="pad" cyclic />
+          <WheelPicker v-model="hour" :values="hourValues" label="小时" :format="pad2" cyclic />
           <span class="time-wheel-unit">时</span>
         </div>
         <span class="time-wheel-colon" aria-hidden="true">:</span>
         <div class="time-wheel-column">
-          <WheelPicker v-model="minute" :values="minuteValues" label="分钟" :format="pad" cyclic />
+          <WheelPicker v-model="minute" :values="minuteValues" label="分钟" :format="pad2" cyclic />
           <span class="time-wheel-unit">分</span>
         </div>
       </div>

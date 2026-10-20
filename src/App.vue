@@ -766,9 +766,7 @@ to {
     align-items:center;
     gap:12px;
     margin:0 0 var(--space-6);
-    padding:var(--space-3) 0 var(--space-4);
-    border-bottom:1px solid var(--border);
-    background:var(--bg)}
+    padding:var(--space-3) 0 var(--space-4)}
   .desktop-search-trigger,
   .desktop-record-trigger { border-radius:var(--radius-9); }
   .desktop-search-trigger { border-color:var(--border-strong); }
@@ -967,8 +965,6 @@ to {
 .global-error-enter-from,.global-error-leave-to {
   opacity:0;
   transform:translate(-50%,10px)}
-.page-enter-active,.page-leave-active {
-  transition:opacity var(--dur-fast) var(--ease-standard)}
-.page-enter-from,.page-leave-to {
-  opacity:0}
+/* 路由切换的进出场动效搬到了 styles/glass.css：那里是全局表现层，
+   而 App.vue 的 scoped 选择器会带上 data-v-app 属性压住全局那份。 */
 </style>

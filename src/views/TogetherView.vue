@@ -1,5 +1,6 @@
 <script setup>
 import PageHeader from '../components/PageHeader.vue'
+import { hmText } from '../utils/formatters.js'
 import AppIcon from '../components/AppIcon.vue'
 import ActionButton from '../components/ActionButton.vue'
 import { campusNotificationRoute } from '../composables/campusContentModel.js'
@@ -141,7 +142,7 @@ function applyProfile(value) {
 
 function localInputFor(epoch, zone) {
   const p = zonedParts(epoch, zone)
-  return `${dateInZone(epoch, zone)}T${String(p.hour).padStart(2, '0')}:${String(p.minute).padStart(2, '0')}`
+  return `${dateInZone(epoch, zone)}T${hmText(p.hour, p.minute)}`
 }
 
 function epochFromInput(value, edge) {

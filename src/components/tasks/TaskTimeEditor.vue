@@ -1,6 +1,7 @@
 <script setup>
 import { nextTick, ref, useId, watch } from 'vue'
 import { newTimeStage, stageLabel, stageRangeText, timePlanId } from '../../composables/tasks/taskTimePlan'
+import { deepClone } from '../../utils/clone.js'
 
 const props = defineProps({ modelValue: { type: Array, required: true }, errorField: { type: String, default: '' }, focusStageId: { type: String, default: '' }, nowMs: { type: Number, required: true } })
 const emit = defineEmits(['update:modelValue', 'change'])
@@ -14,7 +15,7 @@ const timeVisible = ref({})
 const deleted = ref(null)
 
 /** @returns {import('../../types/domain').TaskTimeStage[]} */
-function cloneStages() { return JSON.parse(JSON.stringify(props.modelValue)) }
+function cloneStages() { return deepClone(props.modelValue) }
 function write(stages) { emit('update:modelValue', stages); emit('change') }
 /** @param {Event} event */
 function valueOf(event) { return /** @type {HTMLInputElement} */ (event.target).value }

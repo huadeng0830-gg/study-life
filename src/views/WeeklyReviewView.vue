@@ -402,7 +402,7 @@ function saveReflectionNow() {
 .review-head-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
 .week-switcher { min-height: 42px; display: inline-flex; align-items: center; gap: 4px; padding: 3px; border: 1px solid var(--border); border-radius: var(--radius-10); background: var(--card); box-shadow: var(--shadow-sm); }
 .week-switcher-label { min-width: 150px; color: var(--ink-soft); font-size: var(--fs-12); font-weight: var(--fw-650); text-align: center; font-variant-numeric: tabular-nums; }
-.review-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0; border: 1px solid var(--border); border-radius: var(--radius-surface); background: var(--card); }
+.review-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0; border: 1px solid var(--border); border-radius: var(--radius-surface); background-color: var(--glass-surface); backdrop-filter: var(--glass-filter); -webkit-backdrop-filter: var(--glass-filter); box-shadow: var(--glass-shadow); }
 .review-card { min-width: 0; min-height: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 7px; padding: 16px 20px; }
 .metric-heading { width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .review-kicker { color: var(--ink-faint); font-size: var(--fs-12); font-weight: var(--fw-750); }

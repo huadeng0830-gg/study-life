@@ -32,6 +32,8 @@ import {
 } from './store/timeConfig.js'
 import { timeSettingsTab } from './modalSections.js'
 import { settingError, showToast } from './timeSettingsShared.js'
+import { deepClone } from '../utils/clone.js'
+import { hmText } from '../utils/formatters.js'
 import { resetPlanTools } from './timePlanTools.js'
 import { restoreStoredValues } from './store/core.js'
 
@@ -51,7 +53,7 @@ export function toHHMM(minutes) {
   if (total >= 24 * 60) throw new RangeError('时间必须在 00:00 至 23:59 之间')
   const h = Math.floor(total / 60)
   const m = total % 60
-  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
+  return hmText(h, m)
 }
 
 export const planSeasonId = ref(null)
@@ -191,7 +193,7 @@ export async function saveDraftWithFeedback({ signal } = {}) {
   if (!draftDirty.value) { tryCloseTimeEditor(); return false }
   if (!saveDraft({ notify: false })) return false
   try {
-    await restoreStoredValues({ sl_timecfg: JSON.parse(JSON.stringify(timeConfig.value)) })
+    await restoreStoredValues({ sl_timecfg: deepClone(timeConfig.value) })
     return !signal?.aborted && (draftDirty.value ? { feedback: false } : true)
   } catch (cause) {
     draftDirty.value = true

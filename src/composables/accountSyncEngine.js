@@ -5,7 +5,7 @@ import { accountSyncActive, assertAccountDataIdentity, captureAccountDataIdentit
 import { accountSyncViaAccount } from './accountSyncMode.js'
 import { accountDefaultValues, accountLocalSnapshot, ACCOUNT_DATA_LOCK, withAccountDataLock } from './accountLocalData.js'
 import { accountConflictKey, accountSyncConflicts, accountSyncError, accountSyncLastSyncedAt, accountSyncStatus } from './accountSyncState.js'
-import { MAX_SYNC_PAYLOAD_BYTES, SYNC_DEFAULTS, SYNC_KEYS, assertValidSyncPayload, cloneValue, validateSyncPayload } from './accountSyncData.js'
+import { MAX_SYNC_PAYLOAD_BYTES, SYNC_KEYS, assertValidSyncPayload, cloneValue, validateSyncPayload } from './accountSyncData.js'
 import { buildEntityManifest, buildSyncManifest, hashSyncValue, mergeRestoreMarkers, stableEntityId, validateStableEntityIds, validateSyncManifest } from './syncMetadata.js'
 import { mergeSyncPayload } from './syncMerge.js'
 import { validateAndRepairRelations } from './syncIntegrity.js'
@@ -77,10 +77,20 @@ function assertCurrent(id, revision) {
 function setState(state, error = '') { accountSyncStatus.value = state; accountSyncError.value = error }
 function clearTimers() { window.clearTimeout(timer); window.clearTimeout(poll); timer = null; poll = null }
 async function localValues() {
-  const { flushStoredWrites, useStoredRef } = await import('./store/cloudAccess.js')
+  const { flushStoredWrites, readStoredValueWithoutDeclaring } = await import('./store/cloudAccess.js')
   const flushed = flushStoredWrites()
   if (!flushed.ok) throw new Error(`本机仍有未保存或冲突的数据（${flushed.pendingKeys.join('、')}），已暂停账号同步以保留最新修改。`)
-  const values = Object.fromEntries(SYNC_KEYS.map((key) => [key, cloneValue(useStoredRef(key, cloneValue(SYNC_DEFAULTS[key])).value)]))
+  // 只读，不声明。
+  // 这里原本调 useStoredRef(key, SYNC_DEFAULTS[key])，等于用**同步默认值表**给每个键
+  // 定下默认值。SYNC_DEFAULTS 是刻意从简的：`sl_ledger_fx` 写的是 `[]`（真值是
+  // `{base, rates}`）、`sl_semester` 写的是 `{start:''}`（真值是按今天推算的学期周一）。
+  // 谁先声明谁说了算，所以这取决于模块加载顺序——一旦同步先跑，normalizeStoredValue
+  // 会按错误形状「修复」用户数据并写回本地。改成只读之后，这条路径不再参与默认值决策。
+  // 值仍是 any：下游要按 syncMetadata 的实体/单例规则逐键判断，强类型化反而会在
+  // 这层逼出一堆与本函数无关的断言。
+  const values = /** @type {Record<string, any>} */ (
+    Object.fromEntries(SYNC_KEYS.map((key) => [key, cloneValue(readStoredValueWithoutDeclaring(key))]))
+  )
   assertValidSyncPayload(values)
   if (validateStableEntityIds(values).length) throw new Error('本机记录缺少稳定编号，请在数据管理中修复后再同步。')
   return values

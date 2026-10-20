@@ -1,13 +1,16 @@
 <script setup>
 import PageHeader from '../components/PageHeader.vue'
+import VirtualList from '../components/VirtualList.vue'
 import { computed, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { policyDateKey } from '../composables/settingsPolicy.js'
+import { useDebouncedRef } from '../composables/useDebouncedRef.js'
 import { clock } from '../composables/store/core.js'
 import { createNoticeRecord, noticeSources, notices, addNoticeLink, setNoticeSourceMuted, setNoticeStatus } from '../composables/noticeArchive.js'
 import { summarizeNoticeSources, visibleNoticeRecords } from '../composables/noticeArchiveModel.js'
 import { createPlaceOffer, deletePlaceOffer, places } from '../composables/placeBook.js'
 import { parsePlaceOfferCandidate } from '../composables/noticeParser.js'
+import { handOffNoticeToTasks } from '../composables/noticeHandoff.js'
 
 const router = useRouter()
 const statusFilter = ref('active')
@@ -22,10 +25,15 @@ const monthKey = computed(() => policyDateKey(clock.value).slice(0, 7))
 const sources = computed(() => summarizeNoticeSources(notices.value, noticeSources.value, monthKey.value))
 const topics = computed(() => [...new Set(notices.value.map((item) => String(item.topic || '').trim()).filter(Boolean))].sort())
 const activePlaces = computed(() => places.value.filter((item) => !item.archivedAt))
+// 改一次筛选就要重算一次 visible，并且 offerCandidates 会对每一条都跑一遍
+// parsePlaceOfferCandidate。去抖让连续操作只触发最后一次重算。
+const debouncedStatusFilter = useDebouncedRef(statusFilter, 120)
+const debouncedSourceFilter = useDebouncedRef(sourceFilter, 120)
+const debouncedTopicFilter = useDebouncedRef(topicFilter, 120)
 const visible = computed(() => visibleNoticeRecords(notices.value, {
-  status: statusFilter.value,
-  source: sourceFilter.value,
-  topic: topicFilter.value,
+  status: debouncedStatusFilter.value,
+  source: debouncedSourceFilter.value,
+  topic: debouncedTopicFilter.value,
 }))
 const offerCandidates = computed(() => new Map(visible.value.map((item) => [
   item.id, parsePlaceOfferCandidate(item.raw, clock.value instanceof Date ? clock.value : new Date()),
@@ -45,6 +53,15 @@ function saveNewNotice() {
 
 function changeStatus(item, status) {
   if (!setNoticeStatus(item.id, status)) message.value = '状态更新失败，请刷新后重试。'
+}
+
+/**
+ * 档案页自己的存档动作：待办/日程页面无法读取本机的通知档案，
+ * 而通知理解本来就接受一段原文——直接带过去，比让用户复制粘贴再粘一遍可靠。
+ */
+function actOnNotice(item) {
+  handOffNoticeToTasks(item.raw)
+  router.push('/tasks')
 }
 
 function toggleSource(source) {
@@ -143,9 +160,16 @@ function linkLabel(link) {
         <label>主题<select v-model="topicFilter"><option value="">全部主题</option><option v-for="topic in topics" :key="topic" :value="topic">{{ topic }}</option></select></label>
       </div>
       <p v-if="!visible.length" class="archive-empty">{{ statusFilter === 'archived' ? '还没有已归档的通知。' : '这里还没有通知。保存原文后，它会按来源、主题和时间出现在这里。' }}</p>
-      <article v-for="item in visible" :key="item.id" class="notice-record">
-        <header><div><h3>{{ item.title || '未命名通知' }}</h3><p>{{ item.source || '未注明来源' }} · {{ item.topic || '通知' }} · {{ item.createdAt ? item.createdAt.slice(0, 16).replace('T', ' ') : '时间未知' }}</p></div><span class="notice-status" :class="`status-${item.status}`">{{ { new: '待处理', handled: '已处理', archived: '已归档' }[item.status] }}</span></header>
-        <pre>{{ item.raw }}</pre>
+      <!--
+        档案里每条都带着整段原文，而过去原文是**永远展开**的：列表越长，
+        页面上的 DOM 就越多，改一个筛选条件就整份重建一次。
+        现在默认折叠（点开仍能看全文），并交给 VirtualList 只渲染视口附近的部分。
+      -->
+      <VirtualList v-if="visible.length" :items="visible" :item-key="(item) => item.id" :estimated-height="150" :gap="10" :threshold="24" :overscan="4">
+        <template #default="{ item }">
+        <article class="notice-record">
+          <header><div><h3>{{ item.title || '未命名通知' }}</h3><p>{{ item.source || '未注明来源' }} · {{ item.topic || '通知' }} · {{ item.createdAt ? item.createdAt.slice(0, 16).replace('T', ' ') : '时间未知' }}</p></div><span class="notice-status" :class="`status-${item.status}`">{{ { new: '待处理', handled: '已处理', archived: '已归档' }[item.status] }}</span></header>
+        <details class="notice-raw"><summary>查看原文</summary><pre>{{ item.raw }}</pre></details>
         <form v-if="offerNoticeId === item.id" class="notice-offer-form" @submit.prevent="saveOfferLink(item)">
           <p>解析结果仅作预填；请确认地点和核销金额后再保存。通知原文仍只保存在本机。</p>
           <label>关联地点<select v-model="offerDraft.placeId" required><option value="">请选择</option><option v-for="place in activePlaces" :key="place.id" :value="place.id">{{ place.name }}</option></select></label>
@@ -156,6 +180,7 @@ function linkLabel(link) {
         </form>
         <footer>
           <span v-if="item.linkedEntities?.length">已关联{{ item.linkedEntities.map(linkLabel).join('、') }}</span>
+          <button type="button" @click="actOnNotice(item)">按这条建待办 / 日程</button>
           <button v-if="offerCandidate(item) && !hasOfferLink(item)" type="button" @click="openOfferLink(item)">{{ activePlaces.length ? '解析并关联地点优惠' : '先添加地点再关联优惠' }}</button>
           <button v-if="hasOfferLink(item)" type="button" @click="router.push('/places')">查看地点优惠</button>
           <button v-if="item.status === 'new'" type="button" @click="changeStatus(item, 'handled')">标记已处理</button>
@@ -164,11 +189,13 @@ function linkLabel(link) {
           <button v-if="item.status === 'handled'" type="button" @click="changeStatus(item, 'new')">重新放入待处理</button>
         </footer>
       </article>
+        </template>
+      </VirtualList>
     </section>
   </div>
 </template>
 
 <style scoped>
-.notice-archive-page{display:grid;gap:14px}.card{padding:16px;border:1px solid var(--border);border-radius:var(--radius-14);background:var(--card)}.archive-add h2,.archive-section-title h2{margin:0;font-size:var(--fs-16)}.archive-add label,.archive-filters label{display:flex;flex-direction:column;gap:5px;margin-top:10px;color:var(--muted);font-size:var(--fs-11)}.archive-add input,.archive-add textarea,.archive-filters select{width:100%;min-height:40px;padding:8px 10px;border:1px solid var(--border);border-radius:var(--radius-8);background:var(--bg);color:var(--text);font:inherit}.archive-add textarea{resize:vertical}.archive-add-actions{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:10px}.archive-add-actions p{margin:0;color:var(--muted);font-size:var(--fs-11)}.archive-section-title{display:flex;justify-content:space-between;gap:10px}.archive-section-title p{margin:4px 0 0;color:var(--muted);font-size:var(--fs-11)}.archive-source-row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 0;border-top:1px solid var(--border)}.archive-source-row:first-of-type{margin-top:10px}.archive-source-row span{display:flex;flex-direction:column;gap:3px}.archive-source-row small{color:var(--muted);font-size:var(--fs-10)}.archive-filters{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-bottom:12px}.archive-empty{margin:12px 0 0;padding:16px;border-radius:var(--radius-9);background:var(--bg);color:var(--muted);font-size:var(--fs-12);line-height:1.6}.notice-record{margin-top:10px;padding:13px;border:1px solid var(--border);border-radius:var(--radius-11);background:var(--bg)}.notice-record header{display:flex;justify-content:space-between;gap:12px}.notice-record h3{margin:0;font-size:var(--fs-14)}.notice-record header p{margin:4px 0 0;color:var(--muted);font-size:var(--fs-10)}.notice-status{flex:none;height:max-content;padding:4px 7px;border-radius:var(--radius-pill);background:var(--primary-soft);color:var(--primary);font-size:var(--fs-10)}.status-archived{background:var(--bg-tint);color:var(--muted)}.notice-record pre{margin:10px 0 0;white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;font-size:var(--fs-12);line-height:1.6}.notice-record footer{display:flex;align-items:center;justify-content:flex-end;gap:12px;flex-wrap:wrap;margin-top:10px}.notice-record footer span{margin-right:auto;color:var(--muted);font-size:var(--fs-10)}.notice-record footer button{min-height:40px;padding:5px 0;border:0;background:none;color:var(--primary);font:inherit;font-size:var(--fs-11)}.notice-offer-form{display:grid;gap:8px;margin-top:12px;padding:12px;border:1px solid var(--border);border-radius:var(--radius-9);background:var(--card)}.notice-offer-form p{margin:0;color:var(--muted);font-size:var(--fs-11);line-height:1.5}.notice-offer-form label{display:flex;flex-direction:column;gap:5px;color:var(--muted);font-size:var(--fs-11)}.notice-offer-form input,.notice-offer-form select{width:100%;min-height:44px;padding:8px 10px;border:1px solid var(--border);border-radius:var(--radius-8);background:var(--bg);color:var(--text);font:inherit}.notice-offer-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.notice-offer-form footer{display:flex;gap:8px;flex-wrap:wrap}.btn{min-height:44px;padding:0 12px;border:1px solid var(--border);border-radius:var(--radius-8);background:var(--bg);color:var(--text);font:inherit;font-size:var(--fs-12)}.btn-primary{border-color:var(--primary);background:var(--primary);color:var(--on-primary,#fff)}.btn-ghost{background:transparent}
+.notice-archive-page{display:grid;gap:14px}.card{padding:16px;border:1px solid var(--border);border-radius:var(--radius-14);background-color:var(--glass-surface);backdrop-filter:var(--glass-filter);-webkit-backdrop-filter:var(--glass-filter);box-shadow:var(--glass-shadow)}.archive-add h2,.archive-section-title h2{margin:0;font-size:var(--fs-16)}.archive-add label,.archive-filters label{display:flex;flex-direction:column;gap:5px;margin-top:10px;color:var(--muted);font-size:var(--fs-11)}.archive-add input,.archive-add textarea,.archive-filters select{width:100%;min-height:40px;padding:8px 10px;border:1px solid var(--border);border-radius:var(--radius-8);background:var(--bg);color:var(--text);font:inherit}.archive-add textarea{resize:vertical}.archive-add-actions{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:10px}.archive-add-actions p{margin:0;color:var(--muted);font-size:var(--fs-11)}.archive-section-title{display:flex;justify-content:space-between;gap:10px}.archive-section-title p{margin:4px 0 0;color:var(--muted);font-size:var(--fs-11)}.archive-source-row{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px 0;border-top:1px solid var(--border)}.archive-source-row:first-of-type{margin-top:10px}.archive-source-row span{display:flex;flex-direction:column;gap:3px}.archive-source-row small{color:var(--muted);font-size:var(--fs-10)}.archive-filters{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin-bottom:12px}.archive-empty{margin:12px 0 0;padding:16px;border-radius:var(--radius-9);background:var(--bg);color:var(--muted);font-size:var(--fs-12);line-height:1.6}.notice-record{margin-top:10px;padding:13px;border:1px solid var(--border);border-radius:var(--radius-11);background:var(--bg)}.notice-record header{display:flex;justify-content:space-between;gap:12px}.notice-raw{margin:0}.notice-raw summary{cursor:pointer;color:var(--muted);font-size:var(--fs-11)}.notice-raw pre{max-height:240px;overflow:auto;margin:6px 0 0;white-space:pre-wrap;word-break:break-word}.notice-record h3{margin:0;font-size:var(--fs-14)}.notice-record header p{margin:4px 0 0;color:var(--muted);font-size:var(--fs-10)}.notice-status{flex:none;height:max-content;padding:4px 7px;border-radius:var(--radius-pill);background:var(--primary-soft);color:var(--primary);font-size:var(--fs-10)}.status-archived{background:var(--bg-tint);color:var(--muted)}.notice-record pre{margin:10px 0 0;white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;font-size:var(--fs-12);line-height:1.6}.notice-record footer{display:flex;align-items:center;justify-content:flex-end;gap:12px;flex-wrap:wrap;margin-top:10px}.notice-record footer span{margin-right:auto;color:var(--muted);font-size:var(--fs-10)}.notice-record footer button{min-height:40px;padding:5px 0;border:0;background:none;color:var(--primary);font:inherit;font-size:var(--fs-11)}.notice-offer-form{display:grid;gap:8px;margin-top:12px;padding:12px;border:1px solid var(--border);border-radius:var(--radius-9);background:var(--card)}.notice-offer-form p{margin:0;color:var(--muted);font-size:var(--fs-11);line-height:1.5}.notice-offer-form label{display:flex;flex-direction:column;gap:5px;color:var(--muted);font-size:var(--fs-11)}.notice-offer-form input,.notice-offer-form select{width:100%;min-height:44px;padding:8px 10px;border:1px solid var(--border);border-radius:var(--radius-8);background:var(--bg);color:var(--text);font:inherit}.notice-offer-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}.notice-offer-form footer{display:flex;gap:8px;flex-wrap:wrap}.btn{min-height:44px;padding:0 12px;border:1px solid var(--border);border-radius:var(--radius-8);background:var(--bg);color:var(--text);font:inherit;font-size:var(--fs-12)}.btn-primary{border-color:var(--primary);background:var(--primary);color:var(--on-primary,#fff)}.btn-ghost{background:transparent}
 @media(max-width:520px){.card{padding:13px}.archive-filters{grid-template-columns:1fr}.archive-source-row{align-items:flex-start}.notice-record footer{justify-content:flex-start}.notice-record footer span{flex-basis:100%}}
 </style>

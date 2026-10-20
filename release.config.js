@@ -4,6 +4,31 @@
 // RELEASE_UPDATES 仅保留最近 3 条内置说明，完整的简短发布历史保存在 release-history.json。
 export const RELEASE_UPDATES = Object.freeze([
   {
+    version: '1.12.0',
+    legacyVersion: '2026年10月20日-版本1',
+    channel: 'stable',
+    summary: '界面全面换成液态玻璃：卡片、面板、侧栏、弹窗与提示条都成为会折射的磨砂玻璃，画布下新增缓慢漂移的极光',
+    signature: 'ee5e597ae9',
+    changes: {
+      features: [
+      '界面全面换成液态玻璃：卡片、面板、侧栏、弹窗与提示条都成为会折射的磨砂玻璃，画布下新增缓慢漂移的极光',
+      ],
+      improvements: [
+      '首页「接下来」面板改为流动的玻璃面板，进行中的事项带呼吸提示',
+      ],
+      fixes: [
+      '修复通知标题中「现在」被误判为方位词、导致标题被截断的问题',
+      ],
+      security: [],
+      breaking: [],
+    },
+    notes: [
+      '界面全面换成液态玻璃：卡片、面板、侧栏、弹窗与提示条都成为会折射的磨砂玻璃，画布下新增缓慢漂移的极光',
+      '首页「接下来」面板改为流动的玻璃面板，进行中的事项带呼吸提示',
+      '修复通知标题中「现在」被误判为方位词、导致标题被截断的问题',
+    ],
+  },
+  {
     version: '1.11.3',
     legacyVersion: '2026年10月17日-版本1',
     channel: 'stable',
@@ -64,49 +89,16 @@ export const RELEASE_UPDATES = Object.freeze([
       '限制状态与审计通知原子保存，账号仅能查询本人的处理说明',
     ],
   },
-  {
-    version: '1.11.1',
-    legacyVersion: '2026年10月16日-版本5',
-    channel: 'stable',
-    summary: '降低云端读取与首屏开销，增强弱网和后台恢复',
-    signature: '0f49be9a02',
-    changes: {
-      features: [],
-      improvements: [
-      '减少首页分包请求与无意图预加载',
-      '管理员列表批量查询邮箱，我的投稿只读取所需摘要',
-      '限制读取缓存大小并合并重复请求',
-      ],
-      fixes: [
-      '切换搜索和离开页面时取消过时读取',
-      '后台通知恢复后补读，避免遗漏变化',
-      '公开服务限流或超时时退避，避免重复冲击上游',
-      ],
-      security: [
-      '保持私有数据隔离，批量邮箱查询仅授权服务端可用',
-      ],
-      breaking: [],
-    },
-    notes: [
-      '减少首页分包请求与无意图预加载',
-      '管理员列表批量查询邮箱，我的投稿只读取所需摘要',
-      '限制读取缓存大小并合并重复请求',
-      '切换搜索和离开页面时取消过时读取',
-      '后台通知恢复后补读，避免遗漏变化',
-      '公开服务限流或超时时退避，避免重复冲击上游',
-      '保持私有数据隔离，批量邮箱查询仅授权服务端可用',
-    ],
-  },
 ])
 
 // SemVer 是面向用户和发布的正式版本。日期式标识只用于旧网页客户端的升级兼容。
-export const APP_VERSION = '1.11.3'
+export const APP_VERSION = '1.12.0'
 export const RELEASE_VERSION = APP_VERSION
 export const RELEASE_CHANNEL = 'stable'
 export const LEGACY_RELEASE_VERSION = RELEASE_UPDATES[0].legacyVersion || RELEASE_UPDATES[0].version
 
 // 与第一条签名保持一致，交给 vite.config.js 校验源码一致性。
-export const RELEASE_SOURCE_SIGNATURE = 'bd3af33dfd'
+export const RELEASE_SOURCE_SIGNATURE = 'ee5e597ae9'
 
 // 兼容旧引用：当前版本的更新说明。
 export const RELEASE_NOTES = RELEASE_UPDATES[0].notes

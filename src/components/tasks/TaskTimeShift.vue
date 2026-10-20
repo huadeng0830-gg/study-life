@@ -1,6 +1,7 @@
 <script setup>
 import { computed, ref, useId } from 'vue'
 import { previewTaskTimeShift, shiftDurationText, undoTaskTimeShift } from '../../composables/tasks/taskTimeShift'
+import { deepClone } from '../../utils/clone.js'
 
 const props = defineProps({ task: { type: Object, required: true }, nowMs: { type: Number, required: true } })
 const emit = defineEmits(['apply', 'undo'])
@@ -21,8 +22,8 @@ const canApply = computed(() => !preview.value.error && !preview.value.missingTi
 
 function apply() {
   if (!canApply.value) return
-  before.value = JSON.parse(JSON.stringify(props.task))
-  after.value = JSON.parse(JSON.stringify(preview.value.plan))
+  before.value = deepClone(props.task)
+  after.value = deepClone(preview.value.plan)
   emit('apply', preview.value.plan)
   message.value = `已${shiftDurationText(duration.value)}，保存后生效。`
   expanded.value = false

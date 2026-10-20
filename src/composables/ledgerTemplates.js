@@ -8,6 +8,8 @@
 // 也**刻意不保存 `nextDate`**（下次支付日期是「这一次」的事实，套用模板时回填一个旧日期
 // 只会造成误导）。子对象把「模板元信息」与「被套用的账单字段」分开，读起来不会混。
 import { touchStoredRef, useStoredRef } from './store/core.js'
+import { createId } from '../utils/ids.js'
+import { deepClone } from '../utils/clone.js'
 import { normalizeAmount } from './ledger.js'
 import { normalizeCurrency } from './ledgerFx.js'
 
@@ -15,14 +17,9 @@ export const LEDGER_TEMPLATES_KEY = 'sl_ledger_templates'
 // 与 commands.js 的 createBill 同一份周期白名单。
 const CYCLES = ['weekly', 'monthly', 'quarterly', 'yearly', 'once']
 
-function createId() {
-  const uuid = globalThis.crypto?.randomUUID?.()
-  return uuid ? `ltpl-${uuid}` : `ltpl-${Date.now()}-${Math.random().toString(36).slice(2)}`
-}
-
 /** 深拷贝：模板一旦入 store 就与表单对象脱钩，避免后续编辑表单把已保存的模板一起改掉。 */
 function clone(value) {
-  return JSON.parse(JSON.stringify(value))
+  return deepClone(value)
 }
 
 /**
@@ -80,7 +77,7 @@ export function useLedgerTemplateCommands() {
     const bill = normalizeBillTemplate(value.bill ?? {})
     if (!bill.name && bill.amount === undefined) throw new Error('模板至少要保存账单名称或金额')
     const template = {
-      id: value.id || createId(),
+      id: value.id || createId('ltpl'),
       name,
       createdAt: value.createdAt || new Date().toISOString(),
       bill: clone(bill),

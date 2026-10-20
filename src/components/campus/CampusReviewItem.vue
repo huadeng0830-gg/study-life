@@ -3,6 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { accountUser } from '../../composables/accountAuth.js'
 import { campusContentLabels, campusContentTitle, campusReportReasons } from '../../composables/campusContentModel.js'
 import { campusDateTimeLabel } from '../../composables/campusFormatting.js'
+import { moneyCents } from '../../utils/formatters.js'
 import { Button } from '../ui/button'
 import { Badge } from '../ui/badge'
 import { Field, FieldLabel } from '../ui/field'
@@ -42,7 +43,7 @@ const details = computed(() => {
     item.course_name && `课程：${item.course_name} · ${item.teacher_name || '教师待核对'} · ${item.term || ''}`,
     item.department && `院系：${item.department}`, item.opening_hours && `开放时间：${item.opening_hours}`,
     item.service_info, item.public_contact && `公开业务联系：${item.public_contact}`,
-    item.listing_type && `发布类型：${({ sale:'出售',free:'赠送',wanted:'求购' })[item.listing_type] || item.listing_type} · ${item.price_cents == null ? '价格未填写' : `¥${(item.price_cents / 100).toFixed(2)}`} · ${item.condition || ''} · ${item.meetup_area || ''}`,
+    item.listing_type && `发布类型：${({ sale:'出售',free:'赠送',wanted:'求购' })[item.listing_type] || item.listing_type} · ${item.price_cents == null ? '价格未填写' : moneyCents(item.price_cents)} · ${item.condition || ''} · ${item.meetup_area || ''}`,
     item.task_type && `取件：${item.pickup_area || '未填写'} · 送达：${item.delivery_area || '未填写'} · 截止：${item.deadline || '未设置'}`,
     item.starts_at && `活动时间：${item.starts_at} — ${item.ends_at} · ${item.location || ''} · 组织方：${item.organizer || ''} · 名额：${item.capacity ?? '不限'}`,
     item.approximate_location && `大致位置：${item.approximate_location} · ${item.occurred_at || ''}`,

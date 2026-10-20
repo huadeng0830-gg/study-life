@@ -8,6 +8,7 @@ import { normalizeFocusSession } from './focusTimer.js'
 import { convertToBaseMinor } from './ledgerFx.js'
 import { policyDateKey } from './settingsPolicy.js'
 import { clock } from './store/core.js'
+import { moneyCentsWithCode } from '../utils/formatters.js'
 
 const DAY_MS = 86400000
 const EXAMPLES = Object.freeze(['下周一之前要交什么', '这个月吃饭花了多少', '明天有什么课'])
@@ -46,8 +47,8 @@ function centsForAvailableAmount(item, fx) {
 }
 
 function formatMoney(cents, fx) {
-  const base = String(fx?.base || 'CNY').toUpperCase()
-  return base === 'CNY' ? `¥${(cents / 100).toFixed(2)}` : `${base} ${(cents / 100).toFixed(2)}`
+  // 基准币种（默认 CNY）用 ¥，其他币种按既有约定用代码前缀；数值口径统一走 formatters。
+  return moneyCentsWithCode(cents, fx?.base)
 }
 
 function categoryName(key, categories) {

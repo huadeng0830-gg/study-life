@@ -385,7 +385,10 @@ onBeforeUnmount(cleanup)
 .overlay {
   position: fixed;
   inset: 0;
-  background: rgba(30, 40, 70, 0.35);
+  background: rgba(30, 40, 70, 0.28);
+  /* 遮罩也做一层轻雾：弹窗浮起时背景不是"被压暗"，而是"被推到后面去"。 */
+  backdrop-filter: blur(6px) saturate(115%);
+  -webkit-backdrop-filter: blur(6px) saturate(115%);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -401,14 +404,19 @@ onBeforeUnmount(cleanup)
 .modal {
   display: flex;
   flex-direction: column;
-  background: var(--card);
+  /* 弹窗是磨砂玻璃：底下的页面被模糊推开，玻璃自己还留着一层通透，
+     所以它读起来是"浮在另一层之上"，而不是"一块贴在屏幕上的白板"。 */
+  background-color: color-mix(in srgb, var(--card) 86%, transparent);
+  backdrop-filter: blur(var(--glass-blur-strong)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur-strong)) saturate(var(--glass-saturate));
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
   border-radius: var(--radius-overlay);
   width: 420px;
   max-width: 100%;
   max-height: 85vh;
   max-height: 85dvh;
   overflow: hidden;
-  box-shadow: var(--shadow-overlay);
+  box-shadow: var(--shadow-overlay), inset 0 1px 0 color-mix(in srgb, var(--card) var(--glass-highlight), transparent);
   animation: modal-in var(--dur-base) var(--ease-out);
 }
 .modal.wide {
@@ -449,8 +457,8 @@ onBeforeUnmount(cleanup)
 .modal-foot {
   flex: 0 0 auto;
   padding: var(--space-3) max(var(--space-6), env(safe-area-inset-right, 0px)) calc(var(--space-4) + env(safe-area-inset-bottom, 0px)) max(var(--space-6), env(safe-area-inset-left, 0px));
-  border-top: 1px solid var(--border);
-  background: var(--card);
+  border-top: 1px solid color-mix(in srgb, var(--border) 76%, transparent);
+  background: color-mix(in srgb, var(--card) 70%, transparent);
 }
 .modal-head-actions {
   display: flex;
@@ -515,7 +523,7 @@ onBeforeUnmount(cleanup)
 }
 
 @keyframes modal-in {
-  from { transform: translateY(8px) scale(0.98); }
+  from { transform: translateY(10px) scale(0.965); opacity: 0.4; }
 }
 
 @media (max-width: 520px) {
@@ -534,8 +542,8 @@ onBeforeUnmount(cleanup)
 
   .modal-head {
     padding: 15px max(16px, env(safe-area-inset-right, 0px)) 10px max(16px, env(safe-area-inset-left, 0px));
-    border-bottom: 1px solid var(--border);
-    background: var(--card);
+    border-bottom: 1px solid color-mix(in srgb, var(--border) 76%, transparent);
+    background: color-mix(in srgb, var(--card) 70%, transparent);
   }
 
   .modal-body {

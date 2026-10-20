@@ -2,26 +2,6 @@ import { normalizeExternalExam } from '../externalExam.js'
 
 export const DOMAIN_SCHEMA_VERSION = 6
 
-export function normalizeNoticeRecords(notices = []) {
-  if (!Array.isArray(notices)) return { value: [], changed: true }
-  let changed = false
-  const value = notices.map((notice) => {
-    if (!notice || typeof notice !== 'object' || Array.isArray(notice)) { changed = true; return null }
-    const normalized = {
-      ...notice,
-      source: String(notice.source || ''),
-      topic: String(notice.topic || '通知'),
-      status: ['new', 'handled', 'archived'].includes(notice.status) ? notice.status : 'new',
-      linkedEntityType: String(notice.linkedEntityType || ''),
-      linkedEntityId: notice.linkedEntityId == null ? '' : String(notice.linkedEntityId),
-      scheduleProposalId: String(notice.scheduleProposalId || ''),
-    }
-    if (JSON.stringify(normalized) !== JSON.stringify(notice)) changed = true
-    return normalized
-  }).filter(Boolean)
-  return { value, changed }
-}
-
 export function detachRetiredNoteRelations({ tasks = [], events = [] } = {}) {
   let changed = 0
   const now = new Date().toISOString()

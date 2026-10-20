@@ -8,8 +8,7 @@
 // （首次读取从该键补水），所以这里依然不直接触达 localStorage。
 
 import { findLunarAnniversaryForDate, LUNAR_ANNIVERSARY_PRESENTATION } from './lunarAnniversaries.js'
-
-const pad2 = (value) => String(value).padStart(2, '0')
+import { dateParts, dateText } from '../utils/formatters.js'
 
 function toDate(value) {
   if (value instanceof Date) return value
@@ -20,7 +19,7 @@ function toDate(value) {
 function fullDateOf(value) {
   const date = toDate(value)
   if (!date) return ''
-  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}`
+  return dateText(date)
 }
 
 const MONTH_DAY_RE = /^(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/
@@ -49,7 +48,7 @@ export function monthDayInYear(monthDay, year) {
   if (!Number.isInteger(numericYear) || numericYear < 0 || numericYear > 9999) return ''
   const [month, day] = text.split('-').map(Number)
   const resolvedDay = text === '02-29' && !isLeapYear(numericYear) ? 28 : day
-  return String(numericYear).padStart(4, '0') + '-' + pad2(month) + '-' + pad2(resolvedDay)
+  return dateParts(String(numericYear).padStart(4, '0'), month, resolvedDay)
 }
 
 /** 月-日是否命中（`configured` 与 `today` 都是 'MM-DD'）。 */

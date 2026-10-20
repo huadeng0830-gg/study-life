@@ -1,5 +1,6 @@
 <script setup>
 import PageHeader from '../components/PageHeader.vue'
+import { usePageToast } from '../composables/usePageToast.js'
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import Modal from '../components/Modal.vue'
@@ -67,12 +68,9 @@ const { onKeydown: onLedgerTabKeydown, tabIndexFor: ledgerTabIndex } = useTabKey
 })
 const openSwipeId = ref('')
 const showImportDialog = ref(false)
-const toast = ref({ open: false, message: '', type: 'info', actionLabel: '', undoFn: null, viewFn: null, duration: 3200 })
+const { toast, showToast } = usePageToast()
 function closeSwipe() {
   openSwipeId.value = ''
-}
-function showToast(message, { type = 'info', actionLabel = '', undoFn = null, viewFn = null, duration = 3200 } = {}) {
-  toast.value = { open: true, message, type, actionLabel, undoFn, viewFn, duration }
 }
 /** @param {{ source?: string, count?: number, duplicates?: number }} [result] */
 function onImportedTransactions({ source, count, duplicates } = {}) {
@@ -321,7 +319,6 @@ const baseMonthSummary = computed(() => sumLedgerMonthInBase(expenses.value, fx.
 
 // 新增：快速记账表单 composable
 const {
-  showQuickRecord,
   moreOpen,
   amountInput,
   nameInput,
@@ -353,12 +350,12 @@ const {
   duplicateHit,
   openQuick: openQuickForm,
   closeQuick,
-  // 模板里 QuickEntryModal 的这四个事件直接绑到它们身上（见下方 @save / @select-category 等），
+  // 模板里 QuickEntryModal 的几个事件直接绑到它们身上（见下方 @save / @select-category 等），
   // 少解构任何一个，Vue 都会在渲染时警告"not defined on instance"，而点击时静默无反应——
   // 也就是「记一笔」的保存按钮彻底失灵。必须与模板里的绑定一一对应。
+  // （2.1 之后「一句话记」不再有内嵌副本，所以这里也不再需要 openQuickRecord /
+  //   onQuickRecordSaved —— 唯一入口是外壳的快速记录。）
   saveExpense,
-  openQuickRecord,
-  onQuickRecordSaved,
   selectQuickCategory,
 } = useQuickEntryForm({
   baseCurrency: computed(() => normalizeLedgerFx(fx.value).base),
@@ -788,12 +785,8 @@ const {
       @update:suggested-category-input="suggestedCategoryInput = $event"
       @save="handleQuickSave"
       @close="closeQuickModal"
-      @open-quick-record="openQuickRecord"
       @open-bill-form="openBillForm"
-      @quick-record-saved="onQuickRecordSaved"
       @select-category="selectQuickCategory"
-      :show-quick-record="showQuickRecord"
-      @update:show-quick-record="showQuickRecord = $event"
     />
 
     <TransactionImportDialog

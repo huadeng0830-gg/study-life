@@ -36,7 +36,7 @@ import { selectTodayActionPanels, reminderAction } from '../composables/domain/s
 import { selectWeeklyBillSummary, weekRange } from '../composables/domain/weeklySelectors.js'
 import { normalizeLedgerFx, summarizeLedgerInBase, useLedgerFx } from '../composables/ledgerFx.js'
 import { mySpendYuan } from '../composables/ledgerSplit.js'
-import { moneyWithCurrency } from '../utils/formatters.js'
+import { moneyRow, moneyWithCurrency } from '../utils/formatters.js'
 import { taskPlanningState, taskStatus } from '../composables/domain/state.js'
 import { COURSE_CHECKIN_STATES, upsertCourseCheckin, weeklyPulse } from '../composables/experience.js'
 import { schedulePolicy } from '../composables/settingsPolicy.js'
@@ -308,7 +308,7 @@ function reminderMeta(item) {
   if (item.timeSummary) return item.timeSummary
   if (item.kind === 'overdue') return '已逾期'
   if (item.sourceType === 'task') return taskDeadline(item.entity)
-  if (item.sourceType === 'bill') return `${dayLabel(item.entity.nextDate)} · ¥${Number(item.entity.amount || 0).toFixed(2)}`
+  if (item.sourceType === 'bill') return `${dayLabel(item.entity.nextDate)} · ${moneyRow(item.entity.amount)}`
   if (item.sourceType === 'event') return `${item.entity.date || '待安排'}${item.entity.time ? ` ${item.entity.time}` : ''}`
   return item.entity.countdown?.text || countdownLabel(sortCountdowns([item.entity], now.value)[0])
 }
@@ -349,7 +349,7 @@ function nextMeta(item) {
   if (item.timeSummary) return item.timeSummary
   const day = dayLabel(item.date)
   if (item.kind === 'course') return `${day} ${nextUpTimeRange.value}${item.entity.room ? ` · ${item.entity.room}` : ''}`
-  if (item.kind === 'bill') return `${day} · ¥${Number(item.entity.amount || 0).toFixed(2)}`
+  if (item.kind === 'bill') return `${day} · ${moneyRow(item.entity.amount)}`
   return `${day}${item.time ? ` ${item.time}` : ''}`
 }
 
@@ -393,7 +393,7 @@ function countdownLabel(item) {
 
       <template v-for="id in visibleHomeModuleIds" :key="id">
         <template v-if="id === 'next'">
-          <section class="next-panel" :class="nextUp.kind" aria-label="接下来">
+          <section class="next-panel glass-flow" :class="nextUp.kind" aria-label="接下来">
             <div class="next-main">
               <span class="next-label">接下来</span>
               <template v-if="nextUp.kind !== 'none'">

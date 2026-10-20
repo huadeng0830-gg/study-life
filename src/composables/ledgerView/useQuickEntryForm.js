@@ -22,7 +22,6 @@ export function useQuickEntryForm({ baseCurrency, domain, notify, closeSwipe, le
   const { fx } = useLedgerFx()
 
   // 弹窗开关与编辑态由页面持有（showQuick、editingId），这里只管表单里的 ref
-  const showQuickRecord = ref(false)
   const moreOpen = ref(false)
   const amountInput = ref('')
   const nameInput = ref('')
@@ -156,24 +155,6 @@ export function useQuickEntryForm({ baseCurrency, domain, notify, closeSwipe, le
     forceDup.value = false
     cycleSuggest.value = null
     keepAdding.value = false
-  }
-
-  function openQuickRecord() {
-    showQuickRecord.value = true
-  }
-
-  function closeQuickRecord() {
-    showQuickRecord.value = false
-  }
-
-  function onQuickRecordSaved(payload) {
-    notify(payload.message, {
-      actionLabel: payload.undo ? '撤销' : '',
-      undoFn: payload.undo ?? null,
-      viewFn: payload.entityType === 'transaction' ? () => {} : null,
-      duration: 6000,
-    })
-    closeQuickRecord()
   }
 
   function setDirection(direction) {
@@ -359,13 +340,11 @@ export function useQuickEntryForm({ baseCurrency, domain, notify, closeSwipe, le
   }
 
   function closeQuick() {
-    showQuickRecord.value = false
     keepAdding.value = false
     savingExpense.value = false
   }
 
   return {
-    showQuickRecord,
     moreOpen,
     amountInput,
     nameInput,
@@ -398,9 +377,6 @@ export function useQuickEntryForm({ baseCurrency, domain, notify, closeSwipe, le
     syncSplitMine,
     onSplitChange,
     openQuick,
-    openQuickRecord,
-    closeQuickRecord,
-    onQuickRecordSaved,
     setDirection,
     onNameInput,
     quickCatChips,

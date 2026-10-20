@@ -7,5 +7,3 @@ export function detachCourseRelations(course, { tasks = [], milestones = [], eve
   for (const item of events) { if (item.courseId === course.id) { item.courseId = ''; item.courseName = item.courseName || course.name || ''; result.events++ } }
   return result
 }
-
-export function entityRef(sourceType, sourceId) { return `${sourceType}:${sourceId}` }

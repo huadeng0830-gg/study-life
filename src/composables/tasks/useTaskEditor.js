@@ -6,6 +6,7 @@ import { undoTaskTimeShift } from './taskTimeShift'
 import { isValidPlanningDate } from '../planningViews.js'
 import { defaultReminderMinutes } from '../settingsPolicy.js'
 import { createFormIdentityGuard } from '../formIdentity.js'
+import { deepClone } from '../../utils/clone.js'
 
 function emptyForm() {
   return {
@@ -88,7 +89,7 @@ export function useTaskEditor({ domain, tasks, courses, events, onSaved = (_mess
       courseId: task.courseId ?? '',
       dueDate: task.dueDate ?? '',
       dueTime: task.dueTime ?? '',
-      timeStages: JSON.parse(JSON.stringify(task.timeStages || [])),
+      timeStages: deepClone(task.timeStages || []),
       priority: task.priority ?? 'normal',
       note: task.note ?? '',
       estimateMinutes: task.estimateMinutes ?? '',
@@ -106,7 +107,7 @@ export function useTaskEditor({ domain, tasks, courses, events, onSaved = (_mess
 
   function commitSave(data, editId, identitySnapshot) {
     const existing = tasks.value.find((task) => task.id === editId)
-    const timing = (task) => JSON.parse(JSON.stringify({ dueDate: task.dueDate || '', dueTime: task.dueTime || '', timeStages: task.timeStages || [] }))
+    const timing = (task) => deepClone({ dueDate: task.dueDate || '', dueTime: task.dueTime || '', timeStages: task.timeStages || [] })
     const before = existing && !existing.done && existing.status !== 'completed' ? timing(existing) : null
     const beforeAnchor = existing?.repeatAnchorDay
     const beforeRepeat = existing?.repeat

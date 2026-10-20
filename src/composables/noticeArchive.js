@@ -1,4 +1,5 @@
 import { clock, useStoredRef } from './store/core.js'
+import { createId as createNoticeId } from '../utils/ids.js'
 import { normalizeNoticeRecord } from './noticeArchiveModel.js'
 
 export const NOTICE_STORAGE_KEY = 'sl_notices'
@@ -7,10 +8,6 @@ export const NOTICE_SOURCE_STORAGE_KEY = 'sl_notice_sources'
 export const notices = useStoredRef(NOTICE_STORAGE_KEY, /** @type {Array<ReturnType<typeof normalizeNoticeRecord>>} */ ([]))
 /** @type {import('vue').Ref<Array<{id: string, source: string, muted: boolean, updatedAt: string}>>} */
 export const noticeSources = useStoredRef(NOTICE_SOURCE_STORAGE_KEY, /** @type {Array<{id: string, source: string, muted: boolean, updatedAt: string}>} */ ([]))
-
-function createId() {
-  return globalThis.crypto?.randomUUID?.() || `notice-${Math.random().toString(36).slice(2)}`
-}
 
 function nowIso() {
   return (clock.value instanceof Date ? clock.value : new Date()).toISOString()
@@ -21,7 +18,7 @@ export function createNoticeRecord(value = {}) {
   if (!raw) throw new Error('通知原文为空，未能保存到档案。')
   const record = normalizeNoticeRecord({
     ...value,
-    id: value.id || createId(),
+    id: value.id || createNoticeId(),
     raw,
     title: value.title || raw.split(/\r?\n/).find(Boolean) || '未命名通知',
     status: value.status || 'new',
@@ -71,7 +68,7 @@ export function setNoticeSourceMuted(source, muted) {
   if (existing) {
     noticeSources.value = noticeSources.value.map((item) => item.source === name ? { ...item, muted: Boolean(muted), updatedAt: nowIso() } : item)
   } else if (muted) {
-    noticeSources.value = [...noticeSources.value, { id: `source-${createId()}`, source: name, muted: true, updatedAt: nowIso() }]
+    noticeSources.value = [...noticeSources.value, { id: `source-${createNoticeId()}`, source: name, muted: true, updatedAt: nowIso() }]
   }
   return true
 }

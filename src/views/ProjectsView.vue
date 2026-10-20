@@ -26,6 +26,12 @@ import { useProjectDeliverableEditor } from '../composables/projects/useProjectD
 import { createProjectRequestScope } from '../composables/projects/projectRequestScope.js'
 import { createProjectEditorScope } from '../composables/projects/projectEditorScope.js'
 import { useProjectTaskActions } from '../composables/projects/useProjectTaskActions.js'
+import { useProjectInvites } from '../composables/projects/useProjectInvites.js'
+import { useProjectAdjustments } from '../composables/projects/useProjectAdjustments.js'
+import { useProjectPlanning } from '../composables/projects/useProjectPlanning.js'
+import { useScopedProjectAction } from '../composables/projects/useScopedProjectAction.js'
+import { confirmCommand, confirmDialogCopy } from '../composables/projects/projectConfirmCopy.js'
+import { activityLabel, adjustmentStatus, deliverableStatus, formatDate, nextDay, roleLabel } from '../composables/projects/projectDisplayText.js'
 import { useDomainCommands } from '../composables/domain/commands.js'
 import { syncProjectMeetingEvents, detachProjectMeetingEvents } from '../composables/projectMeetingBridge.js'
 import {
@@ -34,6 +40,7 @@ import {
 } from '../services/projects.js'
 import { dateInZone } from '../composables/zonedTime.js'
 import { formatDateTime } from '../composables/intlFormatters.js'
+import { errorMessage as sharedErrorMessage } from '../utils/errors.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -56,8 +63,6 @@ const adjustments = accountContext.state([])
 const deliverables = accountContext.state([])
 const meetings = accountContext.state([])
 const inbox = accountContext.state(() => ({ invitations: [], assignments: [], adjustments: [], reviews: [], meetings: [] }))
-const friends = accountContext.state([])
-const inviteLinks = accountContext.state([])
 const activeSection = ref('tasks')
 const showArchived = ref(false)
 const pageLoading = accountContext.state(false)
@@ -73,19 +78,11 @@ const projectRequestId = accountContext.state('')
 const showTaskForm = accountContext.state(false)
 const taskDraft = accountContext.state(blankTask)
 const editingTask = accountContext.state(false)
-const showAdjustmentForm = accountContext.state(false)
-const adjustmentTask = accountContext.state(null)
-const adjustmentDraft = accountContext.state(blankAdjustment)
 const showDeliverableForm = accountContext.state(false)
 const deliverableDraft = accountContext.state(blankDeliverable)
 const reviewTarget = accountContext.state(null)
 const reviewFeedback = accountContext.state('')
 const reviewChecklist = accountContext.state(() => [{ item: '符合交付要求', passed: false }])
-const showInviteForm = accountContext.state(false)
-const selectedFriendId = accountContext.state('')
-const friendsLoading = projectContext.state(false)
-const linkBusy = accountContext.state(false)
-const linkToShare = accountContext.state('')
 const taskEvents = accountContext.state([])
 const taskEventsTitle = accountContext.state('')
 const projectCheckpointError = accountContext.state('')
@@ -93,11 +90,6 @@ const confirmAction = accountContext.state(null)
 const lastDeletedProjectId = accountContext.state('')
 const transferTargetId = accountContext.state('')
 const joiningToken = accountContext.state('')
-const showMilestoneForm = accountContext.state(false)
-const milestoneDraft = accountContext.state(blankMilestone)
-const editingMilestone = accountContext.state(false)
-const showDeliveryCheckForm = accountContext.state(false)
-const deliveryCheckDraft = accountContext.state(blankDeliveryCheck)
 const scheduleTimezone = accountContext.state('')
 const projectSaveBusy = accountContext.state(false)
 // 表单自己的错误位。原先这里绑的是 pageError——那**只**记录列表/详情加载失败，而表单校验
@@ -106,10 +98,8 @@ const projectSaveBusy = accountContext.state(false)
 const projectFormError = accountContext.state('')
 const deliveryEvidenceEdits = usePendingFieldEdits() // 「凭证与说明」绑在服务端对象上，每 120 秒自动刷新会整体替换 deliveryChecks，未保存的输入会被静默清空；换项目时清空（id 属旧项目）
 const taskSaveBusy = accountContext.state(false)
-const adjustmentSaveBusy = accountContext.state(false)
 const deliverableSaveBusy = accountContext.state(false)
 const reviewSaveBusy = accountContext.state(false)
-const planningSaveBusy = accountContext.state(false)
 const statusFilter = ref('open')
 const projectSearch = ref('')
 const taskSearch = ref('')
@@ -123,11 +113,8 @@ let selectionVisit = 0
 const editorScopes = {
   project: createProjectEditorScope(projectContext, showProjectForm, projectSaveBusy),
   task: createProjectEditorScope(projectContext, showTaskForm, taskSaveBusy),
-  adjustment: createProjectEditorScope(projectContext, showAdjustmentForm, adjustmentSaveBusy),
   deliverable: createProjectEditorScope(projectContext, showDeliverableForm, deliverableSaveBusy),
   review: createProjectEditorScope(projectContext, reviewTarget, reviewSaveBusy),
-  milestone: createProjectEditorScope(projectContext, showMilestoneForm, planningSaveBusy),
-  check: createProjectEditorScope(projectContext, showDeliveryCheckForm, planningSaveBusy),
 }
 
 function currentProjectRequest(channel) {
@@ -140,6 +127,13 @@ const requestScope = createProjectRequestScope(requestProject, {
   captureProject: () => projectContext.capture(), captureAccount: () => accountContext.capture(), readProjectId: () => selectedProjectId.value,
 })
 const projectRequest = requestScope.request
+// 作用域化动作：忙态门闩、身份守卫、失败通知、租约释放、成功重载收在一处（见 useScopedProjectAction）。
+const scopedAction = useScopedProjectAction({
+  context: projectContext, busy: actionBusy, notify, describeError: errorMessage,
+  reload: () => loadProject(project.value.id),
+})
+const reloadProjectWithInbox = async () => { await loadProject(project.value.id); await loadInbox() }
+const confirmCopy = computed(() => confirmDialogCopy(confirmAction.value))
 
 const isSignedIn = computed(() => Boolean(accountUser.value?.id))
 const isManager = computed(() => ['owner', 'admin'].includes(project.value?.role))
@@ -191,6 +185,24 @@ const { showMeetingForm, meetingDraft, meetingProposalTarget, scheduleAvailabili
   project, activeMembers, accountUser, isManager, scheduleTimezone, projectContext, actionBusy, projectRequest, loadProject, loadInbox, notify, describeError: errorMessage,
 })
 
+const { showInviteForm, selectedFriendId, friends, inviteLinks, linkToShare, friendsLoading, linkBusy,
+  loadFriends, loadInviteLinks, inviteFriend, createInviteLink, copyInviteLink, revokeInviteLink } = useProjectInvites({
+  accountContext, projectContext, scopedAction, project, members, projectRequest, currentProjectRequest,
+  notify, describeError: errorMessage,
+})
+
+const { showAdjustmentForm, adjustmentTask, adjustmentDraft, adjustmentSaveBusy, openAdjustment,
+  saveAdjustment, canRespondAdjustment, adjustmentTypeLabel, adjustmentDataSummary, decideAdjustment,
+  cancelAdjustment, canAddAdjustment } = useProjectAdjustments({
+  accountContext, projectContext, scopedAction, project, accountUser, isManager, activeMembers, adjustments,
+  projectRequest, reloadProject: reloadProjectWithInbox,
+})
+
+const { planningSaveBusy, showMilestoneForm, milestoneDraft, editingMilestone, showDeliveryCheckForm, deliveryCheckDraft,
+  milestoneTaskLabel, openMilestoneForm, saveMilestone, toggleMilestone, openDeliveryCheckForm, saveDeliveryCheckItem } = useProjectPlanning({
+  accountContext, projectContext, scopedAction, project, isManager, milestones, projectRequest,
+})
+
 function applyTaskSummaryFilter(filters) { resetTaskFilters(); statusFilter.value = filters.status; assigneeFilter.value = filters.assignee; activeSection.value = 'tasks' }
 
 function blankProject() {
@@ -201,10 +213,7 @@ function blankTask(parentTaskId = '') {
   return { id: '', parentTaskId, title: '', description: '', dueOn: '', priority: 'normal', assigneeId: '', milestoneId: '', dependsOnTaskId: '', revision: 0 }
 }
 
-function blankAdjustment() { return { type: 'deadline_extension', reason: '', dueOn: '', targetId: '', description: '', subtasks: '' } }
 function blankDeliverable() { return { id: '', taskId: '', title: '', instructions: '', reviewerId: '', required: true, reviewRequired: true } }
-function blankMilestone() { return { id: '', title: '', description: '', dueOn: '', revision: 0 } }
-function blankDeliveryCheck() { return { id: '', title: '', required: true } }
 
 function notify(kind, text) {
   if (!text) return
@@ -214,8 +223,9 @@ function notify(kind, text) {
 }
 
 function errorMessage(error, fallback = '操作没有完成，请稍后重试。') {
+  // project_context_changed 表示用户已经切走/换账号了，报错只会误导，这里保持静默。
   if (error?.code === 'project_context_changed') return ''
-  return error?.message || fallback
+  return sharedErrorMessage(error, fallback)
 }
 
 async function loadInbox() {
@@ -451,51 +461,38 @@ function askConfirm(action) { confirmAction.value = action }
 
 async function runConfirmedAction() {
   const action = confirmAction.value
-  if (!action || actionBusy.value) return
+  const entry = confirmCommand(action)
+  if (!entry) return
   const projectId = action.projectId || project.value?.id
-  const commands = {
-    archive: ['archive', { archived: true }, '项目已归档。'],
-    restore: ['archive', { archived: false }, '项目已恢复。'],
-    delete: ['delete', {}, '项目已移入回收站。你可以立即撤销。'],
-    leave: ['member_leave', {}, '你已退出项目。'],
-    remove: ['member_remove', { targetId: action.targetId }, '成员已移出项目。'],
-    'decline-invite': ['invite_respond', { decision: 'decline' }, '已拒绝项目邀请。'],
-    'delete-milestone': ['milestone_delete', { milestoneId: action.milestoneId }, '里程碑已删除，关联任务仍会保留。'],
-    'meeting-cancel': ['meeting_cancel', { meetingId: action.meetingId }, '讨论邀约已取消。'],
-    'meeting-confirm': ['meeting_confirm', { meetingId: action.meetingId }, '讨论已确认，并加入已接受成员的个人日程。'],
-    'meeting-apply-proposal': ['meeting_apply_proposal', { meetingId: action.meetingId, participantId: action.participantId }, '已采用建议时间，成员需要重新确认。'],
-    'delivery-check-delete': ['delivery_check_delete', { checkId: action.checkId }, '交付检查项已删除。'],
-  }
-  const [command, payload, message] = commands[action.kind] || []
-  if (!command) return
-  return projectContext.run(() => projectRequest(command, { projectId, ...payload }), {
-    busy: actionBusy, busyValue: action.kind,
+  return scopedAction.run({
+    busyValue: action.kind,
     current: action.kind === 'decline-invite' ? accountContext.capture() : currentProjectRequest(),
+    operation: () => projectRequest(entry.command, { projectId, ...entry.payload(action) }),
+    success: entry.message,
     commit: async () => {
       if (action.kind === 'archive' || action.kind === 'restore') showArchived.value = action.kind === 'archive'
       if (action.kind === 'leave') detachProjectTaskTodos(projectId, [], domain)
       if (action.kind === 'delete') lastDeletedProjectId.value = projectId
-      notify('success', message)
       confirmAction.value = null
       if (action.kind === 'delete') await loadProjects({ keepSelected: false })
       else await refresh()
     },
+    reload: false,
   })
 }
 
 async function acceptProjectInvite(projectId) {
-  if (actionBusy.value) return
-  const isCurrent = projectContext.capture()
   const isCurrentNavigation = currentNavigationRequest()
-  actionBusy.value = `invite:${projectId}`
-  try {
-    await projectRequest('invite_respond', { projectId, decision: 'accept' })
-    if (!isCurrent()) return
-    notify('success', '已加入项目。')
-    await loadProjects({ keepSelected: false })
-    if (isCurrentNavigation()) await selectProject(projectId, { automatic: true })
-  } catch (error) { if (!isCurrent()) return; notify('error', errorMessage(error)) }
-  finally { if (isCurrent()) actionBusy.value = '' }
+  return scopedAction.run({
+    busyValue: `invite:${projectId}`,
+    operation: () => projectRequest('invite_respond', { projectId, decision: 'accept' }),
+    success: '已加入项目。',
+    commit: async () => {
+      await loadProjects({ keepSelected: false })
+      if (isCurrentNavigation()) await selectProject(projectId, { automatic: true })
+    },
+    reload: false,
+  })
 }
 
 function openTaskCreate(parentTaskId = '') {
@@ -520,125 +517,26 @@ function openTaskEdit(task) {
 }
 
 async function saveTask() {
-  const isCurrent = editorScopes.task.capture()
   const validated = validateProjectTaskForm(taskDraft.value)
   if (!validated.ok) { taskFormError.value = validated.message; return }
   const { title } = validated.value
   taskFormError.value = ''
-  if (taskSaveBusy.value || !taskDraft.value.id) return
-  taskSaveBusy.value = true
-  try {
-    if (editingTask.value) {
-      await projectRequest('task_update', {
+  return scopedAction.run({
+    busy: taskSaveBusy, current: editorScopes.task.capture(),
+    check: () => Boolean(taskDraft.value.id),
+    operation: () => (editingTask.value
+      ? projectRequest('task_update', {
         projectId: project.value.id, taskId: taskDraft.value.id, expectedRevision: taskDraft.value.revision,
         title, description: taskDraft.value.description.trim(), dueOn: taskDraft.value.dueOn,
         priority: taskDraft.value.priority, assigneeId: taskDraft.value.assigneeId, milestoneId: taskDraft.value.milestoneId,
         dependsOnTaskId: taskDraft.value.dependsOnTaskId,
       })
-    } else {
-      await projectRequest('task_create', { ...taskDraft.value, projectId: project.value.id, title, description: taskDraft.value.description.trim() })
-    }
-    if (!isCurrent()) return
-    showTaskForm.value = false
-    notify('success', editingTask.value ? '任务已更新。' : '任务已添加。')
-    editingTask.value = false
-    await loadProject(project.value.id)
-    await loadInbox()
-  } catch (error) { if (!isCurrent()) return; taskFormError.value = errorMessage(error); notify('error', taskFormError.value) }
-  finally { if (isCurrent()) taskSaveBusy.value = false }
-}
-
-function canRequestAdjustment(task) {
-  if (!task || project.value?.status !== 'active') return false
-  if (task.assigneeId === accountUser.value?.id && task.assignmentStatus === 'accepted') return true
-  return isManager.value && Boolean(task.assigneeId) && task.assigneeId !== accountUser.value?.id
-}
-
-function openAdjustment(task) {
-  if (!canRequestAdjustment(task)) return
-  adjustmentTask.value = task
-  adjustmentDraft.value = { ...blankAdjustment(), dueOn: task.dueOn || '' }
-  showAdjustmentForm.value = true
-}
-
-function adjustmentRequestData() {
-  const draft = adjustmentDraft.value
-  if (draft.type === 'deadline_extension') return { dueOn: draft.dueOn }
-  if (draft.type === 'help' || draft.type === 'handover') return { targetId: draft.targetId }
-  if (draft.type === 'scope_change') return { description: draft.description }
-  if (draft.type === 'split') return { subtasks: draft.subtasks.split(/\r?\n/).map((item) => item.trim()).filter(Boolean) }
-  return {}
-}
-
-async function saveAdjustment() {
-  const isCurrent = editorScopes.adjustment.capture()
-  if (adjustmentSaveBusy.value || !adjustmentTask.value) return
-  const id = newProjectId()
-  const data = adjustmentRequestData()
-  if (!id) { notify('error', '当前环境无法生成安全申请编号。'); return }
-  if (!adjustmentDraft.value.reason.trim()) { notify('error', '请写明申请原因。'); return }
-  if (adjustmentDraft.value.type === 'split' && (!data.subtasks.length || data.subtasks.length > 8)) { notify('error', '任务拆分需要填写 1 到 8 个子任务，每行一项。'); return }
-  if (['help', 'handover'].includes(adjustmentDraft.value.type) && !adjustmentDraft.value.targetId) { notify('error', '请选择一位项目成员。'); return }
-  adjustmentSaveBusy.value = true
-  try {
-    await projectRequest('adjustment_create', {
-      id, projectId: project.value.id, taskId: adjustmentTask.value.id,
-      type: adjustmentDraft.value.type, reason: adjustmentDraft.value.reason.trim(), data,
-    })
-    if (!isCurrent()) return
-    showAdjustmentForm.value = false
-    notify('success', '调整申请已提交，原任务约定暂时保持不变。')
-    await loadProject(project.value.id)
-    await loadInbox()
-  } catch (error) { if (!isCurrent()) return; notify('error', errorMessage(error)) }
-  finally { if (isCurrent()) adjustmentSaveBusy.value = false }
-}
-
-function canRespondAdjustment(request) {
-  if (request?.status !== 'pending' || request.requesterId === accountUser.value?.id) return false
-  return request.approverId ? request.approverId === accountUser.value?.id : isManager.value
-}
-
-function adjustmentTypeLabel(type) {
-  return ({ deadline_extension: '延期', help: '寻求帮助', scope_change: '调整范围', split: '拆分任务', handover: '任务交接', unable_to_continue: '无法继续承担' })[type] || '任务调整'
-}
-
-function adjustmentDataSummary(request) {
-  const data = request.data || {}
-  if (request.type === 'deadline_extension') return `申请截止日期：${formatDate(data.dueOn)}`
-  if (request.type === 'scope_change') return `拟调整说明：${data.description || '未填写'}`
-  if (request.type === 'split') return `拆分为：${(data.subtasks || []).join('、')}`
-  if (['help', 'handover'].includes(request.type)) {
-    const target = activeMembers.value.find((member) => member.userId === data.targetId)
-    return `${request.type === 'help' ? '请求协助：' : '拟交接给：'}${target?.nickname || '项目成员'}`
-  }
-  return '申请释放当前分工。'
-}
-
-async function decideAdjustment(request, decision) {
-  if (actionBusy.value) return
-  const isCurrent = projectContext.capture()
-  actionBusy.value = `adjustment:${request.id}`
-  try {
-    await projectRequest('adjustment_decide', { projectId: project.value.id, requestId: request.id, decision, decisionNote: '' })
-    notify('success', decision === 'approve' ? '申请已通过，任务调整已生效。' : '申请已退回，原任务约定保持不变。')
-    await loadProject(project.value.id)
-    await loadInbox()
-  } catch (error) { if (!isCurrent()) return; notify('error', errorMessage(error)) }
-  finally { if (isCurrent()) actionBusy.value = '' }
-}
-
-async function cancelAdjustment(request) {
-  if (actionBusy.value) return
-  const isCurrent = projectContext.capture()
-  actionBusy.value = `adjustment:${request.id}`
-  try {
-    await projectRequest('adjustment_cancel', { projectId: project.value.id, requestId: request.id })
-    notify('success', '申请已撤回。')
-    await loadProject(project.value.id)
-    await loadInbox()
-  } catch (error) { if (!isCurrent()) return; notify('error', errorMessage(error)) }
-  finally { if (isCurrent()) actionBusy.value = '' }
+      : projectRequest('task_create', { ...taskDraft.value, projectId: project.value.id, title, description: taskDraft.value.description.trim() })),
+    commit: () => { showTaskForm.value = false; editingTask.value = false },
+    success: () => (editingTask.value ? '任务已更新。' : '任务已添加。'),
+    reload: reloadProjectWithInbox,
+    onError: (error) => { taskFormError.value = errorMessage(error); notify('error', taskFormError.value) },
+  })
 }
 
 function openDeliverableCreate() {
@@ -649,19 +547,17 @@ function openDeliverableCreate() {
 }
 
 async function saveDeliverable() {
-  const isCurrent = editorScopes.deliverable.capture()
   const draft = deliverableDraft.value
-  if (!draft.title.trim()) { notify('error', '请填写交付项名称。'); return }
-  if (deliverableSaveBusy.value || !draft.id) return
-  deliverableSaveBusy.value = true
-  try {
-    await projectRequest('deliverable_create', { ...draft, projectId: project.value.id, title: draft.title.trim(), instructions: draft.instructions.trim() })
-    if (!isCurrent()) return
-    showDeliverableForm.value = false
-    notify('success', '交付项已添加。')
-    await loadProject(project.value.id)
-  } catch (error) { if (!isCurrent()) return; notify('error', errorMessage(error)) }
-  finally { if (isCurrent()) deliverableSaveBusy.value = false }
+  return scopedAction.run({
+    busy: deliverableSaveBusy, current: editorScopes.deliverable.capture(),
+    check: () => {
+      if (!draft.title.trim()) return '请填写交付项名称。'
+      return Boolean(draft.id)
+    },
+    operation: () => projectRequest('deliverable_create', { ...draft, projectId: project.value.id, title: draft.title.trim(), instructions: draft.instructions.trim() }),
+    commit: () => { showDeliverableForm.value = false },
+    success: '交付项已添加。',
+  })
 }
 
 function openReview(item, version) {
@@ -684,16 +580,6 @@ function canEditDeliverable(item) {
   return isManager.value || (task?.assigneeId === accountUser.value?.id && task.assignmentStatus === 'accepted')
 }
 
-function deliverableStatus(item) {
-  const latest = item.versions?.[0]
-  if (!latest) return item.required ? '等待提交' : '选填'
-  return ({ pending: `V${latest.number} 等待验收`, approved: `V${latest.number} 已通过`, returned: `V${latest.number} 需修改`, not_required: `V${latest.number} 已提交` })[latest.reviewStatus] || `V${latest.number}`
-}
-
-function adjustmentStatus(status) {
-  return ({ pending: '处理中', approved: '已通过', rejected: '已拒绝', cancelled: '已撤回', stale: '任务已变化' })[status] || '已更新'
-}
-
 async function openProjectSection(item, section, taskId = '') {
   await selectProject(item.projectId)
   if (selectedProjectId.value !== item.projectId || project.value?.id !== item.projectId) return
@@ -704,106 +590,39 @@ function openInboxAdjustment(item) { void openProjectSection(item, 'adjustments'
 
 function openInboxReview(item) { void openProjectSection(item, 'deliverables') }
 
-function canAddAdjustment(task) {
-  return canRequestAdjustment(task) && !adjustments.value.some((request) => request.taskId === task.id && request.requesterId === accountUser.value?.id && request.status === 'pending')
-}
-
 function addReviewChecklistItem() {
   if (reviewChecklist.value.length < 20) reviewChecklist.value.push({ item: '', passed: false })
 }
 
-function milestoneTaskLabel(id) { return milestones.value.find((item) => item.id === id)?.title || '' }
-
-function openMilestoneForm(item = null) {
-  if (!isManager.value || project.value?.status !== 'active') return
-  editingMilestone.value = Boolean(item)
-  milestoneDraft.value = item ? { id: item.id, title: item.title, description: item.description || '', dueOn: item.dueOn || '', revision: item.revision } : { ...blankMilestone(), id: newProjectId() }
-  showMilestoneForm.value = true
-}
-
-async function saveMilestone() {
-  const isCurrent = editorScopes.milestone.capture()
-  const draft = milestoneDraft.value
-  if (!draft.title.trim() || planningSaveBusy.value) return
-  planningSaveBusy.value = true
-  try {
-    if (editingMilestone.value) await projectRequest('milestone_update', { projectId: project.value.id, milestoneId: draft.id, expectedRevision: draft.revision, title: draft.title.trim(), description: draft.description.trim(), dueOn: draft.dueOn })
-    else await projectRequest('milestone_create', { ...draft, projectId: project.value.id, title: draft.title.trim(), description: draft.description.trim() })
-    if (!isCurrent()) return
-    showMilestoneForm.value = false
-    notify('success', editingMilestone.value ? '里程碑已更新。' : '里程碑已添加。')
-    await loadProject(project.value.id)
-  } catch (error) { if (!isCurrent()) return; notify('error', errorMessage(error)) }
-  finally { if (isCurrent()) planningSaveBusy.value = false }
-}
-
-async function toggleMilestone(item, completed) {
-  if (actionBusy.value) return
-  const isCurrent = projectContext.capture()
-  actionBusy.value = `milestone:${item.id}`
-  try {
-    await projectRequest('milestone_toggle', { projectId: project.value.id, milestoneId: item.id, completed })
-    await loadProject(project.value.id)
-  } catch (error) { if (!isCurrent()) return; notify('error', errorMessage(error)) }
-  finally { if (isCurrent()) actionBusy.value = '' }
-}
-
-function openDeliveryCheckForm() {
-  if (!isManager.value || project.value?.status !== 'active') return
-  deliveryCheckDraft.value = { ...blankDeliveryCheck(), id: newProjectId() }
-  showDeliveryCheckForm.value = true
-}
-
-async function saveDeliveryCheckItem() {
-  const isCurrent = editorScopes.check.capture()
-  const draft = deliveryCheckDraft.value
-  if (!draft.title.trim() || planningSaveBusy.value) return
-  planningSaveBusy.value = true
-  try {
-    await projectRequest('delivery_check_create', { ...draft, projectId: project.value.id, title: draft.title.trim() })
-    if (!isCurrent()) return
-    showDeliveryCheckForm.value = false
-    notify('success', '交付检查项已添加。')
-    await loadProject(project.value.id)
-  } catch (error) { if (!isCurrent()) return; notify('error', errorMessage(error)) }
-  finally { if (isCurrent()) planningSaveBusy.value = false }
-}
-
 async function saveDeliveryCheck(item, checked = item.checked) {
-  const isCurrent = projectContext.capture()
-  if (actionBusy.value) return
   const evidence = item.evidence || ''
-  actionBusy.value = `delivery-check:${item.id}`
-  try {
-    await projectRequest('delivery_check_update', { projectId: project.value.id, checkId: item.id, expectedRevision: item.revision, checked, evidence })
-    if (!isCurrent()) return
-    if (deliveryEvidenceEdits.pending.value.get(item.id) === evidence) deliveryEvidenceEdits.clear(item.id)
-    notify('success', checked ? '交付检查已记录。' : '交付检查已重新打开。')
-    await loadProject(project.value.id)
-  } catch (error) { if (!isCurrent()) return; notify('error', errorMessage(error)) }
-  finally { if (isCurrent()) actionBusy.value = '' }
+  return scopedAction.run({
+    busyValue: `delivery-check:${item.id}`,
+    operation: () => projectRequest('delivery_check_update', { projectId: project.value.id, checkId: item.id, expectedRevision: item.revision, checked, evidence }),
+    commit: () => { if (deliveryEvidenceEdits.pending.value.get(item.id) === evidence) deliveryEvidenceEdits.clear(item.id) },
+    success: checked ? '交付检查已记录。' : '交付检查已重新打开。',
+  })
 }
 
 function openInboxMeeting(item) { void openProjectSection(item, 'schedule') }
 
 async function decideReview(result) {
-  const isCurrent = editorScopes.review.capture()
-  if (!reviewTarget.value || reviewSaveBusy.value) return
-  if (!reviewFeedback.value.trim()) { notify('error', '请填写具体验收意见。'); return }
-  if (result === 'approved' && reviewChecklist.value.some((item) => !item.passed)) { notify('error', '请先通过所有检查项，或将成果退回修改。'); return }
-  reviewSaveBusy.value = true
-  try {
-    await projectRequest('deliverable_review', {
+  return scopedAction.run({
+    busy: reviewSaveBusy, current: editorScopes.review.capture(),
+    check: () => {
+      if (!reviewTarget.value) return false
+      if (!reviewFeedback.value.trim()) return '请填写具体验收意见。'
+      if (result === 'approved' && reviewChecklist.value.some((item) => !item.passed)) return '请先通过所有检查项，或将成果退回修改。'
+      return true
+    },
+    operation: () => projectRequest('deliverable_review', {
       projectId: project.value.id, deliverableId: reviewTarget.value.deliverableId,
       versionId: reviewTarget.value.versionId, result, feedback: reviewFeedback.value.trim(), checklist: reviewChecklist.value,
-    })
-    if (!isCurrent()) return
-    reviewTarget.value = null
-    notify('success', result === 'approved' ? '成果已通过验收。' : '成果已退回修改。')
-    await loadProject(project.value.id)
-    await loadInbox()
-  } catch (error) { if (!isCurrent()) return; notify('error', errorMessage(error)) }
-  finally { if (isCurrent()) reviewSaveBusy.value = false }
+    }),
+    commit: () => { reviewTarget.value = null },
+    success: result === 'approved' ? '成果已通过验收。' : '成果已退回修改。',
+    reload: reloadProjectWithInbox,
+  })
 }
 
 async function openDeliverableFile(file) {
@@ -843,84 +662,6 @@ async function changeTaskStatus(task, status) {
   })
 }
 
-async function loadFriends() {
-  return projectContext.run(async (isCurrent) => {
-    const result = await socialRequest('friends_list')
-    if (!isCurrent()) return
-    friends.value = (result.friends || []).filter((item) => item.profile?.userId && !members.value.some((member) => member.userId === item.profile.userId && member.status !== 'left'))
-  }, { busy: friendsLoading, current: currentProjectRequest('friends') })
-}
-
-async function inviteFriend() {
-  if (actionBusy.value) return
-  const isCurrent = projectContext.capture()
-  if (!selectedFriendId.value) { notify('error', '请选择一位好友。'); return }
-  actionBusy.value = 'invite-friend'
-  try {
-    await projectRequest('invite_member', { projectId: project.value.id, targetId: selectedFriendId.value })
-    notify('success', '邀请已发送，对方可在齐行中接受或拒绝。')
-    selectedFriendId.value = ''
-    await loadProject(project.value.id)
-  } catch (error) { if (!isCurrent()) return; notify('error', errorMessage(error)) }
-  finally { if (isCurrent()) actionBusy.value = '' }
-}
-
-async function loadInviteLinks() {
-  const isCurrent = currentProjectRequest()
-  try {
-    const result = await projectRequest('invites', { projectId: project.value.id })
-    if (!isCurrent()) return
-    inviteLinks.value = result.links || []
-  } catch (error) { if (isCurrent()) notify('error', errorMessage(error)) }
-}
-
-function makeInviteToken() {
-  const bytes = new Uint8Array(32)
-  globalThis.crypto?.getRandomValues?.(bytes)
-  if (!globalThis.crypto?.getRandomValues) return ''
-  return [...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('')
-}
-
-function inviteUrl(token) {
-  const base = window.location.href.split('#')[0]
-  return `${base}#/projects?join=${encodeURIComponent(token)}`
-}
-
-async function createInviteLink() {
-  const isCurrent = projectContext.capture()
-  if (linkBusy.value) return
-  const token = makeInviteToken()
-  const id = newProjectId()
-  if (!token || !id) { notify('error', '当前环境无法生成安全邀请链接。'); return }
-  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
-  linkBusy.value = true
-  try {
-    await projectRequest('invite_link_create', { id, projectId: project.value.id, token, expiresAt, maxUses: 5 })
-    linkToShare.value = inviteUrl(token)
-    await loadInviteLinks()
-    try { await navigator.clipboard.writeText(linkToShare.value); notify('success', '邀请链接已创建并复制，可加入 5 人，7 天后过期。') }
-    catch { notify('success', '邀请链接已创建，请复制下方链接分享。') }
-  } catch (error) { if (!isCurrent()) return; notify('error', errorMessage(error)) }
-  finally { if (isCurrent()) linkBusy.value = false }
-}
-
-async function copyInviteLink(url) {
-  try { await navigator.clipboard.writeText(url); notify('success', '邀请链接已复制。') }
-  catch { notify('error', '无法访问剪贴板，请长按链接手动复制。') }
-}
-
-async function revokeInviteLink(linkId) {
-  if (actionBusy.value) return
-  const isCurrent = projectContext.capture()
-  actionBusy.value = `link:${linkId}`
-  try {
-    await projectRequest('invite_link_revoke', { projectId: project.value.id, linkId })
-    notify('success', '邀请链接已停用。')
-    await loadInviteLinks()
-  } catch (error) { if (!isCurrent()) return; notify('error', errorMessage(error)) }
-  finally { if (isCurrent()) actionBusy.value = '' }
-}
-
 async function loadTaskEvents(task) {
   const isCurrent = currentProjectRequest('task-events')
   taskEventsTitle.value = task.title
@@ -932,29 +673,25 @@ async function loadTaskEvents(task) {
 }
 
 async function transferOwner() {
-  const isCurrent = projectContext.capture()
-  if (!transferTargetId.value || actionBusy.value) return
-  actionBusy.value = 'transfer-owner'
-  try {
-    await projectRequest('owner_transfer', { projectId: project.value.id, targetId: transferTargetId.value })
-    transferTargetId.value = ''
-    notify('success', '项目负责人已转交。')
-    await refresh()
-  } catch (error) { if (!isCurrent()) return; notify('error', errorMessage(error)) }
-  finally { if (isCurrent()) actionBusy.value = '' }
+  return scopedAction.run({
+    busyValue: 'transfer-owner',
+    check: () => Boolean(transferTargetId.value),
+    operation: () => projectRequest('owner_transfer', { projectId: project.value.id, targetId: transferTargetId.value }),
+    commit: () => { transferTargetId.value = '' },
+    success: '项目负责人已转交。',
+    reload: () => refresh(),
+  })
 }
 
 async function changeMemberRole(member) {
-  const isCurrent = projectContext.capture()
-  if (!isOwner.value || project.value?.status !== 'active' || actionBusy.value || !member?.userId || member.role === 'owner') return
+  if (!member?.userId) return
   const role = member.role === 'admin' ? 'member' : 'admin'
-  actionBusy.value = `role:${member.userId}`
-  try {
-    await projectRequest('member_role_update', { projectId: project.value.id, targetId: member.userId, role })
-    notify('success', role === 'admin' ? '已设为管理员。' : '已调整为普通成员。')
-    await loadProject(project.value.id)
-  } catch (error) { if (!isCurrent()) return; notify('error', errorMessage(error)) }
-  finally { if (isCurrent()) actionBusy.value = '' }
+  return scopedAction.run({
+    busyValue: `role:${member.userId}`,
+    check: () => isOwner.value && project.value?.status === 'active' && member.role !== 'owner',
+    operation: () => projectRequest('member_role_update', { projectId: project.value.id, targetId: member.userId, role }),
+    success: role === 'admin' ? '已设为管理员。' : '已调整为普通成员。',
+  })
 }
 
 async function processJoinLink() {
@@ -981,55 +718,27 @@ async function processJoinLink() {
 }
 
 async function undoDeleteProject() {
-  const isCurrent = projectContext.capture()
   const isCurrentNavigation = currentNavigationRequest()
-  if (!lastDeletedProjectId.value || actionBusy.value) return
   const id = lastDeletedProjectId.value
-  actionBusy.value = 'restore-deleted'
-  try {
-    await projectRequest('restore', { projectId: id })
-    if (!isCurrent()) return
-    lastDeletedProjectId.value = ''
-    notify('success', '项目已恢复。')
-    await loadProjects({ keepSelected: false })
-    if (isCurrentNavigation()) await selectProject(id, { automatic: true })
-  } catch (error) { if (!isCurrent()) return; notify('error', errorMessage(error)) }
-  finally { if (isCurrent()) actionBusy.value = '' }
+  return scopedAction.run({
+    busyValue: 'restore-deleted',
+    check: () => Boolean(id),
+    operation: () => projectRequest('restore', { projectId: id }),
+    success: '项目已恢复。',
+    commit: async () => {
+      lastDeletedProjectId.value = ''
+      await loadProjects({ keepSelected: false })
+      if (isCurrentNavigation()) await selectProject(id, { automatic: true })
+    },
+    reload: false,
+  })
 }
 
-function formatDate(value) {
-  if (!value) return ''
-  const [, month, day] = String(value).slice(0, 10).split('-')
-  return `${Number(month)} 月 ${Number(day)} 日`
-}
-function nextDay(value) {
-  const day = value ? new Date(`${value}T00:00:00`) : new Date()
-  day.setDate(day.getDate() + 1)
-  return `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, '0')}-${String(day.getDate()).padStart(2, '0')}`
-}
-
-function roleLabel(role) { return ({ owner: '负责人', admin: '管理员', member: '成员' })[role] || '成员' }
 function taskAssignmentLabel(task) {
   if (!task.assigneeId) return '未分配'
   if (task.assignmentStatus === 'pending') return task.assigneeId === accountUser.value?.id ? '等待你确认' : '等待接受'
   if (task.assignmentStatus === 'declined') return '已拒绝，待重新分配'
   return `负责人：${task.assigneeName || members.value.find((item) => item.userId === task.assigneeId)?.nickname || '成员'}`
-}
-function activityLabel(item) {
-  const labels = {
-    project_created: '创建了项目', project_updated: '更新了项目资料', project_archived: '归档了项目',
-    project_restored: '恢复了项目', project_deleted: '删除了项目', member_invited: '邀请了新成员',
-    invite_link_created: '创建了邀请链接', member_joined: '加入了项目', member_declined: '拒绝了邀请',
-    member_left: '退出了项目', member_removed: '移出了成员', owner_transferred: '转交了负责人',
-    member_role_changed: '调整了成员权限',
-    task_created: '创建了任务', task_assigned: '分配了任务',
-    adjustment_requested: '发起了任务调整申请', adjustment_decided: '处理了任务调整申请',
-    deliverable_created: '添加了交付项', result_submitted: '提交了成果版本', review_completed: '完成了成果验收',
-    milestone_created: '添加了项目里程碑', milestone_updated: '更新了项目里程碑',
-    delivery_check_created: '添加了交付检查项', delivery_check_updated: '更新了交付检查项',
-    meeting_created: '发起了小组讨论', meeting_status_changed: '更新了小组讨论安排',
-  }
-  return labels[item.type] || '更新了项目'
 }
 
 watch(() => accountUser.value?.id, (id) => {
@@ -1526,7 +1235,7 @@ onBeforeUnmount(() => {
       <template #foot><div class="projects-form-actions"><button class="btn btn-ghost" type="button" @click="transferTargetId = ''">取消</button><ActionButton tone="primary" class="btn btn-primary" type="button" :disabled="actionBusy === 'transfer-owner'" kind="important" feedback="external" :show-error="false" :action="() => transferOwner()">确认转交</ActionButton></div></template>
     </Modal>
 
-    <ConfirmDialog v-if="confirmAction" :open="Boolean(confirmAction)" :title="({ archive: '归档项目', delete: '删除项目', leave: '退出项目', remove: '移出成员', restore: '恢复项目', 'decline-invite': '拒绝项目邀请', 'delete-milestone': '删除里程碑', 'meeting-confirm': '确认小组讨论', 'meeting-cancel': '取消讨论邀约', 'meeting-apply-proposal': '采用改期建议', 'delivery-check-delete': '删除交付检查项' })[confirmAction.kind] || '确认操作'" :message="({ archive: '归档后，成员可以查看历史内容，但不能新增成员或任务。', delete: '项目会移入回收站，成员暂时不能进入；可以通过负责人恢复项目。', leave: '退出后，你的个人待办会保留为个人记录，项目负责人可以重新分配未完成任务。', remove: `确定将${confirmAction.targetName || '该成员'}移出项目吗？未完成的分工会释放。`, restore: '恢复后，项目成员可以继续协作。', 'decline-invite': '拒绝后，项目邀请会从待处理列表移除。', 'delete-milestone': '删除后，关联任务仍会保留，只解除与此阶段的关联。', 'meeting-confirm': '所有受邀成员已接受。确认后会将讨论加入已接受成员的个人日程。', 'meeting-cancel': '取消后，成员的个人日程会标记为已取消。', 'meeting-apply-proposal': '采用后将新的时间发给全体受邀成员重新确认。', 'delivery-check-delete': '删除后，交付清单会移除此检查项。' })[confirmAction.kind] || ''" :confirm-label="confirmAction.kind === 'delete' || confirmAction.kind === 'remove' || confirmAction.kind === 'delivery-check-delete' || confirmAction.kind === 'delete-milestone' ? '确认删除' : '确认'" :tone="confirmAction.kind === 'delete' || confirmAction.kind === 'remove' || confirmAction.kind === 'leave' || confirmAction.kind === 'delivery-check-delete' || confirmAction.kind === 'meeting-cancel' || confirmAction.kind === 'delete-milestone' ? 'danger' : 'primary'" @close="confirmAction = null" @confirm="runConfirmedAction" />
+    <ConfirmDialog v-if="confirmAction" :open="Boolean(confirmAction)" :title="confirmCopy.title" :message="confirmCopy.message" :confirm-label="confirmCopy.confirmLabel" :tone="confirmCopy.tone" @close="confirmAction = null" @confirm="runConfirmedAction" />
   </div>
 </template>
 

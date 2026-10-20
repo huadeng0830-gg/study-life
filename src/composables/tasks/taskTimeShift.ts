@@ -1,6 +1,7 @@
 import type { TaskStageBoundary } from '../../types/domain'
 import { policyDateKey, policyDateTime, policyTimeKey } from '../settingsPolicy.js'
 import { boundaryText, moveTimeDate, stageLabel, stageTimeState, taskRepeatBase, taskStages, taskTimePlanError, timeClockExists, validTimeClock, validTimeDate, type TaskTiming } from './taskTimePlan'
+import { deepClone } from '../../utils/clone.js'
 
 export interface TaskShiftDuration {
   direction: 'later' | 'earlier'
@@ -13,7 +14,7 @@ export interface MissingShiftTime { key: string; label: string; date: string }
 
 /** 天按日历移动，小时/分钟按经过的时长移动；日期精度从不自动补成午夜。 */
 export function previewTaskTimeShift(task: TaskTiming, duration: TaskShiftDuration, { dateOnlyTimes = {} as Record<string, string>, nowMs = Date.now(), includeDeadline = true } = {}) {
-  const plan: Required<Pick<TaskTiming, 'dueDate' | 'dueTime' | 'timeStages'>> = JSON.parse(JSON.stringify({ dueDate: task.dueDate || '', dueTime: task.dueTime || '', timeStages: taskStages(task) }))
+  const plan: Required<Pick<TaskTiming, 'dueDate' | 'dueTime' | 'timeStages'>> = deepClone({ dueDate: task.dueDate || '', dueTime: task.dueTime || '', timeStages: taskStages(task) })
   const changes: ShiftChange[] = []
   const missingTimes: MissingShiftTime[] = []
   const dateOnlyBoundaries: MissingShiftTime[] = []
@@ -88,7 +89,7 @@ export function shiftDurationText(duration: TaskShiftDuration): string {
 
 /** 撤销仅还原本次改过且之后未再修改的端点，保留新增阶段、名称、提醒和完成事实。 */
 export function undoTaskTimeShift(current: TaskTiming, before: TaskTiming, after: TaskTiming): TaskTiming {
-  const plan: TaskTiming = JSON.parse(JSON.stringify({ dueDate: current.dueDate || '', dueTime: current.dueTime || '', timeStages: taskStages(current) }))
+  const plan: TaskTiming = deepClone({ dueDate: current.dueDate || '', dueTime: current.dueTime || '', timeStages: taskStages(current) })
   if (current.dueDate === after.dueDate && (current.dueTime || '') === (after.dueTime || '')) {
     plan.dueDate = before.dueDate || ''
     plan.dueTime = before.dueTime || ''

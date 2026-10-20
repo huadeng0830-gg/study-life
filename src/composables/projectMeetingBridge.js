@@ -1,4 +1,5 @@
 import { dateInZone, zonedParts } from './zonedTime.js'
+import { hmText } from '../utils/formatters.js'
 
 function localDateTimeParts(value, timezone = 'Asia/Shanghai') {
   const date = new Date(value)
@@ -7,7 +8,7 @@ function localDateTimeParts(value, timezone = 'Asia/Shanghai') {
   const parts = zonedParts(timestamp, timezone)
   return {
     date: dateInZone(timestamp, timezone),
-    time: `${String(parts.hour).padStart(2, '0')}:${String(parts.minute).padStart(2, '0')}`,
+    time: hmText(parts.hour, parts.minute),
   }
 }
 

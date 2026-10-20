@@ -1,5 +1,7 @@
 <script setup>
 import PageHeader from '../components/PageHeader.vue'
+import { usePageToast } from '../composables/usePageToast.js'
+import { deepClone } from '../utils/clone.js'
 import { computed, onBeforeUnmount, ref, useId, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { Button } from '../components/ui/button'
@@ -33,6 +35,10 @@ import { taskFocusLocation } from '../composables/learningFocus.js'
 import { classifyTasks } from '../composables/smartClassify.js'
 import { useDomainCommands } from '../composables/domain/commands.js'
 import { createNoticeRecord, removeNoticeRecord } from '../composables/noticeArchive.js'
+import { useNoticePasteGate } from '../composables/noticeHandoff.js'
+import {
+  archiveImportedNotices, createEventsFromNoticeItems, createNoticeImportFinisher, createTasksFromNoticeItems,
+} from '../composables/noticeImportResult.js'
 import { applyScheduleProposal } from '../composables/scheduleNoticeOperations.js'
 import { selectTaskView } from '../composables/domain/selectors.js'
 import { TASK_PLAN_STATE, isArchived, taskStatus } from '../composables/domain/state.js'
@@ -60,7 +66,8 @@ const courses = domain.courses
 const tasks = domain.tasks
 const route = useRoute()
 const router = useRouter()
-const showNotice = ref(false)
+// 通知理解面板的开关与一次性预填；「通知档案 → 按这条建待办」的交接接收也在这里。
+const { noticeOpen, noticePrefill, closeNotice } = useNoticePasteGate({ beforeOpen: closeTaskTools })
 const mobileLayout = useMediaQuery('(max-width: 900px), (pointer: coarse) and (max-height: 520px)')
 const mobileSelection = ref(false)
 const noticeMessage = ref('')
@@ -79,7 +86,7 @@ const rescheduleTarget = ref(null)
 /** 改期对话框的预置截止日期（`YYYY-MM-DD`）；空串表示沿用待办原本的日期。 */
 const rescheduleDate = ref('')
 /** @type {import('vue').Ref<{ open: boolean, message: string, type: string, actionLabel: string, undoFn?: () => unknown, viewFn?: () => unknown, duration: number }>} */
-const toast = ref({ open: false, message: '', type: 'info', actionLabel: '', duration: 3200 })
+const { toast, showToast } = usePageToast()
 const openSwipeItemId = ref('')
 /** @type {import('vue').Ref<HTMLDetailsElement | null>} */
 const taskTools = ref(null)
@@ -95,7 +102,8 @@ function dismissTaskTools(event) {
 }
 function openNotice() {
   closeTaskTools()
-  showNotice.value = true
+  noticePrefill.value = ''
+  noticeOpen.value = true
 }
 const {
   task: workSessionTask, draft: workSessionDraft, error: workSessionError, busy: workSessionBusy,
@@ -256,9 +264,9 @@ function saveReschedule(plan) {
   if (rescheduleTarget.value.sourceType === 'project-task') { openProjectTask(rescheduleTarget.value); rescheduleTarget.value = null; return }
   const target = tasks.value.find((task) => task.id === rescheduleTarget.value.id)
   if (!target) return
-  const before = JSON.parse(JSON.stringify({ dueDate: target.dueDate || '', dueTime: target.dueTime || '', timeStages: target.timeStages || [], repeat: target.repeat, repeatAnchorDay: target.repeatAnchorDay || null }))
+  const before = deepClone({ dueDate: target.dueDate || '', dueTime: target.dueTime || '', timeStages: target.timeStages || [], repeat: target.repeat, repeatAnchorDay: target.repeatAnchorDay || null })
   domain.updateTask(target.id, plan)
-  const after = JSON.parse(JSON.stringify({ dueDate: target.dueDate || '', dueTime: target.dueTime || '', timeStages: target.timeStages || [], repeat: target.repeat, repeatAnchorDay: target.repeatAnchorDay || null }))
+  const after = deepClone({ dueDate: target.dueDate || '', dueTime: target.dueTime || '', timeStages: target.timeStages || [], repeat: target.repeat, repeatAnchorDay: target.repeatAnchorDay || null })
   rescheduleTarget.value = null
   showToast('时间安排已更新', { type: 'success', actionLabel: '撤销', undoFn: () => {
     const current = tasks.value.find((task) => task.id === target.id)
@@ -351,16 +359,20 @@ function onNoticeCommit(payload) {
       ? `已更新“${payload.title}”；课程名称未唯一匹配，原课程关联已保留`
       : `已根据新通知更新“${payload.title}”`)
   } else if (payload.type === 'event') {
-    let firstCreated = null
-    payload.items.forEach((item) => { const created = domain.createEvent({ ...withCourse(item), courseName: item.course || '', createdFrom: 'clipboard', sourceType: 'notice' }); firstCreated ||= created })
-    saveNotice(firstData.__notice || payload.notice, 'event', firstCreated?.id || '')
-    showNoticeMessage(payload.items.length > 1 ? `已加入 ${payload.items.length} 项日程` : `已加入日程“${payload.items[0].title}”`)
+    const createdIds = createEventsFromNoticeItems(domain, payload.items, { withCourse })
+    const noticeIds = archiveImportedNotices(payload.items, firstData.__notice || payload.notice, 'event', createdIds)
+    finishNoticeImport({
+      createdIds, noticeIds, entityType: 'event',
+      message: payload.items.length > 1 ? `已加入 ${payload.items.length} 项日程` : `已加入日程“${payload.items[0].title}”`,
+    })
   } else {
     const items = payload.items?.length ? payload.items : [firstData]
-    let firstCreated = null
-    items.forEach((item) => { const { __notice: _notice, ...data } = item; const created = domain.createTask({ ...withCourse(data), kind: payload.kind || 'todo', createdFrom: 'clipboard', sourceType: 'notice' }); firstCreated ||= created })
-    saveNotice(firstData.__notice || payload.notice, 'task', firstCreated?.id || '')
-    showNoticeMessage(items.length > 1 ? `已创建 ${items.length} 项${payload.kind === 'homework' ? '作业' : '待办'}` : course || !firstData.course ? `已创建待办“${payload.title}”` : `已创建“${payload.title}”；课程名称未唯一匹配，请检查关联`)
+    const createdIds = createTasksFromNoticeItems(domain, items, { kind: payload.kind || 'todo', withCourse })
+    const noticeIds = archiveImportedNotices(items, firstData.__notice || payload.notice, 'task', createdIds)
+    finishNoticeImport({
+      createdIds, noticeIds, entityType: 'task',
+      message: items.length > 1 ? `已创建 ${items.length} 项${payload.kind === 'homework' ? '作业' : '待办'}` : course || !firstData.course ? `已创建待办“${payload.title}”` : `已创建“${payload.title}”；课程名称未唯一匹配，请检查关联`,
+    })
   }
 }
 
@@ -374,11 +386,9 @@ function showNoticeMessage(message) {
   }, 3500)
 }
 
-/** @param {string} message @param {{ type?: string, actionLabel?: string, undoFn?: () => unknown, viewFn?: () => unknown, duration?: number }} [options] */
-function showToast(message, { type = 'info', actionLabel = '', undoFn = undefined, viewFn = undefined, duration = 3200 } = {}) {
-  toast.value = { open: true, message, type, actionLabel, undoFn, viewFn, duration }
-}
+const finishNoticeImport = createNoticeImportFinisher({ domain, notify: showToast, reportFallback: showNoticeMessage, removeNotice: removeNoticeRecord })
 
+/** @param {string} message @param {{ type?: string, actionLabel?: string, undoFn?: () => unknown, viewFn?: () => unknown, duration?: number }} [options] */
 // `n` 新增、`/` 跳到搜索框。焦点在输入区、任何浮层开着、或按住 Ctrl/Meta/Alt 时都让路，
 // 三条让路条件的理由见 usePageShortcuts。
 usePageShortcuts({
@@ -886,6 +896,11 @@ function updateTaskCheckpointField(field, value) {
         @update:open="setOpenSwipeItem(task.id, $event)"
         @action="handleTaskSwipe($event, task)"
       >
+          <!--
+  整卡点击是**鼠标**上的便利快捷方式，刻意不加 role="button"：
+  卡内还有复选框、分阶段与滑动操作，加上去就是「可交互元素嵌套」，读屏会读成按钮里还有按钮。
+  键盘与读屏用户走标题那个真正的 <button>（.task-title-button），落点与整卡点击相同。
+-->
           <article
             class="card task"
             :class="{ done: taskStatus(task, appNow) === 'completed', archived: isArchived(task), selecting: selectable(task) && (mobileSelection || selectedVisibleTasks.length), 'focus-target-highlight': focusedTaskId === task.id }"
@@ -1033,10 +1048,11 @@ function updateTaskCheckpointField(field, value) {
       :status-label="workSessionStatusLabel" :start-label="workSessionStartLabel" :can-start="Boolean(workSessionTask)" :can-save="Boolean(workSessionTask)"
       :busy="workSessionBusy" :error="workSessionError" @close="closeTaskWorkSession" @start="startTaskWork" @save="saveTaskWorkProgress" @update:field="updateWorkSessionField" />
     <NoticePaste
-      :open="showNotice"
+      :open="noticeOpen"
       :tasks="tasks"
       :courses="courses"
-      @close="showNotice = false"
+      :initial-text="noticePrefill"
+      @close="closeNotice"
       @commit="onNoticeCommit"
     />
     <ConfirmDialog :open="Boolean(deleteTarget)" title="删除待办" :message="`确定删除待办“${deleteTarget?.title || ''}”吗？删除后可在短时间内撤销。`" confirm-label="删除" @close="deleteTarget = null" @confirm="confirmDelete" />

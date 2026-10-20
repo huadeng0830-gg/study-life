@@ -1,5 +1,7 @@
 <script setup>
 import PageHeader from '../components/PageHeader.vue'
+import VirtualList from '../components/VirtualList.vue'
+import PlaceFacts from '../components/places/PlaceFacts.vue'
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import CampusHome from '../components/CampusHome.vue'
@@ -12,6 +14,7 @@ import {
 import { useDomainCommands } from '../composables/domain/commands.js'
 import { flushStoredWrites } from '../composables/store/index.js'
 import { appToday } from '../composables/timeContext.js'
+import { moneyRow } from '../utils/formatters.js'
 import {
   acceptCampusPlaceInvite, cancelCampusPlaceInvite, completeCampusPlaceInvite, deleteCampusPlace,
   deleteCampusPlaceRating, listCampusPlaceInvites, listCampusPlaces, publishCampusPlace, rejectCampusPlaceInvite,
@@ -84,6 +87,8 @@ const filteredPlaces = computed(() => {
       .some((value) => String(value || '').toLocaleLowerCase('zh-CN').includes(needle))
   })
 })
+// VirtualList 的一项必须对应网格的一整行：先把地点两两分组，行高再由真实行元素测量。
+const discoverRows = computed(() => Array.from({ length: Math.ceil(filteredPlaces.value.length / 2) }, (_, index) => filteredPlaces.value.slice(index * 2, index * 2 + 2)))
 const archivedPlaces = computed(() => places.value.filter((place) => place.archivedAt))
 const eligibleTransactions = computed(() => domain.transactions.value
   .filter((item) => item.direction !== 'income' && !item.placeId && !item.archivedAt && !item.deletedAt && !item.tombstone)
@@ -92,10 +97,8 @@ const scoreFields = computed(() => PLACE_SCORE_FIELDS[placeForm.category] || [])
 const visitScoreFields = computed(() => PLACE_SCORE_FIELDS[visitTarget.value?.category] || [])
 const transactionNameById = computed(() => new Map(domain.transactions.value.map((item) => [String(item.id), item.name || '收支记录'])))
 const sharedPlaceById = computed(() => new Map(sharedPlaces.value.map((place) => [String(place.id), place])))
-const visibleOffers = computed(() => placeOffers.value.filter((offer) => offer.status === 'active'
-  && places.value.some((place) => place.id === offer.placeId && !place.archivedAt)))
-const scoredPlacesForInvite = computed(() => activePlaces.value.filter((place) => visitsForPlace(place.id).length
-  && (Object.keys(place.scores || {}).some((key) => key !== 'value') || place.scores?.value !== 'mixed')))
+const visibleOffers = computed(() => placeOffers.value.filter((offer) => offer.status === 'active' && places.value.some((place) => place.id === offer.placeId && !place.archivedAt)))
+const scoredPlacesForInvite = computed(() => activePlaces.value.filter((place) => visitsForPlace(place.id).length && (Object.keys(place.scores || {}).some((key) => key !== 'value') || place.scores?.value !== 'mixed')))
 const selectedInvitePlaces = computed(() => selectedInvitePlaceIds.value
   .map((id) => scoredPlacesForInvite.value.find((place) => String(place.id) === String(id))).filter(Boolean))
 
@@ -143,15 +146,10 @@ function ratingDistribution(place) {
   })
 }
 function placeTypeLabel(place) {
-  return PLACE_TYPES.find((item) => item.id === place?.type)?.label
-    || PLACE_CATEGORIES.find((item) => item.id === place?.category)?.label || '校园地点'
+  return PLACE_TYPES.find((item) => item.id === place?.type)?.label || PLACE_CATEGORIES.find((item) => item.id === place?.category)?.label || '校园地点'
 }
-function isPlaceSaved(placeId) {
-  return places.value.some((place) => String(place.id) === String(placeId) && !place.archivedAt)
-}
-function isPlaceArchived(placeId) {
-  return places.value.some((place) => String(place.id) === String(placeId) && place.archivedAt)
-}
+const isPlaceSaved = (placeId) => places.value.some((place) => String(place.id) === String(placeId) && !place.archivedAt)
+const isPlaceArchived = (placeId) => places.value.some((place) => String(place.id) === String(placeId) && place.archivedAt)
 function addSharedPlaceToWant(place) {
   if (!place?.id || isPlaceSaved(place.id)) return
   if (isPlaceArchived(place.id)) {
@@ -172,17 +170,15 @@ function addSharedPlaceToWant(place) {
     message.value = error?.message || '地点没有加入清单。'
   }
 }
-function updatedDate(value) {
+// 更新日期与到访日期都只取日期段，用同一个格式化入口，避免两处规则各自漂移。
+function dateLabel(value) {
   return String(value || '').slice(0, 10) || '日期未知'
 }
 function avgSpend(placeId) {
   const rows = visitsForPlace(placeId).filter((item) => Number.isFinite(item.price))
   if (!rows.length) return '暂无金额记录'
   const total = rows.reduce((sum, row) => sum + row.price, 0)
-  return `累计 ¥${total.toFixed(2)} · 到访均价 ¥${(total / rows.length).toFixed(2)}`
-}
-function visitDate(value) {
-  return String(value || '').slice(0, 10) || '日期未知'
+  return `累计 ${moneyRow(total)} · 到访均价 ${moneyRow(total / rows.length)}`
 }
 
 async function loadPlaceInvites() {
@@ -441,10 +437,6 @@ async function loadSharedPlaces({ forceRefresh = false } = {}) {
   }
 }
 
-function openSharedVisit(place) {
-  openVisit(place)
-}
-
 async function removePlace(place) {
   busyAction.value = `delete-${place.id}`
   try {
@@ -524,11 +516,11 @@ function redeemOffer(offer) {
     transaction = domain.createTransaction({
       name: `${place.name} · ${offer.title}`, amount: offer.price, date: appToday.value,
       direction: 'expense', placeId: place.id, source: 'place-offer',
-      note: `优惠核销${offer.originalPrice ? `，原价 ¥${offer.originalPrice.toFixed(2)}` : ''}${offer.note ? `；${offer.note}` : ''}`,
+      note: `优惠核销${offer.originalPrice ? `，原价 ${moneyRow(offer.originalPrice)}` : ''}${offer.note ? `；${offer.note}` : ''}`,
     })
     visit = addPlaceVisit(place.id, { visitedAt: appToday.value, price: offer.price, scores: place.scores, transactionId: transaction.id })
     if (!markPlaceOfferRedeemed(offer.id, transaction.id)) throw new Error('这张优惠已核销，请刷新后查看。')
-    message.value = `已核销并记入账本：${transaction.name} ¥${offer.price.toFixed(2)}。`
+    message.value = `已核销并记入账本：${transaction.name} ${moneyRow(offer.price)}。`
   } catch (error) {
     const rollbackErrors = []
     try { if (visit) removePlaceVisit(visit.id) } catch { rollbackErrors.push('到访记录撤回失败') }
@@ -620,7 +612,7 @@ function searchCampusPlaces(category = 'all') {
       @search="searchCampusPlaces"
       @mine="switchSection('mine')"
       @add="beginNewPlace"
-      @visit="openSharedVisit"
+      @visit="openVisit"
       @retry="loadSharedPlaces"
     />
 
@@ -637,30 +629,27 @@ function searchCampusPlaces(category = 'all') {
       <label v-if="selectedCategory !== 'all'" class="type-filter">细分类<select v-model="selectedType"><option value="all">{{ PLACE_CATEGORIES.find((item) => item.id === selectedCategory)?.label }} · 全部</option><option v-for="item in PLACE_TYPES.filter((type) => type.category === selectedCategory)" :key="item.id" :value="item.id">{{ item.label }}</option></select></label>
       <div class="place-results-heading"><h3>{{ selectedCategory === 'all' ? '校内地点' : PLACE_CATEGORIES.find((item) => item.id === selectedCategory)?.label }}</h3><span>{{ sharedLoading ? '正在读取…' : `${filteredPlaces.length} 个结果` }}</span></div>
       <div v-if="sharedLoading && !sharedLoaded" class="place-loading" role="status">正在读取校内地点…</div>
-      <div v-else-if="filteredPlaces.length" class="discover-grid">
-        <article v-for="place in filteredPlaces" :key="place.id" class="place-card discover-card">
-          <header class="discover-card-head"><span class="type-tag">{{ placeTypeLabel(place) }}</span><span class="updated-label">{{ place.isMine ? (place.reviewStatus === 'pending' ? '我的投稿 · 待审核' : place.reviewStatus === 'rejected' ? '审核退回' : '我发布的') : '同校分享' }} · {{ updatedDate(place.updatedAt) }}</span></header>
-          <h3>{{ place.name }}</h3>
-          <p v-if="place.isMine && place.reviewStatus === 'rejected' && place.reviewReason" class="review-reason-note"><b>审核意见：</b>{{ place.reviewReason }}</p>
-          <p class="discover-location"><span aria-hidden="true">⌖</span>{{ [place.campus, place.area, place.placeHint].filter(Boolean).join(' · ') || '位置待补充' }}</p>
-          <p class="rating-total">{{ ratingSummary(place) }}</p>
-          <div v-if="ratingDistribution(place).some((row) => row.count)" class="rating-distribution" aria-label="综合评分分布">
-            <div v-for="row in ratingDistribution(place)" :key="row.value"><span>{{ row.value }} 分</span><span class="rating-track"><i :style="{ width: `${row.percent}%` }"></i></span><b>{{ row.count }}</b></div>
-          </div>
-          <p v-if="place.description" class="discover-description">{{ place.description }}</p>
-          <dl v-if="place.openingHours || place.serviceInfo || place.publicContact || place.sourceInfo" class="discover-facts">
-            <div v-if="place.openingHours"><dt>开放时间</dt><dd>{{ place.openingHours }}</dd></div>
-            <div v-if="place.serviceInfo"><dt>服务与价格</dt><dd>{{ place.serviceInfo }}</dd></div>
-            <div v-if="place.publicContact"><dt>公开联系方式</dt><dd>{{ place.publicContact }}</dd></div>
-            <div v-if="place.sourceInfo"><dt>来源说明</dt><dd>{{ place.sourceInfo }}</dd></div>
-          </dl>
-          <details v-if="place.ratings?.length" class="rating-details"><summary>查看同学体验（{{ place.ratings.length }}）</summary>
-            <div v-for="(rating, index) in place.ratings" :key="`${place.id}-${index}`" class="shared-rating"><p>{{ scoreSummary(rating.scores, place.category) }}</p><p v-if="rating.note">{{ rating.note }}</p></div>
-          </details>
-          <footer class="place-actions"><button class="btn btn-primary" type="button" @click="openSharedVisit(place)">我去过，记一次</button><button class="btn btn-ghost" type="button" :disabled="isPlaceSaved(place.id)" @click="addSharedPlaceToWant(place)">{{ isPlaceSaved(place.id) ? '已在清单' : isPlaceArchived(place.id) ? '恢复到清单' : '加入想去' }}</button><button v-if="!place.isMine" class="btn btn-ghost" type="button" @click="reportTarget = place">报告信息问题</button><button v-if="place.isMine || place.ratings?.some((rating) => rating.isMine)" class="btn btn-ghost" type="button" :disabled="Boolean(busyAction)" @click="deleteRemoteRating(place)">{{ place.isMine ? '撤回地点分享' : '删除我的评分' }}</button></footer>
-          <form v-if="reportTarget?.id === place.id" class="report-form" @submit.prevent="submitReport"><label>问题类型<select v-model="reportReason"><option value="inaccurate">地点信息不准确</option><option value="sensitive">包含不适合公开的信息</option><option value="abuse">辱骂或攻击内容</option><option value="other">其他</option></select></label><label>补充说明（最多 50 字）<input v-model="reportDetail" maxlength="50" /></label><button class="btn btn-primary" type="submit">提交报告</button><button class="btn btn-ghost" type="button" @click="reportTarget = null">取消</button></form>
-        </article>
-      </div>
+      <VirtualList v-else-if="filteredPlaces.length" v-slot="{ item: row }" class="discover-grid" :items="discoverRows" :item-key="(row) => row[0].id" :estimated-height="340" :gap="10" :threshold="12" :overscan="4">
+        <div class="discover-row">
+          <article v-for="place in row" :key="place.id" class="place-card discover-card">
+            <header class="discover-card-head"><span class="type-tag">{{ placeTypeLabel(place) }}</span><span class="updated-label">{{ place.isMine ? (place.reviewStatus === 'pending' ? '我的投稿 · 待审核' : place.reviewStatus === 'rejected' ? '审核退回' : '我发布的') : '同校分享' }} · {{ dateLabel(place.updatedAt) }}</span></header>
+            <h3>{{ place.name }}</h3>
+            <p v-if="place.isMine && place.reviewStatus === 'rejected' && place.reviewReason" class="review-reason-note"><b>审核意见：</b>{{ place.reviewReason }}</p>
+            <p class="discover-location"><span aria-hidden="true">⌖</span>{{ [place.campus, place.area, place.placeHint].filter(Boolean).join(' · ') || '位置待补充' }}</p>
+            <p class="rating-total">{{ ratingSummary(place) }}</p>
+            <div v-if="ratingDistribution(place).some((row) => row.count)" class="rating-distribution" aria-label="综合评分分布">
+              <div v-for="row in ratingDistribution(place)" :key="row.value"><span>{{ row.value }} 分</span><span class="rating-track"><i :style="{ width: `${row.percent}%` }"></i></span><b>{{ row.count }}</b></div>
+            </div>
+            <p v-if="place.description" class="discover-description">{{ place.description }}</p>
+            <PlaceFacts :place="place" />
+            <details v-if="place.ratings?.length" class="rating-details"><summary>查看同学体验（{{ place.ratings.length }}）</summary>
+              <div v-for="(rating, index) in place.ratings" :key="`${place.id}-${index}`" class="shared-rating"><p>{{ scoreSummary(rating.scores, place.category) }}</p><p v-if="rating.note">{{ rating.note }}</p></div>
+            </details>
+            <footer class="place-actions"><button class="btn btn-primary" type="button" @click="openVisit(place)">我去过，记一次</button><button class="btn btn-ghost" type="button" :disabled="isPlaceSaved(place.id)" @click="addSharedPlaceToWant(place)">{{ isPlaceSaved(place.id) ? '已在清单' : isPlaceArchived(place.id) ? '恢复到清单' : '加入想去' }}</button><button v-if="!place.isMine" class="btn btn-ghost" type="button" @click="reportTarget = place">报告信息问题</button><button v-if="place.isMine || place.ratings?.some((rating) => rating.isMine)" class="btn btn-ghost" type="button" :disabled="Boolean(busyAction)" @click="deleteRemoteRating(place)">{{ place.isMine ? '撤回地点分享' : '删除我的评分' }}</button></footer>
+            <form v-if="reportTarget?.id === place.id" class="report-form" @submit.prevent="submitReport"><label>问题类型<select v-model="reportReason"><option value="inaccurate">地点信息不准确</option><option value="sensitive">包含不适合公开的信息</option><option value="abuse">辱骂或攻击内容</option><option value="other">其他</option></select></label><label>补充说明（最多 50 字）<input v-model="reportDetail" maxlength="50" /></label><button class="btn btn-primary" type="submit">提交报告</button><button class="btn btn-ghost" type="button" @click="reportTarget = null">取消</button></form>
+          </article>
+        </div>
+      </VirtualList>
       <div v-else-if="!sharedLoading && sharedLoaded && (searchQuery || selectedCategory !== 'all' || selectedType !== 'all')" class="place-empty"><h3>没有找到匹配地点</h3><p>试试简称、校区名或更短的关键词；也可以清除类别筛选。</p><button class="btn btn-ghost" type="button" @click="searchQuery = ''; selectedCategory = 'all'; selectedType = 'all'">清除搜索和筛选</button></div>
       <div v-else-if="!sharedLoading && sharedLoaded" class="place-empty"><h3>这里还没有校内地点</h3><p>提交一条地点资料，审核通过后就能帮助同校同学找到它。</p><button class="btn btn-primary" type="button" @click="beginNewPlace">添加第一个地点</button></div>
       <div v-else class="place-empty"><h3>校内地点暂时无法读取</h3><p>检查网络和账号学校资料后重试；你的本机地点仍可在“我的地点”中查看。</p><button class="btn btn-ghost" type="button" :disabled="sharedLoading" @click="loadSharedPlaces">重试</button></div>
@@ -681,7 +670,7 @@ function searchCampusPlaces(category = 'all') {
         <div v-if="placeSaveMode === 'visited' && !editingPlaceId" class="place-form-grid visit-inputs">
           <label>到访日期<input v-model="placeForm.visitedAt" type="date" required /></label>
           <label>本次消费（选填）<span class="currency-input"><span>¥</span><input v-model.number="placeForm.price" type="number" min="0" max="100000" step="0.01" inputmode="decimal" /></span></label>
-          <label>关联账本记录（选填）<select v-model="placeForm.transactionId"><option value="">暂不关联</option><option v-for="item in eligibleTransactions" :key="item.id" :value="item.id">{{ item.date }} · {{ item.name }} · ¥{{ Number(item.amount || 0).toFixed(2) }}</option></select></label>
+          <label>关联账本记录（选填）<select v-model="placeForm.transactionId"><option value="">暂不关联</option><option v-for="item in eligibleTransactions" :key="item.id" :value="item.id">{{ item.date }} · {{ item.name }} · {{ moneyRow(item.amount) }}</option></select></label>
         </div>
         <div v-if="placeSaveMode === 'visited' || (editingPlaceId && visitsForPlace(editingPlaceId).length)" class="score-grid">
           <label>综合体验（1–5 分，可选）<select v-model="placeForm.scores.rating"><option :value="undefined">暂不评分</option><option v-for="rating in [1, 2, 3, 4, 5]" :key="rating" :value="rating">{{ rating }} 分</option></select></label>
@@ -713,29 +702,31 @@ function searchCampusPlaces(category = 'all') {
       <label v-if="selectedCategory !== 'all'" class="type-filter">细分类<select v-model="selectedType"><option value="all">{{ PLACE_CATEGORIES.find((item) => item.id === selectedCategory)?.label }} · 全部</option><option v-for="item in PLACE_TYPES.filter((type) => type.category === selectedCategory)" :key="item.id" :value="item.id">{{ item.label }}</option></select></label>
       <p v-if="!activePlaces.length" class="place-empty"><b>先收下一处想去的地点</b><br />记录名称和校区就能加入清单；去过后再补充体验。</p>
       <p v-else-if="!filteredPlaces.length" class="place-empty">没有匹配记录。试试更短的关键词或清除类别筛选。</p>
-      <article v-for="place in filteredPlaces" :key="place.id" class="place-card personal-place-card">
-        <header class="place-card-head"><div><span class="type-tag">{{ placeTypeLabel(place) }}</span><h3>{{ place.name }}</h3><p>{{ [place.campus, place.area, place.placeHint].filter(Boolean).join(' · ') || '位置待补充' }}</p></div><span class="privacy-badge">{{ place.visibility === 'school' ? place.reviewStatus === 'pending' ? '待审核' : place.reviewStatus === 'rejected' ? '审核退回' : '校内可见' : visitsForPlace(place.id).length ? '仅本机' : '想去' }}</span></header>
-        <p v-if="place.reviewStatus === 'rejected' && place.reviewReason" class="review-reason-note"><b>审核意见：</b>{{ place.reviewReason }}</p>
-        <p v-if="visitsForPlace(place.id).length" class="place-scores">{{ scoreSummary(place.scores, place.category) }}</p>
-        <p v-if="place.description" class="place-note">{{ place.description }}</p>
-        <dl v-if="place.openingHours || place.serviceInfo || place.publicContact || place.sourceInfo" class="discover-facts"><div v-if="place.openingHours"><dt>开放时间</dt><dd>{{ place.openingHours }}</dd></div><div v-if="place.serviceInfo"><dt>服务与价格</dt><dd>{{ place.serviceInfo }}</dd></div><div v-if="place.publicContact"><dt>公开联系方式</dt><dd>{{ place.publicContact }}</dd></div><div v-if="place.sourceInfo"><dt>来源说明</dt><dd>{{ place.sourceInfo }}</dd></div></dl>
-        <p v-if="place.note" class="place-note"><span class="private-note-label">私人备注</span>{{ place.note }}</p>
-        <p class="place-stats">{{ visitsForPlace(place.id).length ? `${visitsForPlace(place.id).length} 次到访 · ${avgSpend(place.id)}` : '还没有到访记录' }}</p>
-        <div v-if="visitsForPlace(place.id).length" class="place-visits">
-          <div v-for="visit in visitsForPlace(place.id).slice(0, 3)" :key="visit.id" class="place-visit-row">
-            <span>{{ visitDate(visit.visitedAt) }}<small v-if="visit.transactionId"> · 账本：{{ transactionNameById.get(visit.transactionId) || '已关联收支' }}</small></span>
-            <span>{{ visit.price === null ? '金额未记' : `¥${Number(visit.price).toFixed(2)}` }}<small> · {{ PLACE_VALUE_OPTIONS.find((item) => item.value === visit.scores.value)?.label || '未评分' }}</small><small v-if="visit.note"> · {{ visit.note }}</small></span>
+      <VirtualList v-else v-slot="{ item: place }" class="place-cards" :items="filteredPlaces" item-key="id" :estimated-height="420" :gap="10" :threshold="24" :overscan="4" :reveal-key="route.query.focus || ''" reveal-behavior="auto" :reveal-non-virtual="true">
+        <article class="place-card personal-place-card">
+          <header class="place-card-head"><div><span class="type-tag">{{ placeTypeLabel(place) }}</span><h3>{{ place.name }}</h3><p>{{ [place.campus, place.area, place.placeHint].filter(Boolean).join(' · ') || '位置待补充' }}</p></div><span class="privacy-badge">{{ place.visibility === 'school' ? place.reviewStatus === 'pending' ? '待审核' : place.reviewStatus === 'rejected' ? '审核退回' : '校内可见' : visitsForPlace(place.id).length ? '仅本机' : '想去' }}</span></header>
+          <p v-if="place.reviewStatus === 'rejected' && place.reviewReason" class="review-reason-note"><b>审核意见：</b>{{ place.reviewReason }}</p>
+          <p v-if="visitsForPlace(place.id).length" class="place-scores">{{ scoreSummary(place.scores, place.category) }}</p>
+          <p v-if="place.description" class="place-note">{{ place.description }}</p>
+          <PlaceFacts :place="place" />
+          <p v-if="place.note" class="place-note"><span class="private-note-label">私人备注</span>{{ place.note }}</p>
+          <p class="place-stats">{{ visitsForPlace(place.id).length ? `${visitsForPlace(place.id).length} 次到访 · ${avgSpend(place.id)}` : '还没有到访记录' }}</p>
+          <div v-if="visitsForPlace(place.id).length" class="place-visits">
+            <div v-for="visit in visitsForPlace(place.id).slice(0, 3)" :key="visit.id" class="place-visit-row">
+              <span>{{ dateLabel(visit.visitedAt) }}<small v-if="visit.transactionId"> · 账本：{{ transactionNameById.get(visit.transactionId) || '已关联收支' }}</small></span>
+              <span>{{ visit.price === null ? '金额未记' : moneyRow(visit.price) }}<small> · {{ PLACE_VALUE_OPTIONS.find((item) => item.value === visit.scores.value)?.label || '未评分' }}</small><small v-if="visit.note"> · {{ visit.note }}</small></span>
+            </div>
           </div>
-        </div>
-        <footer class="place-actions">
-          <button class="btn btn-ghost" type="button" @click="editPlace(place)">编辑资料</button>
-          <button class="btn btn-ghost" type="button" @click="openVisit(place)">{{ visitsForPlace(place.id).length ? '记一次到访' : '记录已到访' }}</button>
-          <button class="btn btn-ghost" type="button" :disabled="busyAction === `share-${place.id}`" @click="changeVisibility(place)">{{ place.visibility === 'school' ? '撤回校内投稿' : place.reviewStatus === 'rejected' ? '修改并重新提交' : '提交校内审核' }}</button>
-          <button class="btn btn-ghost" type="button" @click="offerPlaceId = place.id; offerFormOpen = true; section = 'offers'">添加优惠</button>
-          <button class="btn btn-ghost" type="button" @click="archivePlace(place)">归档</button>
-          <button class="btn btn-danger" type="button" :disabled="Boolean(busyAction)" @click="removePlace(place)">删除自己的记录</button>
-        </footer>
-      </article>
+          <footer class="place-actions">
+            <button class="btn btn-ghost" type="button" @click="editPlace(place)">编辑资料</button>
+            <button class="btn btn-ghost" type="button" @click="openVisit(place)">{{ visitsForPlace(place.id).length ? '记一次到访' : '记录已到访' }}</button>
+            <button class="btn btn-ghost" type="button" :disabled="busyAction === `share-${place.id}`" @click="changeVisibility(place)">{{ place.visibility === 'school' ? '撤回校内投稿' : place.reviewStatus === 'rejected' ? '修改并重新提交' : '提交校内审核' }}</button>
+            <button class="btn btn-ghost" type="button" @click="offerPlaceId = place.id; offerFormOpen = true; section = 'offers'">添加优惠</button>
+            <button class="btn btn-ghost" type="button" @click="archivePlace(place)">归档</button>
+            <button class="btn btn-danger" type="button" :disabled="Boolean(busyAction)" @click="removePlace(place)">删除自己的记录</button>
+          </footer>
+        </article>
+      </VirtualList>
       <details v-if="archivedPlaces.length" class="archived-places"><summary>已归档地点 {{ archivedPlaces.length }} 家</summary><div v-for="place in archivedPlaces" :key="place.id" class="archived-place-row"><span>{{ place.name }}</span><button class="btn btn-ghost" type="button" @click="restorePlace(place)">恢复</button><button class="btn btn-danger" type="button" @click="removePlace(place)">删除</button></div></details>
     </section>
 
@@ -758,7 +749,7 @@ function searchCampusPlaces(category = 'all') {
         <p v-if="placeInvitesLoading" class="place-empty">正在读取好友预设…</p>
         <p v-else-if="placeInvitesLoaded && !incomingPlaceInvites.length" class="place-empty">还没有待处理的地点预设。</p>
         <div v-for="invite in incomingPlaceInvites" :key="invite.id" class="place-invite-card">
-          <header><div><b>{{ invite.sender?.nickname || '三两事好友' }}分享了 {{ invite.places.length }} 家地点</b><small>有效期至 {{ visitDate(invite.expiresAt) }}</small></div></header>
+          <header><div><b>{{ invite.sender?.nickname || '三两事好友' }}分享了 {{ invite.places.length }} 家地点</b><small>有效期至 {{ dateLabel(invite.expiresAt) }}</small></div></header>
           <div class="place-invite-checklist"><div v-for="place in invite.places" :key="place.id" class="place-invite-choice"><span><b>{{ place.name }}</b><small>{{ place.campus || '未记校区' }}<span v-if="place.area"> · {{ place.area }}</span><span v-if="place.placeHint"> · {{ place.placeHint }}</span></small><small>{{ scoreSummary(place.scores, place.category) }}</small></span></div></div>
           <p class="place-invite-disclosure">接受会把地点资料和结构化评分保存为你的本机私密副本，不会导入对方的到访、花费或私人备注。接受后副本会从服务器清除。</p>
           <footer class="place-actions"><button class="btn btn-primary" type="button" :disabled="Boolean(busyAction)" @click="acceptPlaceInvite(invite)">{{ busyAction === `place-invite-accept-${invite.id}` ? '导入中…' : '接受并导入本机' }}</button><button class="btn btn-ghost" type="button" :disabled="Boolean(busyAction)" @click="rejectPlaceInvite(invite)">拒收并清除</button></footer>
@@ -768,7 +759,7 @@ function searchCampusPlaces(category = 'all') {
       <article class="place-card">
         <div class="place-section-title"><div><h2>我发出的地点预设</h2><p>好友接受、拒收或预设过期后，服务器会清除分享副本。</p></div></div>
         <p v-if="placeInvitesLoaded && !outgoingPlaceInvites.length" class="place-empty">没有等待好友处理的地点预设。</p>
-        <div v-for="invite in outgoingPlaceInvites" :key="invite.id" class="place-invite-card"><header><div><b>发给{{ invite.recipient?.nickname || '好友' }} · {{ invite.placeCount }} 家地点</b><small>有效期至 {{ visitDate(invite.expiresAt) }}</small></div><button class="btn btn-ghost" type="button" :disabled="Boolean(busyAction)" @click="cancelPlaceInvite(invite)">撤回并清除</button></header></div>
+        <div v-for="invite in outgoingPlaceInvites" :key="invite.id" class="place-invite-card"><header><div><b>发给{{ invite.recipient?.nickname || '好友' }} · {{ invite.placeCount }} 家地点</b><small>有效期至 {{ dateLabel(invite.expiresAt) }}</small></div><button class="btn btn-ghost" type="button" :disabled="Boolean(busyAction)" @click="cancelPlaceInvite(invite)">撤回并清除</button></header></div>
       </article>
     </section>
 
@@ -776,13 +767,21 @@ function searchCampusPlaces(category = 'all') {
       <div class="place-section-title"><div><h2>优惠与团购</h2><p>核销时会新增一笔收支，并关联到地点；这里不设置周期扣款。</p></div><button class="btn btn-primary" type="button" :disabled="!activePlaces.length" :aria-expanded="offerFormOpen" aria-controls="place-offer-form" @click="offerFormOpen = !offerFormOpen">{{ offerFormOpen ? '收起' : '记一张优惠' }}</button></div>
       <form id="place-offer-form" v-show="offerFormOpen" class="place-card place-form" @submit.prevent="saveOffer"><label>地点<select v-model="offerPlaceId" required><option value="">请选择</option><option v-for="place in activePlaces" :key="place.id" :value="place.id">{{ place.name }}</option></select></label><div class="place-form-grid"><label>优惠名称<input v-model.trim="offerForm.title" maxlength="60" required placeholder="例如：午餐套餐券" /></label><label>核销实付（元）<input v-model.number="offerForm.price" type="number" min="0.01" step="0.01" required /></label><label>原价（可选）<input v-model.number="offerForm.originalPrice" type="number" min="0.01" step="0.01" /></label><label>有效期（可选）<input v-model="offerForm.expiresAt" type="date" /></label></div><label>说明（最多 50 字）<input v-model.trim="offerForm.note" maxlength="50" /></label><div class="place-form-actions"><span>核销会写入账本，金额沿用这里的实付金额。</span><button class="btn btn-primary" type="submit">保存优惠</button></div></form>
       <p v-if="!visibleOffers.length" class="place-empty">还没有待核销优惠。记下的优惠可以在使用后直接生成账本记录。</p>
-      <article v-for="offer in visibleOffers" :key="offer.id" class="place-card offer-card"><header><div><h3>{{ places.find((place) => place.id === offer.placeId)?.name || '地点' }} · {{ offer.title }}</h3><p>{{ offer.expiresAt ? `有效期至 ${offer.expiresAt}` : '未设置有效期' }}<span v-if="offer.originalPrice"> · 原价 ¥{{ offer.originalPrice.toFixed(2) }}</span></p></div><b>¥{{ offer.price.toFixed(2) }}</b></header><p v-if="offer.note">{{ offer.note }}</p><footer class="place-actions"><button class="btn btn-primary" type="button" :disabled="offer.expiresAt && offer.expiresAt < appToday" @click="redeemOffer(offer)">{{ offer.expiresAt && offer.expiresAt < appToday ? '优惠已过期' : '核销并记账' }}</button><button class="btn btn-ghost" type="button" @click="deletePlaceOffer(offer.id)">删除优惠</button></footer></article>
+      <article v-for="offer in visibleOffers" :key="offer.id" class="place-card offer-card"><header><div><h3>{{ places.find((place) => place.id === offer.placeId)?.name || '地点' }} · {{ offer.title }}</h3><p>{{ offer.expiresAt ? `有效期至 ${offer.expiresAt}` : '未设置有效期' }}<span v-if="offer.originalPrice"> · 原价 {{ moneyRow(offer.originalPrice) }}</span></p></div><b>{{ moneyRow(offer.price) }}</b></header><p v-if="offer.note">{{ offer.note }}</p><footer class="place-actions"><button class="btn btn-primary" type="button" :disabled="offer.expiresAt && offer.expiresAt < appToday" @click="redeemOffer(offer)">{{ offer.expiresAt && offer.expiresAt < appToday ? '优惠已过期' : '核销并记账' }}</button><button class="btn btn-ghost" type="button" @click="deletePlaceOffer(offer.id)">删除优惠</button></footer></article>
     </section>
 
     <form v-if="showVisitForm" class="visit-sheet" role="dialog" aria-modal="true" aria-labelledby="place-visit-title" @submit.prevent="saveVisit">
       <div class="place-section-title"><div><h2 id="place-visit-title">记一次到访 · {{ visitTarget?.name }}</h2><p>日期、金额、账本关联和私人备注只保存在本机；公开短评需要单独开启。</p></div><button class="btn btn-ghost" type="button" @click="showVisitForm = false">关闭</button></div>
-      <div class="place-form-grid"><label>到访日期<input v-model="visitForm.visitedAt" type="date" required /></label><label>消费金额（可选）<input v-model.number="visitForm.price" type="number" min="0" max="100000" step="0.01" /></label><label>关联收支（可选）<select v-model="visitForm.transactionId"><option value="">暂不关联</option><option v-for="item in eligibleTransactions" :key="item.id" :value="item.id">{{ item.date }} · {{ item.name }} · ¥{{ Number(item.amount || 0).toFixed(2) }}</option></select></label></div>
-      <div class="score-grid"><label>综合体验（1–5 分，可选）<select v-model="visitForm.scores.rating"><option :value="undefined">暂不评分</option><option v-for="rating in [1, 2, 3, 4, 5]" :key="rating" :value="rating">{{ rating }} 分</option></select></label><label v-for="field in visitScoreFields" :key="field.key">{{ field.label }}<input v-if="field.type === 'number'" v-model.number="visitForm.scores[field.key]" type="number" :min="field.min" :max="field.max" /><select v-else-if="field.type === 'boolean'" :value="visitForm.scores[field.key] === undefined ? '' : String(visitForm.scores[field.key])" @change="setVisitScore(field.key, $event.target.value === '' ? undefined : $event.target.value === 'true')"><option value="">未记录</option><option value="true">有</option><option value="false">无</option></select><select v-else v-model="visitForm.scores[field.key]"><option value="">未记录</option><option v-for="option in field.options" :key="option.value" :value="option.value">{{ option.label }}</option></select></label><label>值不值<select v-model="visitForm.scores.value"><option v-for="item in PLACE_VALUE_OPTIONS" :key="item.value" :value="item.value">{{ item.label }}</option></select></label></div>
+      <div class="place-form-grid"><label>到访日期<input v-model="visitForm.visitedAt" type="date" required /></label><label>消费金额（可选）<input v-model.number="visitForm.price" type="number" min="0" max="100000" step="0.01" /></label><label>关联收支（可选）<select v-model="visitForm.transactionId"><option value="">暂不关联</option><option v-for="item in eligibleTransactions" :key="item.id" :value="item.id">{{ item.date }} · {{ item.name }} · {{ moneyRow(item.amount) }}</option></select></label></div>
+      <div class="score-grid">
+        <label>综合体验（1–5 分，可选）<select v-model="visitForm.scores.rating"><option :value="undefined">暂不评分</option><option v-for="rating in [1, 2, 3, 4, 5]" :key="rating" :value="rating">{{ rating }} 分</option></select></label>
+        <label v-for="field in visitScoreFields" :key="field.key">{{ field.label }}
+          <input v-if="field.type === 'number'" v-model.number="visitForm.scores[field.key]" type="number" :min="field.min" :max="field.max" />
+          <select v-else-if="field.type === 'boolean'" :value="visitForm.scores[field.key] === undefined ? '' : String(visitForm.scores[field.key])" @change="setVisitScore(field.key, $event.target.value === '' ? undefined : $event.target.value === 'true')"><option value="">未记录</option><option value="true">有</option><option value="false">无</option></select>
+          <select v-else v-model="visitForm.scores[field.key]"><option value="">未记录</option><option v-for="option in field.options" :key="option.value" :value="option.value">{{ option.label }}</option></select>
+        </label>
+        <label>值不值<select v-model="visitForm.scores.value"><option v-for="item in PLACE_VALUE_OPTIONS" :key="item.value" :value="item.value">{{ item.label }}</option></select></label>
+      </div>
       <label>私人到访备注（最多 50 字，仅本机）<textarea v-model="visitForm.note" maxlength="50" rows="2" /></label>
       <label class="review-share-toggle"><input v-model="visitForm.shareReview" type="checkbox" /><span><b>另写一条校内公开短评</b><small>默认关闭；公开内容将和评分一起显示给同校学生。</small></span></label>
       <label v-if="visitForm.shareReview">公开短评（最多 50 字）<textarea v-model.trim="visitForm.publicNote" maxlength="50" rows="2" placeholder="只写与地点体验有关的信息" /></label>

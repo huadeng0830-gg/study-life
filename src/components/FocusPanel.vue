@@ -1,5 +1,6 @@
 <script setup>
 import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref, watch } from 'vue'
+import { hmText } from '../utils/formatters.js'
 import Modal from './Modal.vue'
 import TaskWorkSession from './tasks/TaskWorkSession.vue'
 import { useTaskWorkSession } from '../composables/tasks/useTaskWorkSession.js'
@@ -43,8 +44,29 @@ const showCustomTime = ref(false)
 const showRecent = ref(false)
 const showEarly = ref(false)
 const earlyElapsedText = ref('')
-const lastSavedSession = ref(null)
-const tempTodoAdded = ref(false)
+// 「本次专注已完成」这张卡片以前只活在组件内存里。FocusPanel 只挂在今天页，
+// 而 KeepAlive 只缓存 2(iOS)/4 个页面——来回切几屏它就被淘汰，回来时卡片没了：
+// 记录做到哪里 / 加入待办 / 标记待办完成 这三个动作一起消失，关联待办永远停在 in_progress。
+// 存成持久键，随 KeepAlive 淘汰与刷新一起活下来。
+const lastCompleted = useStoredRef('sl_focus_last_completed', null)
+const lastSavedSession = ref(lastCompleted.value)
+
+/** 写回持久键；传 null 表示卡片已被消费或关闭。 */
+function setLastSavedSession(session) {
+  lastSavedSession.value = session
+  lastCompleted.value = session ? { ...session } : null
+}
+
+/**
+ * 「已加入待办」也从持久记录推导，不再是一个随组件一起消失的 ref：
+ * 加入待办时任务上带 sourceId=sessionId，回来时按它判断，既不会重复建任务，
+ * 也不会在重新挂载后把按钮退回可点的「加入待办」。
+ */
+const tempTodoAdded = computed(() => {
+  const sessionId = lastSavedSession.value?.sessionId || lastSavedSession.value?.id
+  if (!sessionId) return false
+  return tasks.value.some((task) => task?.sourceId === sessionId)
+})
 const restMinutes = ref(0)
 const restEndsAt = ref(null)
 const roundNumber = ref(1)
@@ -83,7 +105,7 @@ const openTasks = computed(() => {
 
 function mmss(totalSeconds) {
   const total = Math.max(0, Math.floor(Number(totalSeconds) || 0))
-  return `${String(Math.floor(total / 60)).padStart(2, '0')}:${String(total % 60).padStart(2, '0')}`
+  return hmText(Math.floor(total / 60), total % 60)
 }
 
 const clockText = computed(() => {
@@ -139,7 +161,7 @@ function prepareRequestedTask() {
   selectedTodoId.value = task.id
   selectedMinutes.value = Math.max(5, Math.min(180, Math.round(Number(request.minutes) || 25)))
   targetTitle.value = ''
-  lastSavedSession.value = null
+  setLastSavedSession(null)
   restEndsAt.value = null
   showEarly.value = false
   showTodoPicker.value = false
@@ -256,7 +278,6 @@ function start() {
   targetTitle.value = ''
   selectedTodoId.value = ''
   notifiedSessionId = ''
-  tempTodoAdded.value = false
   now.value = Date.now()
   syncTicker()
 }
@@ -291,8 +312,7 @@ function saveFocus(status = 'completed', { autoRest = false } = {}) {
   domain.recordFocusSession(session)
   activeRef.value = null
   showEarly.value = false
-  lastSavedSession.value = session
-  tempTodoAdded.value = false
+  setLastSavedSession(session)
   notifiedSessionId = ''
   if (autoRest && status === 'completed') startRoundRest()
   else syncTicker()
@@ -311,8 +331,7 @@ function discardEarly() {
 }
 
 function closeCompletion() {
-  lastSavedSession.value = null
-  tempTodoAdded.value = false
+  setLastSavedSession(null)
 }
 
 function againFocus() {
@@ -323,8 +342,7 @@ function againFocus() {
   selectedTodoId.value = ''
   if (session.focusType === 'temporary') targetTitle.value = session.title
   else if (session.focusType === 'todo-linked' && session.todoId) selectedTodoId.value = session.todoId
-  lastSavedSession.value = null
-  tempTodoAdded.value = false
+  setLastSavedSession(null)
   start()
 }
 
@@ -332,7 +350,6 @@ function addTempTodo() {
   const session = lastSavedSession.value
   if (!session?.title || tempTodoAdded.value) return
   domain.createTask({ title: session.title, createdFrom: 'focus', sourceType: 'focus', sourceId: session.sessionId })
-  tempTodoAdded.value = true
   showFlash('已加入待办')
 }
 
@@ -345,8 +362,7 @@ function markTodoDone() {
 function startRest(minutes) {
   restMinutes.value = Number(minutes)
   restEndsAt.value = Date.now() + Number(minutes) * 60000
-  lastSavedSession.value = null
-  tempTodoAdded.value = false
+  setLastSavedSession(null)
   now.value = Date.now()
   syncTicker()
 }
@@ -368,7 +384,7 @@ function recoverStaleFocusSession() {
   if (!saved) return
   domain.recordFocusSession(saved)
   activeRef.value = null
-  lastSavedSession.value = saved
+  setLastSavedSession(saved)
   showFlash('上次专注长时间未结束，已按计划时长记录。')
 }
 

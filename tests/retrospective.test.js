@@ -17,6 +17,12 @@ const data = {
     { id: 'x2', name: '地铁', amount: 3, date: '2026-08-27' },
   ],
   moodLog: { '2026-08-28': '😊' },
+  // 实际专注 50 分钟，故意与待办的预计时长合计（45）不同：
+  // 两个数必须是两个数，否则「把计划当成已发生」这个错误就测不出来。
+  focusSessions: [
+    { id: 'f1', title: '高数', startedAt: '2026-08-28T12:00:00Z', actualFocusSeconds: 50 * 60 },
+    { id: 'f2', title: '背单词', startedAt: '2026-08-27T12:00:00Z', actualFocusSeconds: 20 * 60 },
+  ],
 }
 
 describe('retrospective.js', () => {
@@ -30,7 +36,15 @@ describe('retrospective.js', () => {
     expect(snap.stats.tasksDone).toBe(1)
     expect(snap.stats.taskRate).toBe(50)
     expect(snap.stats.expensesTotal).toBe(18)
-    expect(snap.stats.focusMinutes).toBe(45)
+    // 「专注」是实际坐下来的时间（50），不是预计时长（45）。
+    expect(snap.stats.focusMinutes).toBe(50)
+    expect(snap.stats.plannedFocusMinutes).toBe(45)
+  })
+
+  it('只排了计划、没有专注记录时，专注显示 0 而不是计划时长', () => {
+    const snap = daySnapshot('2026-08-28', { ...data, focusSessions: [] })
+    expect(snap.stats.focusMinutes).toBe(0)
+    expect(snap.stats.plannedFocusMinutes).toBe(45)
   })
 
   it('回顾只统计可见且金额、日期有效的账本记录', () => {

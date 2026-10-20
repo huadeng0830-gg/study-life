@@ -8,6 +8,7 @@ import { places } from '../composables/placeBook.js'
 import { PLACE_VALUE_OPTIONS } from '../composables/placeModels.js'
 import { ToggleGroup, ToggleGroupItem } from './ui/toggle-group'
 import AppIcon from './AppIcon.vue'
+import { moneyRow } from '../utils/formatters.js'
 
 const props = defineProps({
   open: Boolean,
@@ -90,6 +91,34 @@ const {
   useClipboard,
   pasteClipboard,
 } = useQuickRecordPanel(props, emit)
+
+/**
+ * 「纠正记录类型」是一组互斥单选：改成 radiogroup + radio + aria-checked 之后，
+ * 键盘模型跟 TodayView 的「选择今日心情」保持一致 —— 整组只留一个 Tab 停靠点，
+ * 其余用方向键到达（不像原来 8 个按钮 8 个 Tab 停靠点）。
+ *
+ * 当前类型不在候选里时（draft.type 还可能是 'unknown'），必须把**第一个候选**留成
+ * 停靠点：否则整组都是 tabindex="-1"，键盘用户就再也到不了这组选择
+ * （tests/helpers/tabOrder.js 把"整组都不在 Tab 序里"判成真实缺陷）。
+ */
+function typeChoiceTabIndex(draft, type) {
+  const current = previewTypes.includes(draft.type) ? draft.type : previewTypes[0]
+  return current === type ? 0 : -1
+}
+
+/** 方向键 / Home / End 在组内移动焦点并同步选中；Enter、Tab、Esc 一律原样放行。 */
+function moveTypeChoice(draft, event) {
+  if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return
+  event.preventDefault()
+  const buttons = [...event.currentTarget.querySelectorAll('[role="radio"]')]
+  const step = event.key === 'ArrowLeft' || event.key === 'ArrowUp' ? -1 : 1
+  const index = event.key === 'Home' ? 0
+    : event.key === 'End' ? buttons.length - 1
+      : (buttons.indexOf(event.target) + step + buttons.length) % buttons.length
+  buttons[index]?.focus()
+  const type = previewTypes[index]
+  if (type) changeDraftType(draft, type)
+}
 </script>
 
 <template>
@@ -102,6 +131,12 @@ const {
       <fieldset v-if="mode === 'record'" class="entry-fields" :disabled="saving" aria-label="编辑快速记录">
         <div class="compose-heading"><b>想到就记，保存前再确认</b><small>待办 · 日程 · 收支 · 重要日期</small></div>
         <div class="input-wrap">
+          <!--
+            Tab / Esc 这两个绑定不是装饰：下方提示文案承诺了「Tab 改字段 · Esc 回到原文」，
+            quickRecordKeyAction 也早为这两个键写好了分支，只是没人绑定，
+            于是 focusNextField() 与 'original' 分支长期是死代码。
+            Esc 必须带 .stop：Modal 在 document 上监听 keydown，不拦住会把整个面板关掉。
+          -->
           <textarea
             ref="inputEl"
             v-model="input"
@@ -119,6 +154,8 @@ const {
             @keydown.enter.exact="onSmartKeydown"
             @keydown.ctrl.enter="onSmartKeydown"
             @keydown.meta.enter="onSmartKeydown"
+            @keydown.tab="onSmartKeydown"
+            @keydown.escape.stop="onSmartKeydown"
           />
           <button
             v-if="voiceSupported"
@@ -185,9 +222,9 @@ const {
               </div>
             </div>
 
-            <div :id="fieldId(draft, 'type-choices')" class="type-switch" role="group" aria-label="纠正记录类型" :aria-describedby="fieldDescription(draft, 'type')">
+            <div :id="fieldId(draft, 'type-choices')" class="type-switch" role="radiogroup" aria-label="纠正记录类型" :aria-describedby="fieldDescription(draft, 'type')" @keydown="moveTypeChoice(draft, $event)">
               <span v-if="draft.uncertain" class="human-confidence">看起来像{{ recordTypeMeta(draft.type).label }}，请确认</span>
-              <button v-for="type in previewTypes" :key="type" type="button" :class="{ on: draft.type === type }" :aria-pressed="draft.type === type" @click="changeDraftType(draft, type)">{{ recordTypeMeta(type).label }}</button>
+              <button v-for="type in previewTypes" :key="type" type="button" role="radio" :class="{ on: draft.type === type }" :aria-checked="draft.type === type" :tabindex="typeChoiceTabIndex(draft, type)" @click="changeDraftType(draft, type)">{{ recordTypeMeta(type).label }}</button>
             </div>
             <small v-if="issueFor(draft, 'type')" :id="fieldId(draft, 'type-error')" class="field-error">{{ issueFor(draft, 'type') }}</small>
 
@@ -267,7 +304,7 @@ const {
             </template>
           </article>
 
-          <div v-if="drafts.length > 1 && (totalExpense || totalIncome)" class="batch-total"><span v-if="totalExpense">支出合计 ¥{{ totalExpense.toFixed(2) }}</span><span v-if="totalIncome">收入合计 ¥{{ totalIncome.toFixed(2) }}</span></div>
+          <div v-if="drafts.length > 1 && (totalExpense || totalIncome)" class="batch-total"><span v-if="totalExpense">支出合计 {{ moneyRow(totalExpense) }}</span><span v-if="totalIncome">收入合计 {{ moneyRow(totalIncome) }}</span></div>
         </section>
       </fieldset>
 

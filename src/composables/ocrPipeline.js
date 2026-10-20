@@ -1,6 +1,8 @@
 import { reactive } from 'vue'
 import { normalizeText, correctOCRErrors } from './courseParser.js'
 import { raceWithControls, throwIfAborted } from './asyncTask.js'
+import { assertSimdAvailable } from './ocrCapability.js'
+import { weekdayIndexOrMinusOne } from './timetable/index.js'
 
 const INIT_TIMEOUT_MS = 45000
 const RECOGNIZE_TIMEOUT_MS = 120000
@@ -52,29 +54,8 @@ const OCR_ASSET_BASE = 'ocr'
 const TESSERACT_CORE_FILE = 'tesseract-core-simd-lstm.wasm.js'
 const TESSERACT_WORKER_FILE = 'tesseract-worker.min.js'
 
-// 最小 SIMD 探测模块（字节码取自 wasm-feature-detect 的固定样本）。
-// 没有它，corePath 就只能指向 CDN —— 那会让"本机 OCR、不出设备"在断网时直接失效。
-const SIMD_PROBE = new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0, 1, 5, 1, 96, 0, 1, 123, 3, 2, 1, 0, 10, 10, 1, 8, 0, 65, 0, 253, 15, 253, 98, 11])
-
-let simdSupport = null
-
-function supportsSimd() {
-  if (simdSupport !== null) return simdSupport
-  try {
-    simdSupport = typeof WebAssembly?.validate === 'function' && WebAssembly.validate(SIMD_PROBE)
-  } catch {
-    simdSupport = false
-  }
-  return simdSupport
-}
-
 function ocrAssetUrl(file) {
   return new URL(`${OCR_ASSET_BASE}/${file}`, document.baseURI).href
-}
-
-function assertSimdAvailable() {
-  if (supportsSimd()) return
-  throw new Error('当前浏览器不支持 WebAssembly SIMD，无法在本机运行图片识课。请更新浏览器，或改用 Excel / 文字方式导入课表。')
 }
 
 export function maxPixelsFor(mode, memoryValue = typeof navigator !== 'undefined' ? navigator.deviceMemory : undefined) {
@@ -371,9 +352,10 @@ function structuredEvidence(result, kind) {
   return structure + result.layout.words.length * 0.02 + result.confidence * 0.08
 }
 
+// 选 weekdayIndexOrMinusOne：本文件的 detectDayGeometry 用 `item.day >= 0` 过滤候选，
+// 所以必须保留 -1 的失败约定（facade 里 null 约定的是另外三个调用点）。
 function dayFromText(text) {
-  const match = String(text || '').replace(/\s/g, '').match(/(?:星期|周)([一二三四五六日天])/) 
-  return match ? '一二三四五六日天'.indexOf(match[1]) : -1
+  return weekdayIndexOrMinusOne(text)
 }
 
 function detectDayGeometry(layout) {

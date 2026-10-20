@@ -1,4 +1,5 @@
 import { computed, ref, watch } from 'vue'
+import { randomToken } from '../utils/ids.js'
 import { accountUser } from './accountAuth.js'
 
 export const ACCOUNT_DATA_OWNER_KEY = 'study-life-data-owner'
@@ -11,12 +12,10 @@ export const ACCOUNT_SWITCH_MARKER_KEY = 'study-life-account-switch'
  * accountSyncLifecycle 的 catch —— 那条路径没有自动重试（见该文件），
  * 于是一次性的环境缺失会变成永久的红色横幅。iOS 15.4 以下的 Safari、
  * 以及任何非安全上下文（局域网 http 预览）都没有 randomUUID。
- * deviceIdentity.js 里早就有这个兜底写法，这里沿用同一套。
+ *
+ * 实现统一走 utils/ids.js 的三级兜底（randomUUID → getRandomValues → 时间戳+序号）。
  */
-export function randomToken() {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID()
-  return `id-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
-}
+export { randomToken }
 
 export function readAccountDataOwner() {
   try { return localStorage.getItem(ACCOUNT_DATA_OWNER_KEY) || '' } catch { return '' }

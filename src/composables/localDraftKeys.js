@@ -11,11 +11,17 @@
  * `BACKUP_ONLY_KEYS` 注释（正在计时的专注、地点到访记录同理）。
  *
  * 由 `tests/localDraftKeys.test.js` 守卫：这里登记的每个前缀都必须真的在源码里
- * 被用作存储键，并且清空与用量两条路径都认它 —— 否则登记表会变成一纸空文。
+ * 被用作**localStorage** 键，并且清空与用量两条路径都认它 —— 否则登记表会变成一纸空文。
+ *
+ * 【快速记录草稿为什么不在表里】`quickRecord/draftStorage.js` 的
+ * `study-life-quick-record-draft:` 写的是 **sessionStorage**，不是 localStorage。
+ * sessionStorage 随标签页关闭而消失，本来就没有「清空后残留」和「长期占用」可言，
+ * 把它登记进来只会让 `isPurgeableLocalKey` 对着一个清空路径根本不枚举的键返回 true，
+ * 读起来像是被保护了，实际什么也没做。该守卫（“登记的前缀不得写在 sessionStorage 里”）
+ * 就是为阻止这种错位再次发生。
  */
 export const LOCAL_DRAFT_KEY_PREFIXES = Object.freeze([
   'study-life:campus-draft:', // campusLifeDraft.js：校园投稿草稿（含正文）
-  'study-life-quick-record-draft:', // quickRecord/draftStorage.js：快速记录草稿
   'study-life-project-submit:', // projects/useProjectDeliverableEditor.js：成果提交草稿
 ])
 

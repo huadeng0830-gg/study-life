@@ -16,6 +16,8 @@
 // 它稳定唯一，重复导入同一份文件不会产生重复。缺失时退化为
 // 日期+金额+收支+对方 的指纹，此时重复导入依赖指纹一致。
 
+import { dateParts, hmText } from '../utils/formatters.js'
+
 /** 解码账单文件。支付宝是 GBK，微信是 UTF-8，都带 BOM。 */
 export function decodeBillText(arrayBuffer) {
   const bytes = new Uint8Array(arrayBuffer)
@@ -164,8 +166,8 @@ export function splitDateTime(value) {
   const matched = /^(\d{4})[-/](\d{1,2})[-/](\d{1,2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?/.exec(text)
   if (!matched) return { date: '', time: '' }
   const [, y, m, d, hh = '', mm = ''] = matched
-  const date = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`
-  const time = hh !== '' ? `${String(hh).padStart(2, '0')}:${mm}` : ''
+  const date = dateParts(y, m, d)
+  const time = hh !== '' ? hmText(hh, mm) : ''
   if (!isValidImportDate(date) || (time && !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(time))) return { date: '', time: '' }
   return { date, time }
 }

@@ -1,4 +1,5 @@
 import { useDomainCommands } from '../domain/commands.js'
+import { moneyRow } from '../../utils/formatters.js'
 import { addPlaceVisit, places, removePlaceVisit, removePlaceVisitsForTransaction, updatePlace } from '../placeBook.js'
 
 export function useQuickRecordAdapters() {
@@ -54,7 +55,7 @@ export function useQuickRecordAdapters() {
           throw error
         }
       }
-      return savedResult(`${draft.type === 'income' ? '已记录并记入收入' : '已记录并记入账本'} · ¥${Number(transaction.amount).toFixed(2)}`, () => {
+      return savedResult(`${draft.type === 'income' ? '已记录并记入收入' : '已记录并记入账本'} · ${moneyRow(transaction.amount)}`, () => {
         const deleted = domain.deleteTransaction(transaction.id)
         if (deleted && !deleted.blocked && visit) {
           removePlaceVisit(visit.id)

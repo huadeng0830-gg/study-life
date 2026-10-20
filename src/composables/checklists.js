@@ -1,16 +1,11 @@
 import { touchStoredRef, useStoredRef } from './store/index.js'
+import { createId } from '../utils/ids.js'
 import { checklistBudget, checklistItems, LIST_TYPES, normalizeChecklistItem } from './domain/checklistModel.js'
 import { normalizeDutyMembers } from './domain/checklistDuty.js'
 import { nextRepeatDueDate, normalizeTaskRepeat } from './taskRecurrence.js'
 
 function stamp() {
   return new Date().toISOString()
-}
-
-function createId(prefix) {
-  const uuid = globalThis.crypto?.randomUUID?.()
-  if (uuid) return `${prefix}-${uuid}`
-  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2)}`
 }
 
 export function useChecklistCommands() {

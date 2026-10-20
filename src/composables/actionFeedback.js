@@ -8,7 +8,6 @@ export const ACTION_TIMING = Object.freeze({
   press: 150, collapse: 320, fade: 150,
   successImportant: 1000, successFrequent: 650, error: 1000, restore: 320,
 })
-export const ACTION_PHASES = Object.freeze(['idle', 'pressed', 'collapsing', 'loading', 'success', 'error', 'restoring'])
 
 /**
  * An action starts immediately. It must return false for validation / no-op,

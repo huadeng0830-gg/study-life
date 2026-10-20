@@ -114,7 +114,3 @@ export async function retireFoodData({ exportBackup = downloadEmergencyBackupOnD
   }
   return { changed: foodDetected || packageDetected, alreadyRun: false }
 }
-
-export function foodRetirementDetected() {
-  return hasRetiredFoodData() && !hasMigrationRun(FOOD_RETIREMENT_MIGRATION)
-}

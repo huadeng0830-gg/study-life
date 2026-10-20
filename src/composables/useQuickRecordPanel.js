@@ -6,10 +6,12 @@ import { QUICK_ACTIONS, QUICK_RECORD_EXAMPLES, recordTypeMeta } from './quickRec
 import { FINANCIAL_RECORD_TYPES, quickRecordDraftText, quickRecordKeyAction, reconcileQuickRecordDrafts, validateQuickRecord } from './quickRecord/workflow.js'
 import { quickRecordDraftKey, readQuickRecordDraft, writeQuickRecordDraft } from './quickRecord/draftStorage.js'
 import { accountDataOwner, assertAccountDataIdentity, captureAccountDataIdentity } from './accountSyncIdentity.js'
+import { useDismissableLayer } from './useDismissableLayer.js'
 import { amountToCents, catInfo, categoriesForScope, classifyTransaction, rememberCategoryOverride } from './ledger.js'
 import { settings as quickRecordSettings } from './settingsPolicy.js'
 import { useDomainCommands } from './domain/commands.js'
 import { announce as announceLive, announceAlert } from './liveRegion.js'
+import { moneyRow } from '../utils/formatters.js'
 
 // Owns parsing, draft recovery, validation and save state for every quick-record entry.
 /**
@@ -87,7 +89,7 @@ export function useQuickRecordPanel(props, emit) {
         type: item.direction === 'income' ? 'income' : item.direction === 'refund' ? 'refund' : 'expense',
         title: item.name || '日常支出', raw: item.name || '',
         amount: item.amount,
-        detail: `${item.direction === 'income' || item.direction === 'refund' ? '+' : '-'}¥${Number(item.amount || 0).toFixed(2)}`,
+        detail: `${item.direction === 'income' || item.direction === 'refund' ? '+' : '-'}${moneyRow(item.amount)}`,
         at: item.updatedAt || item.createdAt,
       })),
       ...tasks.value.filter((item) => item && !item.archivedAt && !item.deletedAt).map((item) => ({
@@ -287,7 +289,11 @@ export function useQuickRecordPanel(props, emit) {
     categoryEditorId.value = ''
   }
 
-  function toggleCategoryEditor(draft, event) {
+  // 分类浮层是就地弹出的：点外部或按 Esc 都应收起，且 Esc 不能冒泡到 Modal
+// 把整个面板连同草稿一起关掉。规则见 useDismissableLayer。
+useDismissableLayer(categoryEditorId, { selector: '.category-picker, .category-chip' })
+
+function toggleCategoryEditor(draft, event) {
     if (categoryEditorId.value === draft.id) {
       categoryEditorId.value = ''
       return

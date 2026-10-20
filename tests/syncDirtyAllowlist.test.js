@@ -59,10 +59,19 @@ describe('账号同步本机变更信号', () => {
 
   it.each(SYNC_KEYS)('SYNC_KEYS 全矩阵：%s 写入会标记 dirty', async (key) => {
     dirtyEvents = []
-    const state = useStoredRef(key, SYNC_DEFAULTS[key])
-    state.value = changedValue(key)
-    await nextTick()
-    flushStoredWrites()
+    // 这里按 key 泛型声明，会用 SYNC_DEFAULTS[key] 当默认值——那与各模块自己的默认值
+    // 刻意不同（`sl_ledger_fx` 在同步表里是 []，真值是 {base,rates}），于是 store 的
+    // 「同键默认值不一致」告警必然触发。这不是缺陷：键早已被真正的模块声明过，
+    // 这里传入的默认值会被忽略，拿到的是同一个 ref。要测的是「写入会不会标 dirty」。
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const state = useStoredRef(key, SYNC_DEFAULTS[key])
+      state.value = changedValue(key)
+      await nextTick()
+      flushStoredWrites()
+    } finally {
+      warn.mockRestore()
+    }
 
     expect(dirtyEvents.some((event) => event.key === key)).toBe(true)
   })

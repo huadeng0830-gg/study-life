@@ -3,8 +3,10 @@
   --sidebar-surface: var(--sidebar-background);
   width: 232px;
   flex: 0 0 232px;
-  background: var(--sidebar-background);
-  border-right: 1px solid var(--border);
+  /* 导航栏改成玻璃：它站在极光画布之前，半透明底让身后的光场透进来，
+     换页时能看见光在栏后缓慢移动。 */
+  background: color-mix(in srgb, var(--card) 54%, transparent);
+  border-right: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
   padding: 20px 14px;
   display: flex;
   flex-direction: column;
@@ -14,6 +16,16 @@
   height: 100dvh;
   z-index: 20;
   transition: width var(--dur-base) var(--ease-standard), flex-basis var(--dur-base) var(--ease-standard);
+}
+/* 桌面端才给侧栏加背景模糊。手机端侧栏是底部横条，而「更多功能」抽屉是它的
+   position:fixed 子节点 —— backdrop-filter 会让侧栏变成 fixed 的包含块，
+   抽屉就会相对底部横条定位而不是相对视口（抽屉会错位到屏幕底部）。
+   所以手机端只保留半透明底，不做实时模糊。 */
+@media (min-width: 901px) {
+  .sidebar {
+    backdrop-filter: blur(var(--glass-blur-strong)) saturate(var(--glass-saturate));
+    -webkit-backdrop-filter: blur(var(--glass-blur-strong)) saturate(var(--glass-saturate));
+  }
 }
 .sidebar.collapsed {
   width: 76px;
@@ -105,7 +117,8 @@
   color: var(--ink-soft);
   text-decoration: none;
   font-size: var(--fs-14-5);
-  transition: background var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard);
+  transition: background var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard),
+    transform var(--dur-fast) var(--ease-standard);
   white-space: nowrap;
 }
 .data-item {
@@ -114,13 +127,15 @@
   background: transparent;
 }
 .nav-item:hover {
-  background: var(--bg);
+  background: color-mix(in srgb, var(--card) 62%, transparent);
   color: var(--text);
+  transform: translateX(2px);
 }
 .nav-item.active {
-  background: var(--primary-soft);
+  background: color-mix(in srgb, var(--primary-soft) 76%, transparent);
   color: var(--primary);
   font-weight: var(--fw-650);
+  transform: none;
 }
 .icon {
   font-size: var(--fs-17);
@@ -204,17 +219,20 @@
   flex: 0 0 auto;
   width: 100%;
   min-height: 40px;
-  border: 1px solid var(--border);
+  border: 1px solid color-mix(in srgb, var(--primary) 30%, transparent);
   border-radius: var(--radius-10);
-  background: var(--primary-soft);
+  background: color-mix(in srgb, var(--primary-soft) 70%, transparent);
   color: var(--primary);
   line-height: 1;
-  transition: background var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard);
+  transition: background var(--dur-fast) var(--ease-standard), color var(--dur-fast) var(--ease-standard),
+    transform var(--dur-fast) var(--ease-standard), box-shadow var(--dur-fast) var(--ease-standard);
 }
 .quick-add-button:hover,
 .quick-add-button.active {
   background: var(--primary);
   color: var(--on-primary, #fff);
+  transform: translateY(-1px);
+  box-shadow: 0 10px 24px -14px color-mix(in srgb, var(--primary) 85%, transparent);
 }
 .quick-add-symbol {
   font-size: var(--fs-21);
@@ -290,7 +308,10 @@
       calc(6px + env(safe-area-inset-bottom))
       max(10px, env(safe-area-inset-left));
     border-right: none;
-    border-top: 1px solid var(--border);
+    border-top: 1px solid color-mix(in srgb, var(--border) 74%, transparent);
+    /* 手机端底栏不加背景模糊（见上面桌面端的说明：会把 fixed 抽屉的包含块带偏），
+       但底色留一点通透，让极光在底栏后透出来。 */
+    background: color-mix(in srgb, var(--card) 90%, transparent);
     box-shadow: 0 -8px 24px rgba(35, 52, 93, 0.08);
   }
 
@@ -434,13 +455,22 @@
 .brand { padding: var(--space-2) var(--space-2) var(--space-6); gap: var(--space-3); }
 .brand-copy strong { color: var(--text); font-weight: var(--fw-700); letter-spacing: -.02em; }
 .brand-copy small { color: var(--muted); font-size: var(--type-caption); font-weight: var(--fw-400); letter-spacing: 0; }
-.brand-mark { border-radius: var(--radius-control); background: var(--primary); color: var(--on-primary); }
+.brand-mark { border-radius: var(--radius-control); background-color: var(--primary); color: var(--on-primary); position: relative; overflow: hidden; box-shadow: 0 8px 20px -12px color-mix(in srgb, var(--primary) 82%, transparent); }
+/* 品牌块上的一层斜高光：实色方块变成一枚被打磨过的玻璃按钮。
+   单独一条规则（不与 color 同规则），因为正文色不能跟着渐变跑。 */
+.brand-mark::before { content: ''; position: absolute; inset: 0; pointer-events: none; background-image: linear-gradient(140deg, color-mix(in srgb, var(--on-primary) 32%, transparent) 0%, transparent 54%); }
 .nav { gap: var(--space-3); scrollbar-width: thin; }
 .nav-group { gap: var(--space-1); }
 .nav-group-title { min-height: var(--control-compact); padding: var(--space-1) var(--space-3); font-size: var(--type-caption); font-weight: var(--fw-500); letter-spacing: 0; }
 .nav-group-items { gap: var(--space-1); }
 .nav-item { min-height: var(--control-large); padding: var(--space-2) var(--space-3); gap: var(--space-3); font-size: var(--type-callout); border-radius: var(--radius-control); }
-.nav-item.active::before { content: ''; position: absolute; left: 0; top: 12px; bottom: 12px; width: 3px; border-radius: var(--radius-pill); background: var(--primary); }
+.nav-item.active::before { content: ''; position: absolute; left: 0; top: 12px; bottom: 12px; width: 3px; border-radius: var(--radius-pill); background: var(--primary); transform-origin: center; animation: nav-indicator var(--dur-base) var(--ease-spring); }
+/* 选中指示条从中间长出来，而不是整条淡入：
+   换页时视线能跟到"光标挪到了哪一项"，而不是"某个地方变蓝了"。 */
+@keyframes nav-indicator {
+  from { transform: scaleY(0.2); opacity: 0; }
+  to { transform: scaleY(1); opacity: 1; }
+}
 .icon { display: grid; place-items: center; flex: 0 0 20px; width: 20px; height: 20px; }
 .sidebar-foot { flex: none; gap: var(--space-1); padding-top: var(--space-3); scrollbar-width: thin; }
 .sidebar-settings { min-width: 0; }

@@ -202,8 +202,25 @@ function detachObservers() {
   window.removeEventListener('resize', scheduleMeasure)
 }
 
-onMounted(attachObservers)
-onActivated(attachObservers)
+/**
+ * 是否真的需要滚动测量。
+ *
+ * 低于 threshold 时 `start`/`end`/`topSpace`/`bottomSpace` 全部短路，条目整份渲染，
+ * 滚动位置根本用不上。但观察器过去是无条件挂上的：scroll + resize + ResizeObserver
+ * 常驻，而且每个滚动帧都要 `getBoundingClientRect` 并查询一次样例行（见 measure）。
+ * 阈值一般在 20~40，也就是说绝大多数列表一直在为用不到的能力付费。
+ *
+ * `revealNonVirtual` 是个例外：它明确要求对**短列表**也做定位滚动，那时仍需测量。
+ */
+const needsMeasurement = computed(() => virtual.value || props.revealNonVirtual)
+
+watch(needsMeasurement, (enabled) => {
+  if (enabled) attachObservers()
+  else detachObservers()
+})
+
+onMounted(() => { if (needsMeasurement.value) attachObservers() })
+onActivated(() => { if (needsMeasurement.value) attachObservers() })
 onDeactivated(detachObservers)
 onBeforeUnmount(detachObservers)
 

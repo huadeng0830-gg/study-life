@@ -1,4 +1,5 @@
 import { dateInZone } from '../zonedTime.js'
+import { dateText } from '../../utils/formatters.js'
 
 export function isProjectTaskBlocked(task) {
   return Boolean(task?.dependsOnTaskId && task.dependencyStatus !== 'completed')
@@ -72,11 +73,10 @@ export function projectTaskRisks({ project, tasks, deliverables, deliveryChecks,
   today.setHours(0, 0, 0, 0)
   const soon = new Date(today)
   soon.setDate(soon.getDate() + 3)
-  const dateKey = (value) => `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`
-  const todayKey = timeZone ? dateInZone(new Date(now).getTime(), timeZone) : dateKey(today)
+  const todayKey = timeZone ? dateInZone(new Date(now).getTime(), timeZone) : dateText(today)
   const soonInZone = new Date(`${todayKey}T00:00:00Z`)
   soonInZone.setUTCDate(soonInZone.getUTCDate() + 3)
-  const soonKey = timeZone ? soonInZone.toISOString().slice(0, 10) : dateKey(soon)
+  const soonKey = timeZone ? soonInZone.toISOString().slice(0, 10) : dateText(soon)
   const risks = []
   for (const task of tasks) {
     if (task.status === 'completed' || !task.dueOn) continue

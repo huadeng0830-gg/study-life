@@ -12,6 +12,7 @@ import { useCampusConfirm } from '../../composables/campusConfirm.js'
 import { campusMonthDayLabel } from '../../composables/campusFormatting.js'
 import { useCampusLifePage } from '../../composables/campusLifePage.js'
 import { useCampusRequest } from '../../composables/campusRequest.js'
+import { moneyCents } from '../../utils/formatters.js'
 import {
   campusLifeMine, campusMarketListings, createMarketInterest, decideMarketInterest,
   listMarketInterests, updateMarketListingStatus, withdrawMarketInterest,
@@ -75,7 +76,7 @@ function statusLabel(status, listingType = 'sale') { return STATUS_BY_TYPE[listi
 function priceLabel(row) {
   if (row.listing_type === 'free') return '免费'
   if (row.price_cents === null || row.price_cents === undefined) return row.listing_type === 'wanted' ? '求购价格可协商' : '价格待补充'
-  return `¥${(Number(row.price_cents) / 100).toFixed(2)}`
+  return moneyCents(row.price_cents)
 }
 
 function openContact(listingId) {

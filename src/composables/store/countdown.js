@@ -1,12 +1,12 @@
 import { clock } from './core.js'
 import { settingsPolicy, policyDateKey, policyDateTime } from '../settingsPolicy.js'
-import { formatRelativeTime } from '../../utils/formatters.js'
+import { dateParts, formatRelativeTime, hmText } from '../../utils/formatters.js'
 
 function localDate(year, month, day, time = '', timezone = settingsPolicy.value.timezone) {
   const [hour = 0, minute = 0] = time.split(':').map(Number)
   const lastDay = new Date(Date.UTC(year, month + 1, 0)).getUTCDate()
-  const date = `${year}-${String(month + 1).padStart(2, '0')}-${String(Math.min(day, lastDay)).padStart(2, '0')}`
-  return new Date(policyDateTime(date, `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`, timezone))
+  const date = dateParts(year, month + 1, Math.min(day, lastDay))
+  return new Date(policyDateTime(date, hmText(hour, minute), timezone))
 }
 
 function appDayStart(date, timezone = settingsPolicy.value.timezone) {

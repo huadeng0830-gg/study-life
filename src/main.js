@@ -2,6 +2,9 @@ import { createApp } from 'vue'
 import { createRouter, createWebHashHistory } from 'vue-router'
 import './style.css'
 import './styles/workbench-surfaces.css'
+// 液态玻璃表现层。必须排在最后：它与前两份样式表特异度相同（都是单类选择器），
+// 靠**注入顺序**决出胜负，所以要放在最后才能压住 workbench-surfaces.css 对 .card 的旧值。
+import './styles/glass.css'
 import { prepareAccountCallback } from './composables/accountAuth.js'
 import { initializeDataVault, redirectPreviewOrigin } from './composables/dataVault.js'
 // 高对比度开关在本机数据与账号提交恢复后加载，避免启动早期读取存储。
@@ -11,6 +14,7 @@ import { runStartupGate } from './composables/startupGate.js'
 import { markStartupStep } from './composables/startupStatus.js'
 import { recallScroll, rememberScroll, resolveScrollPosition, scrollMemoryKey } from './composables/viewScrollMemory.js'
 import { animationsEnabled } from './composables/motion.js'
+import { installGlassMotion, revealRouteView } from './composables/glassMotion.js'
 import { enableLocalSafeMode } from './composables/localSafeMode.js'
 import { routes } from './router/routes.js'
 import { initialRoutePath, preloadRoute } from './router/routePreload.js'
@@ -241,6 +245,12 @@ async function bootstrap({ skipGate = false } = {}) {
     if (from.name) rememberScroll(scrollMemoryKey(from), window.scrollY)
     return true
   })
+
+  // 液态玻璃的动效引擎：指针聚光与点击涟漪靠事件委托，全站只挂一对监听器。
+  installGlassMotion()
+  // 路由切换后让新页面的各区块错峰浮起。等页面真的挂上去由 revealRouteView 自己轮询，
+  // 这里只负责"换页了"这个信号。
+  router.afterEach((to) => { revealRouteView(to.path) })
 
   const app = createApp(App)
   installGlobalErrorHandling(app)

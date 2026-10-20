@@ -19,7 +19,7 @@
 .projects-notice.is-info { color: var(--ink-soft); }
 .projects-undo { padding: 5px 9px; border: 1px solid currentColor; border-radius: var(--radius-8); background: transparent; color: inherit; font: inherit; font-weight: var(--fw-700); cursor: pointer; }
 .projects-error,.projects-form-error { color: var(--danger); font-size: var(--fs-13); }
-.projects-signin,.projects-inbox,.project-overview,.project-panel,.projects-rail,.projects-welcome { padding: 18px; border: 1px solid var(--border); border-radius: var(--card-radius); background: var(--card); box-shadow: var(--shadow-sm); }
+.projects-signin,.projects-inbox,.project-overview,.project-panel,.projects-rail,.projects-welcome { padding: 18px; border: 1px solid var(--border); border-radius: var(--card-radius); background-color: var(--glass-surface); backdrop-filter: var(--glass-filter); -webkit-backdrop-filter: var(--glass-filter); box-shadow: var(--glass-shadow); }
 .projects-signin { display: grid; grid-template-columns: 50px minmax(0, 1fr) auto; align-items: center; gap: 15px; margin-top: 14px; }
 .projects-signin-icon,.projects-welcome-mark { display: grid; place-items: center; width: 48px; height: 48px; border-radius: var(--radius-14); background: var(--primary-soft); font-size: 24px; }
 .projects-signin h2,.projects-welcome h2 { margin: 0 0 5px; font-size: var(--fs-17); }

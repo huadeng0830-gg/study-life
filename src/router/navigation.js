@@ -22,8 +22,6 @@ export const navigationRegistry = Object.freeze(routes
     requiresLogin: Boolean(route.meta.navigation.requiresLogin),
   })))
 
-export const navigationItemById = new Map(navigationRegistry.map((item) => [item.id, item]))
-
 /** @param {{id?: string}|null} [user] */
 export function availableNavigationItems(user = null) {
   return navigationRegistry.filter((item) => item.available && item.pinnable

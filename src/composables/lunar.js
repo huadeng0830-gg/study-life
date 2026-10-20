@@ -108,6 +108,9 @@ function ymdValue({ year, month, day }) {
   return year * 10000 + month * 100 + day
 }
 
+// 本文件在头部声明「纯函数、零依赖」，因此刻意不 import utils/formatters：
+// 一旦引入 import，模块就从「可被任意单测直接调用、无依赖图」变成有依赖图，
+// 与本文件的设计契约冲突。三行 pad2 的重复在这里是**有意保留**的。
 function pad2(value) {
   return String(value).padStart(2, '0')
 }

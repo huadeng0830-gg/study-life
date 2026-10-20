@@ -11,6 +11,8 @@
  * choice stays visible instead of being re-invented per view.
  */
 
+import { dateText, timeText } from '../utils/formatters.js'
+
 /**
  * Postgres `date` columns arrive as `YYYY-MM-DD`. `new Date('2026-03-04')`
  * parses that as UTC midnight, which renders as the *previous* day for anyone
@@ -79,6 +81,5 @@ export function campusWeekdayDateTimeLabel(value, fallback = '') { return format
 export function campusLocalDateTimeInput(value) {
   const date = partsFromDate(value)
   if (!date) return ''
-  const pad = (part) => String(part).padStart(2, '0')
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
+  return `${dateText(date)}T${timeText(date)}`
 }

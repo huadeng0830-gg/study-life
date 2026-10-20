@@ -34,20 +34,3 @@ function loadProfile() {
 }
 
 export const deviceProfile = ref(loadProfile())
-
-export function setDeviceName(name) {
-  const trimmed = String(name ?? '').trim().slice(0, 30)
-  if (!trimmed) return false
-  deviceProfile.value = { ...deviceProfile.value, name: trimmed }
-  try { localStorage.setItem(DEVICE_KEY, JSON.stringify(deviceProfile.value)) } catch {}
-  return true
-}
-
-export function encryptedDeviceMeta() {
-  return {
-    id: deviceProfile.value.id,
-    name: deviceProfile.value.name,
-    platform: deviceProfile.value.platform,
-    pushedAt: new Date().toISOString(),
-  }
-}

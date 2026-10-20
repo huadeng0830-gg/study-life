@@ -13,6 +13,7 @@
  */
 import { isArchived } from './domain/state.js'
 import { moveTimeDate, taskTimeEntries } from './tasks/taskTimePlan'
+import { dateParts, pad2 } from '../utils/formatters.js'
 
 /** 视图模式：列表是默认值，且**不带** query 参数（保持地址栏干净）。 */
 export const TASK_VIEW_MODES = Object.freeze([
@@ -82,8 +83,7 @@ export function shiftTaskMonth(monthKey, delta) {
   const match = MONTH_KEY.exec(String(monthKey || ''))
   if (!match) return ''
   const date = new Date(Number(match[1]), Number(match[2]) - 1 + (Number(delta) || 0), 1)
-  const pad = (value) => String(value).padStart(2, '0')
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}`
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}`
 }
 
 /** 月份标签：当年只写「10月」，跨年才带年份——与账本回顾的翻月标题同一套口径。 */
@@ -141,8 +141,7 @@ export function buildTaskMonthGrid(monthKey, tasks = []) {
   const cells = []
   for (let i = 0; i < lead; i += 1) cells.push(null)
   for (let day = 1; day <= daysInMonth; day += 1) {
-    const pad = (value) => String(value).padStart(2, '0')
-    const dateKey = `${match[1]}-${match[2]}-${pad(day)}`
+    const dateKey = dateParts(match[1], match[2], day)
     cells.push({ day, dateKey, tasks: byDate.get(dateKey) ?? [], count: (byDate.get(dateKey) ?? []).length })
   }
   while (cells.length % 7 !== 0) cells.push(null)

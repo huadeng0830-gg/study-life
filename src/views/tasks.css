@@ -55,7 +55,7 @@
 .overview-item b { font-variant-numeric: tabular-nums; }
 .overview-item small { display: none; }
 .overdue-overview b { color: var(--danger); }
-.workspace-filters { display: flex; flex-direction: column; gap: 12px; padding: 16px; border: 1px solid var(--border); border-radius: var(--radius-surface); background: var(--card); }
+.workspace-filters { display: flex; flex-direction: column; gap: 12px; padding: 16px; border: 1px solid var(--border); border-radius: var(--radius-surface); background-color: var(--glass-surface); backdrop-filter: var(--glass-filter); -webkit-backdrop-filter: var(--glass-filter); box-shadow: var(--glass-shadow); }
 .workspace-query-row { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
 .workspace-search { position: relative; flex: 1 1 260px; min-width: 0; }
 .workspace-search input { width: 100%; padding-right: 40px; }
@@ -111,10 +111,12 @@
   cursor: pointer;
   transition: transform var(--dur-fast) var(--ease-standard), box-shadow var(--dur-fast) var(--ease-standard), border-color var(--dur-fast) var(--ease-standard);
 }
+/* 悬停：玻璃被点亮一点点，而不是换成另一种颜色。
+   底色换成半透明白 + 一道主色描边，光斑（全局 .card 规则）会跟着指针走。 */
 .task:hover {
-  border-color: var(--border-strong);
-  background: var(--bg-tint);
-  box-shadow: none;
+  border-color: color-mix(in srgb, var(--primary) 34%, var(--border));
+  background-color: color-mix(in srgb, var(--primary) 7%, var(--glass-surface));
+  box-shadow: var(--glass-shadow-hover);
 }
 .reschedule-link { flex: 0 0 auto; padding-inline: 5px; color: var(--primary); }
 .reschedule-form { display: flex; flex-direction: column; gap: 14px; }
@@ -340,7 +342,7 @@
   .tasks-page .page-actions { justify-content: flex-end; gap: 8px; }
   .tasks-page .task-list { width: 100%; }
   .tasks-page .task { box-shadow: none; border-radius: var(--radius-control); }
-  .tasks-page .task:hover { box-shadow: none; background: var(--bg-tint); }
+  .tasks-page .task:hover { box-shadow: var(--glass-shadow-hover); background-color: color-mix(in srgb, var(--primary) 7%, var(--glass-surface)); }
 }
 @media (max-width: 900px), (pointer: coarse) and (max-height: 520px) {
   .tasks-page { gap: 10px; }

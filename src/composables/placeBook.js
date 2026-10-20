@@ -26,11 +26,6 @@ export function visitsForPlace(placeId) {
     .sort((left, right) => String(right.visitedAt).localeCompare(String(left.visitedAt)))
 }
 
-export function offersForPlace(placeId) {
-  return placeOffers.value.filter((offer) => String(offer.placeId) === String(placeId))
-    .sort((left, right) => String(right.createdAt).localeCompare(String(left.createdAt)))
-}
-
 function transactionForPlaceVisit(visit, place) {
   if (!visit.transactionId) return null
   const transactions = useStoredRef('sl_expenses', /** @type {import('../types/domain').Transaction[]} */ ([]), { deep: false })

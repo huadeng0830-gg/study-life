@@ -1,4 +1,5 @@
 import { touchStoredRef, useStoredRef } from '../store/index.js'
+import { createId } from '../../utils/ids.js'
 import { normalizeTaskRepeat } from '../taskRecurrence.js'
 import { spawnTaskRepeat } from '../tasks/taskRepeatCommand.js'
 import { classifyTask } from '../smartClassify.js'
@@ -21,13 +22,6 @@ function stamp() {
   const now = Date.now()
   lastStamp = Math.max(now, lastStamp + 1)
   return new Date(lastStamp).toISOString()
-}
-function createId(prefix) {
-  const uuid = globalThis.crypto?.randomUUID?.()
-  if (uuid) return `${prefix}-${uuid}`
-  const bytes = globalThis.crypto?.getRandomValues?.(new Uint32Array(2))
-  if (bytes) return `${prefix}-${bytes[0].toString(36)}${bytes[1].toString(36)}`
-  return `${prefix}-${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`
 }
 // Deletion undo is an in-memory convenience, not durable history. Keep its
 // relation snapshot cache bounded if a page stays open through many deletions.

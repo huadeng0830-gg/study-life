@@ -4,7 +4,7 @@ import { computed, ref, watch } from 'vue'
 import Modal from './Modal.vue'
 import EmptyState from './EmptyState.vue'
 import { useStoredRef } from '../composables/store'
-import { dayStory, monthReport, yearReport, daySnapshot } from '../composables/retrospective.js'
+import { dayStory, focusSessionDay, monthReport, yearReport, daySnapshot } from '../composables/retrospective.js'
 import { moodLog } from '../composables/atmosphereStore.js'
 import { useShareText } from '../composables/useShareText.js'
 import { appToday } from '../composables/timeContext.js'
@@ -18,6 +18,8 @@ const exams = useStoredRef('sl_exams', [])
 const bills = useStoredRef('sl_bills', [])
 const expenses = useStoredRef('sl_expenses', [], { deep: false })
 const events = useStoredRef('sl_events', [])
+// 实际专注时长只存在于专注记录里。以前没读它，回放只能拿待办的预计时长冒充「专注」。
+const focusSessions = useStoredRef('sl_focus_sessions', [])
 
 // 年度报告“年末首次打开”一次性提示：仅在 12 月打开时提示一次，year 已提示的年份不再提示。
 const yearNotice = useStoredRef('sl_retro_year_notice', '')
@@ -44,6 +46,7 @@ const dataset = computed(() => ({
   bills: bills.value,
   expenses: expenses.value,
   events: events.value,
+  focusSessions: focusSessions.value,
   moodLog: moodLog.value,
 }))
 
@@ -67,7 +70,7 @@ const report = computed(() => {
 const hasContent = computed(() => {
   if (tab.value === 'day') {
     const s = daySnapshot(day.value, dataset.value).stats
-    return s.courses + s.tasks + s.exams + s.bills + s.expensesCount + s.events > 0
+    return s.courses + s.tasks + s.exams + s.bills + s.expensesCount + s.events + s.focusMinutes > 0
   }
   const pre = tab.value === 'month' ? month.value : year.value
   const startsWith = (value) => String(value ?? '').startsWith(pre)
@@ -76,6 +79,8 @@ const hasContent = computed(() => {
     || exams.value.some((e) => (e.repeat === 'yearly' ? Boolean(e.date) : startsWith(e.date)))
     || bills.value.some((b) => startsWith(b.nextDate))
     || events.value.some((item) => startsWith(item.date))
+    // 只专注过的日子也有内容——否则「这一天还没有留下记录」会否掉一整天的真实投入。
+    || focusSessions.value.some((session) => focusSessionDay(session).startsWith(pre))
     || (tab.value === 'month' && Object.keys(moodLog.value).some((key) => key.startsWith(pre)))
 })
 

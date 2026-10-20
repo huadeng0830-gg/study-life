@@ -1,4 +1,5 @@
 import { nextRepeatDueDate } from '../taskRecurrence.js'
+import { dateText } from '../../utils/formatters.js'
 
 export const DUTY_WEEKDAYS = Object.freeze([
   { value: 0, label: '星期日' },
@@ -40,11 +41,6 @@ export function dutyMemberChoices(lists = []) {
   ])).sort((a, b) => a.localeCompare(b, 'zh-CN'))
 }
 
-function dateKey(date) {
-  const pad = (value) => String(value).padStart(2, '0')
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
-}
-
 /** 当前学期的保守默认起点；清单可自行改为校历中的实际开学日期。 */
 export function currentSemesterStartDate(value) {
   const date = value instanceof Date ? value : new Date(value)
@@ -61,7 +57,7 @@ export function firstDutyDateOnOrAfter(value, weekday) {
   const date = value instanceof Date ? new Date(value.getTime()) : new Date(value)
   const target = Number(weekday)
   if (Number.isNaN(date.getTime()) || !Number.isInteger(target) || target < 0 || target > 6) return ''
-  const today = dateKey(date)
+  const today = dateText(date)
   if (date.getDay() === target) return today
   return nextRepeatDueDate(today, 'weekly', { weekday: target })
 }

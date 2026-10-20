@@ -101,18 +101,17 @@ export function stageRangeText(stage: TaskTimeStage): string {
   return '日期待定'
 }
 
+export function taskHasTime(task: TaskTiming): boolean {
+  return Boolean(task.dueDate || taskStages(task).some((stage) => stage.start?.date || stage.end?.date))
+}
+
 export function stageStatusText(stage: TaskTimeStage, nowMs = Date.now()): string {
   const state = stageTimeState(stage, nowMs)
   if (state === 'completed') return '已完成'
   if (state === 'ended') return stage.completionRequired === false ? '时间已结束' : '时间已结束 · 待确认'
-  if (state === 'upcoming') return stage.start?.date ? '待开始' : '开始待定'
-  if (state === 'undated') return '日期待定'
-  if (stage.completionRequired === false) return '等待后续'
-  return stage.kind === 'window' ? '可处理' : stage.start?.date ? '已开始' : '待确认'
-}
-
-export function taskHasTime(task: TaskTiming): boolean {
-  return Boolean(task.dueDate || taskStages(task).some((stage) => stage.start?.date || stage.end?.date))
+  if (state === 'active') return '进行中'
+  if (state === 'upcoming') return '未开始'
+  return ''
 }
 
 export function remainingTimeStages(task: TaskTiming, nowMs = Date.now()): TaskTimeStage[] {

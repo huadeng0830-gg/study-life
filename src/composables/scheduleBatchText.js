@@ -1,6 +1,8 @@
 import { computed, ref } from 'vue'
 import { PALETTE, MAX_WEEK } from './store'
 import { timeConfig } from './store/timeConfig.js'
+// 批量行的单/双周后缀（'\t单周'/'双周'）与 timetableLayoutParser.toBatchLine 共用同一实现。
+import { weekTypeBatchSuffix } from './timetable/index.js'
 
 export const DAYS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
 
@@ -101,7 +103,7 @@ export function useScheduleBatchText({
       batchError.value = '开始节次不能晚于结束节次'
       return
     }
-    const weekType = data.weekType === 'odd' ? '\t单周' : data.weekType === 'even' ? '\t双周' : ''
+    const weekType = weekTypeBatchSuffix(data.weekType)
     const room = data.room ? `\t地点:${data.room}` : ''
     const teacher = data.teacher ? `\t教师:${data.teacher}` : ''
     const replacement = `${data.name}\t${DAYS[data.day]}\t${startPeriod}-${endPeriod}节\t${data.startWeek}-${data.endWeek}周${weekType}${room}${teacher}`

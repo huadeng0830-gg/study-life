@@ -1,9 +1,10 @@
 import type { Task, TaskTimeStage } from '../../types/domain'
+import { createId } from '../../utils/ids.js'
 
 export type TaskTiming = Pick<Task, 'dueDate' | 'dueTime' | 'timeStages'> & Partial<Pick<Task, 'id' | 'title' | 'done' | 'status' | 'archivedAt' | 'active' | 'repeat' | 'repeatAnchorDay'>>
 
 export function timePlanId(prefix = 'stage'): string {
-  return `${prefix}-${globalThis.crypto?.randomUUID?.() || `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`}`
+  return createId(prefix)
 }
 
 export function validTimeDate(value: string): boolean {

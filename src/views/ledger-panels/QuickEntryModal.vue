@@ -2,9 +2,17 @@
 import ActionButton from '../../components/ActionButton.vue'
 import { ref, computed, nextTick, watch } from 'vue'
 import Modal from '../../components/Modal.vue'
-import QuickRecordPanel from '../../components/QuickRecordPanel.vue'
 import { activeCategories, catInfo, classifyTransaction, parseNatural } from '../../composables/ledger.js'
 import { currencySymbol } from '../../utils/formatters.js'
+
+/**
+ * 【2.1：这里原来还有第二份「一句话记」】本组件曾内嵌一份 QuickRecordPanel（由
+ * `showQuickRecord` prop + `update:showQuickRecord` 出口驱动），于是账本页同时有
+ * 两个入口：外壳的快速记录（Ctrl/⌘ + K、桌面工具栏、侧栏「记录」）和弹窗里的
+ * 「⚡ 用一句话记」，同一组件还叠了两层弹窗。而两者在 /bills 注入的 context 完全一样
+ * （`preferredType: 'expense'`），所以内嵌那份是纯重复，已删除：
+ * 「记一笔」只负责记一笔，唯一的一句话记入口是外壳那一个。
+ */
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -40,17 +48,6 @@ const props = defineProps({
   formError: { type: String, default: '' },
   errorField: { type: String, default: '' },
   saveAction: { type: Function, default: null },
-  /**
-   * 是否显示内嵌的「⚡ 用一句话记」面板。
-   *
-   * 【必须声明成 prop，不能留在 $attrs 里读】原来模板写的是 `v-if="$attrs.showQuickRecord"`，
-   * 而父级（LedgerView）传的是**短横线**写法 `:show-quick-record="showQuickRecord"`。
-   * Vue 只会对**已声明的 prop** 做 camelize 匹配，非 prop 的属性进 `$attrs` 时**保留原键名** ——
-   * 于是 `$attrs.showQuickRecord` 恒为 `undefined`、`$attrs['show-quick-record']` 才是 true：
-   * 账本里点「⚡ 用一句话记」**什么都不会发生**（面板从未渲染，所以连"关不掉"都轮不到）。
-   * 声明成 prop 之后父级的 kebab 写法会被正确匹配，这一层才有真正的开与关。
-   */
-  showQuickRecord: { type: Boolean, default: false },
 })
 
 const categorySuggestion = computed(() => {
@@ -85,14 +82,6 @@ const emit = defineEmits([
   'update:suggestedCategoryInput',
   'save',
   'close',
-  'open-quick-record',
-  'quick-record-saved',
-  // 面板里「⚡ 用一句话记」那一层的关闭出口。
-  // 【原来整个出口是断的】模板 `@close="$emit('update:showQuickRecord', false)"` 而这里
-  // 没有登记，页面也没监听（LedgerView 只传了 `:show-quick-record`）：
-  // 于是那一层的 ✕ / 点遮罩 / Esc 三条关闭路径全都发出去了却没人接，
-  // 用户只能靠保存一笔才能离开。本组件与 LedgerView 必须成对保留这两处接线。
-  'update:showQuickRecord',
   'select-category',
   // 「创建固定账单」按钮（在识别出周期建议时出现）要交给页面打开账单表单。
   // 之前只在 createBillFromSuggest 里 emit 了它，却没登记进 defineEmits、页面也没监听，
@@ -171,14 +160,6 @@ function closeQuick() {
   emit('close')
 }
 
-function openQuickRecord() {
-  emit('open-quick-record')
-}
-
-function onQuickRecordSaved(payload) {
-  emit('quick-record-saved', payload)
-}
-
 function createBillFromSuggest() {
   const s = props.cycleSuggest
   const parsed = parseNatural(props.nameInput)
@@ -199,7 +180,6 @@ function createBillFromSuggest() {
 <template>
 <Modal :open="open" :title="editingId ? '编辑记录' : keepAdding ? '再记一笔' : '记一笔'" @close="closeQuick">
   <div class="quick-form">
-    <button v-if="!editingId" class="natural-entry-link" type="button" @click="openQuickRecord">⚡ 用一句话记</button>
     <div class="quick-amount-field">
     <span class="quick-currency" aria-hidden="true">{{ currencySymbol(currencyInput || baseCurrency) }}</span>
     <input
@@ -303,14 +283,6 @@ function createBillFromSuggest() {
     </div>
   </div>
 </Modal>
-
-<QuickRecordPanel
-  v-if="showQuickRecord"
-  :open="showQuickRecord"
-  :context="{ preferredType: 'expense' }"
-  @saved="onQuickRecordSaved"
-  @close="$emit('update:showQuickRecord', false)"
-/>
 </template>
 
 <style scoped>
@@ -325,19 +297,6 @@ function createBillFromSuggest() {
 .quick-error { margin:0; color:var(--danger); font-size:var(--fs-12); line-height:1.5; }
 .split-mode { display:flex; align-items:center; gap:8px; color:var(--ink-soft); font-size:var(--fs-12); }
 .split-mode input { width:16px; height:16px; accent-color:var(--primary); }
-.natural-entry-link {
-  color:var(--primary);
-  cursor:pointer;
-  background:0 0;
-  border:0;
-  align-self:flex-end;
-  min-height:24px;
-  padding:3px 8px;
-  font-size:var(--fs-12);
-  font-weight:var(--fw-700)}
-.natural-entry-link:hover {
-  background:var(--primary-soft);
-  border-radius:var(--radius-6)}
 .amount-input {
   text-align:center;
   letter-spacing:.02em;

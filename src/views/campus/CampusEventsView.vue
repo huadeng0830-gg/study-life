@@ -10,6 +10,7 @@ import { useCampusLifePage } from '../../composables/campusLifePage.js'
 import { useCampusBusyKeys } from '../../composables/campusRequest.js'
 import { useDomainCommands } from '../../composables/domain/commands.js'
 import { cancelCampusEventRegistration, campusEvents, registerCampusEvent } from '../../services/campusLife.js'
+import { dateText, timeText } from '../../utils/formatters.js'
 
 const page = useCampusLifePage()
 const domain = useDomainCommands()
@@ -23,7 +24,7 @@ function startLabel(value) { return campusWeekdayDateTimeLabel(value, '时间待
 function timeInput(value) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return null
-  return { date: `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`, time: `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}` }
+  return { date: dateText(date), time: timeText(date) }
 }
 async function register(event) {
   await actions.run(event.id, async () => {

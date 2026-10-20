@@ -1,7 +1,7 @@
 <script setup>
 import NoticeUnderstanding from './NoticeUnderstanding.vue'
 
-defineProps({ open: Boolean, tasks: { type: Array, default: () => [] }, courses: { type: Array, default: () => [] } })
+const props = defineProps({ open: Boolean, tasks: { type: Array, default: () => [] }, courses: { type: Array, default: () => [] }, initialText: { type: String, default: '' } })
 const emit = defineEmits(['close', 'commit'])
 </script>
 
@@ -12,6 +12,7 @@ const emit = defineEmits(['close', 'commit'])
     :open="open"
     :tasks="tasks"
     :courses="courses"
+    :initial-text="props.initialText"
     @close="emit('close')"
     @commit="emit('commit', $event)"
   />

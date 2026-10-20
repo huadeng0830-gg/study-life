@@ -3,6 +3,7 @@ import { MAX_WEEK } from './store'
 import { periodIndex } from './store/timeConfig.js'
 import { accountUser } from './accountAuth.js'
 import { accountDataOwner, assertAccountDataIdentity, captureAccountDataIdentity } from './accountSyncIdentity.js'
+import { deepClone } from '../utils/clone.js'
 
 /** 「撤销本次导入」的可撤销窗口。到期后按钮必须一起消失，不能留在界面上。 */
 const IMPORT_UNDO_WINDOW_MS = 30000
@@ -84,7 +85,7 @@ export function useScheduleImportReview({
     const identity = captureAccountDataIdentity()
     const owner = accountDataOwner.value
     const generation = accountGeneration
-    const snapshot = JSON.parse(JSON.stringify(courses.value))
+    const snapshot = deepClone(courses.value)
     const api = await loadCourseImport()
     if (owner !== accountDataOwner.value || generation !== accountGeneration) return
     try { assertAccountDataIdentity(identity) } catch {
@@ -197,7 +198,7 @@ export function useScheduleImportReview({
       message.value = '课表已有新的编辑，为保护这些改动，本次导入不能整体撤销。'
       return
     }
-    domain.replaceCourses(JSON.parse(JSON.stringify(undo.snapshot)))
+    domain.replaceCourses(deepClone(undo.snapshot))
     lastImportUndo.value = null
     message.value = '已撤销本次导入，课表已恢复'
   }

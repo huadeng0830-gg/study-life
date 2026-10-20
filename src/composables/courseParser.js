@@ -1,9 +1,22 @@
 // 课程表批量录入优化解析器
 // 解决问题：复制粘贴识别失败、OCR慢、识别错误
+//
+// 星期 / 节次 / OCR 混淆字形 / 周次单双周 / 中文数字的规范实现都在
+// ./timetable/index.js（facade）；本文件只保留批量文本的切词与特征识别。
+
+import {
+  cnWordToDigits,
+  digitize,
+  periodNumberFromLabel,
+  weekdayIndexFromToken,
+  weekTypeFromChineseToken,
+} from './timetable/index.js'
+
+// 中文数字转换已移入 facade（作息表解析也要用同一份实现），这里按原导出名再导出，
+// 既有 `import { digitize } from './courseParser.js'` 的调用点不受影响。
+export { cnWordToDigits, digitize }
 
 // 常量定义
-const CN_DIGITS = { 零: 0, 〇: 0, 一: 1, 二: 2, 两: 2, 三: 3, 四: 4, 五: 5, 六: 6, 七: 7, 八: 8, 九: 9 }
-const WEEKDAY_ALIAS = { 一: 0, 二: 1, 三: 2, 四: 3, 五: 4, 六: 5, 日: 6, 天: 6 }
 const FILLER_WORDS = /^(?:课程|课程名称|课程名|名称|星期|星期几|周几|周次|节次|节数|时间|上课时间|时段|类型|上课周类型|每周|地点|位置|教室|教师|老师|备注)$/
 const STRONG_ROOM = /^(?:[A-Za-z]{0,3}-?\d{2,4}|[^\s]*?(?:教学楼|实验楼|实训楼|教室|实验室|机房|报告厅|体育馆|图书馆|操场|楼|馆|栋|厅)[^\s]*)$/
 
@@ -37,27 +50,11 @@ export function normalizeText(text) {
   return normalized.trim()
 }
 
-// 中文数字转换
-export function cnWordToDigits(word) {
-  if (/^[0-9]+$/.test(word)) return word
-  if (word.includes('十')) {
-    const [left, right] = word.split('十')
-    const tens = left ? CN_DIGITS[left] ?? 1 : 1
-    const ones = right ? CN_DIGITS[right] ?? 0 : 0
-    return String(tens * 10 + ones)
-  }
-  return String(CN_DIGITS[word] ?? '')
-}
-
-// 把中文数字转换成阿拉伯数字
-export function digitize(text) {
-  return String(text).replace(/[零〇一两二三四五六七八九十]{1,3}/g, cnWordToDigits)
-}
-
-// 解析星期标记
+// 解析星期标记。
+// 选 weekdayIndexFromToken：这里拿到的是已经切好的 token（'一'…'天' 或 '1'-'7'），
+// 文本级正则（是否接受「礼拜」）留在 extractStrongFeatures，不吸进 facade。
 export function parseWeekdayToken(token) {
-  if (/^[1-7]$/.test(token)) return Number(token) - 1
-  return WEEKDAY_ALIAS[token] ?? null
+  return weekdayIndexFromToken(token)
 }
 
 // OCR常见错误纠正
@@ -146,13 +143,11 @@ export function extractStrongFeatures(segments, periodsMax, MAX_WEEK) {
     }
     
     // 单双周可能写在周次范围之后，不能受 startWeek 是否已识别的限制。
-    if (segment === '单周') {
-      features.weekType = 'odd'
-      continue
-    }
-
-    if (segment === '双周') {
-      features.weekType = 'even'
+    // 批量文本里的「单周/双周」是中文字面编码，课程对象用 'odd'/'even'；
+    // 两个方向的转换都收口在 facade，这里只声明需要的是哪一侧的编码。
+    const batchWeekType = weekTypeFromChineseToken(segment)
+    if (batchWeekType) {
+      features.weekType = batchWeekType
       continue
     }
 
@@ -216,8 +211,9 @@ export function numberedPeriodOptions(periods) {
   return source.flatMap((period) => {
     const label = String(period?.label ?? '').trim()
     if (!period?.id || nonCoursePeriod.test(label)) return []
-    const match = digitize(label).match(/(?:第)?(\d{1,2})\s*(?:节|课)/)
-    let number = match ? Number(match[1]) : null
+    // 标签取号收口到 facade（periodNumberFromLabel）；拿不到编号时返回 null，
+    // 由下面的顺序兜底补号——这是「早自习不挤位」的关键，不能在这里给默认值。
+    let number = periodNumberFromLabel(label)
     if (!Number.isInteger(number) || number < 1 || used.has(number)) {
       while (used.has(nextNumber)) nextNumber++
       number = nextNumber

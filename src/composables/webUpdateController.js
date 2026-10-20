@@ -2,8 +2,6 @@ import { reactive } from 'vue'
 import { collectReleaseChanges, compareRelease, safeUpdateError, updateError,
   validateReleaseHistory, validateReleaseManifest } from './updateProtocol.js'
 
-export const WEB_UPDATE_STAGES = Object.freeze(['idle', 'checking', 'latest', 'available', 'downloading',
-  'ready', 'installing', 'verifying', 'manual-reload', 'completed', 'blocked', 'warning', 'error'])
 export const PENDING_WEB_UPDATE_KEY = 'study_life_pending_update_v1'
 
 /** @param {any} [options] */

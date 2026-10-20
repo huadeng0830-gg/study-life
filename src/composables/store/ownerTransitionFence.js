@@ -1,3 +1,5 @@
+import { deepClone } from '../../utils/clone.js'
+
 export function createOwnerTransitionFence({
   pendingWrites, pendingWriteOwners, pendingWriteBases, storedRefs, storedDefaults,
   pendingWatcherInstalls, conflictedStorageKeys, writtenFingerprints, externallyRestoredRaw,
@@ -51,7 +53,7 @@ export function createOwnerTransitionFence({
         if (saved !== null && (Array.isArray(fallback) ? !Array.isArray(saved)
           : isPlainObject(fallback) ? !isPlainObject(saved)
             : fallback !== null && typeof saved !== typeof fallback)) throw new Error('新账号本机数据格式异常。')
-        const value = saved === null ? JSON.parse(JSON.stringify(fallback)) : normalizeStoredValue(saved, fallback).value
+        const value = saved === null ? deepClone(fallback) : normalizeStoredValue(saved, fallback).value
         const raw = JSON.stringify(value)
         cancelPendingWrite(key)
         conflictedStorageKeys.delete(key)

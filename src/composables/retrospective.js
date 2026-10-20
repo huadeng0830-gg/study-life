@@ -8,10 +8,53 @@ import { mySpendCents, mySpendYuan } from './ledgerSplit.js'
 import { fxRateNote, summarizeLedgerInBase, useLedgerFx } from './ledgerFx.js'
 import { moneyWithCurrency } from '../utils/formatters.js'
 import { taskRatePercent } from './reviewCharts.js'
+import { normalizeFocusSession } from './focusTimer.js'
 
 const number = (value) => {
   const n = Number(value)
   return Number.isFinite(n) ? n : 0
+}
+
+/** 与其它图表一致地把时间戳收敛成本地日历日（YYYY-MM-DD）。 */
+function localDayKey(date) {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+}
+
+/**
+ * 一条专注记录归属哪一天。口径与 reviewCharts.focusMinutesBetween 对齐：
+ * 以 startedAt 为准，裸时间戳直接当毫秒，'YYYY-MM-DDTHH:mm' 视作 UTC 解析。
+ */
+export function focusSessionDay(session) {
+  const raw = session?.startedAt
+  if (raw === undefined || raw === null || raw === '') return ''
+  if (typeof raw === 'number' && Number.isFinite(raw)) return localDayKey(new Date(raw))
+  const text = String(raw).trim()
+  if (/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(text)) {
+    const iso = text.replace(' ', 'T')
+    // 已经是 UTC 或带偏移量的原样解析；「本地墙钟」无时区信息，按 UTC 解释，
+    // 与 reviewCharts.startedAtStamp 同一口径，否则同一个记录在两个页面会落在不同日期。
+    const hasZone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(iso)
+    const parsed = Date.parse(hasZone ? iso : `${iso}Z`)
+    return Number.isFinite(parsed) ? localDayKey(new Date(parsed)) : ''
+  }
+  const parsed = Date.parse(text)
+  return Number.isFinite(parsed) ? localDayKey(new Date(parsed)) : ''
+}
+
+/**
+ * **实际**专注分钟数。
+ *
+ * 过去这里累加的是待办的 `estimateMinutes`（预计时长）却标成「专注」：
+ * 计划 3 小时的人即使一分钟没坐，回放也照样显示 180 分钟——把没做过的事当成事实陈述。
+ * 实际时长只存在于专注记录里，estimateMinutes 是计划值，两者不能混用。
+ */
+function actualFocusMinutes(sessions, belongs) {
+  let seconds = 0
+  for (const session of sessions) {
+    if (!belongs(focusSessionDay(session))) continue
+    seconds += normalizeFocusSession(session)?.actualFocusSeconds || 0
+  }
+  return Math.round(seconds / 60)
 }
 
 function collect(data) {
@@ -22,6 +65,7 @@ function collect(data) {
     bills: Array.isArray(data?.bills) ? data.bills : [],
     expenses: Array.isArray(data?.expenses) ? data.expenses : [],
     events: Array.isArray(data?.events) ? data.events : [],
+    focusSessions: Array.isArray(data?.focusSessions) ? data.focusSessions : [],
     moodLog: data?.moodLog ?? {},
     fx: data?.fx ?? useLedgerFx().fx.value,
   }
@@ -80,7 +124,8 @@ export function daySnapshot(dateStr, data) {
       base: ledger.base,
       fxNote: ledger.note,
       events: events.length,
-      focusMinutes: tasks.reduce((sum, task) => sum + number(task.estimateMinutes), 0),
+      focusMinutes: actualFocusMinutes(d.focusSessions, (day) => day === dateStr),
+      plannedFocusMinutes: tasks.reduce((sum, task) => sum + number(task.estimateMinutes), 0),
     },
   }
 }
@@ -151,7 +196,8 @@ export function monthReport(month, data) {
     incomeTotal: ledger.incomeTotal,
     exams: exams.length,
     bills: bills.length,
-    focusMinutes: tasks.reduce((sum, task) => sum + number(task.estimateMinutes), 0),
+    focusMinutes: actualFocusMinutes(d.focusSessions, (day) => day.startsWith(prefix)),
+    plannedFocusMinutes: tasks.reduce((sum, task) => sum + number(task.estimateMinutes), 0),
     moodDays: mood.sunny + mood.cloudy + mood.rain,
     moodDominant: mood.dominant,
     events: events.length,
@@ -207,7 +253,8 @@ export function yearReport(year, data) {
     incomeTotal: ledger.incomeTotal,
     exams: exams.length,
     bills: bills.length,
-    focusMinutes: tasks.reduce((sum, task) => sum + number(task.estimateMinutes), 0),
+    focusMinutes: actualFocusMinutes(d.focusSessions, (day) => day.startsWith(prefix)),
+    plannedFocusMinutes: tasks.reduce((sum, task) => sum + number(task.estimateMinutes), 0),
     activeDays: new Set([
       ...tasks.map((task) => task.dueDate),
       ...expenses.map((expense) => expense.date),

@@ -2,7 +2,6 @@ import { RELEASE_NOTES as CURRENT_NOTES, RELEASE_UPDATES } from '../../release.c
 import { APP_RELEASE, APP_LEGACY_RELEASE } from './versionInfo.js'
 
 export { APP_RELEASE }
-export const LEGACY_APP_RELEASE = APP_LEGACY_RELEASE
 
 // 当前版本的更新说明。
 export const RELEASE_NOTES = Object.freeze([...CURRENT_NOTES])

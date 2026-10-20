@@ -1,12 +1,10 @@
 import { normalizeFocusSession } from './focusTimer.js'
 import { isTaskActionable, taskStatus } from './domain/state.js'
 import { clock } from './store/core.js'
-
-function pad(value) { return String(value).padStart(2, '0') }
+import { dateText } from '../utils/formatters.js'
 
 export function dayText(value = clock.value) {
-  const date = new Date(value)
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+  return dateText(new Date(value))
 }
 
 export const COURSE_CHECKIN_STATES = Object.freeze({

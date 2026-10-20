@@ -1,6 +1,7 @@
 // 账本模块业务层：分类、消费记录存储、自然输入解析、常记推导。
 // 只新增存储键（sl_expenses / sl_ledger_categories / sl_ledger_freq），不触碰任何既有数据。
 import { computed } from 'vue'
+import { hmText } from '../utils/formatters.js'
 import { useStoredRef } from './store'
 import { clock } from './store/core.js'
 // timestampOf 放在 settingsPolicy 里（时间语义的唯一出处）。
@@ -55,7 +56,7 @@ export function normalizeLedgerTime(value) {
   const hour = Number(match[1])
   const minute = Number(match[2])
   if (hour > 23 || minute > 59) return null
-  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
+  return hmText(hour, minute)
 }
 
 export function sumLedgerAmounts(items = []) {
@@ -474,6 +475,11 @@ export function buildLedgerMonthReview(list, month, { amountOf = null } = {}) {
 }
 
 // ---------- 分类 ----------
+/**
+ * @param {string} [scope]
+ * @param {{ includeHidden?: boolean }} [options]
+ * @returns {Array<{ key: string, name: string, icon: string, scope?: string, hidden?: boolean }>}
+ */
 export function categoriesForScope(scope = 'expense', { includeHidden = false } = {}) {
   return ledgerCategories.value.filter((category) => {
     if ((category.scope || 'expense') !== scope) return false
@@ -481,6 +487,7 @@ export function categoriesForScope(scope = 'expense', { includeHidden = false } 
   })
 }
 
+/** @param {string} [scope] @returns {ReturnType<typeof categoriesForScope>} */
 export function activeCategories(scope = 'expense') {
   return categoriesForScope(scope)
 }
@@ -532,27 +539,7 @@ export function rememberCategoryOverride(term, categoryId, direction = 'expense'
   return true
 }
 
-export function forgetCategoryOverride(term, direction = 'expense') {
-  const normalizedTerm = String(term ?? '').trim().replace(/\s+/g, ' ')
-  const scope = direction === 'income' ? 'income' : 'expense'
-  const next = (freqPrefs.value?.categoryOverrides ?? []).filter(
-    (item) => !(String(item?.term ?? '').trim() === normalizedTerm && (item?.direction || 'expense') === scope),
-  )
-  freqPrefs.value = { ...freqPrefs.value, categoryOverrides: next }
-}
-
 // 固定账单分类名 → 账本分类 key；账单自身仍是周期提醒，支付后才生成 Transaction。
-export function billCategoryToKey(name) {
-  const map = {
-    会员订阅: 'sub',
-    通讯网络: 'communication',
-    生活缴费: 'utilities',
-    住房: 'housing',
-    保险: 'other',
-    其他: 'other',
-  }
-  return map[name] ?? detectCategory(name)
-}
 
 // ---------- 自然输入解析 ----------
 // 「午饭 18」→ { name: '午饭', amount: '18' }

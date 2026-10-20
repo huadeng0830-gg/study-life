@@ -1,0 +1,569 @@
+/* ==========================================================================
+   液态玻璃（Liquid Glass）· 全局视觉与动效层
+   ==========================================================================
+
+   【这一层解决什么】
+   改造前的界面是「平涂 + 细边框 + 静态卡片」：画布是一块死灰，卡片是一块白，
+   悬停只有底色变化，页面切换只有一次 150ms 的淡入。所有信息都"在"，但没有
+   任何东西"活着"，看起来像一份打印出来的表格。
+
+   这一层把整套表面语言换成「液态玻璃」：
+     · 画布不再是一块死灰，而是有缓慢漂移的极光场（aurora）；
+     · 卡片不再是一块白，而是半透明、会折射身后光场的磨砂玻璃；
+     · 玻璃会接住指针——光斑跟着鼠标走，边缘随距离呼吸；
+     · 悬停有抬升、按压有回弹、点击有涟漪、页面进入有错峰。
+
+   【为什么单独成文件，而不是塞进 style.css】
+   style.css 是全站令牌的**唯一**事实来源（scripts/audit-contrast.mjs 只从它
+   抽取调色板），在那里加玻璃令牌会让对比度审计把玻璃底色当成正文表面来算，
+   结论没有意义。这里只提供**表现层**：所有颜色都从既有令牌派生（var + color-mix），
+   不新增任何需要审计的语义色。
+
+   【铁律】
+     · 不写死任何颜色：只用 var(--token) 与 color-mix()，主题/暗色/高对比自动跟随；
+     · 渐变规则里绝不出现 color: 声明（正文色另起一条规则，避免叠化时字色跟着渐变跑）；
+     · 时长与缓动一律走 --dur-* / --ease-* 令牌；
+     · z-index 只复用仓库已有的档位，不新增取值。
+   ========================================================================== */
+
+:root {
+  /* ---------- 玻璃表面参数 ---------- */
+  --glass-blur: 16px;
+  --glass-blur-strong: 30px;
+  --glass-saturate: 170%;
+  /* 表面保留多少不透明度：越低越"透"，越高越"稳"。58% 是可读性与通透感的平衡点。 */
+  --glass-tint: 58%;
+  /* 玻璃自身的底色带一点冷调：纯白的卡片贴在暖白画布上几乎看不出边界，
+     掺一点 --primary-soft 之后，玻璃面板才从画布上"浮"出来。
+     62% 是实测值：再高面板会偏蓝、正文对比度掉到 4.5:1 以下；再低又贴回画布。 */
+  --glass-base: color-mix(in srgb, var(--primary-soft) 62%, var(--card));
+  /* 给各个视图的 scoped 样式用的两份现成配方。
+     视图里的面板散落在十几份 scoped 样式表里，各自抄一遍"半透明底 + 背景模糊"
+     只会抄出十几种不一样的玻璃；改成引用这两个令牌，全站的玻璃才是同一块玻璃。 */
+  --glass-surface: color-mix(in srgb, var(--glass-base) var(--glass-tint), transparent);
+  --glass-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  --glass-border-alpha: 76%;
+  /* 顶边高光：玻璃的上沿会接住环境光，这是"玻璃感"最关键的一笔。 */
+  --glass-highlight: 58%;
+  --glass-radius: var(--radius-surface);
+  --glass-lift: -2px;
+  --glass-press: 0.975;
+
+  /* ---------- 阴影 ---------- */
+  /* 浅色用 --ink（深）压出体积感；深色改用 --bg（近黑），否则暗底上会出现一层发白的假阴影。 */
+  --glass-shadow:
+    0 18px 44px -26px color-mix(in srgb, var(--ink) 32%, transparent),
+    0 2px 6px -3px color-mix(in srgb, var(--ink) 14%, transparent);
+  --glass-shadow-hover:
+    0 26px 58px -26px color-mix(in srgb, var(--ink) 40%, transparent),
+    0 3px 10px -4px color-mix(in srgb, var(--ink) 18%, transparent);
+
+  /* ---------- 动效节奏 ---------- */
+  /* 错峰步长：每块之间差这么多，一屏内容铺开约半秒读完，不至于拖沓。 */
+  --stagger-step: 52ms;
+
+  /* ---------- 极光画布 ---------- */
+  /* 画布上的光斑是"透进来的光"，不是"涂上去的颜色"。
+     这一条是硬约束：正文最弱的文字令牌 --ink-faint 在 --bg 上只有 4.95:1，
+     余量极小。任何**压暗**画布的着色都会把它推到 4.5:1 以下，
+     而审计脚本只看令牌配对，看不到实际合成结果 —— 那道坎只能靠设计守住。
+     所以浅色主题的光斑是**更亮**的（来自 --card），只提亮不压暗；
+     深色主题的光斑是**更暗**的（来自 --bg 混一点品牌色），同理只压暗不提亮。
+     两边都保证文字对比度不降反升。 */
+  --aurora-pool-a: color-mix(in srgb, var(--card) 64%, transparent);
+  --aurora-pool-b: color-mix(in srgb, var(--card) 42%, transparent);
+  --aurora-opacity: 0.9;
+  --aurora-size: 68vmax;
+  --aurora-speed: 38s;
+  /* 玻璃内部那束品牌色的光：它落在**卡片自己的底色上**（卡片本身有 58% 不透明度的
+     白色垫底），所以这里可以比画布上的光斑浓得多，而正文对比度不受影响。
+     6% 是算出来的上限：最弱的文字令牌 --ink-faint 在卡片上本来就只剩 4.78:1，
+     玻璃再叠 6% 的品牌色正好卡在 4.55:1；再浓一点，正文就该换成更深的令牌了。 */
+  --glass-light: 6%;
+  --glass-spot-light: 12%;
+}
+
+:root[data-theme='dark'] {
+  --glass-tint: 56%;
+  --glass-blur: 18px;
+  --glass-blur-strong: 32px;
+  --glass-highlight: 22%;
+  --glass-shadow:
+    0 18px 44px -26px color-mix(in srgb, var(--bg) 82%, transparent),
+    0 2px 6px -3px color-mix(in srgb, var(--bg) 60%, transparent);
+  --glass-shadow-hover:
+    0 26px 58px -26px color-mix(in srgb, var(--bg) 92%, transparent),
+    0 3px 10px -4px color-mix(in srgb, var(--bg) 70%, transparent);
+  /* 深色下的光斑比浅色更收敛：底色本来就深，光斑一亮点就把正文对比度吃掉了。
+     深色主题里最弱的文字令牌（--muted / --ink-faint）在卡片上只剩 5.5:1，
+     6% 的光正好还在 4.5:1 以上；再浓，首屏之外的小字就压不住了。 */
+  --aurora-pool-a: color-mix(in srgb, var(--bg) 74%, var(--brand-grad-a));
+  --aurora-pool-b: color-mix(in srgb, var(--bg) 86%, var(--brand-grad-b));
+  --aurora-opacity: 0.42;
+  --glass-light: 7%;
+  --glass-spot-light: 11%;
+}
+
+/* ==========================================================================
+   极光画布（aurora）
+   ==========================================================================
+   四团缓慢漂移的色斑，铺在壁纸层之下。它本身不承载任何信息，作用是给
+   磨砂玻璃一个**可以折射的东西**——没有背景层次的玻璃只是"半透明的灰"。
+   全部用 transform 漂移（合成器层，不触发布局），且不读任何用户数据。 */
+
+.aurora-field {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+  contain: strict;
+  /* 画布本身的底纹：两个对角的大面积淡色场。
+     浓度卡在 7%/6% —— 再高就会把 --ink-faint 在画布上的 4.95:1 压到 4.5:1 以下，
+     而对比度审计脚本只看令牌配对，看不到实际合成结果，这道坎只能靠设计守住。 */
+  background-image:
+    radial-gradient(90% 68% at 2% 0%, color-mix(in srgb, var(--brand-grad-a) 7%, transparent), transparent 72%),
+    radial-gradient(86% 66% at 100% 100%, color-mix(in srgb, var(--brand-grad-b) 6%, transparent), transparent 72%);
+}
+
+.aurora-blob {
+  position: absolute;
+  width: var(--aurora-size);
+  height: var(--aurora-size);
+  border-radius: var(--radius-circle);
+  opacity: var(--aurora-opacity);
+  will-change: transform;
+  /* 不用 filter: blur()：大面积高斯模糊在移动端会重新栅格化整块画布，
+     而径向渐变本身就是软的，省掉一整层离屏缓冲。 */
+  background: radial-gradient(circle at 50% 50%, var(--aurora-color) 0%, transparent 66%);
+}
+
+.aurora-blob--one {
+  --aurora-color: var(--aurora-pool-a);
+  top: -20vmax;
+  left: -14vmax;
+  animation: aurora-drift-one var(--aurora-speed) ease-in-out infinite alternate;
+}
+
+.aurora-blob--two {
+  --aurora-color: var(--aurora-pool-b);
+  top: 20vmax;
+  right: -24vmax;
+  animation: aurora-drift-two calc(var(--aurora-speed) * 1.25) ease-in-out infinite alternate;
+}
+
+.aurora-blob--three {
+  --aurora-color: var(--aurora-pool-a);
+  bottom: -28vmax;
+  left: 14vmax;
+  animation: aurora-drift-three calc(var(--aurora-speed) * 1.6) ease-in-out infinite alternate;
+}
+
+.aurora-blob--four {
+  --aurora-color: var(--aurora-pool-b);
+  top: 4vmax;
+  left: 30vmax;
+  animation: aurora-drift-four calc(var(--aurora-speed) * 2.1) ease-in-out infinite alternate;
+}
+
+@keyframes aurora-drift-one {
+  from { transform: translate3d(0, 0, 0) scale(1); }
+  to { transform: translate3d(16vmax, 10vmax, 0) scale(1.14); }
+}
+
+@keyframes aurora-drift-two {
+  from { transform: translate3d(0, 0, 0) scale(1.06); }
+  to { transform: translate3d(-18vmax, 12vmax, 0) scale(0.94); }
+}
+
+@keyframes aurora-drift-three {
+  from { transform: translate3d(0, 0, 0) scale(0.96); }
+  to { transform: translate3d(12vmax, -14vmax, 0) scale(1.12); }
+}
+
+@keyframes aurora-drift-four {
+  from { transform: translate3d(0, 0, 0) scale(1.1); }
+  to { transform: translate3d(-14vmax, -8vmax, 0) scale(0.92); }
+}
+
+/* ==========================================================================
+   玻璃表面
+   ========================================================================== */
+
+.glass-surface,
+.glass-panel {
+  position: relative;
+  border-radius: var(--glass-radius);
+  background-color: color-mix(in srgb, var(--glass-base) var(--glass-tint), transparent);
+  border: var(--border-width) solid color-mix(in srgb, var(--border) var(--glass-border-alpha), transparent);
+  box-shadow: var(--glass-shadow), inset 0 1px 0 color-mix(in srgb, var(--card) var(--glass-highlight), transparent);
+}
+
+/* 玻璃要把身后的光场折射出来，这是"玻璃"与"半透明色块"的分界线。
+   放到 @supports 里：不支持 backdrop-filter 的浏览器拿到的是普通半透明底，
+   仍然比纯平涂有层次，只是没有折射。 */
+@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .glass-surface,
+  .glass-panel {
+    backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  }
+  .glass-strong {
+    backdrop-filter: blur(var(--glass-blur-strong)) saturate(var(--glass-saturate));
+    -webkit-backdrop-filter: blur(var(--glass-blur-strong)) saturate(var(--glass-saturate));
+  }
+}
+
+/* 卡片是全站最常见的承载面。把它们整体换成玻璃，比逐个视图改造更彻底，
+   也保证新写的页面默认就是新语言。 */
+.card,
+.ui-card {
+  position: relative;
+  background-color: color-mix(in srgb, var(--glass-base) var(--glass-tint), transparent);
+  border-color: color-mix(in srgb, var(--border) var(--glass-border-alpha), transparent);
+  box-shadow: var(--glass-shadow), inset 0 1px 0 color-mix(in srgb, var(--card) var(--glass-highlight), transparent);
+  transition:
+    box-shadow var(--dur-base) var(--ease-standard),
+    transform var(--dur-base) var(--ease-standard),
+    border-color var(--dur-fast) var(--ease-standard);
+}
+
+/* 玻璃要把身后的光场折射出来，这是"玻璃"与"半透明色块"的分界线。
+   放到 @supports 里：不支持 backdrop-filter 的浏览器拿到的是普通半透明底，
+   仍然比纯平涂有层次，只是没有折射。 */
+@supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .card,
+  .ui-card {
+    backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+    -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  }
+}
+
+/* 悬停：抬起来一点、边缘亮一点。
+   抬升用 transform —— 它不参与布局，所以不会把相邻卡片挤动。 */
+.card:hover,
+.ui-card:hover {
+  transform: translateY(var(--glass-lift));
+  border-color: color-mix(in srgb, var(--primary) 26%, var(--border));
+  box-shadow: var(--glass-shadow-hover), inset 0 1px 0 color-mix(in srgb, var(--card) var(--glass-highlight), transparent);
+}
+
+/* 指针光斑 + 固定在左上角的一束品牌光。
+   光斑的位置由 composables/glassMotion.js 写入 --spot-x / --spot-y；
+   没有 JS 时停在默认位置（卡片中上方），玻璃依然成立，只是少一层反应。
+   这一层光落在**卡片自己的底色**上（卡片有 58% 不透明度的白色垫底），
+   所以可以比画布上的光斑浓得多。
+
+   指针那圈刻意做成**中间镂空的环**而不是实心光斑：正文字通常就在光斑正中，
+   实心光斑会把最弱的正文令牌压到 4.5:1 以下；镂空之后，指针底下的文字
+   落在干净的底色上，只有卡片外围那一圈被点亮 —— 像玻璃边缘的焦散。 */
+.card,
+.ui-card,
+.glass-spot {
+  background-image:
+    radial-gradient(
+      460px circle at var(--spot-x, 50%) var(--spot-y, 16%),
+      transparent 0%,
+      color-mix(in srgb, var(--primary) var(--glass-spot-light), transparent) 48%,
+      transparent 72%
+    ),
+    radial-gradient(
+      130% 110% at 0% 0%,
+      color-mix(in srgb, var(--brand-grad-a) var(--glass-light), transparent),
+      transparent 62%
+    );
+  background-repeat: no-repeat;
+  background-size: 100% 100%, 100% 100%;
+  /* 刻意**不**给 background 加过渡：光斑要死死跟住指针，
+     一旦加了过渡，光就会慢半拍地追过来，反而像卡了。 */
+}
+
+/* 掠光：悬停时一道斜光从左扫到右。
+   用 background-position 走位而不是伪元素 + overflow:hidden ——
+   后者会把卡片内部元素的焦点光环裁掉（焦点可见性是无障碍底线，不能动）。
+   这一道是**白色**的高光：扫过之处底色变亮，正文对比度不降反升。 */
+.glass-sheen {
+  background-image:
+    radial-gradient(
+      460px circle at var(--spot-x, 50%) var(--spot-y, 16%),
+      transparent 0%,
+      color-mix(in srgb, var(--primary) var(--glass-spot-light), transparent) 48%,
+      transparent 72%
+    ),
+    radial-gradient(
+      130% 110% at 0% 0%,
+      color-mix(in srgb, var(--brand-grad-a) var(--glass-light), transparent),
+      transparent 62%
+    ),
+    linear-gradient(
+      118deg,
+      transparent 34%,
+      color-mix(in srgb, var(--card) 62%, transparent) 48%,
+      transparent 62%
+    );
+  background-repeat: no-repeat;
+  background-size: 100% 100%, 100% 100%, 260% 100%;
+  background-position: center, center, -140% 0;
+  transition: background-position var(--dur-slow) var(--ease-out);
+}
+
+.glass-sheen:hover {
+  background-position: center, center, 240% 0;
+}
+
+/* 会流动的玻璃：给首屏级的大面板用。
+   一块 240% 大小的渐变层在面板里缓慢漂移，于是光在玻璃**内部**移动，
+   而不是只有指针附近那一小块亮。
+   代价是每帧重绘一次背景，所以只给一屏一两块大面板用，普通卡片不挂。 */
+.glass-flow {
+  background-image:
+    radial-gradient(
+      70% 70% at var(--spot-x, 50%) var(--spot-y, 20%),
+      color-mix(in srgb, var(--primary) var(--glass-spot-light), transparent),
+      transparent 72%
+    ),
+    radial-gradient(
+      120% 120% at 18% 8%,
+      color-mix(in srgb, var(--brand-grad-a) 17%, transparent),
+      transparent 60%
+    );
+  background-size: 100% 100%, 240% 240%;
+  background-repeat: no-repeat;
+  background-position: center, 0% 0%;
+  animation: glass-flow 24s ease-in-out infinite alternate;
+}
+
+@keyframes glass-flow {
+  from { background-position: center, 0% 0%; }
+  to { background-position: center, 100% 100%; }
+}
+
+/* 吸顶工具栏：磨砂玻璃。
+   它悬在极光画布之上，半透明底 + 背景模糊之后，滚动时能看见身后的光场
+   缓慢移动，页面就有了"活着"的纵深；实色底会把极光整块遮住，
+   滚动时只剩一条死边。
+   放在全局层而不是 App.vue 的 scoped 样式里：这是外壳材质，不是外壳结构，
+   而 scoped 规则会带上 data-v-app 属性，把全局那份压住。 */
+@media (min-width: 901px) {
+  .desktop-toolbar {
+    border-bottom: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
+    background-color: color-mix(in srgb, var(--bg) 74%, transparent);
+    backdrop-filter: var(--glass-filter);
+    -webkit-backdrop-filter: var(--glass-filter);
+  }
+}
+
+/* ==========================================================================
+   交互反馈：按钮 / 筛选片 / 分段控件
+   ==========================================================================
+   改造前按钮只有底色变化。现在补上三段：抬起（hover）、下沉（active）、
+   按下时的一圈内发光（:active 的径向渐变，纯 CSS，不需要 JS）。 */
+
+.btn,
+.ui-button {
+  position: relative;
+  transition:
+    background-color var(--dur-fast) var(--ease-standard),
+    color var(--dur-fast) var(--ease-standard),
+    border-color var(--dur-fast) var(--ease-standard),
+    box-shadow var(--dur-fast) var(--ease-standard),
+    transform var(--dur-instant) var(--ease-standard);
+}
+
+.btn:hover:not(:disabled):not([aria-disabled='true']),
+.ui-button:hover:not(:disabled):not([aria-disabled='true']) {
+  transform: translateY(-1px);
+}
+
+.btn:active:not(:disabled):not([aria-disabled='true']),
+.ui-button:active:not(:disabled):not([aria-disabled='true']) {
+  transform: scale(var(--glass-press));
+  background-image: radial-gradient(
+    circle at center,
+    color-mix(in srgb, var(--primary) 22%, transparent) 0%,
+    transparent 72%
+  );
+}
+
+/* 主按钮：一层极薄的高光，让实色按钮不再是"一块死蓝"。 */
+.btn-primary {
+  background-image: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--on-primary) 16%, transparent) 0%,
+    transparent 58%
+  );
+  box-shadow: 0 6px 18px -10px color-mix(in srgb, var(--primary) 70%, transparent);
+}
+
+.btn-primary:hover:not(:disabled):not([aria-disabled='true']) {
+  box-shadow: 0 10px 24px -12px color-mix(in srgb, var(--primary) 80%, transparent);
+}
+
+/* 点击涟漪：一圈从落点扩散的柔光。
+   用「子元素 + border-radius: inherit」而不是给按钮加 overflow:hidden ——
+   overflow 会把按钮自身的焦点光环（box-shadow 画在边框之外）裁掉，
+   键盘用户就看不见焦点了。子元素自带圆角，径向渐变自然被圆角裁住。 */
+.glass-ripple {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
+  transform-origin: var(--ripple-x, 50%) var(--ripple-y, 50%);
+  background: radial-gradient(
+    circle at var(--ripple-x, 50%) var(--ripple-y, 50%),
+    color-mix(in srgb, var(--primary) 42%, transparent) 0%,
+    transparent 58%
+  );
+  animation: glass-ripple-out var(--dur-slow) var(--ease-out);
+}
+
+@keyframes glass-ripple-out {
+  0% { opacity: 0.9; transform: scale(0.2); }
+  100% { opacity: 0; transform: scale(1); }
+}
+
+/* 筛选片与分段控件：选中态不再是"换个底色"，而是玻璃上浮起一枚胶囊。 */
+.chip {
+  transition:
+    background-color var(--dur-fast) var(--ease-standard),
+    border-color var(--dur-fast) var(--ease-standard),
+    color var(--dur-fast) var(--ease-standard),
+    box-shadow var(--dur-fast) var(--ease-standard),
+    transform var(--dur-instant) var(--ease-standard);
+}
+
+.chip:hover {
+  transform: translateY(-1px);
+}
+
+.chip:active {
+  transform: scale(var(--glass-press));
+}
+
+.chip.on {
+  box-shadow: 0 6px 16px -10px color-mix(in srgb, var(--primary) 70%, transparent);
+}
+
+.segmented > button {
+  transition:
+    background-color var(--dur-fast) var(--ease-standard),
+    color var(--dur-fast) var(--ease-standard),
+    box-shadow var(--dur-fast) var(--ease-standard),
+    transform var(--dur-instant) var(--ease-standard);
+}
+
+.segmented > button.on {
+  background-color: color-mix(in srgb, var(--card) 88%, transparent);
+  box-shadow: var(--glass-shadow), inset 0 1px 0 color-mix(in srgb, var(--card) var(--glass-highlight), transparent);
+}
+
+/* ==========================================================================
+   页面级动效
+   ========================================================================== */
+
+/* 路由切换：旧页面向后上方退去并轻微失焦，新页面从下方带景深浮起。
+   以前只有一次 150ms 的整体淡入——切页像翻幻灯片，看不出"进入了另一个地方"。 */
+.page-enter-active {
+  transition:
+    opacity var(--dur-base) var(--ease-out),
+    transform var(--dur-base) var(--ease-out);
+}
+
+.page-enter-from {
+  opacity: 0;
+  transform: translate3d(0, 18px, 0) scale(0.988);
+}
+
+.page-leave-active {
+  transition:
+    opacity var(--dur-fast) var(--ease-standard),
+    transform var(--dur-fast) var(--ease-standard);
+}
+
+.page-leave-to {
+  opacity: 0;
+  transform: translate3d(0, -10px, 0) scale(0.994);
+}
+
+/* 错峰入场：由 composables/glassMotion.js 给每个区块写入 --reveal-index。
+   逐块延迟入场，比整页同时淡入更有"被布置出来"的感觉。 */
+.glass-reveal {
+  animation: glass-rise var(--dur-reveal) var(--ease-out) backwards;
+  animation-delay: calc(var(--reveal-index, 0) * var(--stagger-step));
+}
+
+@keyframes glass-rise {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 22px, 0) scale(0.992);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* ==========================================================================
+   降级
+   ==========================================================================
+   减少动效与"流畅优先"由 style.css 的全局 !important 规则接管（动画与过渡全关）。
+   这里补两件全局规则管不到的事：高对比度下关掉折射、打印时关掉玻璃。 */
+
+/* 高对比度：玻璃的半透明底会削弱边框对比，磨砂更是直接糊掉边缘。
+   高对比模式要的是"边界清楚"，所以退回实底 + 实边框。 */
+@media (prefers-contrast: more) {
+  :root:not([data-contrast='normal']) {
+    --glass-tint: 100%;
+    --glass-blur: 0px;
+    --glass-blur-strong: 0px;
+    --glass-highlight: 0%;
+    --aurora-opacity: 0;
+  }
+}
+
+:root[data-contrast='high'] {
+  --glass-tint: 100%;
+  --glass-blur: 0px;
+  --glass-blur-strong: 0px;
+  --glass-highlight: 0%;
+  --aurora-opacity: 0;
+}
+
+/* 移动端：一张列表页可能有几十张卡片，每张都做实时 backdrop-filter 会把
+   合成器打满。手机上退到"半透明但不折射"，观感差别很小，性能差别很大。 */
+@media (max-width: 900px), (pointer: coarse) and (max-height: 520px) {
+  :root {
+    --glass-blur: 10px;
+    --aurora-size: 92vmax;
+  }
+  @supports ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+    .card,
+    .ui-card {
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+    }
+  }
+}
+
+/* 打印：玻璃、极光、聚光、掠光一律关掉。
+   纸面上没有可折射的光场，磨砂只会把字印糊；而且 backdrop-filter 在
+   打印时会被浏览器当作"半透明底"，墨量翻倍。 */
+@media print {
+  .aurora-field,
+  .glass-spot,
+  .glass-sheen {
+    display: none !important;
+  }
+  .card,
+  .ui-card,
+  .glass-surface,
+  .glass-panel {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    background: var(--card) !important;
+    background-image: none !important;
+    box-shadow: none !important;
+    transform: none !important;
+  }
+}

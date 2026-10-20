@@ -1,6 +1,7 @@
 import { appearance } from './appearance.js'
 import { restoreStoredValues } from './store/core.js'
 import { useLatestTask } from './latestTask.js'
+import { deepClone } from '../utils/clone.js'
 
 /** @param {{draft: import('vue').Ref<string>, error: import('vue').Ref<string>, message: import('vue').Ref<string>}} fields */
 export function useAppearanceQuoteSave({ draft, error, message }) {
@@ -13,9 +14,9 @@ export function useAppearanceQuoteSave({ draft, error, message }) {
     const quotes = lines.length ? lines : ['今天也要漂亮通关。']
     error.value = ''; message.value = ''
     try {
-      await restoreStoredValues({ sl_appearance: JSON.parse(JSON.stringify({ ...appearance.value, quotes,
+      await restoreStoredValues({ sl_appearance: deepClone({ ...appearance.value, quotes,
         fixedQuoteIndex: Math.min(appearance.value.fixedQuoteIndex, quotes.length - 1),
-      })) })
+      }) })
       if (!job.isCurrent()) return false
       if (draft.value !== source) {
         message.value = `已保存 ${quotes.length} 条提交的文字；新输入尚未保存`

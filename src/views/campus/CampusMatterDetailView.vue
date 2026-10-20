@@ -10,6 +10,7 @@ import { analyzeCampusMatter, matterCategoryLabels, matterIntentLabels, matterOu
 import { useCampusLifePage } from '../../composables/campusLifePage.js'
 import { animationsEnabled } from '../../composables/motion.js'
 import { reportCampusContent } from '../../services/campusLife.js'
+import { dateText } from '../../utils/formatters.js'
 import {
   adoptCampusMatterResponse, campusMatter, deleteCampusMatter, deleteCampusMatterClarification, deleteCampusMatterResponse,
   feedbackCampusMatterResponse, linkCampusMatterTask, markCampusMatter, recordCampusMatterOutcome, replyCampusMatterClarification,
@@ -106,7 +107,7 @@ function dueDateFromChoice(choice) {
   if (!choice) return null
   const date = new Date()
   if (choice === 'tomorrow') date.setDate(date.getDate() + 1)
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+  return dateText(date)
 }
 
 async function runAction(task, successText = '已保存。') {

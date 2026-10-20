@@ -5,6 +5,7 @@ import { normalizeFocusSettings } from './focusTimer.js'
 import { SYNC_DEFAULTS, SYNC_KEYS, isSyncKey } from './syncKeys.js'
 import { normalizeWeeklyReflections } from './weeklyReflections.js'
 import { normalizeDataHealthThresholds } from './dataHealthReport.js'
+import { deepCloneOptional } from '../utils/clone.js'
 
 export { SYNC_DEFAULTS, SYNC_KEYS, isSyncKey }
 
@@ -49,7 +50,7 @@ function withinSyncResourceLimit(value) {
  * @returns {T}
  */
 export function cloneValue(value) {
-  return value === undefined ? undefined : JSON.parse(JSON.stringify(value))
+  return deepCloneOptional(value)
 }
 
 /**

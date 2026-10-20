@@ -127,13 +127,17 @@ const typeClass = computed(() => ({
   padding: 10px 14px;
   border-radius: var(--radius-10);
   font-size: var(--fs-13);
-  box-shadow: var(--shadow-md);
+  /* 提示条也是玻璃：它是浮在最上层的一小块材质，
+     底下的极光被折射进来，提示不再像一张贴在屏幕上的纸条。 */
+  background-color: color-mix(in srgb, var(--card) 80%, transparent);
+  backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  -webkit-backdrop-filter: blur(var(--glass-blur)) saturate(var(--glass-saturate));
+  border: 1px solid color-mix(in srgb, var(--border) 80%, transparent);
+  box-shadow: var(--shadow-md), inset 0 1px 0 color-mix(in srgb, var(--card) var(--glass-highlight), transparent);
   pointer-events: auto;
 }
 .toast-info {
   color: var(--text);
-  border: 1px solid var(--border);
-  background: var(--card);
 }
 /* 这三种语义提示原来都是「写死的浅色底 + 写死的深色字」：
    .toast-info 用令牌、另外三个不用，同一个位置在深色主题下会一条深、三条惨白。

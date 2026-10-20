@@ -1,16 +1,6 @@
-import { digitize } from './courseParser.js'
-
-const DASH_RE = /[\u2010-\u2015\u2212~～－]/g
-const TIME_CHAR_RE = /[OoQqDd]/g
-const ONE_CHAR_RE = /[Il|!]/g
-function clean(value) {
-  return String(value ?? '')
-    .normalize('NFKC')
-    .replace(DASH_RE, '-')
-    .replace(/[\t\u00a0]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-}
+// 解析语义已收口到 timetable facade。本地名 clean 是历史词汇（文件内约 20 处调用），
+// 别名到 facade 的作息表归一化（带 NFKC 的那一份），避免为改名制造无关 diff。
+import { fixScheduleDigits, normalizeScheduleText as clean, parseSchedulePeriod } from './timetable/index.js'
 
 function confidenceLevel(score) {
   if (score >= 0.82) return 'high'
@@ -37,9 +27,9 @@ function editDistance(left, right) {
 }
 
 export function normalizeTimeToken(value) {
-  let token = clean(value)
-    .replace(TIME_CHAR_RE, '0')
-    .replace(ONE_CHAR_RE, '1')
+  // 前两步（0 与 1 的混淆字形修正）与作息表节次共用同一套宽字符类；
+  // 时间特有的 S/s→5、B/b→8、删「了」仍留在本函数。
+  let token = fixScheduleDigits(clean(value))
     .replace(/[Ss]/g, '5')
     .replace(/[Bb]/g, '8')
     .replace(/了/g, '')
@@ -84,24 +74,10 @@ export function extractTimeRanges(value) {
   return ranges
 }
 
+// 选 parseSchedulePeriod：作息表的失败约定是 null，但「早自习/晚自习」等特殊时段
+// 必须返回 start/end 为 null 的对象（调用方据此保留时段名而不是插占位行）。
 export function normalizePeriod(value) {
-  const raw = clean(value)
-  const normalized = digitize(raw)
-    .replace(/[OoQqDd]/g, '0')
-    .replace(/[Il|!]/g, '1')
-    .replace(/[、,，/至到~～－—–]+/g, '-')
-  let numbers = []
-  const explicit = normalized.match(/第?\s*(\d{1,2})(?:\s*-\s*(?:第?\s*)?(\d{1,2}))?\s*(?:节|课)/)
-  if (explicit) numbers = [Number(explicit[1]), Number(explicit[2] || explicit[1])]
-  if (!numbers.length && /^\s*\d{1,2}\s*$/.test(normalized)) numbers = [Number(normalized), Number(normalized)]
-  numbers = numbers.filter((number) => number >= 1 && number <= 30)
-  if (!numbers.length) {
-    const special = raw.match(/早自习|晨读|午自习|午休|晚自习|预备/)
-    return special ? { key: special[0], label: special[0], start: null, end: null, raw } : null
-  }
-  const start = Math.min(...numbers)
-  const end = Math.max(...numbers)
-  return { key: `${start}-${end}`, label: start === end ? `第${start}节` : `第${start}-${end}节`, start, end, raw }
+  return parseSchedulePeriod(value)
 }
 
 function bboxUnion(items) {

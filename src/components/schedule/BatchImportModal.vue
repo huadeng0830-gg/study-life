@@ -1,7 +1,8 @@
 <script setup>
-import { computed, nextTick, reactive, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import Modal from '../Modal.vue'
 import TaskProgress from '../TaskProgress.vue'
+import { ocrAvailabilityBlockReason, ocrAvailabilityHint, ocrUnsupportedReason, probeOcrAvailability } from '../../composables/ocrCapability.js'
 
 const props = defineProps({
   show: { type: Boolean, required: true },
@@ -19,6 +20,44 @@ const props = defineProps({
   error: { type: String, default: '' },
   canUndo: { type: Boolean, default: false },
 })
+
+// 这台设备跑不了图片识课时，图片入口直接禁用并说明原因——
+// 否则用户会选完图、等 45 秒、再收到一句“识别引擎已启动”，最后拿到的却是失败。
+const ocrUnsupported = ocrUnsupportedReason()
+
+/**
+ * 第二类拦截：**离线 + 识别资源从未缓存**。
+ *
+ * 引擎（3.8MB）与中文语言包（2.4MB）不在 PWA 预缓存里，第一次识图才会下载。
+ * 于是「断网 + 第一次识课」必然在 45 秒的引擎初始化里失败；上一轮只处理了 SIMD 能力，
+ * 这条路径仍然是无解释的失败。这里在入口就查一次本机缓存（**纯本地读取，不联网、
+ * 不轮询**），离线且三个资源都没齐时直接禁用图片入口并说明「先联网加载一次」。
+ *
+ * 探测时机：打开入口时、以及系统报告网络恢复/断开时各一次。探测不到 CacheStorage
+ * （桌面版 file:// 等）时 ocrAvailabilityBlockReason 返回空串，行为与从前完全一致。
+ */
+const ocrAvailability = ref(null)
+const ocrBlockedReason = computed(() => ocrAvailabilityBlockReason(ocrAvailability.value))
+const ocrDisabled = computed(() => Boolean(ocrUnsupported) || Boolean(ocrBlockedReason.value))
+const ocrStatusHint = computed(() => ocrAvailabilityHint(ocrAvailability.value))
+
+async function refreshOcrAvailability() {
+  ocrAvailability.value = await probeOcrAvailability({ force: true })
+}
+
+function onNetworkChange() { void refreshOcrAvailability() }
+
+onMounted(() => {
+  void refreshOcrAvailability()
+  globalThis.addEventListener?.('online', onNetworkChange)
+  globalThis.addEventListener?.('offline', onNetworkChange)
+})
+onBeforeUnmount(() => {
+  globalThis.removeEventListener?.('online', onNetworkChange)
+  globalThis.removeEventListener?.('offline', onNetworkChange)
+})
+// 弹窗每次重新打开都重探一次：用户可能刚联网下载完模型、或刚清过缓存。
+watch(() => props.show, (open) => { if (open) void refreshOcrAvailability() })
 
 const emit = defineEmits([
   'close',
@@ -148,6 +187,31 @@ function coursePeriodText(row) {
 
 const showRowError = computed(() => Boolean(props.error) && !(props.progress?.state?.active && props.progress?.state?.visible))
 const reviewRows = computed(() => props.rows.filter((row) => row.needsReview && !row.error))
+
+/**
+ * 复核清单是不是真的被看过了。
+ *
+ * 面板标题写「请逐项确认以下 N 门课程」，但主按钮只被 validCount/invalidCount 决定，
+ * 于是这些「需要确认」的课程可以一键全量导入——标题成了建议，不是约束。
+ * 这里要求显式勾选一次；行集合或行内容一变（重新解析、逐行修改）就作废重勾，
+ * 否则「确认」会变成对旧内容的背书。
+ *
+ * 主按钮的阻断原因：无效行本身在 scheduleBatchText.importBatch 里也会被拒绝，
+ * 但界面必须先把原因说清楚：**不会静默跳过任何一行**，所以先改再导。
+ */
+const reviewAcknowledged = ref(false)
+const reviewSignature = computed(() => props.rows
+  .map((row) => `${row.sourceIndex}|${row.needsReview ? 'r' : ''}${row.error ? 'e' : ''}|${row.data?.name || ''}|${row.data?.day ?? ''}|${row.data?.start || ''}|${row.data?.end || ''}`)
+  .join('\n'))
+watch(reviewSignature, () => { reviewAcknowledged.value = false })
+
+const importBlockedReason = computed(() => {
+  if (!props.validCount) return props.rows.length ? '没有可导入的课程，请先修正预览中标红的内容' : ''
+  if (props.invalidCount) return `有 ${props.invalidCount} 行需修改，导入已阻断：请先修正这些行（不会跳过它们，避免课表缺课）`
+  if (reviewRows.value.length && !reviewAcknowledged.value) return `还有 ${reviewRows.value.length} 行需要确认，请先逐行核对后再导入`
+  return ''
+})
+const canImport = computed(() => !importBlockedReason.value && Boolean(props.validCount))
 const editingSourceIndex = ref(null)
 const reviewDraft = reactive({
   name: '', day: 0, start: '', end: '', startWeek: 1, endWeek: 16, weekType: 'all', room: '', teacher: '',
@@ -257,20 +321,23 @@ function daysLabel(day) {
           class="batch-textarea"
         ></textarea>
         <div class="batch-image-upload" @click.stop>
-          <label class="file-button" :class="{ busy: progress.state.status === 'running' }">
-            <input type="file" accept="image/*" multiple :disabled="progress.state.status === 'running'" @change="onFileChange" hidden />
+          <label class="file-button" :class="{ busy: progress.state.status === 'running', unavailable: ocrDisabled }">
+            <input type="file" accept="image/*" multiple :disabled="progress.state.status === 'running' || ocrDisabled" @change="onFileChange" hidden />
             <span v-if="progress.state.status === 'running'">🔄 {{ progress.state.latestActivity }}</span>
             <span v-else>📷 上传图片识别</span>
           </label>
-          <label class="crop-button" :class="{ busy: progress.state.status === 'running' }">
-            <input type="file" accept="image/*" :disabled="progress.state.status === 'running'" @change="onCropFileChange" hidden />
+          <label class="crop-button" :class="{ busy: progress.state.status === 'running', unavailable: ocrDisabled }">
+            <input type="file" accept="image/*" :disabled="progress.state.status === 'running' || ocrDisabled" @change="onCropFileChange" hidden />
             ✂️ 先框选再识别（单张）
           </label>
           <label class="excel-button" :class="{ busy: progress.state.status === 'running' }">
             <input type="file" accept=".xlsx,.xls,.xlsm,.xlsb,.csv,.ods,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel,text/csv" :disabled="progress.state.status === 'running'" @change="onExcelFileChange" hidden />
             📊 上传 Excel 自动识别
           </label>
-          <p class="ocr-hint">支持一次选择多张 PNG/JPG/WebP；长截图会保留小字清晰度，结果逐张追加且不会覆盖已修改内容</p>
+          <p v-if="ocrBlockedReason" class="ocr-hint ocr-hint-warn" role="status">{{ ocrBlockedReason }}</p>
+          <p v-else-if="ocrUnsupported" class="ocr-hint ocr-hint-warn" role="status">{{ ocrUnsupported }}</p>
+          <p v-else class="ocr-hint">支持一次选择多张 PNG/JPG/WebP；长截图会保留小字清晰度，结果逐张追加且不会覆盖已修改内容</p>
+          <p v-if="!ocrDisabled" class="ocr-hint">{{ ocrStatusHint || '首次识课需联网下载识别模型（约 6 MB）并长期缓存，之后可离线使用。' }}</p>
           <p class="ocr-hint">Excel 文件仅在当前设备解析；会保留原有预览内容并追加新结果。</p>
           <p v-if="summary" class="ocr-result-hint">{{ summary }}</p>
         </div>
@@ -324,6 +391,10 @@ function daysLabel(day) {
             </template>
           </li>
         </ol>
+        <label class="review-ack">
+          <input v-model="reviewAcknowledged" type="checkbox" />
+          <span>我已逐行核对以上 {{ reviewRows.length }} 门课程（这些行会一并导入，不会跳过）</span>
+        </label>
       </section>
 
       <div v-if="rows.length" class="batch-preview-wrap">
@@ -409,10 +480,11 @@ function daysLabel(day) {
       </div>
       <div v-else class="actions">
         <button class="btn btn-ghost" @click="emit('clear')">清空</button>
-        <button class="btn btn-primary" :disabled="!validCount || invalidCount" @click="emit('import')">
+        <button class="btn btn-primary" :disabled="!canImport" @click="emit('import')">
           导入 {{ validCount }} 门课程
         </button>
       </div>
+      <p v-if="importBlockedReason" class="import-block-reason" role="status">{{ importBlockedReason }}</p>
     </div>
   </Modal>
 </template>
@@ -471,6 +543,16 @@ function daysLabel(day) {
 .file-button.busy {
   pointer-events: none;
   opacity: 0.7;
+}
+/* 设备跑不了图片识课：与 .busy 区分开，语义是「这台设备不行」，不是「正在忙」。 */
+.file-button.unavailable,
+.batch-image-upload .crop-button.unavailable {
+  pointer-events: none;
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.ocr-hint-warn {
+  color: var(--danger);
 }
 .ocr-hint {
   color: var(--muted);
@@ -569,6 +651,33 @@ function daysLabel(day) {
 .batch-success>div { display: flex; justify-content: flex-end; gap: 8px; }
 .error-message { display: flex; align-items: center; gap: 6px; padding: 6px 8px; }
 .review-message { display: flex; align-items: center; gap: 6px; padding: 6px 8px; color: var(--warning); }
+/* 「已逐行核对」是复核清单的确认出口，必须与清单本身同一套琥珀色阶、且够大可点。 */
+.review-ack {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 10px;
+  min-height: 44px;
+  padding: 9px 10px;
+  color: var(--text);
+  font-size: var(--fs-11);
+  line-height: 1.5;
+  border: 1px solid color-mix(in srgb, var(--warning) 35%, var(--card));
+  border-radius: var(--radius-8);
+  background: color-mix(in srgb, var(--warning) 6%, var(--card));
+  cursor: pointer;
+}
+.review-ack input { flex: none; width: 18px; height: 18px; margin-top: 1px; accent-color: var(--warning); }
+/* 主按钮为什么不能点：与错误行同一语义色，紧跟在按钮下面。 */
+.import-block-reason {
+  margin: 0;
+  padding: 8px 10px;
+  color: var(--danger);
+  font-size: var(--fs-11);
+  line-height: 1.5;
+  border-radius: var(--radius-8);
+  background: color-mix(in srgb, var(--danger) 10%, var(--card));
+}
 /* 「需要确认」清单是一个整体：容器底色/边框、容器自己的正文色、标题的深棕、
    条目边框和按钮全部属于同一套写死的琥珀色阶。只把里面的 em 换成令牌的话，
    深色主题下容器仍是 #fffbef 白底，亮琥珀字压上去约 1.7:1 —— 所以整块一起迁移。 */

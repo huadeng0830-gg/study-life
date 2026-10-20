@@ -212,6 +212,17 @@ const layerStyle = computed(() => {
 
 <template>
   <div class="wallpaper-layer" :style="layerStyle" aria-hidden="true">
+    <!-- 极光画布：四团缓慢漂移的色斑。它本身不承载信息，作用是给磨砂玻璃一个
+         **可以折射的东西**——没有背景层次的玻璃只是一块半透明的灰。
+         放在壁纸层**之内、壁纸图之下**：用户选了壁纸时，壁纸自然盖住极光，
+         选壁纸与默认画布两种状态都不需要额外分支。
+         「流畅优先」/ 减少动效时整层不渲染：光斑在低性能设备上是无谓的开销。 -->
+    <div v-if="!reducedEffects" class="aurora-field">
+      <span class="aurora-blob aurora-blob--one" />
+      <span class="aurora-blob aurora-blob--two" />
+      <span class="aurora-blob aurora-blob--three" />
+      <span class="aurora-blob aurora-blob--four" />
+    </div>
     <div class="wallpaper-image"></div>
     <div class="wallpaper-shade"></div>
   </div>

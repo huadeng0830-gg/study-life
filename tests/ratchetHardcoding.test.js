@@ -100,15 +100,18 @@ export const BREAKPOINT_TIERS = [360, 520, 760, 900, 901]
 export const GIANT_LINE_LIMIT = 1200
 export const GIANT_ALLOWLIST = {
   'views/LedgerView.vue': 1323,
-  'views/ProjectsView.vue': 1550,
+  // T4（ProjectsView 瘦身）把 16 处逐字重复的异步守卫抽成 useScopedProjectAction，并把
+  // 协商/计划/邀请三组状态与动作搬进 composables/projects/**：1550 → 1243（实测值）。
+  // 仍然只准降：后续再长东西必须先把别处减下来。
+  'views/ProjectsView.vue': 1243,
 }
 
 /** 每个超过 800 行的文件单独设上限，避免只守总数时把瘦身空间转移给另一个文件。 */
 export const LARGE_FILE_LIMITS = Object.freeze({
   'views/LedgerView.vue': 1323,
   // 齐行把项目、任务、成果和团队时间的操作留在同一个路由视图中，避免多个页面之间丢失当前项目上下文；
-  // 本次按实测行数设上限，后续新增功能需要先拆分或压缩。
-  'views/ProjectsView.vue': 1550,
+  // T4 之后上限按实测值收口（1550 → 1243），后续新增功能需要先拆分或压缩。
+  'views/ProjectsView.vue': 1243,
   'components/AppearanceSettings.vue': 1115,
   'views/TodayView.vue': 1012,
   // 通知处理中的课表变更、冲突复核与撤销反馈集中在待办入口，按本轮实测行数封顶。

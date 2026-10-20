@@ -145,6 +145,10 @@ function summarizeSpending(transactions, { convertAmount, currencyBase }) {
   }
 }
 
+// 【刻意不并入 src/utils/formatters.js 的 moneyRow】这里是**多币种**展示：
+// 金额要跟着记录自己的 currency 变（CNY→¥850.00、USD→US$850.00），而 moneyRow/moneyCents
+// 是人民币专用口径；moneyWithCurrency 用的是本仓库自定的符号表（USD→$），与此处
+// Intl currency 的输出（US$）并不一致，硬合并会改变既有输出。故保留本地实现并注明原因。
 function formatMoney(amount, currency) {
   try {
     return new Intl.NumberFormat('zh-CN', { style: 'currency', currency }).format(amount)

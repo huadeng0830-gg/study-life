@@ -141,35 +141,49 @@ describe('记一笔弹窗：关闭与保存', () => {
   })
 
   /**
-   * 账本里那一层「⚡ 用一句话记」：既要能**打开**，也要能**关闭**。
+   * 2.1：账本页只能有**一个**「一句话记」入口。
    *
-   * 【为什么两个方向都要测】这条链路上有两个各自独立的缺陷，而且它们互相掩盖：
-   *   1. 面板从来打不开 —— `QuickEntryModal` 模板读 `$attrs.showQuickRecord`，而父级传的是
-   *      短横线写法 `:show-quick-record`。Vue 只对**已声明的 prop** 做 camelize 匹配，
-   *      非 prop 属性进 `$attrs` 时**保留原键名**，于是那个表达式恒为 `undefined`；
-   *   2. 就算它开了也关不掉 —— 关闭走 `update:showQuickRecord`，而这个事件名既没登记进
-   *      `defineEmits`，页面也没监听。
-   * 只测"关了没"会被第 1 条挡在前面：面板根本没开，断言"已经关闭"照样成立——**假绿**。
-   * 所以必须先断言打开、再断言关闭。同一形状的教训本文件开头已经记过一次。
+   * 原来账本弹窗里另有一个「⚡ 用一句话记」按钮，点开会在「记一笔」之上再套一层
+   * QuickRecordPanel（同一组件、两层弹窗）。而外壳本来就有同一份入口（Ctrl/⌘ + K、
+   * 桌面工具栏与侧栏「记录」），且它在 /bills 注入的 context 与嵌套那份**完全一样**
+   * （都是 `preferredType: 'expense'`）——嵌套那份是纯重复。
+   * 删掉它以后，「默认类型仍是支出」与「记录仍然进账本」这两件事都必须原样成立。
    */
-  it('账本内的「⚡ 用一句话记」面板能打开，也能关闭', async () => {
+  it('账本页只有一个「一句话记」入口：不嵌套第二份面板，默认类型仍是支出且进账本', async () => {
     const amountInput = await openQuickEntry()
     expect(amountInput, '记一笔弹窗没打开').toBeTruthy()
+    expect(document.querySelector('.natural-entry-link'), '记一笔弹窗里还有第二个「用一句话记」入口').toBe(null)
 
-    const entry = byText('.natural-entry-link', '用一句话记')
-    expect(entry, '找不到「⚡ 用一句话记」入口').toBeTruthy()
-    await click(entry)
+    // 关掉「记一笔」，改用外壳那唯一的入口（Ctrl/⌘ + K）。
+    await click(document.querySelector('.overlay .close'))
+    const closed = await waitFor(() => document.querySelector('.quick-form .amount-input'), 300)
+    expect(closed, '记一笔弹窗没有关掉').toBe(null)
 
-    const panel = await waitFor(() => document.querySelector('.quick-record'))
-    expect(panel, '点了「用一句话记」之后面板没有打开（属性键名对不上，或事件没接线）').toBeTruthy()
+    document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true }))
+    const smartInput = await waitFor(() => document.querySelector('.quick-record .smart-input'))
+    expect(smartInput, '外壳的快速记录入口打不开').toBeTruthy()
 
-    // 这时 body 里有两个浮层（记一笔 + 快速记录），要找**面板自己那个**遮罩里的关闭键。
-    const close = panel.closest('.overlay')?.querySelector('.close')
-    expect(close, '「用一句话记」面板上找不到关闭按钮').toBeTruthy()
-    await click(close)
+    // 默认类型仍是支出：没有类型线索的输入按 /bills 的 context.preferredType 落成支出。
+    await setInput(smartInput, '买菜20元')
+    const card = await waitFor(() => document.querySelector('.quick-record .record-card'))
+    expect(card, '输入之后没有出现识别结果').toBeTruthy()
+    expect(card.querySelector('.record-head')?.textContent, '默认类型不再是支出').toContain('支出')
 
-    const stillOpen = await waitFor(() => document.querySelector('.quick-record'), 400)
-    expect(stillOpen, '点了 × 之后「用一句话记」面板没有关闭').toBe(null)
+    // 账本归属正确：从外壳入口保存的记录照样落进账本（与「记一笔」同一条 sl_expenses）。
+    // 「买菜20元」的分类需要确认（面板自己会拦），这是它本来就有的流程，不是本轮改的。
+    const confirmCategory = [...document.querySelectorAll('.quick-record .category-tip button')]
+      .find((node) => (node.textContent || '').trim() === '确认分类')
+    expect(confirmCategory, '找不到「确认分类」').toBeTruthy()
+    await click(confirmCategory)
+
+    const before = expenses.value.length
+    const save = [...document.querySelectorAll('.quick-record button')].find((node) => (node.textContent || '').trim() === '保存')
+    expect(save, '快速记录面板上找不到「保存」').toBeTruthy()
+    await click(save)
+
+    await waitFor(() => (expenses.value.length > before ? true : null))
+    expect(expenses.value.length, '快速记录没有写进账本').toBe(before + 1)
+    expect(expenses.value.at(-1), '写进账本的应是这条支出').toMatchObject({ createdFrom: 'quick-record', direction: 'expense' })
   })
 
   it('「连续记」保持弹窗打开，记完能点「完成」退出', async () => {

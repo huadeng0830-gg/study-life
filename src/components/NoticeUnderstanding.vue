@@ -9,7 +9,7 @@ import { scheduleExceptions } from '../composables/store/schedule.js'
 import { buildScheduleExceptionInputs, findScheduleProposalConflicts, scheduleProposalSummary, scheduleProposalWeekDay } from '../composables/scheduleNoticeOperations.js'
 import { isSupported as voiceSupportedByEnv, transcribe, voiceErrorMessage, VOICE_STATES } from '../composables/voiceInput.js'
 
-const props = defineProps({ open: Boolean, tasks: { type: Array, default: () => [] }, courses: { type: Array, default: () => [] } })
+const props = defineProps({ open: Boolean, tasks: { type: Array, default: () => [] }, courses: { type: Array, default: () => [] }, initialText: { type: String, default: '' } })
 const emit = defineEmits(['close', 'commit'])
 const source = ref('')
 const sourceName = ref('')
@@ -30,7 +30,8 @@ const copied = ref(false)
 // 多段粘贴：整段文本切出来的候选，逐段勾选、各自决定处理方式。
 const segments = ref([])
 const segmentOverflow = ref(0)
-const selectedSegmentIds = ref([])
+// 两级展开的勾选状态：段 → 事项。没有多事项的段用「段 id」当自己唯一那一项。
+const selectedEntryIds = ref([])
 const segmentProcess = ref({})
 const selectedScheduleCourseId = ref('')
 const scheduleConflictChoice = ref('')
@@ -57,7 +58,12 @@ const updatePreview = computed(() => selectedTask.value
   : { patch: {}, rows: [], courseUnmatched: false })
 // 段数 ≥ 2 时走多段确认页；只有 1 段时保持原单条流程不动（避免单条通知也多一层界面）
 const multiMode = computed(() => segments.value.length > 1)
-const selectedSegments = computed(() => segments.value.filter((row) => selectedSegmentIds.value.includes(row.id)))
+// 勾选粒度是「事项」：一段解析出多个事项时逐个勾，没有多事项的段就是它自己一项。
+// 于是提交条数 = selectedEntries.length，而段的选中态由它的事项推出来（单一数据源）。
+const selectedEntries = computed(() => segments.value.flatMap((row) => entriesOf(row)
+  .filter((entry) => selectedEntryIds.value.includes(entry.id))
+  .map((entry) => ({ row, item: entry.item }))))
+const allEntriesSelected = computed(() => segments.value.every((row) => entriesOf(row).every((entry) => selectedEntryIds.value.includes(entry.id))))
 const processOptions = computed(() => parsed.value?.scheduleProposal && !multiMode.value
   ? [...SEGMENT_PROCESS_OPTIONS, { key: 'schedule', label: '应用到课表' }]
   : SEGMENT_PROCESS_OPTIONS)
@@ -65,7 +71,7 @@ const processLabel = computed(() => ({ task: '创建待办', homework: '添加�
 const actionLabel = computed(() => {
   if (processKey.value === 'archive') return '仅保存通知'
   if (processKey.value === 'schedule') return '应用到课表'
-  if (multiMode.value) return selectedSegments.value.length > 1 ? `添加 ${selectedSegments.value.length} 项` : '按确认内容保存'
+  if (multiMode.value) return selectedEntries.value.length > 1 ? `添加 ${selectedEntries.value.length} 项` : '按确认内容保存'
   return selectedItems.value.length > 1 ? `添加 ${selectedItems.value.length} 项` : processLabel.value
 })
 const scheduleCourseOptions = computed(() => {
@@ -114,12 +120,15 @@ watch(() => props.open, (open) => {
     return
   }
   source.value = ''; sourceName.value = ''; parsed.value = null; matches.value = []; selectedId.value = ''; selectedItemIds.value = []
-  segments.value = []; segmentOverflow.value = 0; selectedSegmentIds.value = []; segmentProcess.value = {}
+  segments.value = []; segmentOverflow.value = 0; selectedEntryIds.value = []; segmentProcess.value = {}
   voiceState.value = VOICE_STATES.idle; listening.value = false; voiceMessage.value = ''
   ocrKind.value = 'homework'; ocrProgress.value = 0; ocrMessage.value = ''
   selectedScheduleCourseId.value = ''; scheduleConflictChoice.value = ''
   useExisting.value = false; processKey.value = 'task'; editingField.value = ''; editingAction.value = false; editingSource.value = false
   showMore.value = false; showProcessOptions.value = false; error.value = ''; clipboardMessage.value = ''
+  // initialText 来自「通知档案 → 按这条建待办」：原文已经在本机档案里，
+  // 没必要再让用户去剪贴板粘一遍。有预填就直接解析，不去读剪贴板。
+  if (props.initialText.trim()) { source.value = props.initialText; analyze(); return }
   void readClipboard()
 })
 onBeforeUnmount(() => {
@@ -136,6 +145,13 @@ async function readClipboard() {
   } catch { clipboardMessage.value = '浏览器未授权读取剪贴板，请按 Ctrl + V 粘贴通知。' }
 }
 
+/** 段 → 事项两级展开：一段解析出多个事项时逐个成为可勾选的行，否则整段就是一项。 */
+function entriesOf(row) {
+  return row.items?.length
+    ? row.items.map((item, index) => ({ id: `${row.id}::${item.id || index + 1}`, item }))
+    : [{ id: row.id, item: null }]
+}
+
 /** 段 → 界面行。切段与理解已在 noticeSegments 里分离，这里只做展示与默认值。 */
 function rowsFromCandidates(result) {
   return result.candidates.map((candidate) => {
@@ -148,6 +164,8 @@ function rowsFromCandidates(result) {
       index: candidate.index,
       text: candidate.rawText,
       parsed: candidate.parsed,
+      // 一段里解析出的多个事项：多段页面靠它把「段」再展开一级（单条页面用 parsed.items）。
+      items: Array.isArray(candidate.parsed.items) ? candidate.parsed.items : [],
       title: candidate.parsed.title || '待处理通知',
       type: candidate.parsed.type,
       summary: one.summary,
@@ -176,9 +194,9 @@ function analyze() {
     segmentOverflow.value = result.overflowCount
     // 默认全选：多粘进来的通知多半都是想要的，不默认全选等于要用户重做一遍选择。
     // 但**写入仍然只发生在 save()**，勾选只是候选状态。
-    selectedSegmentIds.value = segments.value.map((row) => row.id)
+    selectAllEntries()
     segmentProcess.value = Object.fromEntries(segments.value.map((row) => [row.id, row.recommendation.key]))
-  } catch { parsed.value = null; matches.value = []; segments.value = []; selectedSegmentIds.value = []; error.value = '解析失败，原始通知仍已保留，请修改后重试。' }
+  } catch { parsed.value = null; matches.value = []; segments.value = []; selectedEntryIds.value = []; error.value = '解析失败，原始通知仍已保留，请修改后重试。' }
 }
 
 /** 只对最终结果切段：interim 是半句话，切了等于凭空造一条（"周五" / "周五交报告"）。 */
@@ -199,10 +217,10 @@ function analyzeVoice(finalText) {
     const result = buildNoticeCandidates(text, { courses: props.courses, mode: 'voice' })
     segments.value = rowsFromCandidates(result)
     segmentOverflow.value = result.overflowCount
-    selectedSegmentIds.value = segments.value.map((row) => row.id)
+    selectAllEntries()
     segmentProcess.value = Object.fromEntries(segments.value.map((row) => [row.id, row.recommendation.key]))
     voiceMessage.value = segments.value.length > 1 ? `识别到 ${segments.value.length} 件事，请逐条确认。` : '识别完成。'
-  } catch { parsed.value = null; matches.value = []; segments.value = []; selectedSegmentIds.value = []; error.value = '解析失败，请手动输入。' }
+  } catch { parsed.value = null; matches.value = []; segments.value = []; selectedEntryIds.value = []; error.value = '解析失败，请手动输入。' }
 }
 
 function stopVoice(discard = false) {
@@ -313,11 +331,23 @@ async function readOcrImage(event) {
   }
 }
 
-function toggleSegment(id) {
-  selectedSegmentIds.value = selectedSegmentIds.value.includes(id) ? selectedSegmentIds.value.filter((value) => value !== id) : [...selectedSegmentIds.value, id]
+/** 全选/取消全选都按「项」算：段有自己的多事项时，全选就是把这些事项也选上。 */
+function allEntryIds() { return segments.value.flatMap((row) => entriesOf(row).map((entry) => entry.id)) }
+function selectAllEntries() { selectedEntryIds.value = allEntryIds() }
+function isSegmentChecked(row) { return entriesOf(row).every((entry) => selectedEntryIds.value.includes(entry.id)) }
+function isSegmentActive(row) { return entriesOf(row).some((entry) => selectedEntryIds.value.includes(entry.id)) }
+/** 点段只做「整段全选 / 整段取消」；部分选中时补全，不从"只留一项"倒推。 */
+function toggleSegment(row) {
+  const keys = entriesOf(row).map((entry) => entry.id)
+  selectedEntryIds.value = keys.every((key) => selectedEntryIds.value.includes(key))
+    ? selectedEntryIds.value.filter((key) => !keys.includes(key))
+    : [...selectedEntryIds.value, ...keys.filter((key) => !selectedEntryIds.value.includes(key))]
+}
+function toggleEntry(id) {
+  selectedEntryIds.value = selectedEntryIds.value.includes(id) ? selectedEntryIds.value.filter((value) => value !== id) : [...selectedEntryIds.value, id]
 }
 function toggleAllSegments() {
-  selectedSegmentIds.value = selectedSegmentIds.value.length === segments.value.length ? [] : segments.value.map((row) => row.id)
+  selectedEntryIds.value = allEntriesSelected.value ? [] : allEntryIds()
 }
 
 function setType(type) {
@@ -426,28 +456,35 @@ function payloadFor(item) {
   return { title, course: item.course || parsed.value.course || '', dueDate: item.dueDate ?? parsed.value.dueDate ?? '', dueTime: item.dueTime ?? parsed.value.dueTime ?? '', date: item.dueDate ?? parsed.value.dueDate ?? '', time: item.dueTime ?? parsed.value.dueTime ?? '', endTime: item.endTime ?? parsed.value.endTime ?? '', location: item.location || parsed.value.location || '', priority: parsed.value.priority || 'normal', note: noteParts.filter(Boolean).join('；'), content: parsed.value.rawText, rawText: parsed.value.rawText, sourceText: parsed.value.rawText, normalizedText: parsed.value.normalizedText, amount: parsed.value.amount || '', paymentPlatform: parsed.value.paymentPlatform || '', updatedFromNoticeAt: new Date().toISOString(), noticeType: parsed.value.type }
 }
 /**
- * 一段 → 一条待办/日程数据。
+ * 一段（或一段里的一个事项）→ 一条待办/日程数据。
  *
  * **必须用段自己的 parsed**，不能用整段的 parsed：整段里含另外几条通知的日期，
  * 拿它当回退值会让每一条都带上别人的截止时间（实测过：5 条里 4 条日期相同）。
  * 缺字段时宁可留空，由用户在确认页补，也不要拿别段的值凑。
+ *
+ * `item` 为 null 时行为与两级展开之前**完全一致**（整段一条）；传了事项时，
+ * 事项自己的标题/日期/时间/地点/课程优先，段解析只做回退 —— 与单条视图的
+ * `payloadFor(item)` 同一套口径，区别只在于回退值来自**本段**而不是整段粘贴文本。
  */
-function segmentPayload(row) {
+function segmentPayload(row, item = null) {
   const one = row.parsed
   const key = segmentProcess.value[row.id] || row.recommendation.key
-  const title = String(key === 'event' ? (one.title || row.title) : (one.actionText || one.title || row.title) || '待处理通知').trim()
+  const title = String(key === 'event'
+    ? (item?.title || one.title || row.title)
+    : (item?.title || one.actionText || one.title || row.title) || '待处理通知').trim()
+  const location = item?.location || one.location
   const noteParts = [one.note?.trim() || '']
-  if (one.location?.trim() && !noteParts[0].includes(one.location.trim())) noteParts.push(`地点：${one.location.trim()}`)
+  if (location?.trim() && !noteParts[0].includes(location.trim())) noteParts.push(`地点：${location.trim()}`)
   if (one.reminder?.trim() && !noteParts.join('').includes(one.reminder.trim())) noteParts.push(`提醒：${one.reminder.trim()}`)
   return {
     title,
-    course: one.course || '',
-    dueDate: one.dueDate ?? '',
-    dueTime: one.dueTime ?? '',
-    date: one.dueDate ?? '',
-    time: one.dueTime ?? '',
-    endTime: one.endTime ?? '',
-    location: one.location || '',
+    course: item?.course || one.course || '',
+    dueDate: item?.dueDate ?? one.dueDate ?? '',
+    dueTime: item?.dueTime ?? one.dueTime ?? '',
+    date: item?.dueDate ?? one.dueDate ?? '',
+    time: item?.dueTime ?? one.dueTime ?? '',
+    endTime: item?.endTime ?? one.endTime ?? '',
+    location: location || '',
     priority: one.priority || 'normal',
     note: noteParts.filter(Boolean).join('；'),
     content: row.text,
@@ -458,26 +495,31 @@ function segmentPayload(row) {
     paymentPlatform: one.paymentPlatform || '',
     updatedFromNoticeAt: new Date().toISOString(),
     noticeType: one.type,
+    // 一段里的多个事项共用这一段的原文：下游 archiveImportedNotices 按原文去重，
+    // 所以「一段 = 一条通知档案」，不会因为事项多就重复入档。
     __notice: noticeRecordFor(one, row.text),
   }
 }
 
 /** 多段保存按目标分组，让待办/作业与日程分别提交。 */
 function saveSegments() {
-  const rows = selectedSegments.value
-  if (!rows.length) { error.value = '至少保留一条需要处理的通知。'; return }
+  const entries = selectedEntries.value
+  if (!entries.length) { error.value = '至少保留一条需要处理的通知。'; return }
   const groups = new Map()
-  for (const row of rows) {
+  for (const { row, item } of entries) {
     const key = segmentProcess.value[row.id] || row.recommendation.key
     if (!groups.has(key)) groups.set(key, [])
-    groups.get(key).push(row)
+    groups.get(key).push({ row, item })
   }
   for (const [key, group] of groups) {
     if (key === 'archive') {
-      emit('commit', { type: 'archive', items: group.map((row) => noticeRecordFor(row.parsed, row.text)), title: group[0].title })
+      // 归档粒度是「通知原文」而不是事项：同一段只入档一次（下游 saveNotice 不按原文去重，
+      // 这里按事项展开会真的写出多条重复档案）。
+      const rows = [...new Map(group.map((entry) => [entry.row.id, entry.row])).values()]
+      emit('commit', { type: 'archive', items: rows.map((row) => noticeRecordFor(row.parsed, row.text)), title: rows[0].title })
       continue
     }
-    const data = group.map((row) => segmentPayload(row))
+    const data = group.map(({ row, item }) => segmentPayload(row, item))
     if (key === 'event') { emit('commit', { type: 'event', items: data, title: data[0].title }); continue }
     emit('commit', { type: 'create', kind: key === 'homework' ? 'homework' : 'todo', items: data, title: data[0].title, data: data[0] })
   }
@@ -558,25 +600,33 @@ function save() {
       <section v-if="multiMode" class="segments-card">
         <div class="subhead">
           <div><span class="section-kicker">多条通知</span><h3>识别到 {{ segments.length }} 条</h3></div>
-          <button type="button" class="link-btn" @click="toggleAllSegments">{{ selectedSegments.length === segments.length ? '取消全选' : '全选' }}</button>
+          <button type="button" class="link-btn" @click="toggleAllSegments">{{ allEntriesSelected ? '取消全选' : '全选' }}</button>
         </div>
         <p v-if="segmentOverflow" class="clipboard-message" role="alert">只切出前 {{ MAX_NOTICE_SEGMENTS }} 段，还有 {{ segmentOverflow }} 段没显示，请分批粘贴。原文仍完整保留在下方「查看原通知」。</p>
-        <div v-for="row in segments" :key="row.id" class="segment-row" :class="{ selected: selectedSegmentIds.includes(row.id) }">
-          <button type="button" class="segment-pick" :aria-pressed="selectedSegmentIds.includes(row.id)" @click="toggleSegment(row.id)">
-            <span class="item-check" aria-hidden="true">{{ selectedSegmentIds.includes(row.id) ? '✓' : '' }}</span>
+        <div v-for="row in segments" :key="row.id" class="segment-row" :class="{ selected: isSegmentActive(row) }">
+          <button type="button" class="segment-pick" :aria-pressed="isSegmentChecked(row)" @click="toggleSegment(row)">
+            <span class="item-check" aria-hidden="true">{{ isSegmentChecked(row) ? '✓' : '' }}</span>
             <span class="segment-text"><b>{{ row.title }}</b><small>{{ row.parsed.dateText || row.parsed.dueDate || '时间未识别' }}{{ row.parsed.dueTime ? ` ${row.parsed.dueTime}` : '' }}{{ row.parsed.location ? ` · ${row.parsed.location}` : '' }} · {{ row.type }}</small></span>
           </button>
           <!-- 每段各自选处理方式，所以这里必须给读屏一个能区分的 label（光有 option 文本在长列表里没上下文）。 -->
           <label class="segment-kind">转为<select :aria-label="`第 ${row.index + 1} 条通知的处理方式`" v-model="segmentProcess[row.id]"><option v-for="option in SEGMENT_PROCESS_OPTIONS" :key="option.key" :value="option.key">{{ option.label }}</option></select></label>
+          <!-- 一段里解析出多个事项时再展开一级：勾选与保存都以事项为单位，
+               段这一级只负责「整段全选 / 整段取消」，选中态由事项推出来。 -->
+          <div v-if="row.items.length > 1" class="segment-items">
+            <button v-for="entry in entriesOf(row)" :key="entry.id" type="button" class="item-row" :class="{ selected: selectedEntryIds.includes(entry.id) }" :aria-pressed="selectedEntryIds.includes(entry.id)" @click="toggleEntry(entry.id)">
+              <span class="item-check" aria-hidden="true">{{ selectedEntryIds.includes(entry.id) ? '✓' : '' }}</span>
+              <span><b>{{ entry.item.title }}</b><small>{{ entry.item.dateRange || dateText(entry.item.dueDate) || '时间未识别' }}{{ entry.item.dueTime ? ` ${entry.item.dueTime}` : '' }}{{ entry.item.location ? ` · ${entry.item.location}` : '' }}</small></span>
+            </button>
+          </div>
         </div>
-        <p class="more-tip">每条都按各自的处理方式保存；不需要的取消勾选。</p>
+        <p class="more-tip">每条都按各自的处理方式保存；一段里有多个事项时可以逐项取消，不需要的整段也可取消。</p>
         <details class="raw-card"><summary>查看完整原文 <span>▾</span></summary><div class="raw-content"><pre>{{ source }}</pre><div class="raw-actions"><button type="button" class="link-btn" @click="editingSource = true">编辑原文并重新识别</button></div></div></details>
       </section>
       <p v-if="ocrMessage && parsed" class="ocr-message" role="status">{{ ocrMessage }}</p>
 
       <template v-if="parsed && understanding && !multiMode">
         <section class="understanding-card">
-          <div class="type-line"><span class="section-kicker">识别为</span><div class="type-chips" role="list" aria-label="通知类型"><button v-for="option in NOTICE_TYPE_OPTIONS" :key="option.value" type="button" class="type-chip" :class="{ active: parsed.type === option.value }" @click="setType(option.value)">{{ option.icon }} {{ option.label }}</button></div></div>
+          <div class="type-line"><span class="section-kicker">识别为</span><div class="type-chips" role="group" aria-label="通知类型"><button v-for="option in NOTICE_TYPE_OPTIONS" :key="option.value" type="button" class="type-chip" :class="{ active: parsed.type === option.value }" :aria-pressed="parsed.type === option.value" @click="setType(option.value)">{{ option.icon }} {{ option.label }}</button></div></div>
           <div class="confidence" :class="parsed.confidenceLevel">{{ parsed.confidenceLevel === 'high' ? '理解度较高' : parsed.confidenceLevel === 'medium' ? '建议快速确认' : '需要你确认' }}</div>
           <h2>{{ parsed.title }}</h2><p class="summary">{{ understanding.summary }}</p>
           <div class="action-card" :class="{ passive: !understanding.hasAction }"><div class="action-heading"><span class="action-label">你需要做什么</span><button type="button" class="action-edit" @click="beginActionEdit">修改</button></div><input v-if="editingAction" v-model="parsed.actionText" class="action-input" aria-label="你需要做什么" @blur="finishActionEdit" @keydown.enter="finishActionEdit" /><strong v-else>{{ understanding.actionText }}</strong><small v-if="!understanding.hasAction">这是一条信息型通知，不会自动生成没有意义的待办。</small></div>
@@ -584,7 +634,7 @@ function save() {
           <div v-if="understanding.warnings.length" class="warnings"><p v-for="warning in understanding.warnings" :key="warning">⚠ {{ warning }}</p><p v-if="parsed.dateCandidates?.filter((item) => !item.isPublication).length > 1" class="candidate-dates">原文日期：{{ parsed.dateCandidates.filter((item) => !item.isPublication).map((item) => item.raw).join('、') }}</p></div>
         </section>
 
-        <section v-if="parsed.items?.length" class="items-card"><div class="subhead"><div><span class="section-kicker">多事项</span><h3>识别到 {{ parsed.items.length }} 个事项</h3></div><button type="button" class="link-btn" @click="selectedItemIds = selectedItemIds.length === parsed.items.length ? [] : parsed.items.map((item) => item.id)">{{ selectedItemIds.length === parsed.items.length ? '取消全选' : '全选' }}</button></div><button v-for="item in parsed.items" :key="item.id" type="button" class="item-row" :class="{ selected: selectedItemIds.includes(item.id) }" @click="toggleItem(item.id)"><span class="item-check">{{ selectedItemIds.includes(item.id) ? '✓' : '' }}</span><span><b>{{ item.title }}</b><small>{{ item.dateRange || dateText(item.dueDate) || '时间未识别' }}{{ item.dueTime ? ` ${item.dueTime}` : '' }}{{ item.location ? ` · ${item.location}` : '' }}</small></span></button></section>
+        <section v-if="parsed.items?.length" class="items-card"><div class="subhead"><div><span class="section-kicker">多事项</span><h3>识别到 {{ parsed.items.length }} 个事项</h3></div><button type="button" class="link-btn" @click="selectedItemIds = selectedItemIds.length === parsed.items.length ? [] : parsed.items.map((item) => item.id)">{{ selectedItemIds.length === parsed.items.length ? '取消全选' : '全选' }}</button></div><button v-for="item in parsed.items" :key="item.id" type="button" class="item-row" :class="{ selected: selectedItemIds.includes(item.id) }" :aria-pressed="selectedItemIds.includes(item.id)" @click="toggleItem(item.id)"><span class="item-check">{{ selectedItemIds.includes(item.id) ? '✓' : '' }}</span><span><b>{{ item.title }}</b><small>{{ item.dateRange || dateText(item.dueDate) || '时间未识别' }}{{ item.dueTime ? ` ${item.dueTime}` : '' }}{{ item.location ? ` · ${item.location}` : '' }}</small></span></button></section>
 
         <section class="process-card"><div class="subhead"><div><span class="section-kicker">推荐处理</span><h3>{{ processLabel }}</h3></div><span class="recommend-mark">✓</span></div><p>{{ understanding.recommendation.reason }}</p><button type="button" class="change-process" :aria-expanded="showProcessOptions" @click="showProcessOptions = !showProcessOptions">{{ showProcessOptions ? '收起其他方式' : '更改处理方式' }}⌄</button><div v-if="showProcessOptions" class="process-options"><label v-for="option in processOptions" :key="option.key"><input v-model="processKey" type="radio" :value="option.key" />{{ option.label }}</label></div></section>
 
@@ -633,7 +683,7 @@ function save() {
 .voice-row{display:flex;align-items:center;gap:9px;margin-top:10px;flex-wrap:wrap}.voice-status{flex:1 1 180px;color:var(--muted);font-size:var(--fs-11);line-height:1.5}
 .segments-card{padding:14px}.segment-row{display:flex;align-items:center;gap:9px;flex-wrap:wrap;margin-top:7px;padding:6px 6px 6px 9px;border:1px solid transparent;border-radius:var(--radius-9);background:var(--bg)}.segment-row.selected{border-color:var(--primary);background:var(--primary-soft)}
 .segment-pick{display:flex;align-items:center;gap:9px;flex:1 1 200px;min-width:0;padding:0;border:0;background:none;text-align:left}.segment-text{min-width:0}.segment-text b,.segment-text small{display:block}.segment-text b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:var(--fs-12)}.segment-text small{margin-top:2px;color:var(--muted);font-size:var(--fs-10)}
-.segment-kind{display:flex;align-items:center;gap:5px;color:var(--muted);font-size:var(--fs-11)}.segment-kind select{max-width:130px;padding:5px 6px;border:1px solid var(--border);border-radius:var(--radius-8);background:var(--card);color:var(--text);font-size:var(--fs-11)}.paste-card{padding:16px}.section-kicker{color:var(--primary);font-size:var(--fs-10);font-weight:var(--fw-900);letter-spacing:.1em}.paste-card textarea{width:100%;min-height:150px;margin-top:8px;line-height:1.65;resize:vertical}.privacy-note{display:flex;gap:9px;margin-top:10px;padding:10px;border-radius:var(--radius-9);background:color-mix(in srgb, var(--success) 10%, var(--card));color:var(--success)}.privacy-note span{font-size:var(--fs-20)}.privacy-note p{font-size:var(--fs-11);line-height:1.5}.paste-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:12px}.clipboard-message{margin-top:7px;color:var(--warning);font-size:var(--fs-11)}.understanding-card{position:relative;padding:17px}.type-line{display:flex;align-items:flex-start;gap:8px}.type-chips{display:flex;flex-wrap:wrap;gap:5px}.type-chip{padding:5px 8px;border:1px solid var(--border);border-radius:var(--radius-pill);background:var(--bg);color:var(--muted);font-size:var(--fs-11)}.type-chip.active{border-color:var(--primary);background:var(--primary-soft);color:var(--primary);font-weight:var(--fw-800)}.confidence{position:absolute;top:16px;right:17px;font-size:var(--fs-10)}.confidence.high{color:var(--success)}.confidence.medium{color:var(--warning)}.confidence.low{color:var(--danger)}h2{margin:17px 0 4px;font-size:var(--fs-22);line-height:1.25}.summary{margin:0;color:var(--muted);font-size:var(--fs-12);line-height:1.55}.action-card{display:flex;flex-direction:column;gap:4px;margin-top:16px;padding:13px;border-radius:var(--radius-11);background:var(--primary-soft)}.action-card.passive{background:var(--bg)}.action-label{color:var(--primary);font-size:var(--fs-10);font-weight:var(--fw-900);letter-spacing:.08em}.action-card strong{font-size:var(--fs-16);line-height:1.4}.action-card small{color:var(--muted);font-size:var(--fs-11)}.facts{display:flex;flex-wrap:wrap;gap:7px;margin-top:12px}.fact-wrap{flex:1 1 200px;min-width:0}.fact-row,.fact-editor{display:flex;align-items:center;gap:10px;width:100%;min-height:40px;padding:8px 10px;border-radius:var(--radius-9);background:var(--bg);text-align:left}.fact-row{border:1px solid transparent}.fact-row:hover{border-color:var(--primary)}.fact-row span,.fact-editor span{flex:0 0 auto;color:var(--muted);font-size:var(--fs-11)}.fact-row b{overflow:hidden;color:var(--text);font-size:var(--fs-13);text-overflow:ellipsis;white-space:nowrap}.fact-row i{margin-left:auto;color:var(--muted);font-size:var(--fs-11);font-style:normal}.fact-editor input{min-width:0;flex:1;padding:5px;background:var(--card)}.warnings{margin-top:10px;padding:8px 10px;border-radius:var(--radius-8);background:color-mix(in srgb, var(--warning) 12%, var(--card));color:var(--warning);font-size:var(--fs-11);line-height:1.5}.warnings p{margin:0}.candidate-dates{color:var(--muted)}.items-card,.process-card,.match-box{padding:14px}.subhead{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}.subhead h3{margin-top:3px;font-size:var(--fs-14)}.item-row{display:flex;align-items:center;gap:9px;width:100%;padding:9px;margin-top:7px;border:1px solid transparent;border-radius:var(--radius-9);background:var(--bg);text-align:left}.item-row.selected{border-color:var(--primary);background:var(--primary-soft)}.item-check{display:grid;place-items:center;flex:0 0 20px;width:20px;height:20px;border:1px solid var(--border);border-radius:var(--radius-6);background:var(--card);color:var(--primary);font-weight:var(--fw-900)}.item-row b,.item-row small{display:block}.item-row b{font-size:var(--fs-12)}.item-row small{margin-top:2px;color:var(--muted);font-size:var(--fs-10)}.recommend-mark{color:var(--primary);font-weight:var(--fw-900)}.process-card>p{margin:4px 0 8px;color:var(--muted);font-size:var(--fs-11)}.change-process{padding:0;border:0;background:none;color:var(--primary);font-size:var(--fs-11)}.process-options{display:flex;flex-wrap:wrap;gap:10px;margin-top:11px;padding-top:10px;border-top:1px solid var(--border)}.process-options label,.update-choice{display:flex;align-items:center;gap:5px;color:var(--muted);font-size:var(--fs-11)}.match-box{border-color:color-mix(in srgb, var(--warning) 35%, var(--border));background:color-mix(in srgb, var(--warning) 8%, var(--card))}.match-row{display:flex;gap:7px;align-items:center;margin-top:7px;padding:8px;border-radius:var(--radius-8);background:var(--card)}.match-row span{display:flex;flex-direction:column;gap:2px}.match-row b{font-size:var(--fs-11)}.match-row small{color:var(--muted);font-size:var(--fs-10)}.update-choice{margin-top:9px;color:var(--text)}.diff-list{display:flex;flex-direction:column;gap:4px;margin-top:8px;padding:8px;border-radius:var(--radius-7);background:var(--card);font-size:var(--fs-10)}.diff-list div{display:grid;grid-template-columns:54px minmax(0,1fr) 15px minmax(0,1fr);gap:5px}.diff-list span,.diff-list strong{min-width:0;overflow-wrap:anywhere}.diff-list span{color:var(--muted);text-decoration:line-through}.diff-list i{font-style:normal;color:var(--muted)}.diff-list strong{color:var(--primary)}.update-hint,.update-warning{margin:0;line-height:1.5}.update-hint{color:var(--muted)}.update-warning{color:var(--warning)}summary{cursor:pointer;list-style:none}summary::-webkit-details-marker{display:none}.more-card,.raw-card{padding:12px 14px}.more-card summary,.raw-card summary{display:flex;justify-content:space-between;color:var(--text);font-size:var(--fs-12);font-weight:var(--fw-800)}.more-card summary span,.raw-card summary span{color:var(--muted);font-size:var(--fs-10);font-weight:var(--fw-400)}.more-content,.raw-content{padding-top:10px}.existing-more{display:flex;flex-direction:column;gap:5px}.existing-more button{border:0;background:none;color:var(--muted);font-size:var(--fs-11);text-align:left}.add-fields{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:7px;color:var(--muted);font-size:var(--fs-11)}.add-fields button{padding:4px 7px;border:1px solid var(--border);border-radius:var(--radius-6);background:var(--card);color:var(--primary);font-size:var(--fs-10)}.extra-editor{margin-top:8px}.extra-editor label{display:flex;flex-direction:column;gap:5px;color:var(--muted);font-size:var(--fs-11)}.extra-editor input,.extra-editor textarea{width:100%;background:var(--card)}.more-tip{margin:10px 0 0;color:var(--muted);font-size:var(--fs-10)}.raw-content pre{max-height:180px;margin:0;overflow:auto;white-space:pre-wrap;color:var(--muted);font-family:inherit;font-size:var(--fs-11);line-height:1.6}.raw-actions{display:flex;gap:12px;margin-top:8px}.link-btn{padding:0;border:0;background:none;color:var(--primary);font-size:var(--fs-11)}.error{margin:0;color:var(--danger);font-size:var(--fs-12)}.notice-footer{display:flex;justify-content:flex-end;gap:8px}.btn{min-height:36px}
+.segment-items{flex:1 1 100%;padding-left:20px}.segment-kind{display:flex;align-items:center;gap:5px;color:var(--muted);font-size:var(--fs-11)}.segment-kind select{max-width:130px;padding:5px 6px;border:1px solid var(--border);border-radius:var(--radius-8);background:var(--card);color:var(--text);font-size:var(--fs-11)}.paste-card{padding:16px}.section-kicker{color:var(--primary);font-size:var(--fs-10);font-weight:var(--fw-900);letter-spacing:.1em}.paste-card textarea{width:100%;min-height:150px;margin-top:8px;line-height:1.65;resize:vertical}.privacy-note{display:flex;gap:9px;margin-top:10px;padding:10px;border-radius:var(--radius-9);background:color-mix(in srgb, var(--success) 10%, var(--card));color:var(--success)}.privacy-note span{font-size:var(--fs-20)}.privacy-note p{font-size:var(--fs-11);line-height:1.5}.paste-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:12px}.clipboard-message{margin-top:7px;color:var(--warning);font-size:var(--fs-11)}.understanding-card{position:relative;padding:17px}.type-line{display:flex;align-items:flex-start;gap:8px}.type-chips{display:flex;flex-wrap:wrap;gap:5px}.type-chip{padding:5px 8px;border:1px solid var(--border);border-radius:var(--radius-pill);background:var(--bg);color:var(--muted);font-size:var(--fs-11)}.type-chip.active{border-color:var(--primary);background:var(--primary-soft);color:var(--primary);font-weight:var(--fw-800)}.confidence{position:absolute;top:16px;right:17px;font-size:var(--fs-10)}.confidence.high{color:var(--success)}.confidence.medium{color:var(--warning)}.confidence.low{color:var(--danger)}h2{margin:17px 0 4px;font-size:var(--fs-22);line-height:1.25}.summary{margin:0;color:var(--muted);font-size:var(--fs-12);line-height:1.55}.action-card{display:flex;flex-direction:column;gap:4px;margin-top:16px;padding:13px;border-radius:var(--radius-11);background:var(--primary-soft)}.action-card.passive{background:var(--bg)}.action-label{color:var(--primary);font-size:var(--fs-10);font-weight:var(--fw-900);letter-spacing:.08em}.action-card strong{font-size:var(--fs-16);line-height:1.4}.action-card small{color:var(--muted);font-size:var(--fs-11)}.facts{display:flex;flex-wrap:wrap;gap:7px;margin-top:12px}.fact-wrap{flex:1 1 200px;min-width:0}.fact-row,.fact-editor{display:flex;align-items:center;gap:10px;width:100%;min-height:40px;padding:8px 10px;border-radius:var(--radius-9);background:var(--bg);text-align:left}.fact-row{border:1px solid transparent}.fact-row:hover{border-color:var(--primary)}.fact-row span,.fact-editor span{flex:0 0 auto;color:var(--muted);font-size:var(--fs-11)}.fact-row b{overflow:hidden;color:var(--text);font-size:var(--fs-13);text-overflow:ellipsis;white-space:nowrap}.fact-row i{margin-left:auto;color:var(--muted);font-size:var(--fs-11);font-style:normal}.fact-editor input{min-width:0;flex:1;padding:5px;background:var(--card)}.warnings{margin-top:10px;padding:8px 10px;border-radius:var(--radius-8);background:color-mix(in srgb, var(--warning) 12%, var(--card));color:var(--warning);font-size:var(--fs-11);line-height:1.5}.warnings p{margin:0}.candidate-dates{color:var(--muted)}.items-card,.process-card,.match-box{padding:14px}.subhead{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}.subhead h3{margin-top:3px;font-size:var(--fs-14)}.item-row{display:flex;align-items:center;gap:9px;width:100%;padding:9px;margin-top:7px;border:1px solid transparent;border-radius:var(--radius-9);background:var(--bg);text-align:left}.item-row.selected{border-color:var(--primary);background:var(--primary-soft)}.item-check{display:grid;place-items:center;flex:0 0 20px;width:20px;height:20px;border:1px solid var(--border);border-radius:var(--radius-6);background:var(--card);color:var(--primary);font-weight:var(--fw-900)}.item-row b,.item-row small{display:block}.item-row b{font-size:var(--fs-12)}.item-row small{margin-top:2px;color:var(--muted);font-size:var(--fs-10)}.recommend-mark{color:var(--primary);font-weight:var(--fw-900)}.process-card>p{margin:4px 0 8px;color:var(--muted);font-size:var(--fs-11)}.change-process{padding:0;border:0;background:none;color:var(--primary);font-size:var(--fs-11)}.process-options{display:flex;flex-wrap:wrap;gap:10px;margin-top:11px;padding-top:10px;border-top:1px solid var(--border)}.process-options label,.update-choice{display:flex;align-items:center;gap:5px;color:var(--muted);font-size:var(--fs-11)}.match-box{border-color:color-mix(in srgb, var(--warning) 35%, var(--border));background:color-mix(in srgb, var(--warning) 8%, var(--card))}.match-row{display:flex;gap:7px;align-items:center;margin-top:7px;padding:8px;border-radius:var(--radius-8);background:var(--card)}.match-row span{display:flex;flex-direction:column;gap:2px}.match-row b{font-size:var(--fs-11)}.match-row small{color:var(--muted);font-size:var(--fs-10)}.update-choice{margin-top:9px;color:var(--text)}.diff-list{display:flex;flex-direction:column;gap:4px;margin-top:8px;padding:8px;border-radius:var(--radius-7);background:var(--card);font-size:var(--fs-10)}.diff-list div{display:grid;grid-template-columns:54px minmax(0,1fr) 15px minmax(0,1fr);gap:5px}.diff-list span,.diff-list strong{min-width:0;overflow-wrap:anywhere}.diff-list span{color:var(--muted);text-decoration:line-through}.diff-list i{font-style:normal;color:var(--muted)}.diff-list strong{color:var(--primary)}.update-hint,.update-warning{margin:0;line-height:1.5}.update-hint{color:var(--muted)}.update-warning{color:var(--warning)}summary{cursor:pointer;list-style:none}summary::-webkit-details-marker{display:none}.more-card,.raw-card{padding:12px 14px}.more-card summary,.raw-card summary{display:flex;justify-content:space-between;color:var(--text);font-size:var(--fs-12);font-weight:var(--fw-800)}.more-card summary span,.raw-card summary span{color:var(--muted);font-size:var(--fs-10);font-weight:var(--fw-400)}.more-content,.raw-content{padding-top:10px}.existing-more{display:flex;flex-direction:column;gap:5px}.existing-more button{border:0;background:none;color:var(--muted);font-size:var(--fs-11);text-align:left}.add-fields{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:7px;color:var(--muted);font-size:var(--fs-11)}.add-fields button{padding:4px 7px;border:1px solid var(--border);border-radius:var(--radius-6);background:var(--card);color:var(--primary);font-size:var(--fs-10)}.extra-editor{margin-top:8px}.extra-editor label{display:flex;flex-direction:column;gap:5px;color:var(--muted);font-size:var(--fs-11)}.extra-editor input,.extra-editor textarea{width:100%;background:var(--card)}.more-tip{margin:10px 0 0;color:var(--muted);font-size:var(--fs-10)}.raw-content pre{max-height:180px;margin:0;overflow:auto;white-space:pre-wrap;color:var(--muted);font-family:inherit;font-size:var(--fs-11);line-height:1.6}.raw-actions{display:flex;gap:12px;margin-top:8px}.link-btn{padding:0;border:0;background:none;color:var(--primary);font-size:var(--fs-11)}.error{margin:0;color:var(--danger);font-size:var(--fs-12)}.notice-footer{display:flex;justify-content:flex-end;gap:8px}.btn{min-height:36px}
 @media(max-width:520px){.notice-shell{gap:9px}.segment-row{padding:7px}.segment-pick{flex-basis:100%}.segment-kind select{flex:1;max-width:none}.understanding-card{padding:14px}.confidence{position:static;margin-top:8px}.type-line{display:block}.type-chips{margin-top:7px}h2{font-size:var(--fs-20);margin-top:13px}.action-card{margin-top:13px}.facts{display:block}.fact-wrap{margin-top:6px}.notice-footer{justify-content:stretch}.notice-footer .btn{flex:1}.paste-card textarea{min-height:120px}.diff-list div{grid-template-columns:48px minmax(0,1fr) 12px minmax(0,1fr);gap:4px}}
 .action-heading{display:flex;justify-content:space-between;align-items:center}.action-edit{padding:0;border:0;background:none;color:var(--primary);font-size:var(--fs-11)}.action-input{width:100%;font-size:var(--fs-15);font-weight:var(--fw-800);background:var(--card)}
 .schedule-preview{display:flex;flex-direction:column;gap:10px;padding:14px;border-color:color-mix(in srgb, var(--primary) 35%, var(--border));background:color-mix(in srgb, var(--primary) 5%, var(--card))}.schedule-preview>label,.schedule-fields label{display:flex;flex-direction:column;gap:5px;color:var(--muted);font-size:var(--fs-11)}.schedule-preview select,.schedule-preview input{min-width:0;min-height:38px;padding:7px 9px;border:1px solid var(--border);border-radius:var(--radius-8);background:var(--card);color:var(--text);font:inherit}.schedule-fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}.schedule-fields .schedule-location{grid-column:1/-1}.schedule-hint{margin:0;color:var(--muted);font-size:var(--fs-11);line-height:1.5}.schedule-conflicts{display:flex;flex-direction:column;gap:7px;padding:10px;border-radius:var(--radius-8);background:color-mix(in srgb, var(--warning) 10%, var(--card));color:var(--warning);font-size:var(--fs-11)}.schedule-conflicts p{margin:0;overflow-wrap:anywhere}.schedule-conflicts .schedule-conflict-warning{color:var(--text);font-weight:600}.schedule-conflicts label{display:flex;align-items:center;gap:7px;min-height:36px;color:var(--text)}

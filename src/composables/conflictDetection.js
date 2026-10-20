@@ -1,6 +1,5 @@
-import { currentTimes, periodIndex } from './store/timeConfig.js'
-import { courseInWeek } from './store/schedule.js'
 import { isActiveEntity } from './domain/state.js'
+import { hmText } from '../utils/formatters.js'
 import { taskOccupiedRanges } from './tasks/taskTimePlan'
 import { policyDateTime } from './settingsPolicy.js'
 
@@ -36,54 +35,6 @@ export function detectTimePlanConflicts(newItem, existingItems = [], itemType = 
 /** @typedef {{ hasConflicts: boolean, count: number, byType: Record<string, number>, message: string }} ConflictSummary */
 
 /**
- * 取某个「节次 id」对应的起止分钟数。
- *
- * 【这里原本整体是坏的】store/timeConfig.js 导出的 currentTimes / periodIndex /
- * currentCampusId 都是**普通函数**，不是 ref，原代码却当 ref 用
- * （`currentCampusId.value`、`periodIndex.value[period]`、`currentTimes.value[campusId]`）——
- * 函数没有 .value，于是 `undefined[period]` 直接抛 TypeError。
- * 而且形状也不对：currentTimes() 返回的是**按节次顺序排好的数组**
- * [{start,end}, ...]，不是 `object[campusId].periods[periodId]`。
- *
- * 之前没人发现，是因为课程冲突这一整条链路根本没有调用方（只有
- * detectTaskEventConflicts 接进了界面）。等课程编辑器真的用它时才会炸，
- * 所以这里一次性把取值方式和形状都对齐。
- *
- * @param {string} period 节次 id（如 timeConfig.periods[i].id）
- * @returns {TimeRange}
- */
-function periodToMinutes(period) {
-  const index = periodIndex(period)
-  if (index < 0) return { start: 0, end: 0 }
-  const row = currentTimes()[index]
-  if (!row) return { start: 0, end: 0 }
-  const toMinutes = (value) => {
-    const match = String(value || '').match(/^(\d{1,2}):(\d{2})$/)
-    if (!match) return 0
-    const hours = Number(match[1]); const minutes = Number(match[2])
-    return hours <= 23 && minutes <= 59 ? hours * 60 + minutes : 0
-  }
-  return { start: toMinutes(row.start), end: toMinutes(row.end) }
-}
-
-/**
- * @param {Course} course
- * @returns {TimeRange|null}
- */
-function getCourseTimeRange(course) {
-  // 这里原本有一行 `scheduleDateContext(dateForWeekDay(week, course.day))`，返回值被直接
-  // 丢弃，旁边还留着"就算把上面的 .value 修好也拿不到值"的注释——但 scheduleDateContext
-  // 是**普通函数**、本来就没有 .value，那条路是走不通的。两次调用都没有任何副作用，
-  // 属于死代码，连同误导性的注释一起删掉。
-  // 真正生效的是下面这段：课程上存的是 start / end 两个节次 id，不是 startPeriod / endPeriod
-  // （见 domain/commands.js 的 createCourse）。
-  const start = periodToMinutes(course.start)
-  const end = periodToMinutes(course.end)
-  if (start.start === 0 && end.end === 0) return null
-  return { start: start.start, end: end.end }
-}
-
-/**
  * @param {TimeRange|null} range1
  * @param {TimeRange|null} range2
  * @returns {boolean}
@@ -91,63 +42,6 @@ function getCourseTimeRange(course) {
 function timeOverlap(range1, range2) {
   if (!range1 || !range2) return false
   return range1.start < range2.end && range2.start < range1.end
-}
-
-/**
- * @param {number} courseDay
- * @param {number} targetDay
- * @returns {boolean}
- */
-function dayMatches(courseDay, targetDay) {
-  return courseDay === targetDay
-}
-
-/**
- * @param {Course} course
- * @param {number} week
- * @returns {boolean}
- */
-function weekMatches(course, week) {
-  return courseInWeek(course, week)
-}
-
-/**
- * @param {Course} newCourse
- * @param {Course[]} [existingCourses=[]]
- * @param {number|null} [targetWeek=null]
- * @returns {CourseConflict[]}
- */
-export function detectCourseConflicts(newCourse, existingCourses = [], targetWeek = null) {
-  if (!newCourse || newCourse.day === undefined || newCourse.day === null || !newCourse.start || !newCourse.end) return []
-  const conflicts = []
-  const checkWeek = targetWeek ?? 1
-
-  for (const course of existingCourses) {
-    if (!isActiveEntity(course)) continue
-    if (course.id === newCourse.id) continue
-    if (!dayMatches(course.day, newCourse.day)) continue
-    if (!weekMatches(course, checkWeek)) continue
-    if (!weekMatches(newCourse, checkWeek)) continue
-
-    const existingRange = getCourseTimeRange(course)
-    const newRange = getCourseTimeRange(newCourse)
-
-    if (timeOverlap(existingRange, newRange)) {
-      conflicts.push({
-        type: 'course-course',
-        entityId: course.id,
-        entityName: course.name,
-        entityType: 'Course',
-        existing: course,
-        new: newCourse,
-        week: checkWeek,
-        day: course.day,
-        timeRange: { start: Math.max(existingRange.start, newRange.start), end: Math.min(existingRange.end, newRange.end) },
-        message: `与「${course.name}」时间冲突（第${checkWeek}周 周${'一二三四五六日'[course.day]} ${existingRange.start}-${existingRange.end}节）`
-      })
-    }
-  }
-  return conflicts
 }
 
 /**
@@ -199,7 +93,7 @@ export function detectTaskEventConflicts(newItem, existingItems = [], date, item
         new: newItem,
         date: targetDate,
         timeRange: { start: Math.max(newStart, itemStart), end: Math.min(newEnd, itemEnd) },
-        message: `与「${item.title || item.name}」时间冲突（${targetDate} ${newTime}-${String(Math.floor(newEnd/60)).padStart(2,'0')}:${String(newEnd%60).padStart(2,'0')}）`
+        message: `与「${item.title || item.name}」时间冲突（${targetDate} ${newTime}-${hmText(Math.floor(newEnd / 60), newEnd % 60)}）`
       })
     }
   }
@@ -218,26 +112,6 @@ function timeToMinutes(value) {
  * @param {{ checkCourses?: boolean, checkTasks?: boolean, checkEvents?: boolean, week?: number, date?: string }} [options={}]
  * @returns {Conflict[]}
  */
-export function detectAllConflicts(newItem, allData = {}, options = {}) {
-  const { courses = [], tasks = [], events = [] } = allData
-  const conflicts = []
-
-  if (newItem.type === 'course' || options.checkCourses) {
-    conflicts.push(...detectCourseConflicts(newItem, courses, options.week))
-  }
-
-  if (newItem.type === 'task' || options.checkTasks) {
-    const date = newItem.dueDate || options.date
-    conflicts.push(...detectTaskEventConflicts(newItem, [...tasks, ...events], date, 'task'))
-  }
-
-  if (newItem.type === 'event' || options.checkEvents) {
-    const date = newItem.date || options.date
-    if (date) conflicts.push(...detectTaskEventConflicts(newItem, events, date, 'event'))
-  }
-
-  return conflicts
-}
 
 /**
  * @param {Conflict[]} conflicts

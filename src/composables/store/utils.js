@@ -1,10 +1,6 @@
 const DAY_NAMES = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
 import { clock } from './core.js'
-
-export function todayIndex(value = clock.value) {
-  const d = new Date(value).getDay()
-  return d === 0 ? 6 : d - 1
-}
+import { dateText } from '../../utils/formatters.js'
 
 export function dayName(i) {
   return DAY_NAMES[i] ?? ''
@@ -24,9 +20,7 @@ export function daysUntil(dateStr, now = clock.value) {
 }
 
 export function todayStr(value = clock.value) {
-  const d = new Date(value)
-  const p = (n) => String(n).padStart(2, '0')
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+  return dateText(new Date(value))
 }
 
 export function minutesUntilStart(date, time, now = clock.value, maxMinutes = 24 * 60) {
@@ -42,8 +36,7 @@ export function minutesUntilStart(date, time, now = clock.value, maxMinutes = 24
 }
 
 function dateString(date) {
-  const p = (value) => String(value).padStart(2, '0')
-  return `${date.getFullYear()}-${p(date.getMonth() + 1)}-${p(date.getDate())}`
+  return dateText(date)
 }
 
 export { dateString }

@@ -627,7 +627,7 @@ onBeforeUnmount(() => {
 .admin-primary-action span { margin-right:4px; font-size:var(--fs-16); }
 .admin-layout { display:grid; grid-template-columns:minmax(0,1.55fr) minmax(280px,0.9fr); align-items:start; gap:16px; }
 .admin-primary-column,.admin-secondary-column { display:grid; align-content:start; gap:16px; min-width:0; }
-.admin-panel { min-width:0; padding:16px 18px; border:1px solid var(--border); border-radius:var(--radius-12); background:var(--card); box-shadow:var(--shadow-sm); }
+.admin-panel { min-width:0; padding:16px 18px; border:1px solid var(--border); border-radius:var(--radius-12); background-color:var(--glass-surface); backdrop-filter:var(--glass-filter); -webkit-backdrop-filter:var(--glass-filter); box-shadow:var(--glass-shadow); }
 .admin-section-head { display:flex; align-items:flex-start; justify-content:space-between; gap:14px; margin-bottom:12px; }
 .admin-section-head h2 { margin:0; font-size:var(--fs-15); font-weight:var(--fw-750); line-height:1.4; }
 .admin-section-head p { margin:4px 0 0; color:var(--muted); font-size:var(--fs-12); line-height:1.55; }

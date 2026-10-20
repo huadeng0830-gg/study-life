@@ -3,6 +3,10 @@ import { accountUser } from './accountAuth.js'
 
 const PREFIX = 'study-life:campus-draft:v1'
 
+// 【刻意不换成 utils/clone.js 的 deepClone】这里优先用原生 structuredClone，
+// 只有环境没有它时才退回 JSON 往返。两者语义不同（structuredClone 保留 Date/Map/Set，
+// 遇到函数会抛 DataCloneError；JSON 往返把 Date 变字符串、静默丢函数），
+// 换过去会改变有 structuredClone 的浏览器里的行为，因此保留原写法。
 function copy(value) { return typeof globalThis.structuredClone === 'function' ? globalThis.structuredClone(value) : JSON.parse(JSON.stringify(value)) }
 function storage() { try { return globalThis.localStorage || null } catch { return null } }
 

@@ -3,6 +3,7 @@ import { MAX_WEEK } from './store'
 import { timeConfig } from './store/timeConfig.js'
 import { useTaskProgress } from './taskProgress.js'
 import { accountDataOwner } from './accountSyncIdentity.js'
+import { ocrAvailabilityBlockReason, probeOcrAvailability, isOnline } from './ocrCapability.js'
 
 // OCR 引擎、版面解析和本地纠错词典只在用户真正选择图片后才下载。
 // 普通查看/编辑课程表不再为这些重模块付出初始化成本。
@@ -70,13 +71,55 @@ function handleOcrActivity(progress, event, recognizeStep = 'structure') {
 
 function isOcrEngineFailure(progress, message) {
   if (/未识别到文字|图片(?:尺寸)?太小|图片格式|请选择图片/.test(message)) return false
+  // 浏览器能力不足：重试多少次都不会成功，给一个「重试」按钮是骗人的。
+  if (isUnretryableOcrCapabilityFailure(message)) return true
   const engineStep = progress.state.steps.find((step) => step.id === 'engine')
   return engineStep?.status === 'running'
     || /初始化|语言模型|OCR 内核|Worker|Failed to fetch|NetworkError|script load|动态导入/i.test(message)
 }
 
+/**
+ * 这台设备根本跑不了图片识课，重试无意义。
+ *
+ * ocrPipeline.assertSimdAvailable 在**解码图片之前**就抛错（见该文件“先判环境再干活”），
+ * 所以 engine 这一步压根没进入 running——旧判定只看「引擎在跑吗」，于是把它归类成
+ * 「识别失败」，界面显示“识别引擎已启动”并给出一个注定再次失败的重试按钮。
+ */
+function isUnretryableOcrCapabilityFailure(message) {
+  return /不支持\s*WebAssembly\s*SIMD|不支持\s*SIMD|SIMD\s*不可用|处于离线状态，本机还没有缓存识别模型|需要先联网加载一次/i.test(String(message ?? ''))
+}
+
+/**
+ * 识图前的第二道能力闸门：离线且识别资源从未缓存时，直接给一句可操作的说明。
+ *
+ * 这是**纯本地**检查（只读 CacheStorage 与 `navigator.onLine`），不产生网络请求、不轮询：
+ * 资源没缓存时联网去下载它们，恰恰是我们**不想**在用户点按钮之前偷偷做的事。
+ * 判不出来（没有 CacheStorage，例如桌面版 file://）时返回空串，行为与从前一致。
+ */
+async function offlineOcrBlockReason() {
+  const availability = await probeOcrAvailability({ force: true })
+  return ocrAvailabilityBlockReason(availability)
+}
+
 function isExcelFile(file) {
   return /\.(?:xlsx|xls|xlsm|xlsb|csv|ods)$/i.test(file?.name || '')
+}
+
+/**
+ * Excel 解析组件同样不在预缓存里（vite.config.js 的 `globIgnores` 排除了 `assets/xlsx-*`）。
+ * 离线且从没用过 Excel 导入时，动态 import 会抛一句
+ * `Failed to fetch dynamically imported module: …/assets/xlsx-XXXX.js`
+ * ——文件名是内容哈希，用户读不出「该怎么办」。
+ *
+ * 这里只在**确实离线 + 确实是取模块失败**时换成一句可操作的话。判断用
+ * `navigator.onLine`，不发请求，也不去猜那个哈希文件名（猜它就等于把构建细节
+ * 抄进业务代码，构建一变就失效）。
+ */
+function excelOfflineMessage(message) {
+  if (isOnline()) return ''
+  return /dynamically imported module|Importing a module script failed|Failed to fetch|NetworkError|Load failed/i.test(String(message ?? ''))
+    ? '当前处于离线状态，Excel 解析组件还没有缓存到本机。请联网后重试一次，或改用「粘贴文字」录入课表。'
+    : ''
 }
 
 /**
@@ -195,7 +238,8 @@ export function useScheduleOcrImport({
       batchOcrProgress.finish('Excel 课程表已解析，请确认预览', reviewCount ? 'warning' : 'completed')
     } catch (error) {
       if (!isCurrent()) return
-      const message = error?.message || 'Excel 课程表读取失败，请检查文件格式后重试'
+      const raw = error?.message || 'Excel 课程表读取失败，请检查文件格式后重试'
+      const message = excelOfflineMessage(raw) || raw
       batchError.value = message
       batchOcrProgress.fail('structure', message, { retry: true })
     }
@@ -213,6 +257,17 @@ export function useScheduleOcrImport({
   async function runTimetableOCR(files) {
     if (!files.length) return
     if (batchOcrProgress.state.status === 'running') return
+    const owner0 = accountDataOwner.value
+    const generation0 = importGeneration
+    // 先判「这台设备现在能不能识图」，再决定要不要开进度条：
+    // 离线且没缓存过模型时，开进度条只会让用户等 45 秒再拿到一句技术报错。
+    const blockedReason = await offlineOcrBlockReason()
+    if (owner0 !== accountDataOwner.value || generation0 !== importGeneration) return
+    if (blockedReason) {
+      ocrSummary.value = ''
+      batchError.value = blockedReason
+      return
+    }
     lastBatchFiles = files
     retryableImport = { type: 'image', files }
     const controller = new AbortController()
@@ -246,8 +301,10 @@ export function useScheduleOcrImport({
         } catch (accurateError) {
           if (!isCurrent()) return
           if (accurateError?.name === 'AbortError') throw accurateError
-          if (import.meta.env.DEV) console.warn('[OCR] 精准课表识别降级为兼容模式', accurateError)
-          batchOcrProgress.activity('精准识别不可用，正在切换兼容引擎')
+          if (import.meta.env.DEV) console.warn('[OCR] 精准课表识别降级为轻量模式', accurateError)
+          // 措辞要诚实：下面用的是同一条管线、同一份语言包、同一个引擎，
+          // 只是把识别质量从精准降到快速。说“切换兼容引擎”会让人以为换了一条识别路径。
+          batchOcrProgress.activity('精准识别未完成，正在以较轻的识别模式重试')
           result = await performLegacyOCR(
             file,
             (event) => { if (isCurrent()) handleOcrActivity(batchOcrProgress, event, 'recognize') },
@@ -288,10 +345,16 @@ export function useScheduleOcrImport({
       }
       if (!isCurrent()) return
       if (!summaries.length && failures.length) {
-        batchError.value = `图片识别失败：${failures.join('；')}`
-        const engineFailed = isOcrEngineFailure(batchOcrProgress, failures.join('；'))
+        const joined = failures.join('；')
+        const capabilityFailed = isUnretryableOcrCapabilityFailure(joined)
+        const engineFailed = capabilityFailed || isOcrEngineFailure(batchOcrProgress, joined)
+        // 能力不足时不能说“识别引擎已启动”——它压根没起来过。
         if (!engineFailed) batchOcrProgress.setStep('engine', 'completed', '识别引擎已启动')
-        batchOcrProgress.fail(engineFailed ? 'engine' : 'recognize', batchError.value, { retry: true })
+        batchError.value = capabilityFailed
+          ? joined
+          : `图片识别失败：${joined}`
+        // 能力缺失重试多少次都是同一个结果，不给一个必然再失败 45 秒的按钮。
+        batchOcrProgress.fail(capabilityFailed ? 'engine' : engineFailed ? 'engine' : 'recognize', batchError.value, { retry: !capabilityFailed })
         return
       }
       batchOcrProgress.setStep('validate', failures.length ? 'warning' : 'completed', failures.length ? `${failures.length} 张图片需要重试` : '课程字段与结构检查完成')

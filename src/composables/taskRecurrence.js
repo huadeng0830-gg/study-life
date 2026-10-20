@@ -15,11 +15,7 @@
  */
 
 import { moveTimeDate, taskRepeatBase, taskStages, timePlanId } from './tasks/taskTimeFields'
-
-function dateText(date) {
-  const pad = (value) => String(value).padStart(2, '0')
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
-}
+import { dateText } from '../utils/formatters.js'
 
 /**
  * 可选的重复规则。`label` 直接就是表单里的选项文案。

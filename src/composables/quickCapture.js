@@ -1,4 +1,6 @@
-// @deprecated 快速录入引擎（旧版）：仅保留给旧 QuickCapturePanel 和旧测试使用。
+// @deprecated 快速录入引擎（旧版）：应用里已无任何调用方，只剩 tests/quickCapture.test.js
+// 还在覆盖它。随附的 QuickCapturePanel / QuickLedgerPanel 两个薄壳组件已一并删除
+// （全库零引用）。
 // 新业务请使用 quickRecord/parser.js：那边的 parseQuickRecord 采用实体提取+意图判断，
 // 支持“花了五元买牛肉面”等语序变化和“12块5”等口语金额。
 import { parseNotice } from './noticeParser.js'
@@ -11,11 +13,6 @@ const COUNTDOWN_HINTS = [
 
 function looksLikeCountdown(text) {
   return COUNTDOWN_HINTS.some((hint) => text.includes(hint))
-}
-
-function timeNow(now) {
-  const pad = (value) => String(value).padStart(2, '0')
-  return `${pad(now.getHours())}:${pad(now.getMinutes())}`
 }
 
 export function capture(text, { courses = [], now = new Date() } = {}) {
@@ -71,10 +68,3 @@ export function capture(text, { courses = [], now = new Date() } = {}) {
 }
 
 // 供保存层直接取默认日期/时间，避免多处重复拼装。
-export function quickCaptureNow(now = new Date()) {
-  const pad = (value) => String(value).padStart(2, '0')
-  return {
-    date: `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`,
-    time: timeNow(now),
-  }
-}

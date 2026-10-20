@@ -5,23 +5,13 @@
 
 import { normalizePeriod } from './scheduleOcrParser.js'
 import { seasonsForCampus, seasonAppliesTo } from './store/timeConfig.js'
+import { deepClone } from '../utils/clone.js'
 
 export const RECOGNITION_ISSUE = {
   UNRECOGNIZED: 'unrecognized',     // 识别不确定：OCR 无法确认内容
   MISSING_TIME: 'missing-time',     // 时间缺失：某一节缺少开始/结束时间
   TIME_CONFLICT: 'time-conflict',   // 真实时间冲突：同组内不同节次确实交叉
   MAPPING_PENDING: 'mapping-pending', // 映射待确认：无法确定归属的校区/作息方案
-}
-
-const ISSUE_TEXT = {
-  [RECOGNITION_ISSUE.UNRECOGNIZED]: '识别不确定',
-  [RECOGNITION_ISSUE.MISSING_TIME]: '时间缺失',
-  [RECOGNITION_ISSUE.TIME_CONFLICT]: '时间冲突',
-  [RECOGNITION_ISSUE.MAPPING_PENDING]: '映射待确认',
-}
-
-export function issueTypeText(type) {
-  return ISSUE_TEXT[type] ?? '待确认'
 }
 
 function toMinutes(value) {
@@ -399,16 +389,6 @@ export function schemeStatus(scheme, cfg) {
   return 'ready'
 }
 
-export function schemeSummaryText(scheme, cfg) {
-  const validation = validateSchemeRows(scheme, cfg)
-  const parts = []
-  if (validation.mappedCount < scheme.rows.length) {
-    parts.push(`${scheme.rows.length - validation.mappedCount} 项无法对应节次`)
-  }
-  if (validation.rowIssues.size) parts.push(`${validation.rowIssues.size} 项待确认`)
-  return parts
-}
-
 // ---------- 导入计划 ----------
 
 export function buildReplaceDiff(scheme, cfg) {
@@ -564,21 +544,21 @@ export function buildImportPlan(draft, cfg, overrides = {}, scope = null) {
 // ---------- 事务执行（全部成功或全部保持原状） ----------
 
 export function snapshotTimeConfig(cfg) {
-  return JSON.parse(JSON.stringify({
+  return deepClone({
     campuses: cfg.campuses,
     seasons: cfg.seasons,
     times: cfg.times,
-  }))
+  })
 }
 
 export function restoreTimeConfig(cfg, snapshot) {
-  cfg.campuses = JSON.parse(JSON.stringify(snapshot.campuses))
-  cfg.seasons = JSON.parse(JSON.stringify(snapshot.seasons))
-  cfg.times = JSON.parse(JSON.stringify(snapshot.times))
+  cfg.campuses = deepClone(snapshot.campuses)
+  cfg.seasons = deepClone(snapshot.seasons)
+  cfg.times = deepClone(snapshot.times)
 }
 
 function cloneTemplate(list, periods) {
-  if (Array.isArray(list) && list.length) return JSON.parse(JSON.stringify(list))
+  if (Array.isArray(list) && list.length) return deepClone(list)
   return periods.map(() => ({ start: '', end: '' }))
 }
 
