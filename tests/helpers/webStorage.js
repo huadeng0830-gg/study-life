@@ -48,3 +48,54 @@ if (typeof window !== 'undefined' && typeof document !== 'undefined') {
   if (!isUsableStorage(globalThis.localStorage)) defineStorage('localStorage', new Storage())
   if (!isUsableStorage(globalThis.sessionStorage)) defineStorage('sessionStorage', new Storage())
 }
+
+// ---------------------------------------------------------------------------
+// 定时器外壳：文件跑完就不再跑。
+//
+// 【为什么需要】
+// 应用里有不少**模块级**的定时器（更新检查、读屏播报、影子写盘……）。
+// 模块不是组件，没有卸载时机，这些定时器会一直活到进程结束。测试环境拆除时
+// window 会被删掉，那一刻排好的定时器照样触发 → 抛 "window is not defined"，
+// 而错误会落到**当时正在跑的那个文件**头上，让不相干的用例一起变红。
+// 表现就是：本机全绿，CI 却红在 viewRenderMatrix / promptDialogMigration /
+// engineeringFrontendProjectsLifecycle 这几个根本没碰更新检查的文件上。
+//
+// 【为什么在这里统一处理，而不是逐个模块加守卫】
+// 逐个加守卫要改几十处，而且每漏一处就再爆一次。这里给**所有**定时器套一层：
+// 回调执行前先确认这个测试文件还没结束，不结束就安静跳过。
+//
+// 【判据为什么是"文件结束"而不是"window 还在不在"】
+// 后者会误伤 tests/mirrorDurability.test.js：它刻意把全局 window 换成 undefined
+// 来模拟环境拆除，并要求**定时器照常触发**，好观察数据层自己的守卫把那次冲刷丢掉。
+// 用 window 的存在性当判据会把那次触发也一起吞掉，用例就会超时。
+// 文件结束是更准的信号：那一刻起，本来就不该再有回调跑起来。
+//
+// 【不影响什么】
+// 回调的调用时机、参数、返回值都原样透传；`vi.useFakeTimers()` 会整体换掉定时器，
+// 不经过这一层；`clearTimeout` 拿到的仍是原始句柄，照常可清。
+// ---------------------------------------------------------------------------
+import { afterAll } from 'vitest'
+
+let fileFinished = false
+afterAll(() => { fileFinished = true })
+
+function wrapTimer(original) {
+  if (typeof original !== 'function') return original
+  const wrapped = function (callback, delay, ...args) {
+    if (typeof callback !== 'function') return original.apply(this, [callback, delay, ...args])
+    return original.apply(this, [function (...inner) {
+      if (fileFinished) return
+      return callback.apply(this, inner)
+    }, delay, ...args])
+  }
+  return wrapped
+}
+
+if (typeof window !== 'undefined') {
+  window.setTimeout = wrapTimer(window.setTimeout)
+  window.setInterval = wrapTimer(window.setInterval)
+  if (globalThis !== window) {
+    globalThis.setTimeout = wrapTimer(globalThis.setTimeout)
+    globalThis.setInterval = wrapTimer(globalThis.setInterval)
+  }
+}

@@ -8,7 +8,7 @@ export const RELEASE_UPDATES = Object.freeze([
     legacyVersion: '2026年10月20日-版本1',
     channel: 'stable',
     summary: '界面全面换成液态玻璃：卡片、面板、侧栏、弹窗与提示条都成为会折射的磨砂玻璃，画布下新增缓慢漂移的极光',
-    signature: '8a6efb6f78',
+    signature: '61eb7a309f',
     changes: {
       features: [
       '界面全面换成液态玻璃：卡片、面板、侧栏、弹窗与提示条都成为会折射的磨砂玻璃，画布下新增缓慢漂移的极光',
@@ -28,7 +28,7 @@ export const RELEASE_UPDATES = Object.freeze([
       '修复通知标题中「现在」被误判为方位词、导致标题被截断的问题',
       '课表图片导入在离线时直接禁用入口，导入复核清单必须显式勾选才继续',
       '相对日期的测试期望值改为按当前日期计算，不再随日期推进而失效',
-      '修复更新检查的模块级定时器在宿主消失后仍继续触发、导致 CI 偶发失败的问题',
+      '修复更新检查与读屏播报的模块级定时器在宿主消失后仍继续触发、导致 CI 偶发失败的问题',
       ],
       security: [],
       breaking: [],
@@ -47,7 +47,7 @@ export const RELEASE_UPDATES = Object.freeze([
       '修复通知标题中「现在」被误判为方位词、导致标题被截断的问题',
       '课表图片导入在离线时直接禁用入口，导入复核清单必须显式勾选才继续',
       '相对日期的测试期望值改为按当前日期计算，不再随日期推进而失效',
-      '修复更新检查的模块级定时器在宿主消失后仍继续触发、导致 CI 偶发失败的问题',
+      '修复更新检查与读屏播报的模块级定时器在宿主消失后仍继续触发、导致 CI 偶发失败的问题',
     ],
   },
   {
@@ -120,7 +120,7 @@ export const RELEASE_CHANNEL = 'stable'
 export const LEGACY_RELEASE_VERSION = RELEASE_UPDATES[0].legacyVersion || RELEASE_UPDATES[0].version
 
 // 与第一条签名保持一致，交给 vite.config.js 校验源码一致性。
-export const RELEASE_SOURCE_SIGNATURE = '8a6efb6f78'
+export const RELEASE_SOURCE_SIGNATURE = '61eb7a309f'
 
 // 兼容旧引用：当前版本的更新说明。
 export const RELEASE_NOTES = RELEASE_UPDATES[0].notes

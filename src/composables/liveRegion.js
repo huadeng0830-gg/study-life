@@ -46,6 +46,12 @@ function scheduleAnnouncement(channel, message, clearAfter) {
   channel.writeTimer = window.setTimeout(() => {
     channel.writeTimer = 0
     channel.target.value = text
+    // 【为什么要再判一次宿主】
+    // 这条通道是**模块级**的：模块不是组件，没有卸载时机，排好的定时器会一直活到
+    // 进程结束。测试环境拆除时 window 会被删掉，那一刻排好的定时器照样触发，
+    // 而这里再摸一次 window 就会抛 "window is not defined" —— 错误落到当时正在跑的
+    // 那个文件头上，让不相干的用例一起变红（本地全绿、CI 却红在另外两个文件上）。
+    if (typeof window === 'undefined') return
     if (clearAfter > 0) {
       channel.clearTimer = window.setTimeout(() => { channel.target.value = '' }, clearAfter)
     }
