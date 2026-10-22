@@ -143,6 +143,8 @@ const reflectionFields = [
 
 const blankReflection = () => normalizeWeeklyReflection(null)
 const reflectionDraft = ref(blankReflection())
+const reflectionExpanded = ref(false)
+const visibleReflectionFields = computed(() => reflectionExpanded.value ? reflectionFields : reflectionFields.filter((field) => field.key === 'next'))
 const reflectionSaveState = ref('saved')
 const activeReflectionWeek = computed(() => review.value.week.startDate)
 const savedReflection = computed(() => normalizeWeeklyReflections(weeklyReflections.value)[activeReflectionWeek.value] || blankReflection())
@@ -229,7 +231,7 @@ function saveReflectionNow() {
     <LearningNavigation current="review" />
 
     <section class="review-grid" aria-label="本周摘要">
-      <article class="review-card">
+      <article v-if="hasTaskSamples" class="review-card">
         <div class="metric-heading"><span class="review-kicker">待办完成</span></div>
         <strong class="metric-value">{{ review.tasks.completed }}<small>项</small></strong>
         <div v-if="hasTaskSamples" class="metric-progress" role="progressbar" :aria-valuenow="weekCompletion?.rate || 0" aria-valuemin="0" aria-valuemax="100" :aria-label="`本周待办完成率 ${weekCompletion?.rate || 0}%`">
@@ -238,20 +240,20 @@ function saveReflectionNow() {
         <div class="metric-foot"><span>{{ hasTaskSamples ? `完成率 ${weekCompletion?.rate || 0}%` : '暂无完成率样本' }}</span><span>到期未完成 {{ weekCompletion?.missed || 0 }} 项</span></div>
         <small>新增 {{ review.tasks.created }} · 作业 {{ review.tasks.homeworkCompleted }} · 复习 {{ review.tasks.reviewCompleted }}</small>
       </article>
-      <article class="review-card">
+      <article v-if="review.courses.sessions || hasFocusSamples" class="review-card">
         <div class="metric-heading"><span class="review-kicker">课程与专注</span><span class="metric-icon" aria-hidden="true">◷</span></div>
         <strong class="metric-value">{{ review.courses.sessions }}<small>节课</small></strong>
         <span>{{ review.courses.courses }} 门课程 · 专注 {{ focusHours.totalMinutes }} 分钟</span>
         <small>{{ focusHours.totalSessions }} 次有效专注 · 待办预估 {{ review.tasks.focusMinutes }} 分钟</small>
       </article>
-      <article class="review-card">
+      <article v-if="review.finance.count || review.bills.due" class="review-card">
         <div class="metric-heading"><span class="review-kicker">本周净支出</span><Badge variant="secondary" class="metric-tag">{{ review.finance.base }}</Badge></div>
         <strong class="metric-value metric-money">{{ formatMoney(review.finance.expense) }}</strong>
         <span>收入 {{ formatMoney(review.finance.income) }} · {{ review.finance.count }} 笔</span>
         <small>账单应付 {{ review.bills.due }} · 已支付 {{ review.bills.paid }}</small>
         <p v-if="review.finance.missingRates?.length" class="metric-warning" role="status">{{ review.finance.excludedCount }} 笔缺少 {{ review.finance.missingRates.join('、') }} 汇率，未计入合计。</p>
       </article>
-      <article class="review-card">
+      <article v-if="review.mood.days" class="review-card">
         <div class="metric-heading"><span class="review-kicker">心情记录</span><Badge variant="secondary" class="metric-tag">{{ moodLabel }}</Badge></div>
         <strong class="metric-value">{{ review.mood.days }}<small>天</small></strong>
         <span>{{ review.mood.days }} 天有记录</span>
@@ -292,13 +294,14 @@ function saveReflectionNow() {
       <CardContent>
       <form class="reflection-form" @submit.prevent="saveReflectionNow">
         <FieldGroup class="reflection-fields grid grid-cols-2 gap-4">
-          <Field v-for="field in reflectionFields" :key="field.key" class="reflection-field" :class="{ 'reflection-next': field.key === 'next' }">
+          <Field v-for="field in visibleReflectionFields" :key="field.key" class="reflection-field" :class="{ 'reflection-next': field.key === 'next' }">
             <FieldLabel :for="'reflection-' + field.key">{{ field.title }}</FieldLabel>
             <FieldDescription :id="'reflection-help-' + field.key">{{ field.description }}</FieldDescription>
             <textarea :id="'reflection-' + field.key" :aria-label="field.title" v-model="reflectionDraft[field.key]" rows="3" maxlength="1000" :placeholder="field.placeholder" :aria-describedby="'reflection-help-' + field.key + ' reflection-count-' + field.key" />
             <small :id="'reflection-count-' + field.key" class="reflection-count">{{ reflectionLength[field.key] }}/1000</small>
           </Field>
         </FieldGroup>
+        <Button type="button" variant="ghost" :aria-expanded="reflectionExpanded" @click="reflectionExpanded = !reflectionExpanded">{{ reflectionExpanded ? '收起其他反思' : '补充本周收获与心得' }}</Button>
         <div class="reflection-footer">
           <p>内容会纳入账号同步与本机备份。</p>
           <Button type="submit" :disabled="!isReflectionDirty">保存本周复盘</Button>
@@ -332,7 +335,7 @@ function saveReflectionNow() {
 
     </div>
 
-    <details class="review-analysis" :open="hasAnalysisSamples || undefined">
+    <details class="review-analysis">
       <summary><span>学习节奏分析</span><span class="analysis-hint">{{ hasAnalysisSamples ? '完成节奏、逾期、专注与心情' : '积累记录后查看趋势' }}</span><ChevronDown aria-hidden="true" /></summary>
     <section class="review-insights" aria-label="学习节奏分析">
       <Card role="article" class="card insight-card">

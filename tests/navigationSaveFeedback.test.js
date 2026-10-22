@@ -42,7 +42,7 @@ describe('GLO02 navigation save feedback at both real entry points', () => {
     document.querySelector('[aria-label="撤销上一步"]').click(); await flush()
     document.querySelector('[aria-label="移除今天"]').click(); await flush()
     document.querySelector('.nav-save').click(); await flush()
-    await vi.waitFor(() => expect(mobileNavigation.value).toEqual(['tasks', 'places']))
+    await vi.waitFor(() => expect(mobileNavigation.value).toEqual(['schedule', 'tasks']))
     expect(restoreStoredValues).toHaveBeenCalledTimes(2)
     expect(boundary).not.toHaveBeenCalled()
   })
@@ -63,7 +63,7 @@ describe('GLO02 navigation save feedback at both real entry points', () => {
     expect(document.body.textContent).toContain('虚构保存失败，请重试')
     submit.click(); await flush()
     await vi.waitFor(() => expect(closed).toHaveBeenCalledTimes(1))
-    expect(mobileNavigation.value).toEqual(['tasks', 'places'])
+    expect(mobileNavigation.value).toEqual(['schedule', 'tasks'])
     expect(restoreStoredValues).toHaveBeenCalledTimes(2)
     expect(boundary).not.toHaveBeenCalled()
   })
@@ -82,7 +82,7 @@ describe('GLO02 navigation save feedback at both real entry points', () => {
 
   it('still leaves if an external update makes the draft clean while the confirmation is open', async () => {
     document.querySelector('[aria-label="关闭弹窗"]').click(); await flush()
-    await realAccess.restoreStoredValues({ [MOBILE_NAVIGATION_KEY]: ['tasks', 'places'] }); await flush()
+    await realAccess.restoreStoredValues({ [MOBILE_NAVIGATION_KEY]: ['schedule', 'tasks'] }); await flush()
     const submit = buttonText('保存并离开')
     expect(submit).toBeTruthy()
     submit.click(); await flush()

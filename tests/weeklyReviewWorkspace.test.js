@@ -74,7 +74,7 @@ describe('周回顾工作区的真实表单与样本状态', () => {
     stored('sl_tasks', []).value = [{ id: 'fiction-done', title: '虚构复习', dueDate: '2026-10-08', createdAt: '2026-10-06T10:00:00Z', done: true, completedAt: '2026-10-08T10:00:00Z' }]
     stored('sl_focus_sessions', []).value = [{ id: 'fiction-focus', startedAt: '2026-10-08T09:00:00Z', actualFocusSeconds: 1500, status: 'completed' }]
     await mountReview()
-    expect(host.querySelector('.review-analysis').open).toBe(true)
+    expect(host.querySelector('.review-analysis').open).toBe(false)
     expect(host.querySelector('.trend-chart')).toBeTruthy()
     expect(host.querySelector('.focus-hour-chart').getAttribute('aria-label')).toContain('1 个有效会话')
     expect(host.querySelector('.metric-progress').getAttribute('aria-valuenow')).toBe('100')
@@ -83,6 +83,8 @@ describe('周回顾工作区的真实表单与样本状态', () => {
 
   it('输入后自动保存，重建页面仍恢复内容', async () => {
     await mountReview()
+    host.querySelector('.reflection-form button[aria-expanded]').click()
+    await vue.nextTick()
     type('#reflection-wins', '虚构记录：已完成本周实验')
     await vue.nextTick()
     expect(host.querySelector('.save-status').textContent).toContain('正在保存')
@@ -91,6 +93,8 @@ describe('周回顾工作区的真实表单与样本状态', () => {
     app.unmount()
     host.remove()
     await mountReview()
+    host.querySelector('.reflection-form button[aria-expanded]').click()
+    await vue.nextTick()
     expect(host.querySelector('#reflection-wins').value).toBe('虚构记录：已完成本周实验')
   })
 

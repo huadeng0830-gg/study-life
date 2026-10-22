@@ -9,7 +9,7 @@ export const MAX_NAV_GROUP_LABEL_LENGTH = 24
 export const MOBILE_NAVIGATION_KEY = 'sl_navigation_mobile'
 export const DESKTOP_NAVIGATION_KEY = 'sl_navigation_desktop'
 
-export const DEFAULT_MOBILE_NAVIGATION = Object.freeze(['today', 'tasks', 'places'])
+export const DEFAULT_MOBILE_NAVIGATION = Object.freeze(['today', 'schedule', 'tasks'])
 export const DEFAULT_DESKTOP_NAVIGATION = Object.freeze(desktopNavigationGroups.map((group) => Object.freeze({
   id: group.id,
   label: group.label,
@@ -168,7 +168,10 @@ export const mobileNavigation = useStoredRef(MOBILE_NAVIGATION_KEY, [...DEFAULT_
 export const desktopNavigation = useStoredRef(DESKTOP_NAVIGATION_KEY,
   DEFAULT_DESKTOP_NAVIGATION.map((group) => ({ ...group, items: [...group.items] })))
 
-const normalizedMobile = normalizeMobileNavigation(mobileNavigation.value)
+// Migrate the previous built-in layout only during initialization. An editor
+// can intentionally choose that same combination later without being rewritten.
+const normalizedMobile = JSON.stringify(mobileNavigation.value) === JSON.stringify(['today', 'tasks', 'places'])
+  ? [...DEFAULT_MOBILE_NAVIGATION] : normalizeMobileNavigation(mobileNavigation.value)
 if (JSON.stringify(normalizedMobile) !== JSON.stringify(mobileNavigation.value)) mobileNavigation.value = normalizedMobile
 const normalizedDesktop = normalizeDesktopNavigation(desktopNavigation.value)
 if (JSON.stringify(normalizedDesktop) !== JSON.stringify(desktopNavigation.value)) desktopNavigation.value = normalizedDesktop

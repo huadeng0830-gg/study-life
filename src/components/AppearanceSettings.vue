@@ -842,9 +842,6 @@ const previewStyle = computed(() => ({
   margin:8px 0 0;
   font-size:var(--fs-11)}
 @media (max-width:760px) {
-  .appearance-tabs {
-  grid-template-columns:1fr 1fr;
-  display:grid}
 .wallpaper-layout {
   grid-template-columns:1fr}
 .target-list {
@@ -962,6 +959,15 @@ const previewStyle = computed(() => ({
   padding:6px;
   border:1px solid var(--border);
   background:var(--bg-tint);
+}
+/* 窄屏改成两列。
+   这条**必须**排在上面的 .appearance-tabs 基础规则之后：媒体查询不会提高特异度，
+   原来它写在基础规则之前，被基础规则整条盖掉，于是手机上三个标签一直挤在一行，
+   第三个按钮被挤得很窄。 */
+@media (max-width:760px) {
+  .appearance-tabs {
+    grid-template-columns:1fr 1fr;
+  }
 }
 .appearance-tabs :deep([data-slot="tabs-trigger"]) {
   display:flex;

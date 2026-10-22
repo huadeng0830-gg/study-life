@@ -1,0 +1,22 @@
+{
+  "appId": "com.sanliangshi.study.life",
+  "appName": "三两事",
+  "webDir": "dist-android",
+  "server": {
+    "hostname": "study-life.pages.dev",
+    "androidScheme": "https"
+  },
+  "android": {
+    "allowMixedContent": false,
+    "captureInput": true,
+    "webContentsDebuggingEnabled": false,
+    "backgroundColor": "#f6f7fa"
+  },
+  "plugins": {
+    "SystemBars": {
+      "style": "LIGHT",
+      "hidden": false,
+      "initialViewportFitValueHint": "cover"
+    }
+  }
+}

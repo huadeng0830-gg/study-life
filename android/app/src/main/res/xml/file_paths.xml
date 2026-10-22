@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 导出目录：安卓的分享面板要读这里的文件（见 androidRuntime.js 的 shareExport）。 -->
+    <cache-path name="exports" path="exports/" />
+    <!--
+      拍照取壁纸：Capacitor 的 <input type="file" capture="environment"> 会把相机
+      拍出来的照片写到 getExternalFilesDir(DIRECTORY_PICTURES)，再用 FileProvider
+      授权给相机应用。这里少配一条的话 FileProvider.getUriForFile 找不到匹配的根，
+      抛 IllegalArgumentException 被吞掉 → 相机拍完拿不到任何文件，
+      「拍照设置壁纸」在安卓上必然失败（网页端正常，所以很容易漏掉）。
+    -->
+    <external-files-path name="camera" path="Pictures/" />
+    <!-- 自更新下载的安装包：应用私有缓存下的 updates/ 目录。
+         系统安装器只认 FileProvider 授权的 content:// URI，
+         少了这条，下载好的 APK 打不开安装界面。 -->
+    <cache-path name="updates" path="updates/" />
+</paths>

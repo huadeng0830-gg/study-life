@@ -1,5 +1,7 @@
 <script setup>
 import { computed, defineAsyncComponent, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { isAndroidApp } from '../../composables/androidRuntime.js'
+import AndroidUpdateCard from './AndroidUpdateCard.vue'
 import { CheckIcon, CircleAlertIcon, CopyIcon, HistoryIcon, RefreshCwIcon } from '@lucide/vue'
 import { announce, announceAlert } from '../../composables/liveRegion.js'
 import { applyAppUpdate, checkForAppUpdate, forceRecoverToLatest, retryAppUpdate, webUpdateState } from '../../composables/appUpdate.js'
@@ -122,6 +124,8 @@ async function copyDiagnostic() {
 </script>
 
 <template>
+  <AndroidUpdateCard v-if="isAndroidApp" />
+  <template v-else>
   <Card class="version-update-section gap-0 py-0 border-border" role="region" aria-label="应用版本与更新状态">
     <CardHeader class="update-card-header">
       <CardTitle>三两事</CardTitle>
@@ -275,6 +279,7 @@ async function copyDiagnostic() {
   </Card>
   <ReleaseNotesBrowser v-if="notesOpen" :open="notesOpen" @close="notesOpen = false" />
 </template>
+  </template>
 
 <style scoped>
 .version-update-section { gap:0; padding-block:0; min-width:0; }

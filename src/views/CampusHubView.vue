@@ -1,5 +1,5 @@
 <script setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { ArrowRight, ClipboardList, Compass, Flag, NotebookPen, Search } from '@lucide/vue'
 import CampusLifeLayout from '../components/campus/CampusLifeLayout.vue'
 import { CAMPUS_FEATURED_PATHS, CAMPUS_NON_SERVICE_PATHS, campusNavigationGrouped } from '../components/campus/navigation.js'
@@ -15,7 +15,12 @@ const featuredLinks = [
 ]
 // 常用入口和服务分类来自同一张导航表：每条导航只在页面上出现一次。
 const serviceGroups = computed(() => campusNavigationGrouped({ exclude: [...CAMPUS_FEATURED_PATHS, ...CAMPUS_NON_SERVICE_PATHS] }))
-const { wallet, loading: beanLoading, error: beanError, signedIn } = useCampusBeanWallet()
+const beansOpen = ref(false)
+/** @param {Event} event */
+function syncBeansOpen(event) {
+  if (event.target instanceof window.HTMLDetailsElement) beansOpen.value = event.target.open
+}
+const { wallet, loading: beanLoading, error: beanError, signedIn } = useCampusBeanWallet({ enabled: beansOpen })
 function openBeanAccount() { openAccountSection('beans') }
 </script>
 
@@ -25,7 +30,7 @@ function openBeanAccount() { openAccountSection('beans') }
       <section class="campus-hub-hero" aria-labelledby="campus-hub-title">
         <div>
           <span class="campus-hub-kicker">同校信息 · 一起共建</span>
-          <h2 id="campus-hub-title">校园里要找的、想说的，都从这里开始。</h2>
+          <h2 id="campus-hub-title">查找校园信息</h2>
           <p>查看校园指南、课程出行、活动和同校互助；发布前会经过审核。</p>
         </div>
         <RouterLink class="campus-hub-search" to="/campus/search"><Search aria-hidden="true" /><span>搜索校园内容</span><ArrowRight aria-hidden="true" /></RouterLink>
@@ -57,7 +62,7 @@ function openBeanAccount() { openAccountSection('beans') }
           </div>
         </section>
       </section>
-      <details class="campus-hub-beans" aria-labelledby="campus-hub-beans-title">
+      <details class="campus-hub-beans" aria-labelledby="campus-hub-beans-title" @toggle="syncBeansOpen">
         <summary>校园贡献与三两豆 <span>查看余额、奖励与参与规则</span><span aria-hidden="true">⌄</span></summary>
         <div class="campus-hub-beans-head"><div><span class="campus-hub-beans-mark" aria-hidden="true">豆</span><div><h2 id="campus-hub-beans-title">三两豆</h2><p>校园贡献奖励，余额与获取方式一眼可见。</p></div></div><button type="button" class="campus-hub-beans-account" @click="openBeanAccount">{{ signedIn ? '我的三两豆账本' : '登录查看余额' }}<ArrowRight aria-hidden="true" /></button></div>
         <div class="campus-hub-beans-body">

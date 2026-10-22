@@ -38,7 +38,7 @@ describe('全局记录与提醒设置', () => {
   it('按实际作用范围分组显示设置，并保留账户默认值编辑', async () => {
     await nextTick()
     expect([...document.querySelectorAll('.settings-group h3')].map((heading) => heading.textContent.trim()))
-      .toEqual(['快速记录', '全局默认值', '提醒默认值'])
+      .toEqual(['常用与启动', '快速记录', '全局默认值', '提醒默认值'])
     expect(document.body.textContent).toContain('记录与提醒设置')
     expect(document.querySelector('select')).toBeTruthy()
     expect(document.querySelector('input[type="checkbox"]')).toBeTruthy()

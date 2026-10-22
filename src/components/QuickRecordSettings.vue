@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import Modal from './Modal.vue'
 import { settings, settingsPolicy, SETTINGS_NAVIGATION_LABEL, TIMEZONE_OPTIONS } from '../composables/settingsPolicy.js'
+import { appearance } from '../composables/appearance.js'
 defineProps({ open: Boolean })
 const emit = defineEmits(['close'])
 
@@ -21,6 +22,12 @@ const milestoneReminder = computed({ get: () => settingsPolicy.value.defaultRemi
 <template>
   <Modal :open="open" :title="`⚡ ${SETTINGS_NAVIGATION_LABEL}`" @close="emit('close')">
     <div class="settings">
+      <section class="settings-group" aria-labelledby="startup-defaults-title">
+        <h3 id="startup-defaults-title">常用与启动</h3>
+        <label class="settings-row"><span><b>打开应用时</b><small>直接链接仍会进入对应事项。</small></span><select v-model="appearance.startPage" aria-label="启动页面"><option value="/">今天</option><option value="/schedule">课程表</option></select></label>
+        <label><input v-model="appearance.compactHome" type="checkbox" /><span><b>首页精简显示</b><small>优先展示课程、待处理事项和上次进度，统计与完整安排按需展开。</small></span></label>
+        <label><input v-model="appearance.showMood" type="checkbox" /><span><b>显示心情记录</b><small>记录自愿，已保存的心情仍可在回顾中查看。</small></span></label>
+      </section>
       <section class="settings-group" aria-labelledby="quick-record-group-title">
         <h3 id="quick-record-group-title">快速记录</h3>
         <label><input v-model="settings.clipboardHint" type="checkbox" /> <span><b>提示剪贴板内容</b><small>打开快速记录时仅提示可识别文本，不会自动创建记录。</small></span></label>

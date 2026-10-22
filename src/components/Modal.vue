@@ -452,11 +452,11 @@ onBeforeUnmount(cleanup)
   overflow-y: auto;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
-  padding: var(--space-5) max(var(--space-6), env(safe-area-inset-right, 0px)) var(--space-6) max(var(--space-6), env(safe-area-inset-left, 0px));
+  padding: var(--space-5) max(var(--space-6), var(--safe-right)) var(--space-6) max(var(--space-6), var(--safe-left));
 }
 .modal-foot {
   flex: 0 0 auto;
-  padding: var(--space-3) max(var(--space-6), env(safe-area-inset-right, 0px)) calc(var(--space-4) + env(safe-area-inset-bottom, 0px)) max(var(--space-6), env(safe-area-inset-left, 0px));
+  padding: var(--space-3) max(var(--space-6), var(--safe-right)) calc(var(--space-4) + var(--safe-bottom)) max(var(--space-6), var(--safe-left));
   border-top: 1px solid color-mix(in srgb, var(--border) 76%, transparent);
   background: color-mix(in srgb, var(--card) 70%, transparent);
 }
@@ -470,10 +470,15 @@ onBeforeUnmount(cleanup)
 @media (max-width: 900px), (pointer: coarse) and (max-height: 520px) {
   .overlay.full-screen { padding: 0; }
   .modal.mobile-full-screen { width: 100%; height: 100%; max-height: 100%; border-radius: 0; }
-  .mobile-full-screen .modal-head { gap: 12px; padding: max(12px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) 12px max(16px, env(safe-area-inset-left, 0px)); border-bottom: 1px solid var(--border); }
+  .mobile-full-screen .modal-head { gap: 12px; padding: max(12px, var(--safe-top)) max(16px, var(--safe-right)) 12px max(16px, var(--safe-left)); border-bottom: 1px solid var(--border); }
   .mobile-full-screen .modal-head > :is(h2, h3, h4) { min-width: 0; overflow-wrap: anywhere; }
   .mobile-full-screen .close { width: 44px; height: 44px; }
-  .mobile-full-screen .modal-body { flex: 1 1 auto; padding: 16px max(16px, env(safe-area-inset-right, 0px)) 24px max(16px, env(safe-area-inset-left, 0px)); scroll-padding-block: 16px; }
+  .mobile-full-screen .modal-body { flex: 1 1 auto; padding: 16px max(16px, var(--safe-right)) 24px max(16px, var(--safe-left)); scroll-padding-block: 16px; }
+  /* 整屏弹窗的底部安全区只算一次：
+     有 .modal-foot 时由页脚承担（见 .modal-foot 的 padding），没有页脚时由内容区承担。
+     原来只有页脚承担，于是"新增待办""添加重要日期"这类**没有页脚**的整屏弹窗，
+     最后一项正好压在安卓手势条下面，点不到。 */
+  .mobile-full-screen:not(:has(.modal-foot)) .modal-body { padding-bottom: calc(24px + var(--safe-bottom)); }
 }
 
 /* ---------- 底部抽屉（sheet）：把手拖拽 + 两档高度吸附（仅窄屏启用） ---------- */
@@ -541,13 +546,19 @@ onBeforeUnmount(cleanup)
   }
 
   .modal-head {
-    padding: 15px max(16px, env(safe-area-inset-right, 0px)) 10px max(16px, env(safe-area-inset-left, 0px));
+    padding: 15px max(16px, var(--safe-right)) 10px max(16px, var(--safe-left));
     border-bottom: 1px solid color-mix(in srgb, var(--border) 76%, transparent);
     background: color-mix(in srgb, var(--card) 70%, transparent);
   }
 
+  /* 底部抽屉的内容区。底部安全区只算一次：有 .modal-foot 时由页脚承担，
+     没有页脚时由这里承担 —— 两处都加就会多出一段空白（页脚上方凭空多一段空隙）。 */
   .modal-body {
-    padding: 14px max(16px, env(safe-area-inset-right, 0px)) calc(18px + env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left, 0px));
+    padding: 14px max(16px, var(--safe-right)) 18px max(16px, var(--safe-left));
+  }
+
+  .modal:not(:has(.modal-foot)) .modal-body {
+    padding-bottom: calc(18px + var(--safe-bottom));
   }
 }
 </style>

@@ -6,7 +6,8 @@
  * 多币种 / 分摊 都是纯函数，不依赖页面级命令对象（`domain.createTransaction` 等由页面注入）。
  */
 import { computed, ref, watch } from 'vue'
-import { activeCategories, classifyTransaction, commonCategories, detectCategory, isValidDateKey, ledgerCategories, ledgerIndex, normalizeLedgerTime, rememberCategoryOverride } from '../ledger.js'
+import { activeCategories, classifyTransaction, commonCategories, detectCategory, isRefundTransaction, isValidDateKey, ledgerCategories, ledgerIndex, normalizeLedgerTime, rememberCategoryOverride } from '../ledger.js'
+import { isBillPayment } from '../ledgerRelations.js'
 import { buildSplit, hasSplit, normalizeSplit, splitCentsEvenly } from '../ledgerSplit.js'
 import { moneyWithCurrency } from '../../utils/formatters.js'
 import { amountToCents, normalizeAmount } from '../ledger.js'
@@ -35,6 +36,16 @@ export function useQuickEntryForm({ baseCurrency, domain, notify, closeSwipe, le
   const formError = ref('')
   const errorField = ref('')
   const currentEditingId = ref(null)
+  const applySameNameCategory = ref(false)
+  const normalizeName = (value) => String(value ?? '').normalize('NFKC').trim().replace(/\s+/gu, ' ').toLowerCase()
+  const sameNameCategoryIds = computed(() => {
+    if (!currentEditingId.value || !normalizeName(nameInput.value)) return []
+    return (domain.transactions?.value || []).filter((entry) => entry && String(entry.id) !== String(currentEditingId.value)
+      && !entry.archivedAt && !entry.deletedAt && !entry.tombstone && !isRefundTransaction(entry) && !isBillPayment(entry)
+      && (entry.direction || 'expense') === directionInput.value && normalizeName(entry.name) === normalizeName(nameInput.value)
+      && (entry.cat || 'other') !== (catInput.value || detectCategory(nameInput.value, { direction: directionInput.value })))
+      .map((entry) => entry.id)
+  })
   const dupWarn = ref(false)
   const forceDup = ref(false)
   const keepAdding = ref(false)
@@ -76,7 +87,11 @@ export function useQuickEntryForm({ baseCurrency, domain, notify, closeSwipe, le
       if (originalSplit && normalizeAmount(amountInput.value) === originalSplit.total
         && Number(splitCount.value) === originalSplit.participants.length
         && normalizeAmount(splitMine.value) === originalSplit.mine) return { split: originalSplit }
-      return { split: buildSplit(amountInput.value, { count: splitCount.value, mine: splitMode.value === 'custom' ? splitMine.value : null }) }
+      const split = buildSplit(amountInput.value, { count: splitCount.value, mine: splitMode.value === 'custom' ? splitMine.value : null })
+      if (originalSplit?.participants.length === split.participants.length) {
+        split.participants = split.participants.map((entry, index) => ({ ...entry, label: originalSplit.participants[index].label }))
+      }
+      return { split }
     } catch (cause) {
       return { error: cause?.message || '分摊数据不合法' }
     }
@@ -118,13 +133,14 @@ export function useQuickEntryForm({ baseCurrency, domain, notify, closeSwipe, le
   function openQuick(prefill = {}) {
     formIdentitySnapshot = identity.begin()
     currentEditingId.value = prefill.id ?? null
+    applySameNameCategory.value = false
     formError.value = ''; errorField.value = ''
     amountInput.value = String(prefill.amount ?? '')
     nameInput.value = prefill.name ?? ''
     dateInput.value = prefill.date ?? appToday.value
-    timeInput.value = prefill.time ?? ledgerNowHM()
+    timeInput.value = prefill.time ?? (prefill.id ? '' : ledgerNowHM())
     noteInput.value = prefill.note ?? ''
-    accountInput.value = prefill.account ?? defaultAccount()
+    accountInput.value = prefill.account ?? (prefill.id ? '' : defaultAccount())
     directionInput.value = prefill.direction ?? prefill.type ?? 'expense'
     const parsedName = parseNatural(nameInput.value).name || nameInput.value.trim()
     const classification = parsedName ? classifyTransaction(parsedName, { direction: directionInput.value }) : null
@@ -147,10 +163,12 @@ export function useQuickEntryForm({ baseCurrency, domain, notify, closeSwipe, le
     originalSplit = normalizeSplit(prefill.split)
     splitCount.value = String(prefill.split?.participants?.length || 1)
     splitMine.value = hasExistingSplit ? String(prefill.split?.mine ?? '') : ''
-    // 编辑既有分摊记录时，「我承担」来自原数据，之后不该被按分等分重算覆盖。
-    splitMode.value = hasExistingSplit ? 'custom' : 'equal'
-    if (!hasExistingSplit) syncSplitMine()
-    moreOpen.value = Boolean(prefill.id) || Boolean(prefill.expandMore)
+    const equalShares = originalSplit ? splitCentsEvenly(Math.round(originalSplit.total * 100), originalSplit.participants.length) : []
+    const wasEqual = originalSplit && originalSplit.participants.every((entry, index) => Math.round(entry.amount * 100) === equalShares[index])
+      && Math.round(originalSplit.mine * 100) === equalShares[0]
+    splitMode.value = hasExistingSplit && !wasEqual ? 'custom' : 'equal'
+    if (splitMode.value === 'equal') syncSplitMine()
+    moreOpen.value = Boolean(prefill.expandMore)
     dupWarn.value = false
     forceDup.value = false
     cycleSuggest.value = null
@@ -275,7 +293,11 @@ export function useQuickEntryForm({ baseCurrency, domain, notify, closeSwipe, le
       const currency = currencyField(currencyInput.value, fx.value)
       if (editingId) {
         const previous = domain.transactions?.value?.find((entry) => entry.id === editingId)
+        if (!previous || isBillPayment(previous) || isRefundTransaction(previous)) {
+          formError.value = '这条记录需从原账单或退款入口处理'; return false
+        }
         const previousCategory = previous?.cat || 'other'
+        const categoryIds = applySameNameCategory.value ? [...sameNameCategoryIds.value] : []
         const target = domain.updateTransaction(editingId, {
           name, amount, cat: catInput.value || detectCategory(name, { direction: directionInput.value }),
           date: dateInput.value || appToday.value, time: timeInput.value,
@@ -285,7 +307,16 @@ export function useQuickEntryForm({ baseCurrency, domain, notify, closeSwipe, le
         if (!target) { formError.value = '这条记录已不可用，请关闭后重新打开'; return false }
         if (target) {
           if (name && previousCategory !== target.cat) rememberCategoryOverride(name, target.cat, target.direction)
-          notify(`已更新 ${moneyWithCurrency(target.amount, target.currency || baseCurrency.value)} · ${target.name}`)
+          let previousCategories = []
+          try {
+            if (categoryIds.length) previousCategories = domain.updateTransactionCategories(categoryIds.map((id) => ({ id, categoryId: target.cat })))
+          } catch (cause) {
+            notify(`当前记录已保存，但同名记录批量分类失败：${cause?.message || '请重试'}`)
+            return true
+          }
+          notify(`已更新 ${moneyWithCurrency(target.amount, target.currency || baseCurrency.value)} · ${target.name}${previousCategories.length ? `，并调整另外 ${previousCategories.length} 笔同名记录` : ''}`, previousCategories.length ? {
+            actionLabel: '撤销批量分类', undoFn: () => domain.updateTransactionCategories(previousCategories),
+          } : undefined)
         }
       } else {
         const saved = domain.createTransaction({ name, amount,
@@ -310,7 +341,6 @@ export function useQuickEntryForm({ baseCurrency, domain, notify, closeSwipe, le
         amountInput.value = ''
         nameInput.value = ''
         noteInput.value = ''
-        accountInput.value = defaultAccount()
         dateInput.value = appToday.value
         timeInput.value = ledgerNowHM()
         catInput.value = ''
@@ -346,6 +376,8 @@ export function useQuickEntryForm({ baseCurrency, domain, notify, closeSwipe, le
 
   return {
     moreOpen,
+    applySameNameCategory,
+    sameNameCategoryCount: computed(() => sameNameCategoryIds.value.length),
     amountInput,
     nameInput,
     catInput,

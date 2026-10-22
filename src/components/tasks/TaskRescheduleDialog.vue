@@ -1,5 +1,5 @@
 <script setup>
-import { ref, useId } from 'vue'
+import { computed, ref, useId } from 'vue'
 import Modal from '../Modal.vue'
 import TaskTimeShift from './TaskTimeShift.vue'
 import ConfirmDialog from '../ConfirmDialog.vue'
@@ -25,6 +25,7 @@ const draft = ref(deepClone({ startDate: props.task.startDate || '', startTime: 
 const error = ref('')
 const changed = ref(Boolean(props.initialDate))
 const conflictMessage = ref('')
+const hasStages = computed(() => Boolean(props.task.timeStages?.length))
 function apply(plan) { draft.value = deepClone(plan); changed.value = true; error.value = '' }
 function setDate(days) { draft.value.dueDate = moveTimeDate(props.today, days); changed.value = true; error.value = '' }
 function save() {
@@ -41,14 +42,15 @@ function save() {
   <Modal :open="true" title="重新安排时间" @close="emit('close')">
     <form :id="formId" class="reschedule-form" novalidate @submit.prevent="save">
       <p v-if="initialDate">将“{{ task.title }}”的截止日期设为 {{ initialDate }}。阶段安排保持原样，保存前仍会检查时间冲突。</p>
-      <p v-else>重新安排“{{ task.title }}”。先预览并应用改期，再保存生效。</p>
-      <TaskTimeShift :task="draft" :now-ms="nowMs" @apply="apply" @undo="apply" />
+      <p v-else>调整“{{ task.title }}”的日期，保存后生效。</p>
+      <p v-if="hasStages" class="scope-note">单独改截止只影响事项截止，{{ task.timeStages.length }} 个阶段保持原样；要一起移动阶段，请展开“移动剩余安排”。</p>
       <details class="deadline-adjust" :open="Boolean(initialDate) || !task.timeStages?.length">
         <summary>单独调整事项截止时间</summary>
         <label>新的截止日期<input v-model="draft.dueDate" type="date" :aria-invalid="Boolean(error) || undefined" @input="changed = true; error = ''; if (!draft.dueDate) draft.dueTime = ''" /></label>
-        <div class="date-shortcuts" role="group" aria-label="快速重新安排日期"><button type="button" @click="setDate(0)">今天</button><button type="button" @click="setDate(1)">明天</button><button type="button" @click="setDate(7)">一周后</button></div>
+        <div class="date-shortcuts" role="group" aria-label="快速重新安排日期"><button type="button" @click="setDate(0)">今天</button><button type="button" @click="setDate(1)">明天</button><button type="button" @click="setDate(7)">一周后</button><button type="button" @click="draft.dueDate = ''; draft.dueTime = ''; changed = true; error = ''">不设截止</button></div>
         <label>截止时间（选填）<input v-model="draft.dueTime" type="time" :disabled="!draft.dueDate" :aria-invalid="Boolean(error) || undefined" @input="changed = true; error = ''" /></label>
       </details>
+      <TaskTimeShift v-if="task.startDate || task.dueDate || hasStages" :task="draft" :now-ms="nowMs" @apply="apply" @undo="apply" />
       <details class="deadline-adjust" :open="Boolean(task.startDate)">
         <summary>单独调整事项开始时间</summary>
         <label>新的开始日期<input v-model="draft.startDate" type="date" @input="changed = true; error = ''; if (!draft.startDate) draft.startTime = ''" /></label>

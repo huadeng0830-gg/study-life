@@ -18,6 +18,19 @@ function createTemporaryRoot() {
 }
 
 describe('release source signature', () => {
+  it('ignores Capacitor generated XML so web releases match a clean checkout', () => {
+    const projectRoot = createTemporaryRoot()
+    const resources = path.join(projectRoot, 'android/app/src/main/res')
+    mkdirSync(path.join(resources, 'xml'), { recursive: true })
+    writeFileSync(path.join(resources, 'xml/file_paths.xml'), '<paths/>')
+    const options = { projectRoot, releaseInputs: ['android/app/src/main/res'] }
+    const cleanSignature = computeSourceSignature(options)
+    writeFileSync(path.join(resources, 'xml/config.xml'), '<widget/>')
+    expect(computeSourceSignature(options)).toBe(cleanSignature)
+    writeFileSync(path.join(resources, 'xml/file_paths.xml'), '<paths><cache-path/></paths>')
+    expect(computeSourceSignature(options)).not.toBe(cleanSignature)
+  })
+
   it('includes Worker sources in the release signature', () => {
     expect(RELEASE_INPUTS).toContain('workers')
     const projectRoot = createTemporaryRoot()

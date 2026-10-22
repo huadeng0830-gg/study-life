@@ -39,12 +39,21 @@ export function useTaskWorkSession({ domain, openProjectTask, notify }) {
 
   function updateField(field, value) { draft.value[field] = value }
 
-  function start() {
-    const current = task.value
-    if (!current || isArchived(current) || taskStatus(current) === 'completed') return
-    if (current.status !== 'in_progress') domain.updateTask(current.id, { status: 'in_progress', done: false, completedAt: null })
-    close()
-    notify('已开始执行；任务进度会保留在这条待办里。', { type: 'success' })
+  function start(value = task.value) {
+    if (value?.sourceType === 'project-task') { openProjectTask(value); return }
+    if (!value || isArchived(value) || ['completed', 'cancelled'].includes(taskStatus(value))) return
+    const wasInProgress = value.status === 'in_progress'
+    try {
+      if (value.status !== 'in_progress' && domain.updateTask(value.id, { status: 'in_progress', done: false, completedAt: null }) === null) {
+        throw new Error('这条待办已不存在，请刷新列表后重试。')
+      }
+      close()
+      notify(wasInProgress ? '继续执行，原有进度已保留。' : '已开始执行；任务进度会保留在这条待办里。', { type: 'success' })
+    } catch (cause) {
+      const message = cause instanceof Error ? cause.message : '暂时无法开始，请重试。'
+      error.value = message
+      notify(message, { type: 'error' })
+    }
   }
 
   function save() {

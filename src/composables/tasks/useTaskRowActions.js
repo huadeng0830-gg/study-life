@@ -7,7 +7,6 @@
  * 「在列表里能改期，在看板里找不到」。所以规则集中在这里，视图只传动作函数。
  */
 import { isArchived, taskStatus } from '../domain/state.js'
-import { taskHasTime } from './taskTimePlan'
 
 /**
  * @param {{
@@ -19,6 +18,7 @@ import { taskHasTime } from './taskTimePlan'
  *   deleteTask: (task: object) => void,
  *   restoreTask: (id: string) => unknown,
  *   startFocusTimer: (task: object) => unknown,
+ *   startWork: (task: object) => unknown,
  *   focusMinutes?: number,
  * }} handlers
  */
@@ -32,17 +32,18 @@ export function useTaskRowActions(handlers) {
     deleteTask,
     restoreTask,
     startFocusTimer,
+    startWork,
     focusMinutes = 25,
   } = handlers
 
   /**
-   * 行上唯一保留的主动作：打开工作台记进度。
+   * 主动作直接执行；记录进度与计时分别从次要操作进入。
    * 归档、已完成和已取消的待办没有「进行中」可言，主动作让位给恢复 / 归档等菜单项。
    */
   function primaryOf(task) {
     if (task?.sourceType === 'project-task') return { label: task.workCheckpoint?.nextStep ? '继续' : '查看项目' }
     if (isArchived(task) || ['completed', 'cancelled'].includes(taskStatus(task))) return null
-    return { label: task.workCheckpoint?.nextStep ? '继续' : task.status === 'in_progress' ? '工作台' : '开始' }
+    return { label: task.status === 'in_progress' || task.workCheckpoint?.nextStep ? '继续' : '开始' }
   }
 
   /** 次要操作清单。顺序按「越危险越靠后」排，取消永远在最后。 */
@@ -56,8 +57,8 @@ export function useTaskRowActions(handlers) {
     const items = []
     if (!completed && !cancelled) {
       items.push({ key: 'focus-timer', label: `专注 ${focusMinutes} 分钟`, hint: '进入专注计时并关联这条待办' })
-      items.push({ key: 'work', label: task.workCheckpoint?.nextStep ? '继续上次进度' : '开始并记录进度', hint: '记下做到哪里' })
-      if (taskHasTime(task)) items.push({ key: 'reschedule', label: '改期', hint: '移动截止时间与全部阶段' })
+      items.push({ key: 'work', label: '记进度', hint: '查看上次进度，记下做到哪里和下一步' })
+      items.push({ key: 'reschedule', label: task.dueDate || task.startDate || task.timeStages?.length ? '改期' : '设置日期', hint: '调整截止日期，或按需移动整段安排' })
     }
     items.push({ key: 'edit', label: '编辑' })
     if (completed) items.push({ key: 'archive', label: '归档', hint: '从当前清单移走，可在历史找回' })
@@ -67,7 +68,8 @@ export function useTaskRowActions(handlers) {
 
   function onPrimary(task) {
     if (task?.sourceType === 'project-task') { openProjectTask(task); return }
-    openWorkSession(task)
+    if (!task || isArchived(task) || ['completed', 'cancelled'].includes(taskStatus(task))) return
+    startWork(task)
   }
 
   function onAction(task, key) {

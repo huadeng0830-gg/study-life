@@ -31,7 +31,7 @@ registerMirrorTeardown()
  *    "内容非空"完全成立。必须要求"数据真的画出来了"。
  */
 const ROUTES = [
-  { path: '/', name: '今天', mustInclude: ['本周收支'] },
+  { path: '/', name: '今天', mustInclude: ['今日安排', '高等数学', '完成高数第三章作业'] },
   { path: '/schedule', name: '课程表', mustInclude: ['高等数学'] },
   { path: '/course', name: '课程进度', mustInclude: ['课程进度', '高等数学', '完成高数第三章作业'] },
   { path: '/tasks', name: '待办', mustInclude: ['完成高数第三章作业'] },

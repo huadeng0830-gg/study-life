@@ -21,6 +21,7 @@ import {
   taskStartedAt,
   unseenResultCount,
 } from '../composables/taskCenter.js'
+import { attachFloatingSlot, createFloatingSlot, detachFloatingSlot, useFloatingOffset } from '../composables/floatingStack.js'
 
 /**
  * 全局后台任务入口。
@@ -34,9 +35,23 @@ const open = ref(false)
 const now = ref(Date.now())
 let tickTimer = 0
 
+/* 悬浮胶囊与 Toast / 快速记录提示 / 全局错误提示共用同一套坑位栈：
+   它们的底边都在 86px（原注释里就写着"与其它浮层同一底栏避让高度"），
+   但胶囊原来既不占坑位也没有 --stack-offset，于是同时出现时会被居中的提示盖住，
+   而它是个按钮 —— 被盖住的部分点不到。 */
+const pillSlot = createFloatingSlot()
+const pillOffset = useFloatingOffset(pillSlot, 56)
+
 const visibleRunning = computed(() => runningTasks.value)
 const results = computed(() => taskCenterResults.value)
 const attention = computed(() => taskCenterAttention.value)
+
+// 胶囊占坑：与其它底部浮层共用 floatingStack，同时出现时依次向上排开。
+const pillVisible = computed(() => Boolean(attention.value) && !open.value)
+watch(pillVisible, (visible) => {
+  if (visible) attachFloatingSlot(pillSlot)
+  else detachFloatingSlot(pillSlot)
+}, { immediate: true })
 
 const pillLabel = computed(() => {
   if (runningTaskCount.value > 0) {
@@ -92,6 +107,7 @@ onBeforeUnmount(() => {
       type="button"
       class="task-pill"
       :class="{ 'is-done': !hasRunningTask }"
+      :style="{ '--stack-offset': `${pillOffset}px` }"
       @click="open = true"
     >
       <span class="task-pill-dot" :class="{ spin: hasRunningTask }" aria-hidden="true" />
@@ -155,14 +171,18 @@ onBeforeUnmount(() => {
 <style scoped>
 .task-pill {
   position: fixed;
-  right: max(16px, env(safe-area-inset-right, 0px));
-  /* 移动端与 Toast/快速记录/全局错误同一底栏避让高度 86px（原先 76px 与其它浮层差 10px）。 */
-  bottom: calc(86px + env(safe-area-inset-bottom, 0px));
+  right: max(16px, var(--safe-right));
+  /* 移动端与 Toast/快速记录/全局错误同一底栏避让高度 86px（原先 76px 与其它浮层差 10px）。
+     --stack-offset 来自共享坑位栈：同时出现的浮层依次向上排开，胶囊不会被提示盖住。 */
+  bottom: calc(86px + var(--safe-bottom) + var(--stack-offset, 0px));
   z-index: 90;
   display: inline-flex;
   align-items: center;
   gap: 8px;
   max-width: calc(100vw - 32px);
+  /* 触屏最小点击目标 44px：胶囊是手机上唯一常驻的悬浮按钮，
+     原来只有 9px 上下内边距（约 39px 高），拇指很难点中。 */
+  min-height: 44px;
   padding: 9px 14px;
   color: var(--on-primary, #fff);
   border: 0;
@@ -335,7 +355,7 @@ onBeforeUnmount(() => {
    两条同时生效，胶囊会停在底栏高度内被压住；901 与 Sidebar/App 的桌面档对齐。 */
 @media (min-width: 901px) {
   .task-pill {
-    right: max(24px, env(safe-area-inset-right, 0px));
+    right: max(24px, var(--safe-right));
     bottom: 24px;
   }
 }

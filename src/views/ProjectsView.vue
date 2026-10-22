@@ -790,7 +790,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="page projects-page">
-    <PageHeader class="page-head projects-head" title="齐行">
+    <PageHeader class="page-head projects-head" title="项目协作">
       <p class="page-subtitle">一个人可以管理项目，需要时再邀请队友一起推进。</p>
       <template #actions><div class="projects-head-actions">
         <ActionButton tone="ghost" class="btn btn-ghost" type="button" :disabled="pageLoading" kind="important" feedback="external" :show-error="false" :action="() => refresh()">刷新</ActionButton>

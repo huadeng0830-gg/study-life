@@ -480,7 +480,9 @@ function exportList() {
     const link = document.createElement('a')
     link.href = url
     link.download = `${activeList.value.name.replace(/[<>:"/\\|?*\u0000-\u001f]/g, '-').slice(0, 60) || '清单'}.txt`
+    document.body.appendChild(link)
     link.click()
+    link.remove()
     window.setTimeout(() => URL.revokeObjectURL(url), 1000)
     showToast('清单已导出为文本')
   } catch { showToast('导出失败，请重试', { type: 'error' }) }
@@ -562,11 +564,13 @@ function emptyAction() {
           </div>
         </div>
 
+        <details class="list-summary"><summary>已完成 {{ stats.done }} / {{ stats.count }} 项 · 还剩 {{ stats.remaining }} 项</summary>
         <div class="summary-grid">
           <div class="progress-summary"><span>完成进度</span><b>{{ stats.percent }}<small>%</small></b><span>{{ stats.done }} / {{ stats.count }} 项已完成</span><div class="summary-progress" role="progressbar" aria-label="清单完成进度" :aria-valuenow="stats.percent" :aria-valuemin="0" :aria-valuemax="100"><i :style="{ width: stats.percent + '%' }"></i></div></div>
           <div><span>待完成事项</span><b>{{ stats.remaining }}<small>项</small></b><span>{{ stats.count && !stats.remaining ? '全部完成了 ✓' : '逐项勾选，不再遗漏' }}</span></div>
           <div v-if="activeList.type === 'shopping'"><span>{{ stats.unpricedCount ? '已估总额' : '预计总额' }}</span><b class="summary-money">{{ moneyRow(stats.total) }}</b><span>待购 {{ moneyRow(stats.pendingTotal) }} · 已购 {{ moneyRow(stats.boughtTotal) }}</span></div>
         </div>
+        </details>
         <p v-if="activeList.dutyEnabled" class="duty-overview" role="status">
           <span>{{ activeList.repeat === 'weekly' ? `每周${DUTY_WEEKDAYS.find(item => item.value === activeList.repeatWeekday)?.label || '指定星期'}` : '单次排班' }} · {{ dutyStatsText }}（{{ dutySemesterStart }} 起）</span>
         </p>
@@ -730,6 +734,7 @@ function emptyAction() {
 .sidebar-empty { font-size: var(--fs-12); color: var(--ink-soft); text-align: center; padding: 10px 0; }
 .sidebar-empty button, .filter-result button { display: inline-block; color: var(--primary); border: 0; background: transparent; padding: 8px; }
 .shopping-card { min-width: 0; padding: 0; }
+.list-summary > summary { min-height: var(--tap-min); padding: var(--space-3) var(--space-5); color: var(--ink-soft); cursor: pointer; }
 .list-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; padding: 24px 24px 18px; }
 .list-heading { min-width: 0; }
 .list-type { color: var(--primary); font-size: var(--fs-12); }

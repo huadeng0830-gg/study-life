@@ -1,0 +1,29 @@
+/* ---------- 安全区（刘海 / 状态栏 / 手势条 / 输入法）----------
+   全站统一从这里取安全区（var(--safe-top/right/bottom/left)），
+   不要再直接写 env(safe-area-inset-*)。
+
+   【为什么不能只写 env()】
+   iOS Safari 会把 env(safe-area-inset-*) 解析成真实的安全区数值。
+   安卓 WebView 不是这样：安卓的 inset 由原生层拿到并**注入成 CSS 变量**
+   （Capacitor 的 SystemBars 插件写在 documentElement 上的
+   --safe-area-inset-top/right/bottom/left），env() 在很多安卓内核上恒为 0。
+
+   【两级回退为什么这么写】
+   var(--safe-area-inset-*, env(safe-area-inset-*, 0px))：
+   优先用原生注入的那份（安卓，且输入法弹起时原生会把 bottom 归零，
+   因为安卓 WebView 不会自己缩小布局视口），没有它时才用 env()（iOS/桌面）。
+
+   【为什么不写在 style.css 里】
+   style.css 已经接近单文件行数上限（见 tests/ratchetHardcoding.test.js 的
+   LARGE_FILE_LIMITS）。安全区是独立的一件事，单独成文件更好维护。
+
+   注意：--safe-area-inset-* 这四个名字**故意不在这里声明**。
+   一旦声明成 0px，var() 的回退就永远不会触发，iOS 的 env() 会被吃掉。
+   它们由原生运行时注入，属于"运行时提供的令牌"（见 composables/androidRuntime.js
+   里的 NATIVE_SAFE_AREA_TOKENS）。 */
+:root {
+  --safe-top: var(--safe-area-inset-top, env(safe-area-inset-top, 0px));
+  --safe-right: var(--safe-area-inset-right, env(safe-area-inset-right, 0px));
+  --safe-bottom: var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px));
+  --safe-left: var(--safe-area-inset-left, env(safe-area-inset-left, 0px));
+}

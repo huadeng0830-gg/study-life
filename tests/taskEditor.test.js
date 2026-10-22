@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { useTaskEditor } from '../src/composables/tasks/useTaskEditor.js'
 
 function createEditor() {
-  const domain = { createTask: vi.fn(), updateTask: vi.fn() }
+  const domain = { createTask: vi.fn(data => ({ id: 'example-created-task', ...data })), updateTask: vi.fn() }
   const editor = useTaskEditor({
     domain,
     tasks: ref([]),

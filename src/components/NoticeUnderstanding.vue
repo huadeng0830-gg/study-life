@@ -8,6 +8,7 @@ import { rankCandidates } from '../composables/searchRelevance.js'
 import { scheduleExceptions } from '../composables/store/schedule.js'
 import { buildScheduleExceptionInputs, findScheduleProposalConflicts, scheduleProposalSummary, scheduleProposalWeekDay } from '../composables/scheduleNoticeOperations.js'
 import { isSupported as voiceSupportedByEnv, transcribe, voiceErrorMessage, VOICE_STATES } from '../composables/voiceInput.js'
+import { isAndroidApp } from '../composables/androidRuntime.js'
 
 const props = defineProps({ open: Boolean, tasks: { type: Array, default: () => [] }, courses: { type: Array, default: () => [] }, initialText: { type: String, default: '' } })
 const emit = defineEmits(['close', 'commit'])
@@ -137,12 +138,15 @@ onBeforeUnmount(() => {
 })
 
 async function readClipboard() {
-  if (typeof navigator === 'undefined' || !navigator.clipboard?.readText) { clipboardMessage.value = '无法自动读取剪贴板，请按 Ctrl + V 粘贴通知。'; return }
+  // 安卓 WebView 没有剪贴板读取授权弹窗，navigator.clipboard.readText 必然被拒；
+  // 而手机上又没有 Ctrl + V，照着提示做只会更困惑。
+  const pasteHint = isAndroidApp ? '请长按输入框后选择"粘贴"' : '请按 Ctrl + V 粘贴通知'
+  if (typeof navigator === 'undefined' || !navigator.clipboard?.readText) { clipboardMessage.value = `无法自动读取剪贴板，${pasteHint}。`; return }
   try {
     const value = await navigator.clipboard.readText()
     if (!props.open) return
-    if (value.trim()) { source.value = value; analyze() } else clipboardMessage.value = '剪贴板为空，请按 Ctrl + V 粘贴通知。'
-  } catch { clipboardMessage.value = '浏览器未授权读取剪贴板，请按 Ctrl + V 粘贴通知。' }
+    if (value.trim()) { source.value = value; analyze() } else clipboardMessage.value = `剪贴板为空，${pasteHint}。`
+  } catch { clipboardMessage.value = `浏览器未授权读取剪贴板，${pasteHint}。` }
 }
 
 /** 段 → 事项两级展开：一段解析出多个事项时逐个成为可勾选的行，否则整段就是一项。 */

@@ -30,6 +30,7 @@ import { menuPlacementFor } from '../composables/menuPlacement.js'
 import { createLongPress } from '../composables/longPress.js'
 import { addAppDays, appCalendarDaysBetween, appNow, appToday } from '../composables/timeContext.js'
 import { defaultReminderMinutes } from '../composables/settingsPolicy.js'
+import { reminderNotificationHint } from '../composables/reminderScheduler.js'
 import { matchesMilestoneQuery, milestoneCalendarOccurrenceDate, selectMilestoneWorkspace } from '../composables/planningViews.js'
 import { useDebouncedRef } from '../composables/useDebouncedRef.js'
 import { countdownState } from '../composables/store/countdown.js'
@@ -108,6 +109,9 @@ function checkAllRequiredItems(item) {
 }
 
 const defaultReminder = computed(() => defaultReminderMinutes('milestone'))
+// 提醒能力说明必须照实说：安卓安装版的 WebView 没有系统通知，
+// 提醒只会在应用打开时以应用内提示出现（见 reminderScheduler.js）。
+const reminderHint = computed(() => reminderNotificationHint())
 
 function remove() {
   const item = exams.value.find((entry) => entry.id === editingId.value)
@@ -440,6 +444,11 @@ function onCardClick(item, event) {
 
 // 桌面端用右键，与移动端长按得到同一个菜单
 function openContextMenuAt(item, event) {
+  // 触屏长按：浏览器在长按之后**还会补一个 contextmenu 事件**。
+  // 长按路径（cardLongPress）已经开过菜单，这里再开一次就是"关掉再打开"——
+  // 肉眼可见地闪一下，还会把浮层栈的 history 标记推掉再补一条。
+  // sourceCapabilities.firesTouchEvents 精确区分触屏与鼠标（Firefox 没有这个属性，走右键路径）。
+  if (event?.sourceCapabilities?.firesTouchEvents) return
   closeMenu()
   contextMenu.value = { item, x: Number(event?.clientX) || 0, y: Number(event?.clientY) || 0 }
 }
@@ -813,7 +822,7 @@ function courseLabel(item) {
 
         <label for="dates-reminder">提前提醒（分钟）</label>
         <input id="dates-reminder" v-model="form.reminderMinutes" type="number" min="0" step="1" :placeholder="`默认提前 ${defaultReminder} 分钟`" :aria-invalid="errorField === 'reminder' || undefined" aria-describedby="dates-reminder-hint" @input="clearFormError('reminder')" />
-        <small id="dates-reminder-hint" class="field-hint">0 表示到点提醒，留空使用默认设置。未填时间按 23:59 计算；应用打开且允许通知时提醒。</small>
+        <small id="dates-reminder-hint" class="field-hint">0 表示到点提醒，留空使用默认设置。未填时间按 23:59 计算；{{ reminderHint }}</small>
 
         <div v-if="form.category === '学习'" class="form-row">
           <div><label for="exams-course">关联课程</label><select id="exams-course" v-model="form.courseId"><option value="">暂不关联</option><option v-for="course in courses" :key="course.id" :value="course.id">{{ course.name }}</option></select></div>

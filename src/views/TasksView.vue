@@ -135,7 +135,14 @@ const {
   save,
   confirmConflictSave,
   remove,
-} = useTaskEditor({ domain, tasks, courses, events: domain.events, onSaved: (message, options = {}) => showToast(message, { type: 'success', ...options }) })
+} = useTaskEditor({ domain, tasks, courses, events: domain.events, onSaved: (message, options = {}) => {
+  const { createdId, ...toastOptions } = options
+  if (createdId) {
+    const created = tasks.value.find(task => task.id === createdId)
+    if (created && !visibleTasks.value.some(task => task.id === createdId)) applyViewState({ q: '', priority: 'all', period: 'all', filter: 'all', history: false }, { touchFilter: true })
+  }
+  showToast(message, { type: 'success', ...toastOptions })
+} })
 const { completionTarget, completionMessage, toggle: toggleWithStageGuard, confirmWhole, completeStage } = useTaskStageActions({ domain, now: appNow, notify: showToast })
 const repeatBase = computed(() => taskRepeatBase(form.value))
 const editingStageId = ref('')
@@ -255,6 +262,7 @@ const { taskPrimaryOf, taskActionItems, onTaskPrimary, onTaskAction } = useTaskR
   openEditTask,
   openReschedule,
   openWorkSession: openTaskWorkSession,
+  startWork: (task) => startTaskWork(task),
   archiveTask,
   deleteTask,
   restoreTask: (id) => domain.restoreTask(id),
@@ -479,7 +487,8 @@ const workspaceSummary = computed(() => taskWorkspaceSummary(tasks.value, appNow
 const courseNamesById = computed(() => new Map(courses.value.map((course) => [course.id, course.name])))
 const hasWorkspaceFilters = computed(() => Boolean(viewState.value.q || priorityFilter.value !== 'all' || periodFilter.value !== 'all'))
 const defaultTaskReminder = computed(() => defaultReminderMinutes('task'))
-// 提醒说明与浏览器实际通知能力保持一致。
+// 提醒能力说明必须照实说：安卓安装版的 WebView 没有系统通知，
+// 提醒只会在应用打开时以应用内提示出现（见 reminderScheduler.js）。
 const reminderHint = computed(() => reminderNotificationHint())
 
 function applyWorkspaceFilters(items) {
@@ -738,16 +747,6 @@ function updateTaskCheckpointField(field, value) {
 
     <LearningNavigation current="tasks" />
 
-    <details v-if="tasks.length && !showHistory" class="task-overview-disclosure" :open="!mobileLayout">
-      <summary>日期概览 <span>今天 {{ workspaceSummary.today }} · 待确认 {{ workspaceSummary.overdue }}</span></summary>
-    <div class="task-overview" role="group" aria-label="待办概览">
-      <Button :variant="periodFilter === 'today' ? 'secondary' : 'outline'" size="sm" class="overview-item" :aria-pressed="periodFilter === 'today'" @click="selectOverview('today')"><span>今天的安排</span><b>{{ workspaceSummary.today }}</b><small>阶段或截止时间</small></Button>
-      <Button :variant="periodFilter === 'overdue' ? 'secondary' : 'outline'" size="sm" class="overview-item overdue-overview" :aria-pressed="periodFilter === 'overdue'" @click="selectOverview('overdue')"><span>需要确认</span><b>{{ workspaceSummary.overdue }}</b><small>逾期或阶段已结束</small></Button>
-      <Button :variant="periodFilter === 'week' ? 'secondary' : 'outline'" size="sm" class="overview-item" :aria-pressed="periodFilter === 'week'" @click="selectOverview('week')"><span>未来 7 天</span><b>{{ workspaceSummary.week }}</b><small>含今天</small></Button>
-      <Button :variant="periodFilter === 'unplanned' ? 'secondary' : 'outline'" size="sm" class="overview-item" :aria-pressed="periodFilter === 'unplanned'" @click="selectOverview('unplanned')"><span>待安排日期</span><b>{{ workspaceSummary.unplanned }}</b><small>给想法安排时间</small></Button>
-    </div>
-
-    </details>
     <p v-if="noticeMessage" class="notice-success" role="status">✓ {{ noticeMessage }}</p>
     <p v-if="csvImportMessage" class="notice-success" role="status">✓ {{ csvImportMessage }}</p>
     <p v-if="organizeMessage && !noticeMessage" class="notice-success" role="status">✓ {{ organizeMessage }}</p>
@@ -755,6 +754,10 @@ function updateTaskCheckpointField(field, value) {
     <p v-if="navigationError" class="error-text" role="alert">{{ navigationError }}</p>
 
     <section class="workspace-filters" aria-label="搜索和筛选待办">
+      <ToggleGroup v-if="!showHistory" type="single" :model-value="periodFilter" aria-label="常用日期范围" @update:model-value="value => value && (value === 'all' ? resetWorkspaceFilters() : selectOverview(value))">
+        <ToggleGroupItem value="today">今天</ToggleGroupItem><ToggleGroupItem value="week">近期</ToggleGroupItem><ToggleGroupItem value="unplanned">待安排</ToggleGroupItem><ToggleGroupItem value="all">全部</ToggleGroupItem>
+      </ToggleGroup>
+      <div v-if="workspaceSummary.overdue && !showHistory" class="workspace-replan"><span>{{ workspaceSummary.overdue }} 项需要重新安排</span><Button variant="ghost" size="sm" @click="selectOverview('overdue'); mobileSelection = true">查看并整理</Button></div>
       <div class="task-controls">
         <ToggleGroup v-if="!showHistory" type="single" :spacing="1" :model-value="viewMode" class="task-view-toolbar max-w-full flex-wrap" aria-label="待办视图" @update:model-value="value => value && setViewMode(value)">
           <ToggleGroupItem value="list"><List data-icon="inline-start" />列表</ToggleGroupItem>
@@ -958,7 +961,8 @@ function updateTaskCheckpointField(field, value) {
           </div>
 
           <div class="task-row-footer">
-          <span v-if="!task.timeStages?.length" class="due" :class="dueInfo(task).cls">{{ dueInfo(task).text }}</span>
+          <button v-if="!task.timeStages?.length && !isArchived(task) && !['completed', 'cancelled'].includes(taskStatus(task, appNow))" type="button" class="due task-date-action" :class="dueInfo(task).cls" :aria-label="`调整日期：${task.title}`" @click.stop="openReschedule(task)">{{ dueInfo(task).text }}<span aria-hidden="true"> · 修改</span></button>
+          <span v-else-if="!task.timeStages?.length" class="due" :class="dueInfo(task).cls">{{ dueInfo(task).text }}</span>
 
           <div class="more" @click.stop>
             <TaskRowActions :primary="taskPrimaryOf(task)" :actions="taskActionItems(task)" :subject="task.title" @primary="onTaskPrimary(task)" @select="onTaskAction(task, $event)" />

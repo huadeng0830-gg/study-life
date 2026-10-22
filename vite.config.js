@@ -42,6 +42,8 @@ if (env.NODE_ENV === 'production' && releaseGateEnabled && !releaseSourceSynced)
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
   const desktopBuild = mode === 'desktop'
+  const androidBuild = mode === 'android'
+  const nativeBuild = desktopBuild || androidBuild
   // 测试环境同样没有 `virtual:pwa-register` 的注入实现，而应用壳会静态导入它。
   // 别名到替身，免得每个挂载真实应用的用例都要自己 mock（见 tests/helpers/pwaRegisterStub.js）。
   const testBuild = env.VITEST === 'true' || mode === 'test'
@@ -78,12 +80,12 @@ export default defineConfig(({ mode }) => {
   base: desktopBuild ? './' : '/',
   server: {
     // 浏览器回归测试的临时配置和数据库会被独占，开发服务器无需监视它们。
-    watch: { ignored: ['**/.vitest-tmp/**', '**/.playwright-cli/**'] },
+    watch: { ignored: ['**/.vitest-tmp/**', '**/.playwright-cli/**', '**/.tmp/**', '**/.tools/**', '**/android/**', '**/release-android/**'] },
   },
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
-      ...(desktopBuild ? {
+      ...(nativeBuild ? {
         'virtual:pwa-register': fileURLToPath(new URL('./desktop/pwa-register-shim.js', import.meta.url)),
       } : testBuild ? {
         'virtual:pwa-register': fileURLToPath(new URL('./tests/helpers/pwaRegisterStub.js', import.meta.url)),
@@ -95,7 +97,7 @@ export default defineConfig(({ mode }) => {
     'globalThis.__STUDY_LIFE_BUILD_INFO__': JSON.stringify(buildInfo),
   },
   build: {
-    outDir: desktopBuild ? 'dist-desktop' : 'dist',
+    outDir: desktopBuild ? 'dist-desktop' : androidBuild ? 'dist-android' : 'dist',
     target: 'es2019',
     cssTarget: 'safari13',
       rollupOptions: {
@@ -139,7 +141,7 @@ export default defineConfig(({ mode }) => {
     },
     vue(),
     tailwindcss(),
-    ...(desktopBuild ? [] : [VitePWA({
+    ...(nativeBuild ? [] : [VitePWA({
       registerType: 'prompt',
       injectRegister: false,
       // 图标只在安装 PWA 时读取，不占用页面切换缓存带宽。

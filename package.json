@@ -1,7 +1,7 @@
 {
   "name": "study-life",
   "private": true,
-  "version": "1.12.1",
+  "version": "1.13.2",
   "type": "module",
   "engines": {
     "node": ">=22"
@@ -10,6 +10,9 @@
     "dev": "vite",
     "build": "vite build --configLoader native && node scripts/check-release-build.mjs dist",
     "build:check": "node scripts/build-check.mjs",
+    "build:android": "vite build --configLoader native --mode android && node scripts/check-release-build.mjs dist-android",
+    "android:setup": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/setup-android.ps1",
+    "android:apk": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-android.ps1",
     "check:release": "npm run build",
     "preview": "vite preview",
     "preview:host": "vite preview --host",
@@ -45,6 +48,12 @@
     "check:release-readme": "node scripts/check-release-readme.mjs"
   },
   "dependencies": {
+    "@capacitor/android": "8.5.3",
+    "@capacitor/app": "8.1.2",
+    "@capacitor/browser": "8.0.5",
+    "@capacitor/core": "8.5.3",
+    "@capacitor/filesystem": "8.1.5",
+    "@capacitor/share": "8.0.3",
     "@e965/xlsx": "^0.20.3",
     "@internationalized/date": "^3.12.4",
     "@lucide/vue": "1.48.0",
@@ -60,6 +69,7 @@
     "vue-router": "^4.6.4"
   },
   "devDependencies": {
+    "@capacitor/cli": "8.5.3",
     "@tailwindcss/vite": "^4.3.3",
     "@types/node": "^26.4.0",
     "@typescript-eslint/parser": "^8.71.1",

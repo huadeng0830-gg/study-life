@@ -24,10 +24,13 @@ const groups = computed(() => visibleDesktopNavigation(props.desktop, props.user
     <template v-if="mode === 'mobile'">
       <div class="mobile-preview-screen"><span aria-hidden="true">☷</span><b>你的常用页面</b><small>常用入口随手可达</small></div>
       <div class="mobile-nav-preview" :style="{ '--preview-count': mobileItems.length + FIXED_MOBILE_NAV_ITEMS }" aria-label="手机底部导航预览">
-        <div v-for="item in mobileItems" :key="item.id" class="mobile-nav-preview-item" :class="{ selected: item.path === currentPath }">
+        <template v-for="(item, index) in mobileItems" :key="item.id">
+        <div v-if="index === 2" class="mobile-nav-preview-item capture"><span aria-hidden="true">＋</span><small>＋记录</small></div>
+        <div class="mobile-nav-preview-item" :class="{ selected: item.path === currentPath }">
           <span aria-hidden="true">{{ item.icon }}</span><small>{{ item.mobileLabel }}</small>
         </div>
-        <div class="mobile-nav-preview-item capture"><span aria-hidden="true">＋</span><small>快速记录</small></div>
+        </template>
+        <div v-if="mobileItems.length <= 2" class="mobile-nav-preview-item capture"><span aria-hidden="true">＋</span><small>＋记录</small></div>
         <div class="mobile-nav-preview-item more" :class="{ selected: !mobileItems.some((item) => item.path === currentPath) }"><span aria-hidden="true">⋯</span><small>更多</small></div>
       </div>
     </template>

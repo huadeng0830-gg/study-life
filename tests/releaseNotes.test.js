@@ -32,6 +32,7 @@ describe('版本更新说明', () => {
   })
 
   it('当前版本只展示一次', () => {
+    markReleaseSeen('previous-release')
     expect(shouldShowReleaseNotes()).toBe(true)
     markReleaseSeen()
     expect(localStorage.getItem(RELEASE_SEEN_KEY)).toBe(APP_RELEASE)

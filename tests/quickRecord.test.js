@@ -3,6 +3,11 @@ import { describe, expect, it } from 'vitest'
 import { parseQuickRecord } from '../src/composables/quickRecord/parser.js'
 
 describe('quickRecord.parser', () => {
+  it('提交课程实验报告仍是作业，报告会和讲座仍是日程', () => {
+    expect(parseQuickRecord('周五交虚构课程实验报告')[0].type).toBe('homework')
+    expect(parseQuickRecord('明天下午三点参加课程报告会')[0].type).toBe('event')
+    expect(parseQuickRecord('明天下午三点参加学习方法讲座')[0].type).toBe('event')
+  })
   it('识别作业、课程、截止时间和优先级', () => {
     const [draft] = parseQuickRecord('周五18点交高数第三章作业，重要', { courses: [{ id: 'c1', name: '高数' }], now: new Date('2026-08-29T10:00:00') })
     expect(draft.type).toBe('homework')

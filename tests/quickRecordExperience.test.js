@@ -61,6 +61,20 @@ afterEach(() => {
 })
 
 describe('快速记录完整录入体验', () => {
+  it('puts a recognized expense before extra tools, keeps type correction collapsed, and saves once', async () => {
+    mountPanel()
+    await enter('午饭18元')
+    const panel = document.querySelector('.entry-fields')
+    const result = panel.querySelector('.results')
+    const tools = panel.querySelector('.input-tools')
+    expect(result.compareDocumentPosition(tools) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(result.querySelector('.type-options').open).toBe(false)
+    expect(panel.querySelector('.record-shortcuts')).toBeNull()
+    expect(document.querySelector('.modal-foot .save-actions')).toBeTruthy()
+    button('保存').click()
+    await vi.waitFor(() => expect(saveMock).toHaveBeenCalledTimes(1))
+    expect(saveMock.mock.calls[0][0]).toMatchObject({ type: 'expense', amount: 18, title: '午饭' })
+  })
   it('首次打开立即解析初始内容，空白入口可直接选择类型和示例', async () => {
     mountPanel({ initialText: '午饭18元' })
     await nextTick()

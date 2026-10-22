@@ -56,4 +56,29 @@ describe('个人待办续接流程', () => {
     expect(session.error.value).toContain('公开的 HTTP 或 HTTPS')
     expect(domain.updateTask).not.toHaveBeenCalled()
   })
+
+  it('starts directly without opening a progress form and never changes checkpoints', () => {
+    const { session, domain, openProjectTask } = createSession()
+    const checkpoint = { lastStep: '第六题', nextStep: '继续第七题' }
+    session.start({ id: 'direct', status: 'pending', workCheckpoint: checkpoint })
+    expect(domain.updateTask).toHaveBeenCalledWith('direct', { status: 'in_progress', done: false, completedAt: null })
+    expect(session.task.value).toBeNull()
+    domain.updateTask.mockClear()
+    for (const status of ['archived', 'completed', 'cancelled']) session.start({ id: status, status })
+    session.start({ id: 'already-started', status: 'in_progress' })
+    expect(domain.updateTask).not.toHaveBeenCalled()
+    const project = { id: 'shared', sourceType: 'project-task' }
+    session.start(project)
+    expect(openProjectTask).toHaveBeenCalledWith(project)
+    expect(checkpoint).toEqual({ lastStep: '第六题', nextStep: '继续第七题' })
+  })
+
+  it('reports a missing or failed write without announcing a successful start', () => {
+    const { session, domain, notify } = createSession()
+    domain.updateTask.mockReturnValueOnce(null).mockImplementationOnce(() => { throw new Error('示例保存失败') })
+    session.start({ id: 'missing', status: 'pending' })
+    session.start({ id: 'failed', status: 'pending' })
+    expect(notify.mock.calls.map(([, options]) => options.type)).toEqual(['error', 'error'])
+    expect(session.error.value).toBe('示例保存失败')
+  })
 })

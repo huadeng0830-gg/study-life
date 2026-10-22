@@ -304,9 +304,9 @@
     width: 100%;
     height: auto;
     background: var(--card);
-    padding: 6px max(10px, env(safe-area-inset-right))
-      calc(6px + env(safe-area-inset-bottom))
-      max(10px, env(safe-area-inset-left));
+    padding: 6px max(10px, var(--safe-right))
+      calc(6px + var(--safe-bottom))
+      max(10px, var(--safe-left));
     border-right: none;
     border-top: 1px solid color-mix(in srgb, var(--border) 74%, transparent);
     /* 手机端底栏不加背景模糊（见上面桌面端的说明：会把 fixed 抽屉的包含块带偏），
@@ -395,7 +395,7 @@
     overflow-y: auto;
     overscroll-behavior: contain;
     -webkit-overflow-scrolling: touch;
-    padding: calc(14px + env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) calc(14px + env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+    padding: calc(14px + var(--safe-top)) max(12px, var(--safe-right)) calc(14px + var(--safe-bottom)) max(12px, var(--safe-left));
     border: 0;
     border-left: 1px solid var(--border);
     border-radius: var(--radius-16) 0 0 var(--radius-16);
@@ -431,8 +431,8 @@
 @media (max-width: 360px) {
   .sidebar,
   .sidebar.collapsed {
-    padding-left: max(3px, env(safe-area-inset-left));
-    padding-right: max(3px, env(safe-area-inset-right));
+    padding-left: max(3px, var(--safe-left));
+    padding-right: max(3px, var(--safe-right));
   }
   .mobile-nav { grid-template-columns: repeat(var(--mobile-nav-count, 5), minmax(0, 1fr)); gap: 0; }
 }

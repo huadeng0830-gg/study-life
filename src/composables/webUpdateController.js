@@ -79,7 +79,8 @@ export function createWebUpdateController({ currentVersion, currentSourceSignatu
   }
   function fail(error, taskPending = false) {
     const safe = safeUpdateError(error)
-    transition(['OFFLINE', 'OTHER_TASK'].includes(safe.code) ? 'warning' : 'error', safe.message, { error: safe, taskPending })
+    if (['SOURCE_INVALID', 'SOURCE_CHANGED', 'SOURCE_ROLLBACK', 'VERSION_VERIFY'].includes(safe.code)) workerUpdateAllowed = false
+    transition(['OFFLINE', 'OTHER_TASK', 'SW_TIMEOUT'].includes(safe.code) ? 'warning' : 'error', safe.message, { error: safe, taskPending })
     log(safe.code)
     return false
   }
@@ -208,6 +209,8 @@ export function createWebUpdateController({ currentVersion, currentSourceSignatu
     peerReload()
   }
   function workerTimedOut() {
+    // A background download timer must never overwrite a later trust failure.
+    if (state.stage === 'error' && state.error && !['TIMEOUT', 'NETWORK', 'SW_TIMEOUT'].includes(state.error.code)) return
     resolveWorker?.('timeout')
     fail(updateError('SW_TIMEOUT', '资源下载仍未结束。可以继续使用应用，或继续等待下载。', 'wait'), true)
   }
@@ -332,13 +335,17 @@ export function createWebUpdateController({ currentVersion, currentSourceSignatu
       }
       if (comparison > 0) {
         workerUpdateAllowed = true
-        const history = await readReleaseHistory()
-        if (disposed || id !== generation) return false
-        const updates = collectReleaseChanges(history, currentVersion, manifest.version, channel)
-        state.updateReleases = updates.length ? updates : [{
+        state.updateReleases = [{
           version: manifest.version, channel: manifest.channel, title: manifest.title, summary: manifest.summary,
           publishedAt: manifest.publishedAt, changes: manifest.changes, notes: manifest.notes,
         }]
+        // Release notes are optional enrichment, never a gate for installing a
+        // validated release. Ignore a late response after another operation.
+        void readReleaseHistory().then((history) => {
+          if (disposed || id !== generation || state.releaseManifest?.sourceSignature !== manifest.sourceSignature) return
+          const updates = collectReleaseChanges(history, currentVersion, manifest.version, channel)
+          if (updates.length) state.updateReleases = updates
+        })
       }
       state.lastCheckOutcome = comparison === 0 ? '已是最新版本' : '检测到新版本'
       if (comparison === 0) {
@@ -421,14 +428,14 @@ export function createWebUpdateController({ currentVersion, currentSourceSignatu
     const html = await requestText('/index.html', checkTimeoutMs)
     const document = new DOMParser().parseFromString(html, 'text/html')
     const meta = (name) => document.querySelector(`meta[name="${name}"]`)?.getAttribute('content') || ''
-    if (meta('study-life-app-version') !== manifest.version || meta('study-life-build-id') !== manifest.buildId ||
+    if (meta('study-life-app-version') !== manifest.version ||
       meta('study-life-source-signature') !== manifest.sourceSignature ||
       (manifest.legacyVersion && meta('study-life-release') !== manifest.legacyVersion))
       throw updateError('SOURCE_INVALID', '发布版本与入口资源不一致，请稍后重试。')
     const documentUrl = windowRef.location?.href || 'https://localhost/'
     const origin = new URL(documentUrl).origin
     const liveManifest = validateReleaseManifest(await requestJson('/release.json', checkTimeoutMs), { channel })
-    if (!liveManifest || liveManifest.version !== manifest.version || liveManifest.buildId !== manifest.buildId ||
+    if (!liveManifest || liveManifest.version !== manifest.version ||
       liveManifest.sourceSignature !== manifest.sourceSignature)
       throw updateError('SOURCE_CHANGED', '检查期间发布内容发生变化，请重新检查后再更新。', 'check')
     const entryAssets = [...document.querySelectorAll('script[src],link[rel="stylesheet"][href]')]

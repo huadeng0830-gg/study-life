@@ -1,4 +1,5 @@
 import { registerSW } from 'virtual:pwa-register'
+import { isAndroidApp } from './androidRuntime.js'
 import { computed, toRef, watch } from 'vue'
 import { APP_RELEASE } from './releaseNotes.js'
 import { APP_CHANNEL, APP_LEGACY_RELEASE, BUILD_ID, SOURCE_SIGNATURE } from './versionInfo.js'
@@ -65,7 +66,7 @@ export function createControllerTakeoverMonitor(serviceWorker, { timeoutMs = 600
 
 const desktop = isDesktopApp
 let lastDesktopSilentCheckAt = 0
-if (!desktop) registerSW({ immediate: true,
+if (!desktop && !isAndroidApp) registerSW({ immediate: true,
   onRegisteredSW: (_url, registration) => controller.observeRegistration(registration),
   // The plugin must never navigate independently of version verification.
   onNeedReload: () => {},
@@ -92,6 +93,7 @@ function updateHostAlive() {
 }
 
 function silentCheck() {
+  if (isAndroidApp) return
   if (!updateHostAlive()) return
   if (!updatePreferences.autoCheck) return
   if (desktop) {

@@ -126,6 +126,7 @@ export function useTaskEditor({ domain, tasks, courses, events, onSaved = (_mess
   }
 
   function commitSave(data, editId, identitySnapshot) {
+    let createdId = null
     const existing = tasks.value.find((task) => task.id === editId)
     const timing = (task) => deepClone({ startDate: task.startDate || '', startTime: task.startTime || '', dueDate: task.dueDate || '', dueTime: task.dueTime || '', timeStages: task.timeStages || [] })
     const before = existing && !existing.done && existing.status !== 'completed' ? timing(existing) : null
@@ -137,7 +138,7 @@ export function useTaskEditor({ domain, tasks, courses, events, onSaved = (_mess
         setFormError('这条待办已不存在，请关闭后重新添加。')
         return
       }
-      if (!editId) domain.createTask({ ...data, createdFrom: 'manual' })
+      if (!editId) createdId = domain.createTask({ ...data, createdFrom: 'manual' }).id
     } catch (cause) {
       setFormError(cause instanceof Error ? cause.message : '请检查时间安排。')
       return
@@ -154,7 +155,8 @@ export function useTaskEditor({ domain, tasks, courses, events, onSaved = (_mess
           { ...before, repeat: beforeRepeat, repeatAnchorDay: beforeAnchor },
           { ...after, repeat: afterRepeat, repeatAnchorDay: afterAnchor }))
       } })
-    } else onSaved(editId ? '待办已更新' : '待办已添加')
+    } else if (createdId) onSaved('待办已添加', { createdId })
+    else onSaved('待办已更新')
   }
 
   function save() {

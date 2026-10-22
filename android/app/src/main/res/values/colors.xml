@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  品牌色。
+
+  【为什么以前没有这个文件】styles.xml 里一直写着 @color/colorPrimary，
+  但本模块没有 values/colors.xml，于是这个引用落到了 @capacitor/android
+  库自带的 colors.xml：colorPrimary=#3F51B5、colorAccent=#FF4081。
+  结果是安卓启动画面是 Material 默认的靛蓝、系统强调色是粉红，
+  与应用自己的主色令牌完全对不上 —— 装上第一眼就像"这不是我们的 App"。
+  这里补上与 src/style.css、src/composables/theme.js 一致的色值。
+
+  值改这里之前先改 src/style.css，两边必须一致（有测试守着）。
+-->
+<resources>
+    <!-- 与 style.css 的主色令牌（浅色主题）同值。 -->
+    <color name="colorPrimary">#3D63D8</color>
+    <!-- 与 style.css 的主色悬停态同值。 -->
+    <color name="colorPrimaryDark">#3151B8</color>
+    <!-- 与主色令牌同值：Material 组件的强调色（涟漪、开关）跟着主色走。 -->
+    <color name="colorAccent">#3D63D8</color>
+
+    <!-- 窗口底色 = 应用页面底色（style.css 的页面底色令牌）。
+         冷启动时 WebView 还没画出第一帧，这块底色就是用户看到的那一屏，
+         不给就会先闪一下系统默认的黑/白。 -->
+    <color name="appBackground">#F6F7FA</color>
+
+    <!-- 启动画面底色 = PWA manifest 的 background_color（vite.config.js），
+         与网页版首屏占位（index.html 的 .startup-loading 底色）同色，
+         于是"网页装成 PWA"和"装 APK"两种入口的第一屏长得一模一样。 -->
+    <color name="splashBackground">#F4F6FA</color>
+</resources>

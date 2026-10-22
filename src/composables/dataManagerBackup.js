@@ -11,6 +11,7 @@ import {
   restoreBackupSelectedFields,
 } from './backupArchive.js'
 import { markBackedUp } from './backupReminder.js'
+import { expectAndroidExport } from './androidRuntime.js'
 import { buildBackupRestoreValues } from './backupRestore.js'
 import { assertAccountDataIdentity, captureAccountDataIdentity } from './accountSyncIdentity.js'
 import { withAccountDataLock } from './accountLocalData.js'
@@ -121,6 +122,9 @@ async function exportBackup() {
     const link = document.createElement('a')
     const now = new Date()
     const filename = `三两事备份-${getAppToday(now)}-${getAppTime(now).replace(/:/g, '')}${String(now.getUTCSeconds()).padStart(2, '0')}-${String(now.getMilliseconds()).padStart(3, '0')}.json`
+    // 安卓上点击不会直接落盘，而是弹系统分享面板；用户可以点"取消"。
+    // 必须在点击**之前**挂上等待，否则结果回来时没人接。
+    const androidExport = expectAndroidExport()
     try {
       link.href = url
       link.download = filename
@@ -129,6 +133,18 @@ async function exportBackup() {
     } finally {
       link.remove()
       window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+    }
+    if (androidExport) {
+      const outcome = await androidExport
+      if (!outcome?.ok) {
+        // 文件没有保存成功：绝不能标记"已备份"，否则备份提醒会安静地停七天。
+        backupMessage.value = outcome?.cancelled
+          ? '已取消保存，备份文件没有写入本机。'
+          : '备份文件没有保存成功，请重试。'
+        backupProgress.setStep('file', 'warning', backupMessage.value)
+        backupProgress.finish('备份文件未保存', 'warning')
+        return
+      }
     }
     const imageCount = Object.keys(backup.data.__wallpaper_images || {}).length
     backupMessage.value = `已生成 ${filename}（${formatDataSize(blob.size)}${imageCount ? `，含 ${imageCount} 张壁纸` : ''}）。${flush.pendingKeys.length ? `文件包含 ${flush.pendingKeys.length} 项未保存的最新修改；` : ''}请确认文件已保存。`

@@ -60,6 +60,37 @@ afterEach(() => {
 })
 
 describe('实际待办阶段交互', () => {
+  it('starts a task directly and keeps progress and staged times unchanged', async () => {
+    const before = JSON.stringify(task().timeStages)
+    const primary = row().querySelector('.tra-primary')
+    expect(primary).toBeTruthy()
+    await clickElement(primary)
+    expect(task().status).toBe('in_progress')
+    expect(JSON.stringify(task().timeStages)).toBe(before)
+    expect(document.querySelector('[role="dialog"]')).toBeNull()
+    await chooseTaskAction(row(), '记进度', clickElement)
+    expect(document.querySelector('.task-work-session')).toBeTruthy()
+  })
+
+  it('keeps empty dates optional and allows row date editing with undo', async () => {
+    await click(host, '添加待办')
+    const form = document.querySelector('form.form')
+    expect(form.querySelector('.task-date-fields').open).toBe(false)
+    value(form.querySelector('#tasks-title'), '示例轻量事项')
+    submit(form)
+    await nextTick()
+    const saved = domain.tasks.value.find(item => item.title === '示例轻量事项')
+    await vi.waitFor(() => expect(host.querySelector(`[data-focus-id="${saved.id}"]`)).toBeTruthy())
+    const target = host.querySelector(`[data-focus-id="${saved.id}"]`)
+    await clickElement(target.querySelector('.task-date-action'))
+    expect(document.querySelector('.reschedule-form')).toBeTruthy()
+    await click(document.querySelector('.date-shortcuts'), '明天')
+    await click(document.querySelector('[role="dialog"]'), '保存改期')
+    expect(saved.dueDate).toBe('2026-10-11')
+    expect(saved.timeStages || []).toEqual([])
+    await click(document.body, '撤销')
+    expect(saved.dueDate || '').toBe('')
+  })
   it('普通任务可直接填写开始和截止时间，无需添加阶段', async () => {
     await click(host, '添加待办')
     const form = document.querySelector('form.form')

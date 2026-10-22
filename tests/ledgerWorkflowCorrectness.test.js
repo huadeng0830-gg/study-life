@@ -46,9 +46,9 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-function form() {
+function form(notify = () => {}) {
   return scope.run(() => useQuickEntryForm({
-    baseCurrency: ref(fx.value.base), domain, notify: () => {}, closeSwipe: () => {}, ledgerNowHM: () => '12:00',
+    baseCurrency: ref(fx.value.base), domain, notify, closeSwipe: () => {}, ledgerNowHM: () => '12:00',
   }))
 }
 async function mount(tab = 'ledger') {
@@ -79,6 +79,70 @@ const button = (text) => [...document.querySelectorAll('button')].find((node) =>
 const item = (overrides) => ({ id: 'example', name: '示例记录', amount: 30, date: today(), time: '12:00', cat: 'food', ...overrides })
 
 describe('ledger entry and refund correctness', () => {
+  it('uses the same complete editor from a visible row action and updates rather than duplicates', async () => {
+    const original = domain.createTransaction({ name: '示例午饭', amount: 18, date: today(), time: '12:00', cat: 'food', account: '示例现金', note: '原备注' })
+    await mount()
+    await click(host.querySelector('.feed-edit-button'))
+    expect(document.querySelector('.quick-form')).toBeTruthy()
+    expect(document.querySelector('.detail-edit-grid')).toBeNull()
+    await input(document.querySelector('.name-input'), '示例晚饭')
+    await input(document.querySelector('.amount-input'), '21.50')
+    await click(button('保存修改'))
+    await vi.waitFor(() => expect(document.querySelector('.quick-form')).toBeNull())
+    expect(expenses.value).toHaveLength(1)
+    expect(original).toMatchObject({ amount: 21.5, name: '示例晚饭', account: '示例现金', note: '原备注', time: '12:00' })
+    await click(host.querySelector('.feed-item'))
+    expect(button('完整编辑')).toBeUndefined()
+    button('编辑').focus()
+    await click(button('编辑'))
+    expect(document.querySelector('.name-input').value).toBe('示例晚饭')
+    await click(document.querySelector('.modal .close'))
+    expect(document.activeElement.dataset.focusId).toBe(original.id)
+  })
+
+  it('does not invent a time or account when editing an older record', async () => {
+    expenses.value = [item({ id: 'legacy', time: undefined, account: undefined })]
+    const api = form()
+    api.openQuick(expenses.value[0])
+    expect(api.timeInput.value).toBe('')
+    expect(api.accountInput.value).toBe('')
+    api.amountInput.value = '35'
+    expect(await api.saveExpense(false, 'legacy')).toBe(true)
+    expect(expenses.value[0]).toMatchObject({ amount: 35, time: '', account: '' })
+  })
+
+  it('keeps named equal split shares proportional when editing the total', async () => {
+    const split = buildSplit(100, { count: 2 })
+    split.participants[1].label = '示例同伴'
+    const original = domain.createTransaction({ name: '示例聚餐', amount: 100, cat: 'food', split })
+    const api = form()
+    api.openQuick(original)
+    api.amountInput.value = '120'
+    await nextTick()
+    expect(await api.saveExpense(false, original.id)).toBe(true)
+    expect(original.split).toMatchObject({ total: 120, mine: 60, participants: [{ amount: 60 }, { amount: 60, label: '示例同伴' }] })
+  })
+
+  it('applies same-name categories only with explicit selection and supports undo', async () => {
+    const original = domain.createTransaction({ name: '示例交通', amount: 10, cat: 'other' })
+    const peer = domain.createTransaction({ name: '示例交通', amount: 20, cat: 'other' })
+    const unrelated = domain.createTransaction({ name: '示例餐饮', amount: 30, cat: 'food' })
+    let undo
+    const api = form((_message, options) => { undo = options?.undoFn })
+    api.openQuick(original)
+    api.catInput.value = 'transit'
+    await nextTick()
+    expect(api.sameNameCategoryCount.value).toBe(1)
+    expect(peer.cat).toBe('other')
+    api.applySameNameCategory.value = true
+    expect(await api.saveExpense(false, original.id)).toBe(true)
+    expect(expenses.value.find(entry => entry.id === peer.id).cat).toBe('transit')
+    expect(unrelated.cat).toBe('food')
+    expect(peer.amount).toBe(20)
+    undo()
+    expect(expenses.value.find(entry => entry.id === peer.id).cat).toBe('other')
+    expect(expenses.value.find(entry => entry.id === original.id).cat).toBe('transit')
+  })
   it('preserves a cleared optional time when creating, editing and reopening a record', async () => {
     const api = form()
     api.openQuick({ amount: 12 })

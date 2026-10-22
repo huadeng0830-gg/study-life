@@ -94,6 +94,13 @@ const moneyHero = moneyRow
 <template>
 <!-- ================= 账本首页 ================= -->
 <div class="ledger-home">
+  <section class="ledger-quick-entry" aria-label="快速记账">
+    <div><b>记下刚刚的一笔</b><small>金额 + 内容就能记下，分类和账户可随后修改</small></div>
+    <div class="ledger-quick-entry-actions">
+      <Button class="ledger-entry-button" type="button" @click="$emit('open-quick')">＋ 记一笔</Button>
+      <Button class="ledger-entry-button" type="button" variant="outline" @click="$emit('open-import')">导入账单</Button>
+    </div>
+  </section>
   <!-- 核心数据：只回答不同时间范围内“花了多少” -->
   <section class="hero-stat card" aria-label="花费概览">
     <span class="hero-label">花费概览</span>
@@ -136,14 +143,6 @@ const moneyHero = moneyRow
     :budget="budget"
     @open-budget-settings="$emit('open-budget-settings')"
   />
-
-  <section class="ledger-quick-entry" aria-label="快速记账">
-    <div><b>刚刚发生了什么？</b><small>金额 + 内容就能记下，分类和账户会沿用默认值</small></div>
-    <div class="ledger-quick-entry-actions">
-      <Button class="ledger-entry-button" type="button" @click="$emit('open-quick')">＋ 记一笔</Button>
-      <Button class="ledger-entry-button" type="button" variant="outline" @click="$emit('open-import')">导入账单</Button>
-    </div>
-  </section>
 
   <!-- 待处理：固定账单临近（无则整块隐藏） -->
   <section v-if="pendingBills.length" class="pending-block">
@@ -289,8 +288,8 @@ const moneyHero = moneyRow
               <small v-if="e.summary.excludedCount">{{ e.summary.excludedCount }} 笔未折算</small>
             </h3>
           </div>
+          <div v-else class="feed-transaction-row">
           <SwipeActionItem
-            v-else
             class="feed-virtual-item feed-transaction-item"
             :actions="e.actions"
             :open="openSwipeId === String(e.transaction.id)"
@@ -328,6 +327,8 @@ const moneyHero = moneyRow
               <span class="fi-amount" :class="{ income: e.transaction.direction === 'income', refund: e.transaction.direction === 'refund' }">{{ feedAmount(e.transaction) }}</span>
             </div>
           </SwipeActionItem>
+          <button v-if="e.actions.some(action => action.key === 'edit')" type="button" class="feed-edit-button" :aria-label="`编辑记录：${e.transaction.name}`" @click="$emit('swipe-action', e.transaction.id, 'edit')">编辑</button>
+          </div>
         </template>
       </VirtualList>
     </div>
@@ -362,6 +363,9 @@ const moneyHero = moneyRow
 </template>
 
 <style scoped>
+.feed-transaction-row { display:flex; min-width:0; height:100%; align-items:stretch; }
+.feed-transaction-row > .feed-transaction-item { flex:1; min-width:0; }
+.feed-edit-button { flex-shrink:0; min-width:44px; min-height:44px; border:0; background:transparent; color:var(--primary); font-size:var(--fs-12); cursor:pointer; }
 .block-title {
   margin:0 0 8px;
   font-size:var(--fs-13-5);
@@ -382,7 +386,7 @@ const moneyHero = moneyRow
 .ledger-home>.budget-card {
   order:2}
 .ledger-home>.ledger-quick-entry {
-  order:3}
+  order:0}
 .ledger-home>.search-block {
   order:4}
 .ledger-home>.feed-block {

@@ -1,5 +1,7 @@
 @import './styles/action-feedback.css';
 @import './styles/shadcn.css';
+@import './styles/safe-area.css';
+@import './styles/touch-feedback.css';
 :root {
   color-scheme: light;
   --bg: #f6f7fa;

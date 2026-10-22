@@ -30,7 +30,8 @@ export function selectHomeNextUp({
   bills = [],
   milestones = [],
   now = new Date(),
-  today,
+  today = '',
+  preferCourses = false,
 } = {}) {
   const nowTs = now.getTime()
   const todayKey = today || new Date(nowTs).toISOString().slice(0, 10)
@@ -79,7 +80,8 @@ export function selectHomeNextUp({
     if (countdown.target && !countdown.isPast) add('milestone', item, policyDateKey(countdown.target), item.time)
   })
 
-  const nextUp = candidates.sort((a, b) => a.dueAt - b.dueAt)[0] || { kind: 'none' }
+  const sorted = candidates.sort((a, b) => a.dueAt - b.dueAt)
+  const nextUp = (preferCourses ? sorted.find((item) => item.kind === 'course') : null) || sorted[0] || { kind: 'none' }
   const course = nextUp.kind === 'course' ? nextUp.entity : null
   const start = course ? times[periodIndex(course.start)]?.start : ''
   const startMinutes = minutesOf(start)

@@ -1,0 +1,30 @@
+/* ---------- 触摸反馈与滚动边界（安卓 WebView 专项）----------
+
+   这一组规则都是**安卓 WebView 特有的默认行为**，浏览器里看不到，
+   但在手机上非常刺眼。单独成文件是因为它们同属"触摸体验"这一件事，
+   且 style.css 已接近单文件行数上限（见 tests/ratchetHardcoding.test.js）。 */
+
+/* 安卓 WebView 的回弹光晕（overscroll glow）是一条亮蓝色的边，
+   在这个几乎满屏的浅色界面上非常刺眼，而且它没有任何信息量。
+   overscroll-behavior: none 让滚动到边界时不再画那条光晕。
+   （iOS Safari 不支持这个属性，忽略即可，不影响橡皮筋效果。） */
+html,
+body {
+  overscroll-behavior: none;
+}
+
+/* 安卓 Chrome 长按可点元素时会闪一块半透明灰底（tap highlight）。
+   触摸反馈已经有 ripple/active 态，这里关掉默认的。 */
+html,
+body {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* 安卓长按按钮文字会弹出放大镜并进入"选择文本"状态，看起来像界面坏了。
+   按钮上的字本来就不是要复制的内容，直接禁掉。
+   （输入框与可选中的正文不受影响。） */
+button,
+[role='button'] {
+  -webkit-user-select: none;
+  user-select: none;
+}

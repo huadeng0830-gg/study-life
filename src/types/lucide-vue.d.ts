@@ -13,8 +13,10 @@ declare module '@lucide/vue' {
   export const CheckIcon: Component
   export const CircleAlertIcon: Component
   export const CopyIcon: Component
+  export const DownloadIcon: Component
   export const HistoryIcon: Component
   export const RefreshCwIcon: Component
+  export const ShieldCheckIcon: Component
   export const ChevronDown: Component
   export const ChevronDownIcon: Component
   export const ChevronLeftIcon: Component

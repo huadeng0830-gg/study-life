@@ -72,7 +72,7 @@ describe('navigation editing sessions', () => {
     expect(persist).toHaveBeenCalledTimes(1)
     expect(persist.mock.calls[0][0]).toHaveProperty(MOBILE_NAVIGATION_KEY)
     expect(persist.mock.calls[0][0]).toHaveProperty(DESKTOP_NAVIGATION_KEY)
-    expect(mobile.value).toEqual(['tasks', 'places'])
+    expect(mobile.value).toEqual(['schedule', 'tasks'])
     expect(desktop.value[0].label).toBe('我的学习')
     expect(editor.hasChanges.value).toBe(false)
     expect(editor.canUndo.value).toBe(false)
@@ -87,7 +87,7 @@ describe('navigation editing sessions', () => {
     editor.apply({ type: 'desktop:rename-group', id: 'workspace', label: '我的学习' }, { batch: 'rename-1' })
     editor.undo()
     expect(editor.drafts.value.desktop[0].label).toBe('学习与计划')
-    expect(editor.drafts.value.mobile).toEqual(['tasks', 'places'])
+    expect(editor.drafts.value.mobile).toEqual(['schedule', 'tasks'])
     editor.redo()
     expect(editor.drafts.value.desktop[0].label).toBe('我的学习')
     editor.mode.value = 'mobile'
@@ -106,7 +106,7 @@ describe('navigation editing sessions', () => {
     expect(mobile.value).toEqual(DEFAULT_MOBILE_NAVIGATION)
     expect(editor.hasChanges.value).toBe(false)
     editor.undo()
-    expect(editor.drafts.value.mobile).toEqual(['tasks', 'places'])
+    expect(editor.drafts.value.mobile).toEqual(['schedule', 'tasks'])
     expect(editor.hasChanges.value).toBe(true)
   })
 
@@ -127,7 +127,7 @@ describe('navigation editing sessions', () => {
   it('rejects over-capacity edits and invalid names before either device can be saved', async () => {
     const { editor, persist } = setup()
     expect(editor.apply({ type: 'mobile:add', id: 'events' })).toBe(true)
-    expect(editor.apply({ type: 'mobile:add', id: 'schedule' })).toBe(true)
+    expect(editor.apply({ type: 'mobile:add', id: 'places' })).toBe(true)
     const canUndoBeforeRejectedEdit = editor.canUndo.value
     expect(editor.apply({ type: 'mobile:add', id: 'projects' })).toBe(false)
     expect(editor.error.value).toContain('最多添加')
@@ -168,7 +168,7 @@ describe('navigation editing sessions', () => {
   it('does not display a conflict while its own save publishes the stored refs', async () => {
     let finishSave
     const { editor, mobile } = setup({ persist: () => {
-      mobile.value = ['tasks', 'places']
+      mobile.value = ['schedule', 'tasks']
       return new Promise((resolve) => { finishSave = resolve })
     } })
     editor.apply({ type: 'mobile:remove', id: 'today' })
@@ -185,7 +185,7 @@ describe('navigation editing sessions', () => {
     desktop.value = [{ id: 'custom', label: '新侧栏', items: ['tasks'] }]
     expect(editor.drafts.value.desktop).toEqual(desktop.value)
     mobile.value = ['projects']
-    expect(editor.drafts.value.mobile).toEqual(['tasks', 'places'])
+    expect(editor.drafts.value.mobile).toEqual(['schedule', 'tasks'])
     expect(editor.conflicts.value).toEqual(['mobile'])
     expect(await editor.save()).toBe(false)
     expect(persist).not.toHaveBeenCalled()
@@ -226,7 +226,7 @@ describe('navigation editing sessions', () => {
     editor.undo({ cancel: true })
     expect(editor.canRedo.value).toBe(true)
     editor.redo()
-    expect(editor.drafts.value.mobile).toEqual(['tasks', 'places'])
+    expect(editor.drafts.value.mobile).toEqual(['schedule', 'tasks'])
   })
 
   it('shows the actual stored layout when another update arrives during persistence', async () => {
@@ -261,7 +261,7 @@ describe('navigation editing sessions', () => {
     expect(editor.drafts.value.desktop).toEqual(desktop.value)
     expect(editor.dirty.value).toEqual({ mobile: failed, desktop: false })
     expect(editor.conflicts.value).toEqual([])
-    expect(editor.drafts.value.mobile).toEqual(['tasks', 'places'])
+    expect(editor.drafts.value.mobile).toEqual(['schedule', 'tasks'])
     if (failed) expect(editor.error.value).toBe('存储空间不足')
   })
 })

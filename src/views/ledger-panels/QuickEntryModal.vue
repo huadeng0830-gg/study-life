@@ -47,6 +47,8 @@ const props = defineProps({
   duplicateHit: { type: Boolean, default: false },
   formError: { type: String, default: '' },
   errorField: { type: String, default: '' },
+  applySameNameCategory: { type: Boolean, default: false },
+  sameNameCategoryCount: { type: Number, default: 0 },
   saveAction: { type: Function, default: null },
 })
 
@@ -77,6 +79,7 @@ const emit = defineEmits([
   'update:moreOpen',
   'update:dupWarn',
   'update:forceDup',
+  'update:applySameNameCategory',
   'update:cycleSuggest',
   'update:categoryInputManuallySelected',
   'update:suggestedCategoryInput',
@@ -236,8 +239,12 @@ function createBillFromSuggest() {
     </div>
 
     <button type="button" class="more-toggle" :aria-expanded="moreOpen" @click="$emit('update:moreOpen', !moreOpen)">
-      {{ moreOpen ? '收起' : '更多' }} <i>{{ moreOpen ? '▴' : '▾' }}</i>
+      {{ moreOpen ? '收起其他信息' : '日期、账户与更多' }} <i>{{ moreOpen ? '▴' : '▾' }}</i>
     </button>
+
+    <p class="entry-summary">{{ dateInput }}<template v-if="timeInput"> {{ timeInput }}</template> · {{ catInfo(catInput || 'other').name }} · {{ accountInput || '默认账户' }} · {{ currencyInput || baseCurrency }}<template v-if="Number(splitCount) > 1"> · {{ splitPreview }}</template></p>
+
+    <label v-if="editingId && sameNameCategoryCount" class="split-mode bulk-category"><input type="checkbox" :checked="applySameNameCategory" @change="$emit('update:applySameNameCategory', $event.target.checked)" />同时将另外 {{ sameNameCategoryCount }} 笔同名{{ directionInput === 'income' ? '收入' : '支出' }}改为「{{ catInfo(catInput || 'other').name }}」</label>
 
     <div v-show="moreOpen" class="more-area">
       <div class="chip-row cat-chips">
@@ -295,6 +302,8 @@ function createBillFromSuggest() {
 .quick-amount-field { display:flex; align-items:center; gap:8px; }
 .quick-currency { color:var(--ink-soft); font-size:var(--fs-23); }
 .quick-error { margin:0; color:var(--danger); font-size:var(--fs-12); line-height:1.5; }
+.entry-summary { margin:0; color:var(--ink-soft); font-size:var(--fs-12); line-height:1.6; overflow-wrap:anywhere; }
+.bulk-category { min-height:44px; }
 .split-mode { display:flex; align-items:center; gap:8px; color:var(--ink-soft); font-size:var(--fs-12); }
 .split-mode input { width:16px; height:16px; accent-color:var(--primary); }
 .amount-input {

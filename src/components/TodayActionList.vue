@@ -32,7 +32,7 @@ function actionLabel(item) {
         </div>
       </div>
     </section>
-    <section v-else-if="empty" class="action-panel action-empty" aria-label="现在该做"><div class="panel-head"><h2>今天最重要</h2><Button as-child variant="ghost"><RouterLink to="/tasks">全部待办</RouterLink></Button></div><p class="quiet-empty">没有待处理的紧急事项。给今天留一个小目标吧。</p></section>
+    <section v-else-if="empty" class="action-panel action-empty" aria-label="现在该做"><div class="panel-head"><h2>今天最重要</h2><Button as-child variant="ghost"><RouterLink to="/tasks">全部待办</RouterLink></Button></div><p class="quiet-empty">今天没有待处理的紧急事项。</p></section>
   </template>
 
   <section v-else-if="items.length" class="action-panel risk-panel" aria-label="需要注意">

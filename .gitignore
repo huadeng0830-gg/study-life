@@ -1,3 +1,18 @@
+# Android build tools, outputs and private signing material
+.tools/
+/dist-android/
+/release-android/
+/android/.gradle/
+/android/.kotlin/
+/android/local.properties
+/android/app/build/
+/android/build/
+/android/app/src/main/assets/public/
+/android/app/src/main/assets/capacitor.config.json
+/android/app/src/main/assets/capacitor.plugins.json
+*.keystore
+*.jks
+
 # Logs
 logs
 *.log

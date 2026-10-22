@@ -22,8 +22,8 @@ describe('导航信息架构', () => {
 
   it('保持既有数字快捷键映射，手机最多自选五个页面并保留两个常驻入口', () => {
     expect(desktopShortcutRoutes).toEqual(['/', '/schedule', '/tasks', '/exams', '/lists', '/bills', '/events', '/review'])
-    expect(DEFAULT_MOBILE_NAVIGATION).toEqual(['today', 'tasks', 'places'])
-    expect(normalizeMobileNavigation(['today', 'tasks', 'schedule'])).toEqual(['today', 'tasks', 'places'])
+    expect(DEFAULT_MOBILE_NAVIGATION).toEqual(['today', 'schedule', 'tasks'])
+    expect(normalizeMobileNavigation(['today', 'tasks', 'schedule'])).toEqual(['today', 'schedule', 'tasks'])
     expect(normalizeMobileNavigation(['tasks', 'tasks', 'course', 'bills', 'events'])).toEqual(['tasks', 'course', 'bills', 'events'])
     expect(normalizeMobileNavigation(['tasks', 'course', 'bills', 'events', 'projects', 'schedule'])).toHaveLength(5)
   })
@@ -62,13 +62,14 @@ describe('导航信息架构', () => {
     expect(tool?.label).toBe(SETTINGS_NAVIGATION_LABEL)
   })
 
-  it.each(['/campus/reviewer-application', '/campus/guides'])('校园子页 %s 仍由校园一级底栏承载', (path) => {
+  it.each(['/campus/reviewer-application', '/campus/guides'])('校园子页 %s 在更多可达，且支持校园入口的激活判断', (path) => {
     const navigation = useNavigationViewModel({ path }, '我的账号')
-    const campus = navigation.bottomItems.value.find((item) => item.id === 'places')
+    const campus = navigationRegistry.find((item) => item.id === 'places')
 
     expect(campus).toBeDefined()
     expect(navigation.isBottomItemActive(campus)).toBe(true)
-    expect(navigation.moreHasCurrentPage.value).toBe(false)
+    expect(navigation.moreHasCurrentPage.value).toBe(true)
+    expect(navigation.moreGroups.value.flatMap(group => group.items).some(item => item.id === 'places')).toBe(true)
   })
 })
 

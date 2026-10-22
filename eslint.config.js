@@ -10,6 +10,11 @@ export default [
     ignores: [
       'dist/**',
       'dist-desktop/**',
+      'dist-android/**',
+      'release-android/**',
+      'android/**',
+      '.tools/**',
+      '.tmp/**',
       'release-desktop/**',
       'dist-bak/**',
       'node_modules/**',

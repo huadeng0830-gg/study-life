@@ -25,9 +25,9 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: var(--space-6);
+  gap: var(--space-5);
   min-width: 0;
-  padding: var(--space-6);
+  padding: var(--space-5) var(--space-6);
   border: 1px solid color-mix(in srgb, var(--primary) 26%, var(--border));
   border-radius: var(--radius-surface);
   background-color: color-mix(in srgb, var(--primary-soft) 52%, transparent);
@@ -96,6 +96,10 @@
   50% { opacity: 0.55; transform: scale(0.78); }
 }
 .next-action { flex: none; max-width: 100%; min-height: var(--control-large); }
+/* 行动按钮成组：桌面端贴在面板右侧，手机端并排铺满一行（原来手机端是
+   两个整行按钮竖着排，「接下来」一张卡就吃掉大半屏）。 */
+.next-actions { display: flex; flex: none; align-items: center; gap: var(--space-2); }
+.next-actions .next-action { flex: 0 1 auto; }
 .experience-message { padding: var(--space-3) var(--space-4); border-radius: var(--radius-control); background: var(--primary-soft); color: var(--primary); font-size: var(--type-subheadline); }
 .today-page > .panel { min-width: 0; }
 .panel-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-3); margin-bottom: var(--space-4); }
@@ -144,10 +148,17 @@
 .event-detail-note { padding-top: var(--space-3); border-top: 1px solid var(--border); white-space: pre-wrap; }
 
 @container today-layout (min-width: 850px) {
-  .today-page { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); align-items: start; gap: var(--space-5) var(--space-6); }
+  .today-page { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); align-items: start; gap: var(--space-5) var(--space-6); }
   .today-page > .page-head, .today-page > .next-panel, .today-page > .experience-message, .today-page > .home-productivity, .today-page > .compact-link-row, .today-page > .today-mood-lower, .today-page > .social-calendar-anchor { grid-column: 1 / -1; }
-  .today-page > .today-agenda { grid-column: 1; grid-row: span 2; min-height: 320px; }
-  .today-page > .action-panel, .today-page > .focus-panel { grid-column: 2; }
+  /* 左栏是「今日安排」，右栏是「现在该做 / 需要注意」。
+     这条规则原来写的是 `.today-page > .today-agenda`，但 `.today-agenda` 是
+     TodayAgenda 组件自己的根节点，**不是** .today-page 的直接子节点——
+     直接子节点是包着它的 <details>。选择器从未命中，于是左栏只剩一行
+     折叠摘要标题，右栏堆满所有内容，中间空出一大片空白。
+     现在按 <details> 来定位，左栏才有内容。 */
+  .today-page > .today-agenda-section { grid-column: 1; grid-row: span 2; align-self: start; }
+  .today-page > .action-panel { grid-column: 2; }
+  .today-page > .focus-panel { grid-column: 2; }
   .today-page.has-focus-request > .focus-panel { grid-column: 1 / -1; }
 }
 @media (max-width: 900px), (pointer: coarse) and (max-height: 520px) {
@@ -155,7 +166,7 @@
   .today-page-head { align-items: flex-start; gap: var(--space-2); }
   .today-quote { display: none; }
   .today-context { gap: var(--space-2); }
-  .next-panel { padding: var(--space-5); gap: var(--space-4); }
+  .next-panel { padding: var(--space-4) var(--space-5); gap: var(--space-4); }
   .next-title { font-size: var(--fs-20); }
   .today-course-checkin button { min-height: var(--tap-min); }
 }
@@ -165,11 +176,20 @@
   .greeting { font-size: var(--fs-22); }
   .replay-btn { padding-inline: var(--space-2); }
   .panel-link, .compact-link-row a { min-width:var(--tap-min); min-height:var(--tap-min); display:inline-flex; align-items:center; }
-  .next-panel { align-items: flex-start; flex-direction: column; padding: var(--space-5) var(--space-4); }
-  .next-action { width: 100%; }
+  /* 手机端：「接下来」压成两行（标题 + 并排按钮），不再占满半屏。 */
+  .next-panel { align-items: stretch; flex-direction: column; gap: var(--space-3); padding: var(--space-4); }
+  .next-main { gap: var(--space-1); }
+  .next-actions { width: 100%; }
+  .next-actions .next-action { flex: 1 1 0; min-width: 0; }
   .week-finance-stats { gap: var(--space-2); }
   .week-finance-stats b { font-size: var(--type-callout); }
   .mood-toolbar { gap: var(--space-2); }
   .mood-label { flex-basis: 100%; }
   .mood-note { flex-basis: 100%; max-width: none; }
 }
+.today-agenda-disclosure { border-bottom: 1px solid var(--border); padding-block: var(--space-2); }
+.today-agenda-disclosure > summary { min-height: var(--tap-min); display: flex; align-items: center; cursor: pointer; color: var(--ink-soft); font-size: var(--type-callout); }
+.today-agenda-disclosure > summary::after { content: '＋'; margin-left: auto; }
+.today-agenda-disclosure[open] > summary::after { content: '−'; }
+/* 摘要里的计数用弱一档的灰，让「今日安排」四个字仍然是这句的主语。 */
+.today-agenda-count { margin-left: var(--space-2); color: var(--muted); font-size: var(--fs-12); }

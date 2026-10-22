@@ -39,6 +39,7 @@ import { persistenceState, dismissPersistenceNotice } from './composables/store/
 import PersistenceErrorAlert from './components/PersistenceErrorAlert.vue'
 import { backupReminderTitle, needsBackup, useBackupNotice } from './composables/backupReminder.js'
 import { attachFloatingSlot, createFloatingSlot, detachFloatingSlot, useFloatingOffset } from './composables/floatingStack.js'
+import ShellNotices from './components/ShellNotices.vue'
 import { announce, announceAlert, clearAnnouncement, liveAlert, liveMessage } from './composables/liveRegion.js'
 import { openSearch, searchOpen } from './composables/globalSearch.js'
 import { adminTitleForRoute } from './composables/adminWorkspaceModel.js'
@@ -558,6 +559,8 @@ function t(key) {
     </div>
   </Transition>
 
+  <!-- 安卓返回键提示与应用内提醒（components/ShellNotices.vue）。 -->
+  <ShellNotices />
   <!-- 常驻读屏播报区：始终存在于 DOM 里，只改文本。
        各页面临时插入的 role="status" 对 VoiceOver 不可靠（有些实现不播报
        首次插入就带内容的 live region），路由切换也需要在这里播报。 -->
@@ -589,30 +592,29 @@ function t(key) {
    tests/scopedChildReachability.test.js 与第三十九轮报告；删除前后用 @vue/compiler-sfc
    编译成 CSS 文本逐字 diff 过，差异只有这些选择器。
    这些样式在 components/Sidebar.vue 自己的 scoped 样式块里都有等价副本，需要改请改那边。 */
+/* 第四十轮：这条移动端底栏副本原先还写了底色与上边框。Sidebar.css 里那条同名规则
+   特异度相同（scoped 之后都是「类 + 作用域属性」），于是**谁在样式表里靠后谁赢**——
+   而 App.vue 的样式排在 Sidebar.vue 之后，副本一直盖着正本：正本刻意让底栏留 10% 通透
+   （极光/壁纸从底栏后透出来），副本却写死了不透明底色，手机上那条通透底栏从来没出现过。
+   现在副本只保留定位与尺寸，**表面（底色/边框）交给 Sidebar.css**。 */
 @media (max-width: 900px), (pointer: coarse) and (max-height: 520px) {
   .sidebar,.sidebar.collapsed {
   width:100%;
   height:auto;
-  background:var(--card);
   /* 安全区：index.html 用了 viewport-fit=cover，刘海与手势条会压到内容上，
-     所以所有贴边横条都要把 env(safe-area-inset-*) 加进内边距或定位里（下面还有多处同样处理）。 */
-  padding:6px max(10px, env(safe-area-inset-right)) calc(6px + env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
+     所以所有贴边横条都要把 var(--safe-*) 加进内边距或定位里（下面还有多处同样处理）。
+     --safe-* 统一在 styles/safe-area.css 里定义：安卓取原生注入值，iOS 走 env()。 */
+  padding:6px max(10px, var(--safe-right)) calc(6px + var(--safe-bottom)) max(10px, var(--safe-left));
   border-right:none;
-  border-top:1px solid var(--border);
   position:fixed;
   top:auto;
   bottom:0;
   left:0;
   right:0;
   box-shadow:0 -8px 24px #23345d14}
-/* 同一批残留：≤900px 这一段里引用 Sidebar.vue 内部类的 15 条（.mobile-nav / .mobile-nav-item /
-   .mobile-more-item / .mobile-ledger-trigger / .more-trigger / .mobile-more-sheet /
-   .mobile-more-head / .mobile-more-group / .mobile-more-grid 及其后代）已按同一判据删除。
-   上面那条 .sidebar,.sidebar.collapsed 是**活**的：.sidebar 是 Sidebar.vue 的模板根节点，
-   父作用域属性会落在它身上，移动端底栏的定位、安全区与 border 都由它生效。
-   注意 .more-sheet-enter/leave-* 那两条**故意保留**：过渡类名不在任何模板里（由 Sidebar.vue 的
-   Transition 组件按 name="more-sheet" 在运行时生成），模板根标签判不了生死，按「未判定一律
-   保留」处理——它们在报告里列为"未判定"，不当作已确认的死规则。 */
+/* 同一批残留：≤900px 这一段里引用 Sidebar.vue 内部类的 15 条已按同一判据删除。
+   注意 .more-sheet-enter/leave-* 那两条**故意保留**：过渡类名不在任何模板里，
+   模板根标签判不了生死，按「未判定一律保留」处理。 */
 .more-sheet-enter-active,.more-sheet-leave-active {
   transition:opacity var(--dur-fast) var(--ease-standard), transform var(--dur-fast) var(--ease-standard)}
 .more-sheet-enter-from,.more-sheet-leave-to {
@@ -702,7 +704,7 @@ to {
   max-width:var(--container-wide);
   margin:0 auto;
   /* 横向也要让开刘海/灵动岛：index.html 是 viewport-fit=cover，横屏时左右会顶边。
-     max(…, env(safe-area-inset-*)) 在无安全区时退回原固定值，桌面不受影响。 */
+     max(…, var(--safe-*)) 在无安全区时退回原固定值，桌面不受影响。 */
   padding:var(--space-4) clamp(24px, 3vw, 48px) var(--space-12)}
 .connection-notice { display:flex; align-items:flex-start; gap:var(--space-2); margin-bottom:var(--space-4); padding:var(--space-3) var(--space-4); border:1px solid var(--border-strong); border-left:3px solid var(--info); border-radius:var(--radius-control); background:var(--card); color:var(--ink-soft); font-size:var(--type-subheadline); }
 .desktop-toolbar { display:none; }
@@ -781,7 +783,7 @@ to {
    否则窄条两侧会多出一块点不到正文的死区。槽位序号用 order 真的参与定序，DOM 顺序只是渲染结果。 */
 .global-alert-stack {
   z-index:240;
-  top:calc(12px + env(safe-area-inset-top));
+  top:calc(12px + var(--safe-top));
   left:0;
   right:0;
   gap:8px;
@@ -853,13 +855,13 @@ to {
   .layout {
   flex-direction:column}
 .content {
-  padding:calc(20px + env(safe-area-inset-top)) max(16px, env(safe-area-inset-right, 0px)) calc(86px + env(safe-area-inset-bottom)) max(16px, env(safe-area-inset-left, 0px));
+  padding:calc(20px + var(--safe-top)) max(16px, var(--safe-right)) calc(86px + var(--safe-bottom)) max(16px, var(--safe-left));
   order:1}
 }
 @media (max-width:520px) {
   .content {
   /* 底部与 Toast/任务胶囊同一 86px 档（原先 84px 会让 86px 高的浮层压到最后一行内容）。 */
-  padding:calc(18px + env(safe-area-inset-top)) max(14px, env(safe-area-inset-right, 0px)) calc(86px + env(safe-area-inset-bottom)) max(14px, env(safe-area-inset-left, 0px))}
+  padding:calc(18px + var(--safe-top)) max(14px, var(--safe-right)) calc(86px + var(--safe-bottom)) max(14px, var(--safe-left))}
 }
 /* 预留高度必须随**可见条数**增长：写死 54px 时第二条告警会整条压在正文首屏上（--alert-count 由 JS
    统计后内联传入，样式侧只管"每条多高"）。末尾那个 8px 与 .global-alert-stack 的 gap 是同一个数。
@@ -872,7 +874,7 @@ to {
 @media (max-width:760px) { .global-alert-reserve { --alert-lane:124px; } }
 .quick-record-toast {
   left:50%;
-  bottom:calc(18px + env(safe-area-inset-bottom) + var(--stack-offset,0px));
+  bottom:calc(18px + var(--safe-bottom) + var(--stack-offset,0px));
   z-index:250;
   max-width:min(560px,100vw - 32px);
   color:var(--text);
@@ -911,11 +913,11 @@ to {
   transform:translateY(-8px)}
 @media (max-width: 900px), (pointer: coarse) and (max-height: 520px) {
   .quick-record-toast {
-  bottom:calc(86px + env(safe-area-inset-bottom) + var(--stack-offset,0px))}
+  bottom:calc(86px + var(--safe-bottom) + var(--stack-offset,0px))}
 }
 .global-error-toast {
   left:50%;
-  bottom:calc(18px + env(safe-area-inset-bottom) + var(--stack-offset,0px));
+  bottom:calc(18px + var(--safe-bottom) + var(--stack-offset,0px));
   z-index:300;
   border:1px solid var(--border-strong);
   background:var(--card);
@@ -930,7 +932,7 @@ to {
   transform:translate(-50%)}
 @media (max-width: 900px), (pointer: coarse) and (max-height: 520px) {
   .global-error-toast {
-  bottom:calc(86px + env(safe-area-inset-bottom) + var(--stack-offset,0px))}
+  bottom:calc(86px + var(--safe-bottom) + var(--stack-offset,0px))}
 }
 .global-error-copy {
   flex-direction:column;
@@ -939,6 +941,7 @@ to {
   display:flex}
 .global-error-copy b {
   font-size:var(--fs-13)}
+/* 安卓返回键提示与应用内提醒的样式在 components/ShellNotices.vue。 */
 .global-error-copy span {
   color:var(--ink-soft);
   font-size:var(--fs-12)}

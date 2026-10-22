@@ -93,6 +93,8 @@ describe('渲染后的 Tab 顺序与可访问名称', () => {
   }, 15_000)
 
   it('心情单选组用方向键、Home 和 End 切换，并始终只有一个 Tab 停靠点', async () => {
+    const { appearance } = await import('../src/composables/appearance.js')
+    appearance.value = { ...appearance.value, showMood: true }
     mounted = await mountApp({ routes })
     const group = document.querySelector('[role="radiogroup"][aria-label="选择今日心情"]')
     const radios = [...group.querySelectorAll('[role="radio"]')]
@@ -104,6 +106,7 @@ describe('渲染后的 Tab 顺序与可访问名称', () => {
       expect(radios[index].getAttribute('aria-checked')).toBe('true')
       expect(group.querySelectorAll('[tabindex="0"]')).toHaveLength(1)
     }
+    appearance.value = { ...appearance.value, showMood: false }
   })
 
   it('跳过链接是第一个 Tab 停靠点，并指向真实存在的 main', async () => {

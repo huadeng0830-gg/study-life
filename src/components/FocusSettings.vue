@@ -37,7 +37,12 @@ async function save({ signal } = {}) {
     if (draft.value.systemNotificationEnabled) {
       if (typeof window === 'undefined' || !('Notification' in window)) {
         draft.value.systemNotificationEnabled = false
-        error.value = '当前浏览器不支持系统通知，已关闭该选项；声音和震动仍可使用'
+        // 震动能不能用是另一回事：安卓安装版已经申请了 VIBRATE 权限，
+        // 所以这里不能顺带说"震动不可用"；桌面浏览器上则要按实际能力说话。
+        const vibrationAvailable = typeof navigator !== 'undefined' && 'vibrate' in navigator
+        error.value = vibrationAvailable
+          ? '当前环境不支持系统通知，已关闭该选项；声音和震动仍可使用'
+          : '当前环境不支持系统通知和震动，已关闭相关选项；声音仍可使用'
         return false
       }
       try {

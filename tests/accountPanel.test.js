@@ -3,6 +3,8 @@ import { createApp, h, nextTick } from 'vue'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const adapter = vi.hoisted(() => ({ getSupabaseClient: vi.fn(), getSupabaseConfig: vi.fn(), verifyAccountCurrentPassword: vi.fn() }))
+const nativeBrowser = vi.hoisted(() => ({ open: vi.fn().mockResolvedValue(undefined) }))
+vi.mock('@capacitor/browser', () => ({ Browser: nativeBrowser }))
 vi.mock('../src/services/supabase.js', () => adapter)
 // Auth/form tests use an unrestricted, already verified moderation snapshot.
 // Restricted/unknown/racing snapshots are exercised in accountRestrictions.test.js.
@@ -126,6 +128,31 @@ async function click(text) {
 }
 
 describe('注册面板的实际表单行为', () => {
+  it('安卓未验证邮箱的重发入口交给浏览器，避免跨容器丢失邮件验证状态', async () => {
+    vi.stubEnv('MODE', 'android')
+    client.auth.signInWithPassword.mockResolvedValue({ data: { user: null, session: null }, error: { code: 'email_not_confirmed' } })
+    await mountPanel()
+    await fill('#account-email', user.email)
+    await fill('#account-password', 'Fictional123!')
+    await submit()
+    await vi.waitFor(() => expect(document.querySelector('#account-confirmation-title')).toBeTruthy())
+    await click('在浏览器中验证邮箱')
+    await vi.waitFor(() => expect(nativeBrowser.open).toHaveBeenCalledWith({ url: 'https://study-life.pages.dev/?account=login' }))
+    expect(client.auth.resend).not.toHaveBeenCalled()
+    expect(document.body.textContent).toContain('验证后返回安卓应用登录')
+  })
+
+  it('安卓注册和找回密码由浏览器发起，不在 APK 中创建邮件验证请求', async () => {
+    vi.stubEnv('MODE', 'android')
+    await mountPanel()
+    await click('在浏览器中注册账号')
+    await vi.waitFor(() => expect(nativeBrowser.open).toHaveBeenCalledWith({ url: 'https://study-life.pages.dev/?account=register' }))
+    await click('忘记密码？')
+    await vi.waitFor(() => expect(nativeBrowser.open).toHaveBeenCalledWith({ url: 'https://study-life.pages.dev/?account=recovery' }))
+    expect(client.auth.signUp).not.toHaveBeenCalled()
+    expect(client.auth.resetPasswordForEmail).not.toHaveBeenCalled()
+  })
+
   it('按部署能力展示 OAuth，隐藏未配置的邮箱注册与恢复', async () => {
     vi.stubEnv('VITE_ACCOUNT_EMAIL_SIGNUP_ENABLED', 'false')
     vi.stubEnv('VITE_ACCOUNT_EMAIL_DELIVERY_ENABLED', 'false')

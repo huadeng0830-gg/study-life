@@ -456,6 +456,7 @@ function openMobileTool(key) {
 
     <nav class="mobile-nav" :style="{ '--mobile-nav-count': mobileBarItems }" aria-label="手机主要导航">
       <template v-for="item in mobileBottomItems" :key="item.id">
+        <button v-if="mobileBottomItems.indexOf(item) === Math.min(2, mobileBottomItems.length)" class="mobile-nav-item capture-trigger" type="button" aria-label="快速记录" aria-haspopup="dialog" @pointerdown="warmTool('capture')" @click="openMobileTool('capture')"><span aria-hidden="true"><AppIcon name="capture" /></span><small>＋记录</small></button>
         <router-link
           :to="item.path"
           class="mobile-nav-item"
@@ -467,8 +468,8 @@ function openMobileTool(key) {
           <span><AppIcon :name="item.id" /></span><small>{{ item.mobileLabel || item.label }}</small>
         </router-link>
       </template>
-      <button class="mobile-nav-item capture-trigger" type="button" aria-label="快速记录" aria-haspopup="dialog" @pointerenter="warmTool('capture')" @pointerdown="warmTool('capture')" @focus="warmTool('capture')" @click="openMobileTool('capture')">
-        <span aria-hidden="true"><AppIcon name="capture" /></span><small>快速记录</small>
+      <button v-if="mobileBottomItems.length <= 2" class="mobile-nav-item capture-trigger" type="button" aria-label="快速记录" aria-haspopup="dialog" @pointerenter="warmTool('capture')" @pointerdown="warmTool('capture')" @focus="warmTool('capture')" @click="openMobileTool('capture')">
+        <span aria-hidden="true"><AppIcon name="capture" /></span><small>＋记录</small>
       </button>
       <button ref="moreTriggerEl" class="mobile-nav-item more-trigger" :class="{ active: showMobileMore || mobileMoreHasCurrentPage }" type="button" :aria-expanded="showMobileMore" :aria-label="updateReminderVisible ? '更多功能，有新版本' : '更多功能'" @click="showMobileMore = !showMobileMore">
         <span><AppIcon name="more" /><i v-if="updateReminderVisible" class="update-dot"></i></span><small>更多</small>

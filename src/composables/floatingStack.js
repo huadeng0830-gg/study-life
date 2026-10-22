@@ -5,7 +5,7 @@ import { computed, ref } from 'vue'
  *
  * 背景：页面底部原本有三套互不感知的浮层 ——
  *   Toast（z-index 200）、快速记录成功提示（z-index 250）、全局错误提示（z-index 300）、
- * 它们都用 `position: fixed; bottom: calc(18px + env(safe-area-inset-bottom))`，
+ * 它们都用 `position: fixed; bottom: calc(18px + var(--safe-bottom))`，
  * 同时出现时会精确地叠在同一个位置，后出现的把先出现的盖住。
  * 加上 KeepAlive 会同时保留多个页面实例，多个 `<Toast>` 也可能一起打开，
  * 于是"提示被吃掉"变成常态。

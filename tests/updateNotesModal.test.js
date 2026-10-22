@@ -67,9 +67,10 @@ async function waitForOverlay(timeoutMs = 4000) {
 }
 
 describe('更新说明浮层', () => {
-  it('判别力前提：干净的 profile 下「确实应该弹」（否则下面那条"不弹"毫无意义）', () => {
+  it('首次使用不把版本记录误当更新，直接进入应用', () => {
     localStorage.clear()
-    expect(shouldShowReleaseNotes(), '空 profile 下应为真').toBe(true)
+    expect(shouldShowReleaseNotes()).toBe(false)
+    expect(localStorage.getItem(RELEASE_SEEN_KEY)).toBe(APP_RELEASE)
   })
 
   it('夹具默认扮演回访用户：不弹，且当前版本已被标记为已读', async () => {
@@ -82,15 +83,16 @@ describe('更新说明浮层', () => {
     expect(shouldShowReleaseNotes(), '夹具应已把当前版本标记为已读').toBe(false)
   })
 
-  it('首次启动会弹，并显示当前版本与本轮说明', async () => {
+  it('旧版本升级后显示当前版本与本轮说明', async () => {
     // 预热分块：让 `defineAsyncComponent` 的解析不取决于"等多久"
     await import('../src/components/UpdateNotes.vue')
     const { mountApp } = await import('./helpers/mountApp.js')
     localStorage.clear()
+    localStorage.setItem(RELEASE_SEEN_KEY, 'previous-release')
     mounted = await mountApp({ markReleaseSeen: false })
 
     const overlay = await waitForOverlay()
-    expect(overlay, '首次启动必须弹更新说明').toBeTruthy()
+    expect(overlay, '升级后应显示更新说明').toBeTruthy()
     expect(overlay.textContent).toContain(`版本 ${APP_RELEASE}`)
     expect(overlay.textContent).toContain(RELEASE_NOTES[0])
   })
@@ -99,10 +101,11 @@ describe('更新说明浮层', () => {
     await import('../src/components/UpdateNotes.vue')
     const { mountApp, settle } = await import('./helpers/mountApp.js')
     localStorage.clear()
+    localStorage.setItem(RELEASE_SEEN_KEY, 'previous-release')
     mounted = await mountApp({ markReleaseSeen: false })
 
     const overlay = await waitForOverlay()
-    expect(overlay, '首次启动必须弹更新说明').toBeTruthy()
+    expect(overlay, '升级后应显示更新说明').toBeTruthy()
 
     const ack = [...overlay.querySelectorAll('button')].find((button) => button.textContent.trim() === '知道了')
     expect(ack, '浮层里应有「知道了」按钮').toBeTruthy()

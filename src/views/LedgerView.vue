@@ -20,11 +20,11 @@ import { moneyWithCurrency } from '../utils/formatters.js'
 import { useDomainCommands } from '../composables/domain/commands.js'
 import { policyTimeKey } from '../composables/settingsPolicy.js'
 import { appNow, appToday } from '../composables/timeContext.js'
-import { clearFocusFromRoute, focusElementWhenReady, readFocusQuery } from '../composables/focusNavigation.js'
+import { clearFocusFromRoute, findFocusElement, focusElementWhenReady, readFocusQuery } from '../composables/focusNavigation.js'
 import { useTabKeys } from '../composables/tabKeys.js'
 // 本轮新增的四个功能各自一个模块：多币种汇率 / 预算预警 / 账单模板 / 报销分摊。
 // 它们都只提供纯函数与新选择器，既有汇总路径（buildLedgerIndex 等）一行都没改。
-import { createLedgerBaseConverter, normalizeCurrency, normalizeLedgerFx, useLedgerFx } from '../composables/ledgerFx.js'
+import { createLedgerBaseConverter, normalizeLedgerFx, useLedgerFx } from '../composables/ledgerFx.js'
 import { sumLedgerMonthInBase } from '../composables/ledgerFx.js'
 import { useLedgerBudget } from '../composables/ledgerBudget.js'
 import { useLedgerFeed } from '../composables/ledgerView/feed.js'
@@ -200,15 +200,7 @@ function onTransactionSwipeAction(id, action) {
   closeSwipe()
   if (action === 'edit') {
     const target = expenses.value.find((item) => String(item.id) === String(id))
-    if (target) {
-      openDetail(target.id)
-      detailAmountInput.value = String(target.amount ?? '')
-      detailCategoryInput.value = target.cat || ''
-      detailDateInput.value = target.date || ledgerToday()
-      detailCurrencyInput.value = normalizeCurrency(target.currency) || baseCurrency.value
-      detailEdit.value = true
-      nextTick(() => document.querySelector('.detail-edit-amount')?.focus())
-    }
+    if (target) { openDetail(target.id); openDetailEditor() }
   } else if (action === 'delete') {
     deleteTransactionById(id)
   } else if (action === 'undo-bill') {
@@ -320,6 +312,8 @@ const baseMonthSummary = computed(() => sumLedgerMonthInBase(expenses.value, fx.
 // 新增：快速记账表单 composable
 const {
   moreOpen,
+  applySameNameCategory,
+  sameNameCategoryCount,
   amountInput,
   nameInput,
   catInput,
@@ -384,9 +378,14 @@ function openQuick(prefill = {}) {
 // 表单状态，showQuick 一直是 true —— 表现就是「点 × 完全没反应」。
 // 记一笔的开关与编辑态必须在这里一起收掉。
 function closeQuickModal() {
+  const returnId = editingId.value
   closeQuick()
   showQuick.value = false
   editingId.value = null
+  if (returnId) nextTick(() => {
+    const target = findFocusElement(returnId) || document.querySelector('.ledger-home .search-input')
+    target?.focus?.({ preventScroll: true })
+  })
 }
 
 /**
@@ -407,13 +406,6 @@ const {
   open: detailOpen,
   detailItem,
   detailExpense,
-  detailEdit,
-  detailAmountInput,
-  detailCategoryInput,
-  detailDateInput,
-  detailCurrencyInput,
-  applySameNameCategory,
-  sameNameCategoryCount,
   showRefund,
   refundItem,
   refundAmountInput,
@@ -426,10 +418,7 @@ const {
   openDetail,
   closeDetail,
   editFromDetail,
-  cancelDetailEdit,
-  saveDetailEdit,
   againFromDetail,
-  fullEditFromDetail,
   undoBillPaymentFromDetail,
   deleteFromDetail,
   openRefund,
@@ -448,8 +437,8 @@ const {
   splitDetailNote,
 })
 
-function openFullDetailEditor() {
-  const prefill = fullEditFromDetail()
+function openDetailEditor() {
+  const prefill = editFromDetail()
   if (prefill) openQuick(prefill)
 }
 
@@ -729,6 +718,9 @@ const {
       :open="showQuick"
       :editing-id="editingId"
       :keep-adding="keepAdding"
+      :apply-same-name-category="applySameNameCategory"
+      :same-name-category-count="sameNameCategoryCount"
+      @update:apply-same-name-category="applySameNameCategory = $event"
       :base-currency="baseCurrency"
       :currency-options="currencyOptions"
       :quick-cat-chips="quickCatChips"
@@ -805,13 +797,6 @@ const {
     <TransactionDetailModal
       :open="detailOpen"
       :detail-expense="detailExpense"
-      :detail-edit="detailEdit"
-      :detail-amount-input="detailAmountInput"
-      :detail-category-input="detailCategoryInput"
-      :detail-date-input="detailDateInput"
-      :detail-currency-input="detailCurrencyInput"
-      :apply-same-name-category="applySameNameCategory"
-      :same-name-category-count="sameNameCategoryCount"
       :show-refund="showRefund"
       :refund-item="refundItem"
       :refund-amount-input="refundAmountInput"
@@ -824,22 +809,13 @@ const {
       :base-currency="baseCurrency"
       :splitDetailNote="splitDetailNote"
       @update:open="closeDetail()"
-      @update:detail-edit="detailEdit = $event"
-      @update:detail-amount-input="detailAmountInput = $event"
-      @update:detail-category-input="detailCategoryInput = $event"
-      @update:detail-date-input="detailDateInput = $event"
-      @update:detail-currency-input="detailCurrencyInput = $event"
-      @update:apply-same-name-category="applySameNameCategory = $event"
       @update:show-refund="showRefund = $event"
       @update:refund-item="refundItem = $event"
       @update:refund-amount-input="refundAmountInput = $event"
       @update:refund-date-input="refundDateInput = $event"
       @update:refund-note-input="refundNoteInput = $event"
-      @edit-from-detail="editFromDetail"
-      @save-detail-edit="saveDetailEdit"
-      @cancel-detail-edit="cancelDetailEdit"
+      @edit-from-detail="openDetailEditor"
       @again-from-detail="repeatDetailRecord"
-      @full-edit-from-detail="openFullDetailEditor"
       @open-related-record="openDetail"
       @undo-bill-payment-from-detail="undoBillPaymentFromDetail"
       @delete-from-detail="deleteFromDetail"

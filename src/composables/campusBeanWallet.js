@@ -1,4 +1,4 @@
-import { computed, ref, watch } from 'vue'
+import { computed, ref, toValue, watch } from 'vue'
 import { accountUser } from './accountAuth.js'
 import { campusErrorMessage } from './campusContentModel.js'
 import { useCampusRequest } from './campusRequest.js'
@@ -11,8 +11,9 @@ import { campusBeanWallet } from '../services/campusCommunity.js'
  * 两套错误文案。规则数字（每条 3 豆、每日 20 条、单次 0–20）还散落在三个地方。
  *
  * 这里只管读取；规则文案走 `CAMPUS_BEAN_RULES`，卡片长什么样交给各自的页面。
+ * @param {{ enabled?: import('vue').MaybeRefOrGetter<boolean> }} [options]
  */
-export function useCampusBeanWallet() {
+export function useCampusBeanWallet({ enabled = true } = {}) {
   const wallet = ref(null)
   const ledger = ref([])
   const loading = ref(false)
@@ -25,7 +26,7 @@ export function useCampusBeanWallet() {
     wallet.value = null
     ledger.value = []
     error.value = ''
-    if (!signedIn.value) { loading.value = false; return }
+    if (!signedIn.value || !toValue(enabled)) { request.invalidate(); loading.value = false; return }
     const revision = request.begin()
     loading.value = true
     try {
@@ -41,7 +42,7 @@ export function useCampusBeanWallet() {
   }
 
   // 换账号即重读。未登录时清空，避免把上一个账号的余额留在页面上。
-  watch(() => accountUser.value?.id, () => { void load() }, { immediate: true })
+  watch(() => [accountUser.value?.id, toValue(enabled)], () => { void load() }, { immediate: true })
 
   return { wallet, ledger, loading, error, signedIn, load }
 }

@@ -10,7 +10,9 @@ export const PROJECT_ROOT = fileURLToPath(new URL('../', import.meta.url))
 export const RELEASE_INPUTS = ['src', 'functions', 'workers', 'supabase/functions', 'supabase/migrations', 'supabase/config.toml', 'public', 'desktop', 'desktop-app', 'index.html', 'package.json', 'package-lock.json',
   'vite.config.js', 'electron-builder.yml', 'electron-builder.release.yml', 'release.config.js', 'release-history.json', 'wrangler.jsonc',
   'scripts/source-signature.mjs', 'scripts/release-manifest.mjs', 'scripts/version-utils.mjs', 'scripts/bump-release.mjs',
-  'scripts/check-release-build.mjs']
+  'scripts/check-release-build.mjs', 'capacitor.config.json', 'android/app/src/main/java', 'android/app/src/main/res',
+  'android/app/src/main/AndroidManifest.xml', 'android/app/build.gradle', 'android/build.gradle', 'android/variables.gradle',
+  'android/gradle.properties', 'android/gradle/wrapper/gradle-wrapper.properties', 'scripts/build-android.ps1', 'scripts/setup-android.ps1']
 
 // 这些目录是**本机构建/安装产物**，不属于仓库源码：
 // node_modules 是依赖，.wrangler 是 wrangler 的本地构建输出（workers/ 下会写入
@@ -20,15 +22,16 @@ const RELEASE_INPUT_EXCLUDED_DIRS = new Set(['node_modules', '.git', '.wrangler'
 // Wrangler generates this ignored declaration locally when checking the public Worker.
 // It is not part of the commit, so including it would make release signatures differ
 // between a developer checkout and the clean Cloudflare Pages checkout.
-const RELEASE_INPUT_EXCLUDED_FILES = new Set(['workers/public-api/worker-configuration.d.ts'])
+const RELEASE_INPUT_EXCLUDED_FILES = new Set(['workers/public-api/worker-configuration.d.ts',
+  'android/app/src/main/res/xml/config.xml'])
 
-export function collectReleaseFiles(target) {
+export function collectReleaseFiles(target, projectRoot = PROJECT_ROOT) {
   if (!existsSync(target)) return []
   if (!statSync(target).isDirectory()) return [target]
   return readdirSync(target, { withFileTypes: true })
     .filter((entry) => !RELEASE_INPUT_EXCLUDED_DIRS.has(entry.name) &&
-      !RELEASE_INPUT_EXCLUDED_FILES.has(relative(PROJECT_ROOT, resolve(target, entry.name)).replaceAll('\\', '/')))
-    .flatMap((entry) => collectReleaseFiles(resolve(target, entry.name)))
+      !RELEASE_INPUT_EXCLUDED_FILES.has(relative(projectRoot, resolve(target, entry.name)).replaceAll('\\', '/')))
+    .flatMap((entry) => collectReleaseFiles(resolve(target, entry.name), projectRoot))
 }
 
 // 二进制判定沿用 git 的启发式：首块里出现 NUL 字节即视为二进制。
@@ -58,7 +61,7 @@ export function computeSourceSignature({
 } = {}) {
   const hash = createHash('sha256')
   const files = releaseInputs
-    .flatMap((input) => collectReleaseFiles(resolve(projectRoot, input)))
+    .flatMap((input) => collectReleaseFiles(resolve(projectRoot, input), projectRoot))
     // Use code-point ordering so paths hash identically under different OS
     // locales and ICU defaults (for example, zh-CN workstations and en-US CI).
     .sort((a, b) => {

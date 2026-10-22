@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <!-- 基础应用主题（当前没有界面直接用它，保留 Capacitor 模板的结构）。 -->
+    <style name="AppTheme" parent="Theme.AppCompat.Light.DarkActionBar">
+        <item name="colorPrimary">@color/colorPrimary</item>
+        <item name="colorPrimaryDark">@color/colorPrimaryDark</item>
+        <item name="colorAccent">@color/colorAccent</item>
+    </style>
+
+    <!--
+      实际使用的窗口主题。
+
+      【windowBackground】原来只写了 android:background=@null（Capacitor 模板的写法），
+      窗口没有底色：冷启动时 WebView 还没画出第一帧，屏幕上会先出现系统默认的
+      透明/黑色闪一下，再跳到应用底色。改成应用自己的页面底色。
+
+      【Light 而不是 DayNight】应用主题由网页层决定（默认'蓝色'即浅色，
+      用户也可切到'跟随系统'），原生这边只负责最初几帧。
+      固定用浅色底 = 默认主题（绝大多数人）启动零闪屏；
+      选了深色主题的用户最多看到一帧浅色，随后立刻切到深色。
+
+      【windowLightStatusBar】启动画面与系统状态栏都是浅色底，
+      不显式声明的话状态栏图标会用默认的浅色，等于看不见。
+    -->
+    <style name="AppTheme.NoActionBar" parent="Theme.AppCompat.Light.NoActionBar">
+        <item name="windowActionBar">false</item>
+        <item name="windowNoTitle">true</item>
+        <item name="android:background">@null</item>
+        <item name="android:windowBackground">@color/appBackground</item>
+        <item name="android:windowLightStatusBar">true</item>
+    </style>
+
+    <!--
+      Android 12+ 启动画面（androidx.core:core-splashscreen）。
+
+      【底色】原来指向 @color/colorPrimary，落到了 Capacitor 库的 #3F51B5（靛蓝），
+      所以启动画面是紫色的。现在由 values/colors.xml 提供真实的浅底色。
+
+      【图标】原来用 @drawable/app_mark —— 一张 192px、放在 drawable/（按 mdpi 算）
+      的位图，在 3x 屏幕上被放大到 160dp，边缘发虚。改用 @mipmap/ic_launcher：
+      它是自适应图标，前景按 108dp 画布里的 72dp 安全区排版，
+      任何屏幕密度下都是矢量级清晰，且与桌面图标完全一致。
+    -->
+    <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/splashBackground</item>
+        <item name="windowSplashScreenAnimatedIcon">@mipmap/ic_launcher</item>
+        <item name="postSplashScreenTheme">@style/AppTheme.NoActionBar</item>
+        <item name="android:windowLightStatusBar">true</item>
+    </style>
+</resources>

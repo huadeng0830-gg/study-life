@@ -138,7 +138,7 @@ export const routes = [
   // Keep old bookmarks usable after the standalone Notes page was retired.
   { path: '/notes', redirect: '/' },
   { path: '/together', name: 'together', meta: { title: '一起约', navigation: { id: 'together', icon: '👥', groupId: 'campus', groupLabel: '校园与协作', defaultDesktop: true } }, component: asyncRoute('/together') },
-  { path: '/projects', name: 'projects', meta: { title: '齐行', navigation: { id: 'projects', label: '项目协作', mobileLabel: '项目', icon: '🧩', groupId: 'campus', groupLabel: '校园与协作', defaultDesktop: true } }, component: asyncRoute('/projects') },
+  { path: '/projects', name: 'projects', meta: { title: '项目协作', navigation: { id: 'projects', label: '项目协作', mobileLabel: '项目', icon: '🧩', groupId: 'campus', groupLabel: '校园与协作', defaultDesktop: true } }, component: asyncRoute('/projects') },
   // 管理工作区共用导航，按任务懒加载；不进入用户可编辑的业务导航。
   { path: '/admin', name: 'admin-center', meta: { title: '管理中心' }, component: asyncRoute('/admin') },
   { path: '/platform-admin', name: 'platform-admin', meta: { title: '平台运维' }, component: asyncRoute('/platform-admin') },

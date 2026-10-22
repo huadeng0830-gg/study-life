@@ -1,5 +1,6 @@
 <script setup>
 import ActionButton from './ActionButton.vue'
+import { isAndroidApp } from '../composables/androidRuntime.js'
 import { readRegistrationStatus } from '../services/platformRegistration.js'
 import { computed, defineAsyncComponent, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import Modal from './Modal.vue'
@@ -31,14 +32,15 @@ const props = defineProps({ open: Boolean })
 const accountRestrictionsPresent = computed(() => Object.keys(accountRestrictions.value?.restrictions || {}).length > 0)
 watch(() => [props.open, accountUser.value?.id], ([open, user]) => { if (open && user) void refreshAccountRestrictions() }, { immediate: true })
 const authOptions = getAccountAuthOptions()
-const oauthProviders = window.studyLifeDesktop?.isDesktop ? [] : authOptions.providers
+const oauthProviders = window.studyLifeDesktop?.isDesktop || isAndroidApp ? [] : authOptions.providers
 const registrationOpen = ref(/** @type {boolean|null} */(null))
-const emailSignupEnabled = computed(() => authOptions.emailSignup && authOptions.emailDelivery && registrationOpen.value !== false)
+const emailSignupEnabled = computed(() => !isAndroidApp && authOptions.emailSignup && authOptions.emailDelivery && registrationOpen.value !== false)
 watch(() => props.open, async open => { if (open && !accountUser.value && accountAvailable.value) { try { registrationOpen.value = await readRegistrationStatus() } catch { registrationOpen.value = null } } }, { immediate: true })
 const passwordAccount = computed(() => !accountUser.value?.app_metadata?.providers?.length || accountUser.value.app_metadata.providers.includes('email'))
 const emit = defineEmits(['close'])
 // 账号面板的常见场景是已有账号登录；新用户仍可在同一屏切到注册。
-const mode = ref('login')
+const requestedAccountMode = new URLSearchParams(window.location.search).get('account') || ''
+const mode = ref(!isAndroidApp && ['recovery', 'register'].includes(requestedAccountMode) ? requestedAccountMode : 'login')
 const email = ref('')
 const password = ref('')
 const confirmation = ref('')
@@ -101,6 +103,7 @@ function clearPasswords() {
 }
 
 function changeMode(nextMode) {
+  if (isAndroidApp && nextMode === 'recovery') { void openWebAccount('recovery'); return }
   if (busy.value) return
   mode.value = nextMode
   clearPasswords()
@@ -195,6 +198,7 @@ async function submit() {
 
 async function resend() {
   if (busy.value || resendSeconds.value > 0 || !accountAvailable.value) return
+  if (isAndroidApp) { await openWebAccount('confirmation'); return }
   const target = confirmationEmail.value || normalizeAccountEmail(email.value)
   const emailError = validateAccountForm({ email: target }).email
   if (emailError) {
@@ -269,6 +273,7 @@ function passwordUpdated() {
 }
 
 async function sendRecoveryForUser() {
+  if (isAndroidApp) { await openWebAccount('recovery'); return }
   if (busy.value || resendSeconds.value > 0) return
   feedbackError.value = ''
   feedback.value = ''
@@ -285,7 +290,24 @@ function leaveRecovery() {
   nextTick(() => summaryHeading.value?.focus())
 }
 
-onMounted(() => { if (accountAvailable.value) void initializeAccountAuth() })
+async function openWebAccount(action) {
+  try {
+    const { Browser } = await import('@capacitor/browser')
+    const webMode = action === 'confirmation' ? 'login' : action === 'register' ? 'register' : 'recovery'
+    await Browser.open({ url: `https://study-life.pages.dev/?account=${webMode}` })
+    feedback.value = action === 'confirmation'
+      ? '请在浏览器中登录此账号，再重新发送验证邮件并打开链接；验证后返回安卓应用登录。'
+      : '请在打开的浏览器中完成注册或找回密码；完成后返回安卓应用，使用邮箱和密码登录。'
+  } catch { feedbackError.value = '未能打开浏览器，请访问网页版，在“我的账号”中完成邮箱验证、注册或找回密码。' }
+}
+onMounted(() => {
+  if (accountAvailable.value) void initializeAccountAuth()
+  if (['recovery', 'register', 'login'].includes(requestedAccountMode)) {
+    const url = new URL(window.location.href)
+    url.searchParams.delete('account')
+    window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`)
+  }
+})
 onBeforeUnmount(() => {
   clearPasswords()
 })
@@ -349,7 +371,7 @@ onBeforeUnmount(() => {
         <p>请在 <strong class="account-email">{{ confirmationEmail }}</strong> 中打开验证链接。</p>
         <p class="account-help">{{ authOptions.emailDelivery ? '没有收到邮件时，请检查垃圾邮件或稍后重新发送。' : '验证邮件暂时无法发送，请返回登录或联系管理员。' }}</p>
         <ActionButton v-if="authOptions.emailDelivery" tone="neutral" type="button" class="btn" :disabled="busy || resendSeconds > 0" :busy="busy" kind="important" feedback="external" :show-error="false" :action="() => resend()">
-          {{ resendSeconds > 0 ? resendSeconds + ' 秒后可重发' : '重新发送验证邮件' }}
+          {{ resendSeconds > 0 ? resendSeconds + ' 秒后可重发' : isAndroidApp ? '在浏览器中验证邮箱' : '重新发送验证邮件' }}
         </ActionButton>
         <div class="account-links">
           <button type="button" class="btn btn-primary" :disabled="busy" @click="changeMode('login')">已验证，去登录</button>
@@ -377,6 +399,7 @@ onBeforeUnmount(() => {
             <p class="account-help">首次使用会创建账号；已有记录会按账号同步规则合并。</p>
           </div>
           <p v-if="!emailSignupEnabled && mode === 'login'" class="account-help">{{ oauthProviders.length ? '已有邮箱账号仍可在下方登录。' : '目前支持已有邮箱账号登录；不登录也可继续在本机使用。' }}</p>
+          <Button v-if="isAndroidApp && authOptions.emailSignup && authOptions.emailDelivery && registrationOpen !== false" type="button" variant="outline" @click="openWebAccount('register')">在浏览器中注册账号</Button>
           <div v-if="mode !== 'recovery' && emailSignupEnabled" class="account-mode" role="group" aria-label="账号操作">
             <button type="button" class="btn" :class="{ 'btn-primary': mode === 'login' }" :aria-pressed="mode === 'login'" :disabled="busy" @click="changeMode('login')">登录</button>
             <button v-if="emailSignupEnabled" type="button" class="btn" :class="{ 'btn-primary': mode === 'register' }" :aria-pressed="mode === 'register'" :disabled="busy" @click="changeMode('register')">注册</button>

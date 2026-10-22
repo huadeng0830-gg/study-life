@@ -50,6 +50,10 @@ function readSeenReleases() {
 export function shouldShowReleaseNotes(release = APP_RELEASE) {
   const seen = readSeenReleases()
   // 无法持久化时不弹出，避免隐私模式下每次启动都重复打扰。
+  if (seen?.size === 0) {
+    markReleaseSeen(release)
+    return false
+  }
   return seen ? !seen.has(release) : false
 }
 

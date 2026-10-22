@@ -177,7 +177,7 @@ describe('记一笔弹窗：关闭与保存', () => {
     await click(confirmCategory)
 
     const before = expenses.value.length
-    const save = [...document.querySelectorAll('.quick-record button')].find((node) => (node.textContent || '').trim() === '保存')
+    const save = [...document.querySelectorAll('[role="dialog"] button')].find((node) => (node.textContent || '').trim() === '保存')
     expect(save, '快速记录面板上找不到「保存」').toBeTruthy()
     await click(save)
 

@@ -147,7 +147,7 @@ function requestDelete() {
 </script>
 
 <template>
-  <Modal :open="open" :title="editingId ? '编辑课程' : '添加课程'" @close="emit('close')">
+  <Modal :open="open" :title="editingId ? (editingCourse?.name || '课程详情') : '添加课程'" @close="emit('close')">
     <div class="form">
       <section v-if="editingId" class="course-links" aria-label="课程关联事项">
         <div class="course-links-head"><div><b>关联事项</b><small>删除课程只会解除关联，待办和重要日期会保留。</small></div><span v-if="linkedReviewProgress !== null" class="link-progress">复习 {{ linkedReviewProgress }}%</span></div>
@@ -157,6 +157,7 @@ function requestDelete() {
           <div><span class="link-label">学习类重要日期 {{ linkedCountdowns.length }}</span><p v-if="!linkedCountdowns.length" class="link-empty">暂无关联学习类重要日期</p><ul v-else class="link-list"><li v-for="item in linkedCountdowns.slice(0, 3)" :key="item.id"><RouterLink :to="focusLocation('/exams', item.id)" @click="emit('close')">{{ item.name }}</RouterLink><small>{{ item.date }} · 复习 {{ item.reviewProgress || 0 }}%</small></li></ul><RouterLink class="link-action" :to="{ path: '/exams', query: { new: '1', courseId: String(editingId) } }" @click="emit('close')">＋ 记录考试或重要日期</RouterLink></div>
         </div>
       </section>
+      <details class="course-edit-fields" :open="!editingId || Boolean(error.message)"><summary>修改课程资料与每周安排</summary>
       <label for="course-name">课程名称 *</label>
       <input
           id="course-name"
@@ -205,11 +206,14 @@ function requestDelete() {
       <p v-if="error.message" id="course-editor-error" class="error" role="alert">{{ error.message }}</p>
       <div class="actions"><button v-if="editingId" class="btn btn-ghost" @click="emit('archive', editingCourse)">{{ isArchived(editingCourse) ? '恢复课程' : '归档课程' }}</button><button v-if="editingId" class="btn btn-danger" @click="requestDelete">删除课程</button><button class="btn btn-primary" @click="save">保存</button></div>
       <p v-if="editingId" class="cell-add-hint">同一格子可以放不同周次的课（如 1-6 周上 A、7-16 周上 B） <button class="btn btn-ghost" @click="emit('add-another')">＋ 在此格添加另一门课</button></p>
+      </details>
     </div>
   </Modal>
 </template>
 
 <style scoped>
+.course-edit-fields[open] { display: flex; flex-direction: column; gap: var(--space-2); }
+.course-edit-fields > summary { min-height: var(--tap-min); cursor: pointer; padding-block: var(--space-3); font-weight: var(--fw-600); }
 .link-list a { color: var(--primary); text-decoration: none; font-size: var(--fs-12); overflow-wrap: anywhere; }
 .link-list a:hover { text-decoration: underline; }
 .link-list small.link-overdue { color: var(--danger); }

@@ -36,6 +36,56 @@ beforeEach(() => { vi.useFakeTimers(); sessionStorage.clear() })
 afterEach(() => { controllers.forEach((controller) => controller.dispose()); controllers = []; vi.clearAllTimers(); vi.useRealTimers() })
 
 describe('网页更新的操作、事件和实际版本验证', () => {
+  it('下载提示期限不能覆盖随后发现的版本回退，也不能重新授权旧 Worker', async () => {
+    let release = latest
+    const { controller, registration } = fixture({ fetchFn: vi.fn(async (path) => releaseFetchResponse(path, makeReleaseManifest(release))) })
+    await controller.check()
+    const worker = new EventTarget()
+    worker.state = 'installing'
+    worker.postMessage = vi.fn()
+    registration.installing = worker
+    registration.dispatchEvent(new Event('updatefound'))
+    release = '0.1.0'
+    await controller.check()
+    await vi.advanceTimersByTimeAsync(30000)
+    worker.state = 'installed'
+    worker.dispatchEvent(new Event('statechange'))
+    expect(controller.state).toMatchObject({ stage: 'error', error: { code: 'SOURCE_ROLLBACK' }, taskPending: false })
+    await expect(controller.apply()).resolves.toBe(false)
+    expect(worker.postMessage).not.toHaveBeenCalled()
+  })
+  it('更新日志请求很慢也不阻塞已核对的版本，日志可以随后补齐', async () => {
+    const gate = deferred()
+    const manifest = makeReleaseManifest(latest)
+    const { controller } = fixture({ fetchFn: vi.fn((path) => String(path).startsWith('/release-history.json')
+      ? gate.promise : Promise.resolve(releaseFetchResponse(path, manifest))) })
+    let settled = false
+    const check = controller.check().then((value) => { settled = true; return value })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(settled).toBe(true)
+    expect(controller.state).toMatchObject({ stage: 'available', availableVersion: latest, taskPending: false })
+    gate.resolve(releaseFetchResponse('/release-history.json', manifest))
+    await vi.advanceTimersByTimeAsync(0)
+    await expect(check).resolves.toBe(true)
+    expect(controller.state.updateReleases[0].version).toBe(latest)
+  })
+
+  it('弱网下载超过提示期限后自行完成，直接进入待启用而不需要点击继续等待', async () => {
+    const { controller, registration } = fixture()
+    await controller.check()
+    const worker = new EventTarget()
+    worker.state = 'installing'
+    registration.installing = worker
+    registration.dispatchEvent(new Event('updatefound'))
+    await vi.advanceTimersByTimeAsync(30000)
+    expect(controller.state.taskPending).toBe(true)
+    worker.state = 'installed'
+    registration.installing = null
+    registration.waiting = worker
+    worker.dispatchEvent(new Event('statechange'))
+    expect(controller.state).toMatchObject({ stage: 'ready', error: null, taskPending: false })
+  })
+
   it('两个入口快速检查共用同一任务与版本请求', async () => {
     const gate = deferred()
     const { controller, fetchMock } = fixture({ fetchFn: vi.fn(() => gate.promise) })
@@ -97,7 +147,7 @@ describe('网页更新的操作、事件和实际版本验证', () => {
     expect(registration.unregister).not.toHaveBeenCalled()
     await vi.advanceTimersByTimeAsync(30000)
     await expect(task).resolves.toBe(false)
-    expect(controller.state).toMatchObject({ stage: 'error', taskPending: true, error: { retryAction: 'wait' } })
+    expect(controller.state).toMatchObject({ stage: 'warning', taskPending: true, error: { retryAction: 'wait' } })
     await controller.continueDownload()
     expect(registration.update).toHaveBeenCalledTimes(1)
     worker.state = 'installed'

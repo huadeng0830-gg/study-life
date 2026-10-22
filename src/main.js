@@ -21,7 +21,7 @@ import { initialRoutePath, preloadRoute } from './router/routePreload.js'
 import { configureStartupDiagnostics, recordStartupTiming, startupElapsedMs, startupNow } from './composables/startupDiagnostics.js'
 import { configureOverlayHistory } from './composables/overlayStack.js'
 
-const isDesktopShell = window.studyLifeDesktop?.isDesktop === true
+const isDesktopShell = window.studyLifeDesktop?.isDesktop === true || import.meta.env.MODE === 'android'
 const startupDebugEnabled = import.meta.env.DEV
   || new URLSearchParams(window.location.search).get('startupDebug') === '1'
 configureStartupDiagnostics(startupDebugEnabled)
@@ -140,6 +140,15 @@ window.addEventListener('vite:preloadError', (event) => {
 })
 
 async function bootstrap({ skipGate = false } = {}) {
+  if (import.meta.env.MODE === 'android') {
+    const { installAndroidExportBridge, initializeAndroidRuntime } = await import('./composables/androidRuntime.js')
+    installAndroidExportBridge()
+    // 返回键监听必须在界面挂载**之前**接上。
+    // Capacitor 自带的默认实现在没有 JS 监听器时会把返回键**吃掉**：
+    // 能后退就退 WebView 的历史（不是哈希路由，页面会变白），不能后退就什么都不做。
+    // 原来这段代码排在 app.mount() 之后，启动那几秒里按返回键没有任何反应。
+    void initializeAndroidRuntime().catch((error) => console.warn('[android] NATIVE_INTEGRATION_UNAVAILABLE', error))
+  }
   if (redirectPreviewOrigin()) return
 
   // 本地 Vault 与账号数据恢复完成前不能导入 App：App 的模块依赖会读取本地设置。
@@ -218,6 +227,17 @@ async function bootstrap({ skipGate = false } = {}) {
   const { default: App } = await loadAppModule()
 
   await prepareAccountCallback()
+  if (['recovery', 'register', 'login'].includes(new URLSearchParams(window.location.search).get('account') || '')) {
+    const { accountOpen } = await import('./composables/accountAuth.js')
+    accountOpen.value = true
+  }
+
+  // Resolve only an empty launch URL after the owner's local data is ready.
+  // Explicit bookmarks, focus links and authentication returns stay intact.
+  if (!window.location.hash && !window.location.search) {
+    const { appearance } = await import('./composables/appearance.js')
+    if (appearance.value.startPage === '/schedule') window.history.replaceState(window.history.state, '', '#/schedule')
+  }
 
   let routerHistory = null
   configureOverlayHistory({ pauseRouterListeners: () => routerHistory?.pauseListeners() })

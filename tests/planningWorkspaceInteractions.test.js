@@ -86,8 +86,8 @@ describe('重要日期与待办交互', () => {
     expect(document.querySelector('[role="dialog"]')).toBeTruthy()
   })
 
-  it('概览筛选逾期，重新安排日期保留工作状态，并可撤销', async () => {
-    buttonWithin(host.querySelector('.task-overview'), '需要确认').click()
+  it('积压入口筛选逾期，重新安排日期保留工作状态，并可撤销', async () => {
+    buttonWithin(host.querySelector('.workspace-replan'), '查看并整理').click()
     await nextTick()
     expect(visibleIds()).toEqual(['overdue'])
     await chooseTaskAction(host.querySelector('[data-focus-id="overdue"]'), '改期', clickElement)

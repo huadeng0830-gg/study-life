@@ -126,6 +126,10 @@ function inferIntent(source, schedule, amountCount, forcedType, preferredType = 
     return { type: 'externalExam', confidence: 0.88, uncertain: false }
   }
   if (COUNTDOWN_WORDS.test(source) && hasDate) return { type: 'countdown', confidence: 0.8, uncertain: false }
+  // A course name is context, not an event intent. Explicit submission actions
+  // win over the broad “课程” event keyword; report meetings remain events.
+  if (/(?:提交|上交|补交|完成|撰写|交(?!流|通|往|换)).{0,40}(?:作业|实验报告|论文|习题|报告(?!会)|作文)/.test(source))
+    return { type: 'homework', confidence: 0.9, uncertain: false }
   if (EVENT_WORDS.test(source) && (hasDate || hasTime)) return { type: 'event', confidence: 0.84, uncertain: false }
   if (HOMEWORK_WORDS.test(source)) return { type: 'homework', confidence: 0.72, uncertain: false }
   if (hasDate || hasTime || /提醒我|记得|截止|开始|完成|提交|交/.test(source)) return { type: preferredType === 'event' ? 'event' : 'todo', confidence: 0.66, uncertain: false }

@@ -37,11 +37,12 @@ import { selectWeeklyBillSummary, weekRange } from '../composables/domain/weekly
 import { normalizeLedgerFx, summarizeLedgerInBase, useLedgerFx } from '../composables/ledgerFx.js'
 import { mySpendYuan } from '../composables/ledgerSplit.js'
 import { moneyRow, moneyWithCurrency } from '../utils/formatters.js'
-import { taskPlanningState, taskStatus } from '../composables/domain/state.js'
+import { isTaskActionable, taskPlanningState, taskStatus } from '../composables/domain/state.js'
 import { COURSE_CHECKIN_STATES, upsertCourseCheckin, weeklyPulse } from '../composables/experience.js'
 import { schedulePolicy } from '../composables/settingsPolicy.js'
 import { addAppDays, appCalendarDaysBetween, appNow, appToday, currentDayIndex, currentWeek, getAppTime, formatAppDate } from '../composables/timeContext.js'
 import { selectHomeNextUp } from '../composables/home/nextUp.js'
+import { taskFocusLocation } from '../composables/learningFocus.js'
 import { MOOD_OPTIONS, logMood, moodOf } from '../composables/mood.js'
 import { focusLocation } from '../composables/focusNavigation.js'
 import { clearFocusFromRoute, focusElementWhenReady, readFocusQuery } from '../composables/focusNavigation.js'
@@ -89,6 +90,7 @@ watch(() => [route.path, route.query.focusTask, route.query.focusMinutes], ([pat
   focusRequest.value = { id: String(id), minutes: Math.max(5, Math.min(180, Math.round(Number(minutes) || 25))), token: ++focusRequestToken }
 }, { immediate: true })
 const focusSessions = useStoredRef('sl_focus_sessions', [])
+const activeFocus = useStoredRef('sl_focus_active', null)
 const courseCheckins = useStoredRef('sl_course_checkins', [])
 const eventDetail = ref(null)
 const focusMessage = ref('')
@@ -96,13 +98,27 @@ let focusHandled = ''
 const now = appNow
 const todayKey = () => appToday.value
 const activeSchedule = computed(() => schedulePolicy())
+const compactHome = computed(() => appearance.value.compactHome !== false)
+// 「今日安排」默认展开：桌面端两栏布局左栏靠它撑住，手机端先折叠（一行摘要），
+// 否则用户要滚过一整天的课表才够得到「今天最重要」。
+const agendaOpen = ref(typeof window !== 'undefined'
+  ? window.matchMedia('(min-width: 901px)').matches
+  : true)
+/** @param {Event} event */
+function syncAgendaOpen(event) {
+  if (event.target instanceof window.HTMLDetailsElement) agendaOpen.value = event.target.open
+}
+const resumeTask = computed(() => tasks.value.filter((task) => isTaskActionable(task, now.value)
+  && (task.workCheckpoint?.nextStep || task.workCheckpoint?.lastStep || task.workCheckpoint?.blocker))
+  .sort((a, b) => String(b.workCheckpoint?.updatedAt || b.updatedAt || '').localeCompare(String(a.workCheckpoint?.updatedAt || a.updatedAt || '')))[0])
 // 首页模块按用户在个性化里拖拽后的顺序渲染；只保留可见且仍合法的模块 id。
 const visibleHomeModuleIds = computed(() => {
   const ids = appearance.value.homeModules
     .filter((module) => module.visible !== false)
     .map((module) => module.id)
     .filter((id) => HOME_MODULES.some((item) => item.id === id))
-  return focusRequest.value ? ['focus', ...ids.filter((id) => id !== 'focus')] : ids
+  const visible = compactHome.value ? ids.filter((id) => !['week', 'finance'].includes(id)) : ids
+  return focusRequest.value || activeFocus.value ? ['focus', ...visible.filter((id) => id !== 'focus')] : visible
 })
 
 async function onFocusPrepared(result) {
@@ -226,6 +242,7 @@ const nextProjection = computed(() => selectHomeNextUp({
   milestones: exams.value,
   now: now.value,
   today: todayKey(),
+  preferCourses: compactHome.value,
 }))
 const nextUp = computed(() => nextProjection.value.nextUp)
 const nextUpTimeRange = computed(() => nextProjection.value.nextUpTimeRange)
@@ -234,6 +251,14 @@ const nextTimingLabel = computed(() => nextProjection.value.nextTimingLabel)
 
 const pulse = computed(() => weeklyPulse({ tasks: tasks.value, focusSessions: focusSessions.value, courseCheckins: courseCheckins.value, moodLog: moodLog.value }, now.value))
 const todayCourses = computed(() => coursesForDates(courses.value, [todayKey()])[0] || [])
+const todayEvents = computed(() => events.value.filter((item) => item?.date === todayKey()))
+// 折叠态的摘要要能一句话说清今天有多少安排，展开后里面再列细节。
+const todayAgendaCount = computed(() => {
+  const parts = []
+  if (todayCourses.value.length) parts.push(`${todayCourses.value.length} 节课`)
+  if (todayEvents.value.length) parts.push(`${todayEvents.value.length} 项日程`)
+  return parts.join(' · ') || '暂无安排'
+})
 const COURSE_CHECKIN_OPTIONS = Object.freeze([
   { state: COURSE_CHECKIN_STATES.understood, label: '听懂了' },
   { state: COURSE_CHECKIN_STATES.unclear, label: '有疑问' },
@@ -369,13 +394,13 @@ function countdownLabel(item) {
   <div class="page today-page" :class="{ 'has-focus-request': focusRequest }">
     <header class="page-head today-page-head">
       <div class="head-copy">
-        <h1 class="greeting">{{ greeting() }}，把今天安排好。</h1>
-        <p v-if="currentQuote" class="today-quote">{{ currentQuote }}</p>
+        <h1 class="greeting">{{ greeting() }}，{{ compactHome ? '今天' : '把今天安排好。' }}</h1>
+        <p v-if="currentQuote && !compactHome" class="today-quote">{{ currentQuote }}</p>
         <p class="page-desc today-context">
           <time class="today-context-date" :datetime="todayKey()">{{ dateText }}</time>
           <span class="today-context-chip">第 {{ weekNum }} 周</span>
-          <span class="today-context-chip">{{ campusName(activeSchedule.campusId) }}</span>
-          <span class="today-context-chip">{{ seasonName(activeSchedule.seasonId) }}</span>
+          <span v-if="!compactHome" class="today-context-chip">{{ campusName(activeSchedule.campusId) }}</span>
+          <span v-if="!compactHome" class="today-context-chip">{{ seasonName(activeSchedule.seasonId) }}</span>
         </p>
         <!-- 节日叙事：只有当天真的有节日/纪念日时才出现，平时不占位置、不进 Tab 序。 -->
         <p v-if="festiveNarrative" class="festive-narrative">
@@ -395,19 +420,26 @@ function countdownLabel(item) {
         <template v-if="id === 'next'">
           <section class="next-panel glass-flow" :class="nextUp.kind" aria-label="接下来">
             <div class="next-main">
-              <span class="next-label">接下来</span>
+              <span class="next-label">{{ nextUp.kind === 'course' ? '下一节课' : '接下来' }}</span>
               <template v-if="nextUp.kind !== 'none'">
                 <strong class="next-title">{{ nextTitle(nextUp) }}</strong>
                 <span class="next-meta">{{ nextMeta(nextUp) }}<template v-if="nextUp.kind === 'course' && nextDeparture"> · {{ nextDeparture }}</template></span>
-                <span v-if="nextUp.state === 'live'" class="next-state live">▶ {{ nextTimingLabel }}</span>
+                <span v-if="nextUp.state === 'active'" class="next-state live">▶ {{ nextTimingLabel }}</span>
                 <span v-else-if="nextTimingLabel" class="next-state">{{ nextTimingLabel }}</span>
               </template>
-              <template v-else><strong class="next-title is-muted">留一点时间，给想做的事</strong><span class="next-empty-line">记下一个小目标，或从下面开始专注。</span></template>
+              <template v-else><strong class="next-title is-muted">近期没有固定安排</strong><span class="next-empty-line">课程和已安排的事项会出现在这里。</span></template>
             </div>
-            <Button v-if="nextUp.kind !== 'none'" class="next-action whitespace-normal" @click="openNext">{{ nextUp.kind === 'course' ? '查看课程表' : nextUp.kind === 'task' ? '处理待办' : nextUp.kind === 'event' ? '查看日程' : '查看详情' }}</Button>
-            <Button v-else as-child class="next-action whitespace-normal"><RouterLink to="/tasks?new=1"><AppIcon name="capture" />记一条待办</RouterLink></Button>
+            <!-- 两个按钮收进一个容器：以前它们是面板的直接子元素，
+                 space-between 会把「查看课程表」推到中间、「记作业」推到最右，
+                 读起来像两个互不相干的按钮。这里让它们始终并排站在同一边。 -->
+            <div class="next-actions">
+              <Button v-if="nextUp.kind !== 'none'" class="next-action whitespace-normal" @click="openNext">{{ nextUp.kind === 'course' ? '查看课程表' : nextUp.kind === 'task' ? '处理待办' : nextUp.kind === 'event' ? '查看日程' : '查看详情' }}</Button>
+              <Button v-if="nextUp.kind === 'course'" as-child variant="outline" class="next-action whitespace-normal"><RouterLink :to="{ path: '/tasks', query: { new: '1', courseId: nextUp.entity.id } }">记作业</RouterLink></Button>
+              <Button v-else-if="nextUp.kind === 'none'" as-child class="next-action whitespace-normal"><RouterLink to="/schedule">查看课表</RouterLink></Button>
+            </div>
           </section>
-          <TodayAgenda :courses="agendaData.courses" :events="agendaData.events" :today="todayKey()" :now="now" />
+          <details :open="agendaOpen" class="today-agenda-disclosure today-agenda-section" @toggle="syncAgendaOpen"><summary>今日安排<span class="today-agenda-count">{{ todayAgendaCount }}</span></summary><TodayAgenda :courses="agendaData.courses" :events="agendaData.events" :today="todayKey()" :now="now" /></details>
+          <section v-if="compactHome && resumeTask" class="compact-link-row"><div><b>接着上次 · {{ resumeTask.title }}</b><p>{{ resumeTask.workCheckpoint.nextStep || resumeTask.workCheckpoint.lastStep || resumeTask.workCheckpoint.blocker }}</p></div><Button as-child variant="outline"><RouterLink :to="taskFocusLocation(resumeTask, 15)">继续 15 分钟</RouterLink></Button></section>
         </template>
 
         <TodayActionList
@@ -449,7 +481,7 @@ function countdownLabel(item) {
           <p class="week-finance-note">{{ weeklyFinance.count }} 笔收支记录 · {{ weeklyFinanceNote }}<template v-if="weeklyBills.due || weeklyBills.paid"> · 固定账单已付 {{ weeklyBills.paid }} 笔（{{ moneyWithCurrency(weeklyBillFinance.expenseTotal, ledgerCurrency) }}；{{ weeklyBillFinanceNote }}），本周应付 {{ weeklyBills.due }} 项</template><template v-else> · 本周没有应付固定账单</template></p>
         </section>
 
-        <FocusPanel v-else-if="id === 'focus'" :request="focusRequest" @prepared="onFocusPrepared" />
+        <details v-else-if="id === 'focus'" class="today-agenda-disclosure" :open="!compactHome || Boolean(focusRequest || activeFocus)"><summary>{{ activeFocus ? '返回正在进行的专注' : '开始一段专注' }}</summary><FocusPanel :request="focusRequest" @prepared="onFocusPrepared" /></details>
       </template>
 
       <HomeProductivityPanel v-if="!focusRequest" />
@@ -460,7 +492,7 @@ function countdownLabel(item) {
 
       <section v-if="unscheduledCount" class="compact-link-row"><span>待安排 <b>{{ unscheduledCount }}</b></span><small>还没有日期的事项</small><router-link to="/tasks">去安排</router-link></section>
 
-      <section class="today-mood-lower mood-strip" aria-label="今日心情">
+      <section v-if="appearance.showMood" class="today-mood-lower mood-strip" aria-label="今日心情">
         <div class="mood-toolbar">
           <span class="mood-label">今天感觉怎么样？</span>
           <div class="mood-options" role="radiogroup" aria-label="选择今日心情" @keydown="moveMood">

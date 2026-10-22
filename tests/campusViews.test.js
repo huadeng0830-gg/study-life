@@ -523,7 +523,12 @@ describe('缺少学校时给出可执行的下一步', () => {
     const { default: CampusHubView } = await import('../src/views/CampusHubView.vue')
     await mountView(CampusHubView)
 
-    expect(host.querySelector('.campus-hub-hero h2')?.textContent).toContain('校园里要找的、想说的')
+    expect(host.querySelector('.campus-hub-hero h2')?.textContent).toContain('查找校园信息')
+    expect(serviceState.responses.campusBeanWallet.wallet.contribution).toBe(12)
+    const disclosure = host.querySelector('.campus-hub-beans')
+    disclosure.open = true
+    disclosure.dispatchEvent(new Event('toggle'))
+    await settle()
     expect(host.querySelector('a[href="/campus/feedback"]')).toBeNull(); expect(host.querySelector('a[href="/feedback"]')).toBeNull()
     expect(host.querySelector('.campus-hub-feature[href="/campus/publish"]')?.textContent).toContain('统一发布')
     expect(host.querySelector('.campus-hub-service[href="/campus/places"]')?.textContent).toContain('校园地点')

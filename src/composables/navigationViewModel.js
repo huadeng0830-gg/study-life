@@ -7,7 +7,7 @@ import { FIXED_MOBILE_NAV_ITEMS, desktopNavigation, mobileNavigation, visibleDes
 /** Build the desktop and mobile menu projections from the same saved route IDs. */
 export function useNavigationViewModel(currentRoute, accountLabel) {
   const availableItems = computed(() => availableNavigationItems(accountUser.value))
-  const collapsedGroups = ref({ other: true })
+  const collapsedGroups = ref({ other: true, life: true, campus: true })
   const desktopGroups = computed(() => visibleDesktopNavigation(desktopNavigation.value, accountUser.value).map((group) => ({
     ...group,
     collapsed: Boolean(collapsedGroups.value[group.id]),

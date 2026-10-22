@@ -1,5 +1,5 @@
 <script setup>
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import ActionButton from './ActionButton.vue'
 import Modal from './Modal.vue'
 import StudyQuestionMode from './StudyQuestionMode.vue'
@@ -92,6 +92,11 @@ const {
   pasteClipboard,
 } = useQuickRecordPanel(props, emit)
 
+const inputSuggestions = computed(() => {
+  const type = drafts.value[0]?.type
+  return ['todo', 'homework', 'event', 'countdown'].includes(type) ? ['今天', '明天', '下周一前'] : []
+})
+
 /**
  * 「纠正记录类型」是一组互斥单选：改成 radiogroup + radio + aria-checked 之后，
  * 键盘模型跟 TodayView 的「选择今日心情」保持一致 —— 整组只留一个 Tab 停靠点，
@@ -129,7 +134,7 @@ function moveTypeChoice(draft, event) {
         <ToggleGroupItem value="question" :class="{ on: mode === 'question' }">提问</ToggleGroupItem>
       </ToggleGroup>
       <fieldset v-if="mode === 'record'" class="entry-fields" :disabled="saving" aria-label="编辑快速记录">
-        <div class="compose-heading"><b>想到就记，保存前再确认</b><small>待办 · 日程 · 收支 · 重要日期</small></div>
+        <div v-if="!hasDrafts" class="compose-heading"><b>想到就记，保存前再确认</b><small>待办 · 日程 · 收支 · 重要日期</small></div>
         <div class="input-wrap">
           <!--
             Tab / Esc 这两个绑定不是装饰：下方提示文案承诺了「Tab 改字段 · Esc 回到原文」，
@@ -167,48 +172,8 @@ function moveTypeChoice(draft, event) {
           >{{ listening ? '⏹' : '🎤' }}</button>
         </div>
 
-        <div v-if="input.trim()" class="record-shortcuts" role="group" aria-label="输入建议">
-          <button type="button" @click="insertSuggestion('下周三前')">下周三前</button>
-          <button type="button" @click="insertSuggestion('18块5')">18块5</button>
-          <button type="button" @click="insertSuggestion('下午3点')">下午3点</button>
-          <span v-if="drafts.length === 1">识别为：{{ recordTypeMeta(drafts[0].type).label }} · Enter 保存 · Tab 改字段 · Esc 回到原文</span>
-          <span v-else>Enter 换行 · Ctrl/Cmd + Enter 保存</span>
-        </div>
-
-        <div class="input-tools">
-          <p :id="`quick-input-help-${panelId}`" class="example">一行一项，可混合记录。<span class="desktop-key-hint">Enter 保存 · Shift + Enter 换行</span><span class="mobile-key-hint">回车换行</span></p>
-          <button type="button" :disabled="clipboardLoading" @click="pasteClipboard">{{ clipboardLoading ? '读取中…' : '粘贴文字' }}</button>
-          <button v-if="input || hasDrafts" type="button" @click="clearEntry">清空</button>
-        </div>
-        <p v-if="draftStatus" class="draft-status">{{ draftStatus }} · 仅保留在当前标签页</p>
-
-        <div class="action-row" role="group" aria-label="记录方式">
-          <button type="button" :class="{ on: !forcedType }" :aria-pressed="!forcedType" @click="chooseAuto"><AppIcon name="festive" />自动识别</button>
-          <button v-for="action in actions" :key="action.type" type="button" :class="{ on: forcedType === action.type }" :aria-pressed="forcedType === action.type" @click="chooseAction(action.type)"><AppIcon :name="action.type" />{{ action.label }}</button>
-        </div>
-
-        <section v-if="!input.trim()" class="example-block" aria-label="记录示例">
-          <p>试试这样记 <small>点击示例，修改后保存</small></p>
-          <button v-for="text in examples" :key="text" type="button" class="example-entry" @click="useExample(text)"><span>{{ text.replace(/\n/g, ' / ') }}</span><span aria-hidden="true">↗</span></button>
-        </section>
-
-        <p v-if="voiceStatusText" class="voice-status">{{ voiceStatusText }}</p>
-
-        <div v-if="clipboardHint && !input" class="clipboard-hint">
-          <span>检测到剪贴板内容：“{{ clipboardHint }}”</span><button type="button" @click="useClipboard">智能识别</button>
-        </div>
-
-        <section v-if="!input && recentRecords.length" class="recent-block" aria-label="最近记录">
-          <div class="recent-head"><span>最近记录</span><small>点击复用，确认后创建新记录</small></div>
-          <button v-for="item in recentRecords" :key="`${item.type}-${item.id}`" type="button" class="recent-row" @click="reuseRecent(item)">
-            <span class="recent-icon" aria-hidden="true">{{ recentIcon(item.type) }}</span>
-            <span class="recent-name">{{ recentTitle(item) }}</span>
-            <small>{{ item.detail }}</small>
-          </button>
-        </section>
-
         <section v-if="hasDrafts" class="results">
-          <div class="results-heading">
+          <div v-if="drafts.length > 1" class="results-heading">
             <p class="result-count">识别到 {{ drafts.length }} 项<span v-if="drafts.length > 1"> · 已选 {{ selectedDrafts.length }} 项</span></p>
             <div v-if="drafts.length > 1" class="selection-actions"><button type="button" @click="setAllSelected(true)">全选</button><button type="button" @click="setAllSelected(false)">取消全选</button></div>
           </div>
@@ -222,10 +187,6 @@ function moveTypeChoice(draft, event) {
               </div>
             </div>
 
-            <div :id="fieldId(draft, 'type-choices')" class="type-switch" role="radiogroup" aria-label="纠正记录类型" :aria-describedby="fieldDescription(draft, 'type')" @keydown="moveTypeChoice(draft, $event)">
-              <span v-if="draft.uncertain" class="human-confidence">看起来像{{ recordTypeMeta(draft.type).label }}，请确认</span>
-              <button v-for="type in previewTypes" :key="type" type="button" role="radio" :class="{ on: draft.type === type }" :aria-checked="draft.type === type" :tabindex="typeChoiceTabIndex(draft, type)" @click="changeDraftType(draft, type)">{{ recordTypeMeta(type).label }}</button>
-            </div>
             <small v-if="issueFor(draft, 'type')" :id="fieldId(draft, 'type-error')" class="field-error">{{ issueFor(draft, 'type') }}</small>
 
             <!-- 不确定类型时保留原文，要求先选结构化类型再保存。 -->
@@ -302,28 +263,79 @@ function moveTypeChoice(draft, event) {
                 <label class="note-field">备注（可选）<textarea v-model="draft.note" rows="2" /></label>
               </div>
             </template>
+            <details class="type-options" :open="draft.uncertain || draft.type === 'unknown'">
+              <summary>{{ recordTypeMeta(draft.type).label }} · 更改类型</summary>
+            <div :id="fieldId(draft, 'type-choices')" class="type-switch" role="radiogroup" aria-label="纠正记录类型" :aria-describedby="fieldDescription(draft, 'type')" @keydown="moveTypeChoice(draft, $event)">
+              <span v-if="draft.uncertain" class="human-confidence">看起来像{{ recordTypeMeta(draft.type).label }}，请确认</span>
+              <button v-for="type in previewTypes" :key="type" type="button" role="radio" :class="{ on: draft.type === type }" :aria-checked="draft.type === type" :tabindex="typeChoiceTabIndex(draft, type)" @click="changeDraftType(draft, type)">{{ recordTypeMeta(type).label }}</button>
+            </div>
+            </details>
           </article>
 
           <div v-if="drafts.length > 1 && (totalExpense || totalIncome)" class="batch-total"><span v-if="totalExpense">支出合计 {{ moneyRow(totalExpense) }}</span><span v-if="totalIncome">收入合计 {{ moneyRow(totalIncome) }}</span></div>
         </section>
+        <div v-if="input.trim() && inputSuggestions.length" class="record-shortcuts" role="group" aria-label="输入建议">
+          <button v-for="suggestion in inputSuggestions" :key="suggestion" type="button" @click="insertSuggestion(suggestion)">{{ suggestion }}</button>
+          <span v-if="drafts.length === 1" class="desktop-key-hint">识别为：{{ recordTypeMeta(drafts[0].type).label }} · Enter 保存 · Tab 改字段 · Esc 回到原文</span>
+          <span v-else class="desktop-key-hint">Enter 换行 · Ctrl/Cmd + Enter 保存</span>
+        </div>
+
+        <div class="input-tools">
+          <p :id="`quick-input-help-${panelId}`" class="example" :class="{ 'desktop-key-hint': hasDrafts }">一行一项，可混合记录。<span class="desktop-key-hint">Enter 保存 · Shift + Enter 换行</span><span class="mobile-key-hint">回车换行</span></p>
+          <button type="button" :disabled="clipboardLoading" @click="pasteClipboard">{{ clipboardLoading ? '读取中…' : '粘贴文字' }}</button>
+          <button v-if="input || hasDrafts" type="button" @click="clearEntry">清空</button>
+        </div>
+        <p v-if="draftStatus" class="draft-status desktop-key-hint">{{ draftStatus }} · 仅保留在当前标签页</p>
+
+        <details v-if="!hasDrafts" class="record-options"><summary>{{ forcedType ? recordTypeMeta(forcedType).label : '自动识别' }} · 更换记录方式</summary>
+        <div class="action-row" role="group" aria-label="记录方式">
+          <button type="button" :class="{ on: !forcedType }" :aria-pressed="!forcedType" @click="chooseAuto"><AppIcon name="festive" />自动识别</button>
+          <button v-for="action in actions" :key="action.type" type="button" :class="{ on: forcedType === action.type }" :aria-pressed="forcedType === action.type" @click="chooseAction(action.type)"><AppIcon :name="action.type" />{{ action.label }}</button>
+        </div>
+        </details>
+
+        <section v-if="!input.trim()" class="example-block" aria-label="记录示例">
+          <p>试试这样记 <small>点击示例，修改后保存</small></p>
+          <button v-for="text in examples.slice(0, 1)" :key="text" type="button" class="example-entry" @click="useExample(text)"><span>{{ text.replace(/\n/g, ' / ') }}</span><span aria-hidden="true">↗</span></button>
+        </section>
+
+        <p v-if="voiceStatusText" class="voice-status">{{ voiceStatusText }}</p>
+
+        <div v-if="clipboardHint && !input" class="clipboard-hint">
+          <span>检测到剪贴板内容：“{{ clipboardHint }}”</span><button type="button" @click="useClipboard">智能识别</button>
+        </div>
+
+        <details v-if="!input && recentRecords.length" class="recent-block"><summary>最近记录 · 点击复用</summary>
+          <div class="recent-head"><span>最近记录</span><small>点击复用，确认后创建新记录</small></div>
+          <button v-for="item in recentRecords" :key="`${item.type}-${item.id}`" type="button" class="recent-row" @click="reuseRecent(item)">
+            <span class="recent-icon" aria-hidden="true">{{ recentIcon(item.type) }}</span>
+            <span class="recent-name">{{ recentTitle(item) }}</span>
+            <small>{{ item.detail }}</small>
+          </button>
+        </details>
+
       </fieldset>
 
         <p v-if="mode === 'record' && error" class="error" role="alert">{{ error }}</p>
-        <div v-if="mode === 'record'" class="footer">
+
+
+      <StudyQuestionMode v-if="mode === 'question'" />
+      <datalist v-if="mode === 'record'" :id="courseListId"><option v-for="course in courses" :key="course.id" :value="course.name" /></datalist>
+    </section>
+    <template v-if="mode === 'record'" #foot>
+        <div class="footer">
           <div class="save-feedback"><p v-if="feedback" class="success" role="status">{{ feedback }}</p><button v-if="lastSaved.length" type="button" class="undo-save" :disabled="saving" @click="undoLastSaved">撤销刚才保存</button><small v-if="hasDrafts && !feedback">{{ saving ? '正在保存，请稍候…' : `将保存 ${selectedDrafts.length} 项记录` }}</small></div>
           <div v-if="hasDrafts" class="save-actions">
             <ActionButton tone="primary" type="button" class="btn btn-primary" :disabled="saving || !selectedDrafts.length || listening || clipboardLoading" :busy="saving || undefined" kind="frequent" feedback="external" :show-error="false" :action="() => saveAll(false)">{{ saveLabel }}</ActionButton>
             <ActionButton tone="ghost" type="button" class="btn btn-ghost" :disabled="saving || !selectedDrafts.length || listening || clipboardLoading" :busy="saving || undefined" kind="frequent" feedback="external" :show-error="false" :action="() => saveAll(true)">保存并继续</ActionButton>
           </div>
         </div>
-
-      <StudyQuestionMode v-else />
-      <datalist v-if="mode === 'record'" :id="courseListId"><option v-for="course in courses" :key="course.id" :value="course.name" /></datalist>
-    </section>
+    </template>
   </Modal>
 </template>
 
 <style scoped>
+.record-options > summary, .recent-block > summary { min-height: var(--tap-min); padding-block: var(--space-2); color: var(--ink-soft); cursor: pointer; font-size: var(--type-callout); }
 .quick-record{display:flex;flex-direction:column;gap:11px}
 .mode-switch{display:flex;gap:5px;padding:3px;border:1px solid var(--border);border-radius:var(--radius-pill);background:var(--bg-tint)}
 .mode-switch button{flex:1;min-height:38px;border:0;border-radius:var(--radius-pill);color:var(--ink-soft);background:transparent;font:inherit;font-size:var(--fs-12);touch-action:manipulation}
@@ -386,6 +398,7 @@ function moveTypeChoice(draft, event) {
 .record-head b{color:var(--primary)}
 .record-head-actions{display:inline-flex;align-items:center;gap:6px}
 .record-head button{display:inline-flex;align-items:center;justify-content:center;min-width:24px;min-height:24px;padding:2px 6px;color:var(--ink-faint);font-size:var(--fs-11);border:0;background:transparent}
+.type-options summary{min-height:44px;padding:7px 0;color:var(--primary);font-size:var(--fs-12);cursor:pointer}
 .type-switch{display:flex;align-items:center;gap:5px;overflow-x:auto;margin:8px 0 2px;padding-bottom:2px}
 .type-switch button{flex:0 0 auto;min-height:30px;padding:5px 8px;color:var(--ink-soft);font-size:var(--fs-11);border:1px solid var(--border);border-radius:var(--radius-pill);background:var(--card);touch-action:manipulation}
 .type-switch button.on{color:var(--primary);font-weight:var(--fw-800);border-color:var(--primary);background:var(--primary-soft)}

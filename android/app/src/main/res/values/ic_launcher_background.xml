@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  自适应图标的背景层。
+
+  原来这里是白色：自适应图标的前景就是那张完整的绿色圆角图，
+  白底 + 前景的透明圆角 → 桌面图标四周一圈白边。
+  现在取图案本身的深绿，图标与背景无缝。
+
+  绿色取自 public/pwa-v2-512x512.png 的暗部（#0E3830）与中间调之间的 #1B5147。
+-->
+<resources>
+    <color name="ic_launcher_background">#1B5147</color>
+</resources>

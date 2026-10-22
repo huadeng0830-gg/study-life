@@ -117,7 +117,7 @@ const typeClass = computed(() => ({
   left: 50%;
   /* --stack-offset 由 floatingStack 按同时显示的浮层数量给出，
      同时出现多条提示时依次向上排开，不再互相压盖。 */
-  bottom: calc(18px + env(safe-area-inset-bottom) + var(--stack-offset, 0px));
+  bottom: calc(18px + var(--safe-bottom) + var(--stack-offset, 0px));
   z-index: 200;
   transform: translateX(-50%);
   display: flex;
@@ -216,9 +216,12 @@ const typeClass = computed(() => ({
   opacity: 0;
   transform: translate(-50%, 8px);
 }
-@media (max-width: 900px) {
+/* 底部横条出现时（外壳在 ≤900px 或矮触屏设备上换成底栏布局），提示要抬到底栏之上。
+   判据必须与外壳一致：只写 max-width:900px 的话，横屏手机（宽度大于 900px 但
+   高度不足 520px）已经换成底栏布局，提示却还压在 18px 处、被底栏盖住。 */
+@media (max-width: 900px), (pointer: coarse) and (max-height: 520px) {
   .toast {
-    bottom: calc(86px + env(safe-area-inset-bottom) + var(--stack-offset, 0px));
+    bottom: calc(86px + var(--safe-bottom) + var(--stack-offset, 0px));
   }
 }
 </style>

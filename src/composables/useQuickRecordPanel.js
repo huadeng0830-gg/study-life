@@ -696,7 +696,8 @@ function toggleCategoryEditor(draft, event) {
       focusInput(true)
       nextTick(() => autosize(inputEl.value))
     } catch {
-      if (runId === clipboardRunId && props.open) error.value = '无法读取剪贴板，请直接粘贴到输入框'
+      // 安卓 WebView 读剪贴板必然被拒（没有授权弹窗），文案要按平台说人话：手机上没有 Ctrl + V。
+      if (runId === clipboardRunId && props.open) error.value = import.meta.env.MODE === 'android' ? '无法读取剪贴板，请长按输入框后选择"粘贴"' : '无法读取剪贴板，请直接粘贴到输入框'
     } finally {
       clipboardLoading.value = false
     }

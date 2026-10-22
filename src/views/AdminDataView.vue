@@ -273,7 +273,9 @@ function exportDataHealthReport() {
     const link = document.createElement('a')
     link.href = url
     link.download = `study-life-data-health-${appNow.value.toISOString().slice(0, 10)}.txt`
+    document.body.appendChild(link)
     link.click()
+    link.remove()
     window.setTimeout(() => URL.revokeObjectURL(url), 0)
     setToast('体检记录已导出为纯文本')
   } catch { setToast('导出失败，请检查浏览器下载权限。', { type: 'error' }) }

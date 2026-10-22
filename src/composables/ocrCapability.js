@@ -22,6 +22,18 @@ const OCR_ENGINE_ASSETS = Object.freeze([
   'ocr/tesseract-worker.min.js',
 ])
 
+/**
+ * 安卓安装版把识别引擎与语言包**直接打进安装包**
+ * （android/app/src/main/assets/public/ocr，由 WebView 的本地资源服务器提供）。
+ *
+ * 所以安卓上"这三个文件在不在本机"永远是"在"，断网也能识别。
+ * 下面那段 CacheStorage 探测是给**网页版**用的：网页版靠 Service Worker 的
+ * CacheFirst 在第一次真正识图时才把模型落盘，"离线 + 从未识过图"必然失败。
+ * 安卓安装版若沿用同一判断，就会在明明带着 6MB 离线模型的情况下，
+ * 因为手机断网而把图片识课拦掉 —— 用户看到的是一句完全错误的提示。
+ */
+const isAndroidApp = import.meta.env.MODE === 'android'
+
 // 最小 SIMD 探测模块（字节码取自 wasm-feature-detect 的固定样本）。
 const SIMD_PROBE = new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0, 1, 5, 1, 96, 0, 1, 123, 3, 2, 1, 0, 10, 10, 1, 8, 0, 65, 0, 253, 15, 253, 98, 11])
 
@@ -99,8 +111,11 @@ export async function probeOcrAvailability({ force = false } = {}) {
   if (!force && availabilityProbe) return availabilityProbe
   const probe = (async () => {
     const online = isOnline()
-    const { reachable, cached, missing } = await readOcrCacheState()
-    const availability = Object.freeze({ online, cacheReachable: reachable, cached, missing })
+    // 安卓安装版：模型随包内置，不需要探测缓存。
+    const availability = isAndroidApp
+      ? Object.freeze({ online, cacheReachable: true, cached: true, missing: [] })
+      : await readOcrCacheState().then(({ reachable, cached, missing }) =>
+        Object.freeze({ online, cacheReachable: reachable, cached, missing }))
     availabilityCache = availability
     if (availabilityProbe === probe) availabilityProbe = null
     return availability
@@ -126,6 +141,7 @@ export function ocrAvailabilityBlockReason(availability) {
 /** 一句状态说明（不阻断时展示）；判断不了时返回空串，由调用方使用原有文案。 */
 export function ocrAvailabilityHint(availability) {
   if (!availability) return ''
+  if (isAndroidApp) return '识别模型已随安装包内置，离线也能识别。'
   if (availability.cached) return '识别模型已缓存，可离线识别。'
   if (!availability.online) {
     return availability.cacheReachable

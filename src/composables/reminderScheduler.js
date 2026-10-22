@@ -23,6 +23,7 @@ import { isArchived, isTaskActionable } from './domain/state.js'
 import { stageBoundaryAt, stageLabel, stageTimeState, taskStages } from './tasks/taskTimePlan'
 import { activeNoticeReminders } from './noticeArchiveModel.js'
 import { externalExamReminderSpecs } from './externalExam.js'
+import { isAndroidApp } from './androidRuntime.js'
 
 // 直接注册存储 ref，而不是从某个 barrel import —— 后者会把本模块拉进
 // store → domain → … 的依赖链，而这个调度器只需要读三份集合。
@@ -223,11 +224,24 @@ function fire(entries) {
   const pending = entries.filter((entry) => !logEntries.some((item) => item.key === entry.key && (!entry.signature || !item.signature || item.signature === entry.signature)))
   if (!pending.length) return false
   const entry = pending[0]
-  if (notifyPermission() !== 'granted') return false
+  const kindLabel = entry.kind === 'task' ? '待办' : entry.kind === 'event' ? '日程' : entry.kind === 'notice' ? '通知' : '重要节点'
+  const title = `三两事 · ${kindLabel}提醒`
+  const body = pending.map((item) => item.body).join('\n')
+  if (notifyPermission() !== 'granted') {
+    // 安卓安装版的 WebView 里**没有 Notification 这个对象**。
+    // 原先这里直接 return false —— 到点的提醒既没有系统通知，界面上也没有任何提示，
+    // 用户设好的提醒等于完全不存在。
+    // 安卓上改成应用内提示：应用在前台时提醒才算真的提醒过。
+    if (isAndroidApp) {
+      pending.forEach((item) => markFired(item.key, Date.now(), item.signature))
+      window.dispatchEvent(new CustomEvent(REMINDER_EVENT, { detail: { title, body } }))
+      return true
+    }
+    return false
+  }
   try {
-    const kindLabel = entry.kind === 'task' ? '待办' : entry.kind === 'event' ? '日程' : entry.kind === 'notice' ? '通知' : '重要节点'
-    const notification = new Notification(`三两事 · ${kindLabel}提醒`, {
-      body: pending.map((item) => item.body).join('\n'),
+    const notification = new Notification(title, {
+      body,
       tag: entry.key,
     })
     // Only consume the catch-up window after the browser accepted the notification.
@@ -258,11 +272,27 @@ function notifyState() {
   return { state: 'prompt', enabled: false }
 }
 
-/** 与当前浏览器的实际通知能力一致，避免承诺未实现的应用内提醒。 */
+/** 应用内提醒事件名（安卓安装版没有系统通知时用）。 */
+export const REMINDER_EVENT = 'study-life:reminder'
+
+/**
+ * 提醒能力的一句话说明。
+ *
+ * 【为什么界面必须照实说】安卓安装版的 WebView 里没有 Notification，
+ * 到点的提醒不会弹出系统通知（只在应用前台时给一条应用内提示）。
+ * 界面若还写"应用打开且允许通知时提醒"，用户会以为提醒已经安排好了，
+ * 到点却什么都没发生 —— 这是"看起来有、实际没有"里最刺眼的一种。
+ */
 export function reminderNotificationHint() {
   const state = notifyState()
-  if (state.state === 'unsupported') return '当前浏览器不支持系统通知，暂时无法弹出提醒，请使用支持通知的浏览器。'
-  if (state.state === 'denied') return '系统通知已被拒绝，请在浏览器设置中允许通知后启用提醒。'
+  if (state.state === 'unsupported') {
+    return isAndroidApp
+      ? '安卓安装版不支持系统通知，提醒只会在应用打开时以应用内提示出现。'
+      : '当前浏览器不支持系统通知，暂时无法弹出提醒，请使用支持通知的浏览器。'
+  }
+  if (state.state === 'denied') return isAndroidApp
+    ? '系统通知已被拒绝，提醒只会在应用打开时以应用内提示出现。'
+    : '系统通知已被拒绝，请在浏览器设置中允许通知后启用提醒。'
   if (state.state === 'prompt') return '需要先允许系统通知，提醒才会弹出。'
   return '应用打开且允许通知时提醒。'
 }
