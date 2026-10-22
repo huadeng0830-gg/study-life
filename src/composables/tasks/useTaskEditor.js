@@ -13,6 +13,8 @@ function emptyForm() {
     title: '',
     course: '',
     courseId: '',
+    startDate: '',
+    startTime: '',
     dueDate: '',
     dueTime: '',
     /** @type {import('../../types/domain').TaskTimeStage[]} */
@@ -40,6 +42,10 @@ export function useTaskEditor({ domain, tasks, courses, events, onSaved = (_mess
   const error = ref('')
   const errorField = ref('')
   const titleInput = ref(null)
+  /** @type {import('vue').Ref<HTMLInputElement | null>} */
+  const startDateInput = ref(null)
+  /** @type {import('vue').Ref<HTMLInputElement | null>} */
+  const startTimeInput = ref(null)
   const dueDateInput = ref(null)
   const dueTimeInput = ref(null)
   const repeatEndDateInput = ref(null)
@@ -57,6 +63,8 @@ export function useTaskEditor({ domain, tasks, courses, events, onSaved = (_mess
     error.value = message
     errorField.value = message ? field : ''
     if (message && field === 'title') nextTick(() => titleInput.value?.focus())
+    if (message && field === 'startDate') nextTick(() => startDateInput.value?.focus())
+    if (message && field === 'startTime') nextTick(() => startTimeInput.value?.focus())
     if (message && field === 'dueDate') nextTick(() => dueDateInput.value?.focus())
     if (message && field === 'dueTime') nextTick(() => dueTimeInput.value?.focus())
     if (message && field === 'repeatEndDate') nextTick(() => repeatEndDateInput.value?.focus())
@@ -67,6 +75,16 @@ export function useTaskEditor({ domain, tasks, courses, events, onSaved = (_mess
 
   function clearFormError(field) {
     if (errorField.value === field) setFormError('')
+  }
+
+  function registerTimeInput(field, input) {
+    const inputs = { startDate: startDateInput, startTime: startTimeInput, dueDate: dueDateInput, dueTime: dueTimeInput }
+    inputs[field].value = input
+  }
+  function updateTimeField(field, value) {
+    form.value[field] = value
+    if (field.endsWith('Date') && !value) form.value[field.replace('Date', 'Time')] = ''
+    clearFormError(field)
   }
 
   function openAdd() {
@@ -87,6 +105,8 @@ export function useTaskEditor({ domain, tasks, courses, events, onSaved = (_mess
       title: task.title,
       course: task.course ?? '',
       courseId: task.courseId ?? '',
+      startDate: task.startDate ?? '',
+      startTime: task.startTime ?? '',
       dueDate: task.dueDate ?? '',
       dueTime: task.dueTime ?? '',
       timeStages: deepClone(task.timeStages || []),
@@ -107,7 +127,7 @@ export function useTaskEditor({ domain, tasks, courses, events, onSaved = (_mess
 
   function commitSave(data, editId, identitySnapshot) {
     const existing = tasks.value.find((task) => task.id === editId)
-    const timing = (task) => deepClone({ dueDate: task.dueDate || '', dueTime: task.dueTime || '', timeStages: task.timeStages || [] })
+    const timing = (task) => deepClone({ startDate: task.startDate || '', startTime: task.startTime || '', dueDate: task.dueDate || '', dueTime: task.dueTime || '', timeStages: task.timeStages || [] })
     const before = existing && !existing.done && existing.status !== 'completed' ? timing(existing) : null
     const beforeAnchor = existing?.repeatAnchorDay
     const beforeRepeat = existing?.repeat
@@ -126,7 +146,7 @@ export function useTaskEditor({ domain, tasks, courses, events, onSaved = (_mess
     const after = before && existing ? timing(existing) : null
     const afterAnchor = existing?.repeatAnchorDay
     const afterRepeat = existing?.repeat
-    if (before && after && JSON.stringify(undoTaskTimeShift(after, before, after)) !== JSON.stringify(after)) {
+    if (before && after && JSON.stringify(timing(undoTaskTimeShift(after, before, after))) !== JSON.stringify(timing(after))) {
       onSaved('待办已更新', { actionLabel: '撤销改期', duration: 6000, undoFn: () => {
         const current = tasks.value.find((task) => task.id === editId)
         if (!current) return
@@ -142,13 +162,13 @@ export function useTaskEditor({ domain, tasks, courses, events, onSaved = (_mess
       setFormError('请填写待办内容', 'title')
       return
     }
-    const deadlineError = taskDeadlineError({ dueDate: form.value.dueDate, dueTime: form.value.dueDate ? form.value.dueTime : '' })
+    const deadlineError = taskDeadlineError({ startDate: form.value.startDate, startTime: form.value.startDate ? form.value.startTime : '', dueDate: form.value.dueDate, dueTime: form.value.dueDate ? form.value.dueTime : '' })
     if (deadlineError) { setFormError(deadlineError.message, deadlineError.field); return }
     const timeError = taskTimePlanError(form.value.timeStages)
     if (timeError) { setFormError(timeError.message, timeError.field); return }
     const repeatBase = taskRepeatBase(form.value)
     if (form.value.repeat !== 'none' && !repeatBase.date) {
-      setFormError('重复待办需要设置截止日期或阶段日期，完成后才能生成下一期。', 'dueDate')
+      setFormError('重复待办需要设置截止日期、开始日期或阶段日期，完成后才能生成下一期。', 'dueDate')
       return
     }
     if (form.value.repeat !== 'none' && form.value.repeatEndDate && form.value.repeatEndDate < repeatBase.date) {
@@ -205,6 +225,10 @@ export function useTaskEditor({ domain, tasks, courses, events, onSaved = (_mess
     const editId = editingId.value
     const identitySnapshot = formIdentitySnapshot
     const existingTask = tasks.value.find((task) => task.id === editId)
+    if (form.value.startDate || existingTask?.startDate) {
+      data.startDate = form.value.startDate
+      data.startTime = form.value.startDate ? form.value.startTime : ''
+    }
     if (form.value.timeStages.length || existingTask?.timeStages) data.timeStages = normalizeTimeStages(form.value.timeStages)
     if (rawReminderMinutes || existingTask?.reminderMinutes !== undefined) data.reminderMinutes = defaultReminderMinutes('task', rawReminderMinutes)
     if (rawActualMinutes) data.actualMinutes = Math.round(actualMinutes * 10) / 10
@@ -245,6 +269,8 @@ export function useTaskEditor({ domain, tasks, courses, events, onSaved = (_mess
     error,
     errorField,
     titleInput,
+    startDateInput,
+    startTimeInput,
     dueDateInput,
     dueTimeInput,
     repeatEndDateInput,
@@ -257,6 +283,8 @@ export function useTaskEditor({ domain, tasks, courses, events, onSaved = (_mess
     openAdd,
     openEdit,
     clearFormError,
+    registerTimeInput,
+    updateTimeField,
     save,
     confirmConflictSave,
     remove,

@@ -1,6 +1,6 @@
 import type { TaskStageBoundary } from '../../types/domain'
 import { policyDateKey, policyDateTime, policyTimeKey } from '../settingsPolicy.js'
-import { boundaryText, moveTimeDate, stageLabel, stageTimeState, taskRepeatBase, taskStages, taskTimePlanError, timeClockExists, validTimeClock, validTimeDate, type TaskTiming } from './taskTimePlan'
+import { boundaryText, moveTimeDate, stageLabel, stageTimeState, taskDeadlineError, taskRepeatBase, taskStages, taskTimePlanError, timeClockExists, validTimeClock, validTimeDate, type TaskTiming } from './taskTimePlan'
 import { deepClone } from '../../utils/clone.js'
 
 export interface TaskShiftDuration {
@@ -14,7 +14,7 @@ export interface MissingShiftTime { key: string; label: string; date: string }
 
 /** 天按日历移动，小时/分钟按经过的时长移动；日期精度从不自动补成午夜。 */
 export function previewTaskTimeShift(task: TaskTiming, duration: TaskShiftDuration, { dateOnlyTimes = {} as Record<string, string>, nowMs = Date.now(), includeDeadline = true } = {}) {
-  const plan: Required<Pick<TaskTiming, 'dueDate' | 'dueTime' | 'timeStages'>> = deepClone({ dueDate: task.dueDate || '', dueTime: task.dueTime || '', timeStages: taskStages(task) })
+  const plan: TaskTiming & Required<Pick<TaskTiming, 'dueDate' | 'dueTime' | 'timeStages'>> = deepClone({ ...(task.startDate ? { startDate: task.startDate, startTime: task.startTime || '' } : {}), dueDate: task.dueDate || '', dueTime: task.dueTime || '', timeStages: taskStages(task) })
   const changes: ShiftChange[] = []
   const missingTimes: MissingShiftTime[] = []
   const dateOnlyBoundaries: MissingShiftTime[] = []
@@ -59,6 +59,11 @@ export function previewTaskTimeShift(task: TaskTiming, duration: TaskShiftDurati
     return next
   }
 
+  if (plan.startDate) {
+    const start = move({ date: plan.startDate, ...(plan.startTime ? { time: plan.startTime } : {}) }, 'start', '事项开始')
+    plan.startDate = start.date
+    plan.startTime = start.time || ''
+  }
   if (includeDeadline && plan.dueDate) {
     const due = move({ date: plan.dueDate, ...(plan.dueTime ? { time: plan.dueTime } : {}) }, 'due', '事项截止')
     plan.dueDate = due.date
@@ -74,7 +79,7 @@ export function previewTaskTimeShift(task: TaskTiming, duration: TaskShiftDurati
     if (stage.allDay && minuteOffset && !missingTimes.some((item) => item.key.startsWith(`${stage.id}:`))) next.allDay = false
     return next
   })
-  if (!error && !missingTimes.length) error = taskTimePlanError(plan.timeStages)?.message || ''
+  if (!error && !missingTimes.length) error = taskDeadlineError(plan)?.message || taskTimePlanError(plan.timeStages)?.message || ''
   if (!error && !missingTimes.length && !changes.length) error = '没有可移动的日期。请先给未完成的安排填写日期。'
   return { plan, changes, missingTimes, dateOnlyBoundaries, error }
 }
@@ -90,9 +95,21 @@ export function shiftDurationText(duration: TaskShiftDuration): string {
 /** 撤销仅还原本次改过且之后未再修改的端点，保留新增阶段、名称、提醒和完成事实。 */
 export function undoTaskTimeShift(current: TaskTiming, before: TaskTiming, after: TaskTiming): TaskTiming {
   const plan: TaskTiming = deepClone({ dueDate: current.dueDate || '', dueTime: current.dueTime || '', timeStages: taskStages(current) })
+  if (current.startDate || before.startDate || after.startDate) {
+    const unchanged = (current.startDate || '') === (after.startDate || '') && (current.startTime || '') === (after.startTime || '')
+    plan.startDate = (unchanged ? before.startDate : current.startDate) || ''
+    plan.startTime = (unchanged ? before.startTime : current.startTime) || ''
+  }
   if (current.dueDate === after.dueDate && (current.dueTime || '') === (after.dueTime || '')) {
     plan.dueDate = before.dueDate || ''
     plan.dueTime = before.dueTime || ''
+  }
+  // 后续单独改动某个端点时，撤销不能拼出反向区间。
+  if (taskDeadlineError(plan)) {
+    plan.startDate = current.startDate || ''
+    plan.startTime = current.startTime || ''
+    plan.dueDate = current.dueDate || ''
+    plan.dueTime = current.dueTime || ''
   }
   const original = new Map(taskStages(before).map((stage) => [stage.id, stage]))
   const moved = new Map(taskStages(after).map((stage) => [stage.id, stage]))

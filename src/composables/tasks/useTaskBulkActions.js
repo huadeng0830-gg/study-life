@@ -27,6 +27,8 @@ export function useTaskBulkActions({ domain, tasks, selection, notify, nowMs, ge
   function snapshotTiming(task) {
     return {
       id: task.id,
+      startDate: task.startDate || '',
+      startTime: task.startTime || '',
       dueDate: task.dueDate || '',
       dueTime: task.dueTime || '',
       timeStages: deepClone(task.timeStages || []),
@@ -135,7 +137,7 @@ export function useTaskBulkActions({ domain, tasks, selection, notify, nowMs, ge
 
     const duration = { direction: /** @type {'later' | 'earlier'} */ (direction), days: Math.abs(amount), hours: 0, minutes: 0 }
     const targetIds = new Set(targets.map((task) => task.id))
-    const unaffected = getExistingItems().filter((item) => !(targetIds.has(item.id) && (item.dueDate || Array.isArray(item.timeStages))))
+    const unaffected = getExistingItems().filter((item) => !(targetIds.has(item.id) && (item.startDate || item.dueDate || Array.isArray(item.timeStages))))
     const plans = []
     const conflicts = []
     let skipped = 0
@@ -143,7 +145,7 @@ export function useTaskBulkActions({ domain, tasks, selection, notify, nowMs, ge
       const live = tasks.value.find((item) => item.id === task.id)
       if (!live || live.deletedAt || live.archivedAt || live.status === 'archived') { skipped += 1; continue }
       const { plan, error } = previewTaskTimeShift(live, duration, { nowMs: nowMs() })
-      if (error || !plan?.dueDate && !plan?.timeStages?.length) { skipped += 1; continue }
+      if (error || !plan?.startDate && !plan?.dueDate && !plan?.timeStages?.length) { skipped += 1; continue }
       const candidate = { ...live, ...plan }
       const comparisons = [
         ...unaffected,

@@ -196,6 +196,7 @@ export function useDomainCommands() {
       id: value.id || createId('t'), title: String(value.title || '').trim(), done: false, status: 'pending',
       createdAt: now, updatedAt: now, course: value.course || '', courseId: value.courseId || '',
       dueDate: value.dueDate || '', dueTime: value.dueTime || '', priority: value.priority || 'normal',
+      ...(value.startDate ? { startDate: value.startDate, startTime: value.startTime || '' } : {}),
       note: value.note || '', sourceText: value.sourceText || '', estimateMinutes: Number(value.estimateMinutes) || 0,
       ...(value.actualMinutes !== undefined && value.actualMinutes !== null && value.actualMinutes !== '' && Number.isFinite(actualMinutes) && actualMinutes >= 0
         ? { actualMinutes } : {}),

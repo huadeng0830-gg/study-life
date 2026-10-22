@@ -21,7 +21,7 @@ const props = defineProps({
 const emit = defineEmits(['close', 'save'])
 const formId = useId()
 /** @type {import('vue').Ref<import('../../composables/tasks/taskTimePlan').TaskTiming>} */
-const draft = ref(deepClone({ dueDate: props.initialDate || props.task.dueDate || '', dueTime: props.task.dueTime || '', timeStages: props.task.timeStages || [] }))
+const draft = ref(deepClone({ startDate: props.task.startDate || '', startTime: props.task.startTime || '', dueDate: props.initialDate || props.task.dueDate || '', dueTime: props.task.dueTime || '', timeStages: props.task.timeStages || [] }))
 const error = ref('')
 const changed = ref(Boolean(props.initialDate))
 const conflictMessage = ref('')
@@ -48,6 +48,11 @@ function save() {
         <label>新的截止日期<input v-model="draft.dueDate" type="date" :aria-invalid="Boolean(error) || undefined" @input="changed = true; error = ''; if (!draft.dueDate) draft.dueTime = ''" /></label>
         <div class="date-shortcuts" role="group" aria-label="快速重新安排日期"><button type="button" @click="setDate(0)">今天</button><button type="button" @click="setDate(1)">明天</button><button type="button" @click="setDate(7)">一周后</button></div>
         <label>截止时间（选填）<input v-model="draft.dueTime" type="time" :disabled="!draft.dueDate" :aria-invalid="Boolean(error) || undefined" @input="changed = true; error = ''" /></label>
+      </details>
+      <details class="deadline-adjust" :open="Boolean(task.startDate)">
+        <summary>单独调整事项开始时间</summary>
+        <label>新的开始日期<input v-model="draft.startDate" type="date" @input="changed = true; error = ''; if (!draft.startDate) draft.startTime = ''" /></label>
+        <label>开始时间（选填）<input v-model="draft.startTime" type="time" :disabled="!draft.startDate" @input="changed = true; error = ''" /></label>
       </details>
       <p v-if="error" class="error" role="alert">{{ error }}</p>
     </form>

@@ -24,7 +24,7 @@ export function matchesMilestoneQuery(item, query, courseNames = new Map()) {
 export function filterTaskWorkspace(tasks, { query = '', priority = 'all', period = 'all', now = new Date(), courseNames = new Map() } = {}) {
   return tasks.filter((task) => {
     if (priority !== 'all' && (task.priority || 'normal') !== priority) return false
-    if (!matchesQuery([task.title, courseNames.get(task.courseId), task.course, task.note, task.workCheckpoint?.lastStep, task.workCheckpoint?.blocker, task.workCheckpoint?.nextStep, ...taskStages(task).flatMap((stage) => [stage.label, stage.start?.date, stage.end?.date])], query)) return false
+    if (!matchesQuery([task.title, courseNames.get(task.courseId), task.course, task.note, task.startDate, task.dueDate, task.workCheckpoint?.lastStep, task.workCheckpoint?.blocker, task.workCheckpoint?.nextStep, ...taskStages(task).flatMap((stage) => [stage.label, stage.start?.date, stage.end?.date])], query)) return false
     if (period === 'all') return true
     if (!isTaskActionable(task, now)) return false
     if (period === 'overdue') return taskStatus(task, now) === 'overdue' || taskTimeSummary(task, now.getTime()).risk

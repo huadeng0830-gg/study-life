@@ -181,6 +181,7 @@ export function createNextRepeatingTask(task, now = new Date()) {
     completedAt: null,
     repeatGeneratedAt: null,
     dueDate,
+    ...(task.startDate ? { startDate: moveTimeDate(task.startDate, days) } : {}),
     createdAt: now.toISOString(),
   }
   delete next.repeatGenerationError

@@ -20,6 +20,7 @@ import Toast from '../components/Toast.vue'
 import TaskWorkCheckpointFields from '../components/tasks/TaskWorkCheckpointFields.vue'
 import TaskWorkSession from '../components/tasks/TaskWorkSession.vue'
 import TaskTimeEditor from '../components/tasks/TaskTimeEditor.vue'
+import TaskDateRangeFields from '../components/tasks/TaskDateRangeFields.vue'
 import TaskTimeShift from '../components/tasks/TaskTimeShift.vue'
 import TaskStageAction from '../components/tasks/TaskStageAction.vue'
 import TaskRescheduleDialog from '../components/tasks/TaskRescheduleDialog.vue'
@@ -58,6 +59,7 @@ import { TASK_SORTS } from '../composables/tasks/taskViewQuery.js'
 import { useTaskViewQuery } from '../composables/tasks/useTaskViewQuery.js'
 import { usePageShortcuts } from '../composables/usePageShortcuts.js'
 import { defaultReminderMinutes } from '../composables/settingsPolicy.js'
+import { reminderNotificationHint } from '../composables/reminderScheduler.js'
 import { useTaskRouteFocus } from '../composables/tasks/useTaskRouteFocus.js'
 const domain = useDomainCommands()
 /** @type {import('vue').Ref<import('../types/domain').Course[]>} */
@@ -118,8 +120,6 @@ const {
   error,
   errorField,
   titleInput,
-  dueDateInput,
-  dueTimeInput,
   repeatEndDateInput,
   estimateInput,
   actualInput,
@@ -130,6 +130,8 @@ const {
   openAdd,
   openEdit: openPersonalTaskEditor,
   clearFormError,
+  registerTimeInput,
+  updateTimeField,
   save,
   confirmConflictSave,
   remove,
@@ -140,7 +142,7 @@ const editingStageId = ref('')
 const editorFormId = useId()
 
 function applyTimeShift(plan) {
-  Object.assign(form.value, { dueDate: plan.dueDate || '', dueTime: plan.dueTime || '', timeStages: plan.timeStages || [] })
+  Object.assign(form.value, { startDate: plan.startDate || '', startTime: plan.startTime || '', dueDate: plan.dueDate || '', dueTime: plan.dueTime || '', timeStages: plan.timeStages || [] })
   clearFormError(errorField.value)
 }
 
@@ -264,9 +266,9 @@ function saveReschedule(plan) {
   if (rescheduleTarget.value.sourceType === 'project-task') { openProjectTask(rescheduleTarget.value); rescheduleTarget.value = null; return }
   const target = tasks.value.find((task) => task.id === rescheduleTarget.value.id)
   if (!target) return
-  const before = deepClone({ dueDate: target.dueDate || '', dueTime: target.dueTime || '', timeStages: target.timeStages || [], repeat: target.repeat, repeatAnchorDay: target.repeatAnchorDay || null })
+  const before = deepClone({ startDate: target.startDate || '', startTime: target.startTime || '', dueDate: target.dueDate || '', dueTime: target.dueTime || '', timeStages: target.timeStages || [], repeat: target.repeat, repeatAnchorDay: target.repeatAnchorDay || null })
   domain.updateTask(target.id, plan)
-  const after = deepClone({ dueDate: target.dueDate || '', dueTime: target.dueTime || '', timeStages: target.timeStages || [], repeat: target.repeat, repeatAnchorDay: target.repeatAnchorDay || null })
+  const after = deepClone({ startDate: target.startDate || '', startTime: target.startTime || '', dueDate: target.dueDate || '', dueTime: target.dueTime || '', timeStages: target.timeStages || [], repeat: target.repeat, repeatAnchorDay: target.repeatAnchorDay || null })
   rescheduleTarget.value = null
   showToast('时间安排已更新', { type: 'success', actionLabel: '撤销', undoFn: () => {
     const current = tasks.value.find((task) => task.id === target.id)
@@ -408,7 +410,7 @@ function dueTimestamp(task) {
 
 function computeDueInfo(task) {
   if (taskStatus(task) === 'completed') return { text: task.completedAt ? `完成于 ${formatAppDate(task.completedAt, { withWeekday: false })}` : '已完成', cls: 'completed' }
-  if (taskStages(task).length) { const plan = taskTimeSummary(task, appNow.value.getTime()); return { text: plan.text, cls: plan.risk ? 'overdue' : '' } }
+  if (task.startDate || taskStages(task).length) { const plan = taskTimeSummary(task, appNow.value.getTime()); return { text: plan.text, cls: plan.risk ? 'overdue' : '' } }
   if (!task.dueDate) return { text: '无截止日期', cls: '' }
   const today = appToday.value
   const days = appCalendarDaysBetween(today, task.dueDate)
@@ -477,6 +479,8 @@ const workspaceSummary = computed(() => taskWorkspaceSummary(tasks.value, appNow
 const courseNamesById = computed(() => new Map(courses.value.map((course) => [course.id, course.name])))
 const hasWorkspaceFilters = computed(() => Boolean(viewState.value.q || priorityFilter.value !== 'all' || periodFilter.value !== 'all'))
 const defaultTaskReminder = computed(() => defaultReminderMinutes('task'))
+// 提醒说明与浏览器实际通知能力保持一致。
+const reminderHint = computed(() => reminderNotificationHint())
 
 function applyWorkspaceFilters(items) {
   return filterTaskWorkspace(items, { query: searchQuery.value, priority: priorityFilter.value, period: periodFilter.value, now: appNow.value, courseNames: courseNamesById.value })
@@ -716,7 +720,7 @@ function updateTaskCheckpointField(field, value) {
 
 <template>
   <div class="page tasks-page stack" @click.capture="dismissTaskTools">
-    <PageHeader class="page-head" title="待办" description="记下要做的事，按下一步时间管理截止与阶段安排。">
+    <PageHeader class="page-head" title="待办" description="记下要做的事，直接设置开始和截止时间，需要时再拆分阶段。">
       <template #actions>
         <Button variant="ghost" :aria-expanded="showHistory" @click="setHistory">{{ showHistory ? '返回当前' : `历史 ${counts.archived || ''}` }}</Button>
         <details ref="taskTools" class="task-tools" @keydown.esc.stop.prevent="closeTaskTools">
@@ -973,20 +977,11 @@ function updateTaskCheckpointField(field, value) {
         <FieldDescription>只需填写内容，日期和其他信息都可以稍后补充。</FieldDescription>
 
         </Field>
-        <div class="form-row deadline-row">
-          <div>
-            <label for="tasks-due-date">截止日期</label>
-            <input id="tasks-due-date" ref="dueDateInput" v-model="form.dueDate" type="date" :aria-invalid="errorField === 'dueDate' || undefined" :aria-describedby="errorField === 'dueDate' ? 'tasks-form-error' : undefined" @input="clearFormError('dueDate'); if (!form.dueDate) form.dueTime = ''" />
-          </div>
-          <div>
-            <label for="tasks-due-time">截止时间</label>
-            <input id="tasks-due-time" ref="dueTimeInput" v-model="form.dueTime" type="time" :disabled="!form.dueDate" :aria-invalid="errorField === 'dueTime' || undefined" :aria-describedby="errorField === 'dueTime' ? 'tasks-form-error' : undefined" @input="clearFormError('dueTime')" />
-          </div>
-        </div>
+        <TaskDateRangeFields :form="form" :error-field="errorField" error-id="tasks-form-error" @register-input="registerTimeInput" @change="updateTimeField" />
 
-        <div class="date-shortcuts" role="group" aria-label="快速选择截止日期"><button type="button" :aria-pressed="form.dueDate === appToday" @click="setFormDueDate(0)">今天</button><button type="button" :aria-pressed="form.dueDate === addAppDays(appToday, 1)" @click="setFormDueDate(1)">明天</button><button type="button" :aria-pressed="form.dueDate === addAppDays(appToday, 7)" @click="setFormDueDate(7)">一周后</button><button type="button" :aria-pressed="!form.dueDate" @click="setFormDueDate(null)">暂不安排</button></div>
+        <div class="date-shortcuts" role="group" aria-label="快速选择截止日期"><button type="button" :aria-pressed="form.dueDate === appToday" @click="setFormDueDate(0)">今天</button><button type="button" :aria-pressed="form.dueDate === addAppDays(appToday, 1)" @click="setFormDueDate(1)">明天</button><button type="button" :aria-pressed="form.dueDate === addAppDays(appToday, 7)" @click="setFormDueDate(7)">一周后</button><button type="button" :aria-pressed="!form.dueDate" @click="setFormDueDate(null)">不设截止</button></div>
         <small v-if="!taskHasTime(form)" class="repeat-hint">未设置日期的事项会留在“待安排日期”，随时可以补上。</small>
-        <details class="task-details" :open="Boolean(form.timeStages.length || errorField.startsWith('timeStages.') || editingStageId)"><summary>安排起止时间或多个阶段 <small>可选</small></summary><TaskTimeEditor v-model="form.timeStages" :error-field="errorField" :focus-stage-id="editingStageId" :now-ms="appNow.getTime()" @change="clearFormError(errorField)" /></details>
+        <details class="task-details" :open="Boolean(form.timeStages.length || errorField.startsWith('timeStages.') || editingStageId)"><summary>拆分阶段 <small>复杂任务按需添加</small></summary><TaskTimeEditor v-model="form.timeStages" :error-field="errorField" :focus-stage-id="editingStageId" :now-ms="appNow.getTime()" @change="clearFormError(errorField)" /></details>
         <TaskTimeShift v-if="taskHasTime(form)" :task="form" :now-ms="appNow.getTime()" @apply="applyTimeShift" @undo="applyTimeShift" />
 
         <details class="task-details task-context" :open="Boolean(form.course || form.note || form.priority !== 'normal')">
@@ -1023,11 +1018,11 @@ function updateTaskCheckpointField(field, value) {
         <select id="tasks-repeat" v-model="form.repeat"><option v-for="rule in TASK_REPEATS" :key="rule.value" :value="rule.value">{{ rule.value === 'none' ? rule.label : `${rule.label}（完成后生成下一期）` }}</option></select>
         <label v-if="form.repeat !== 'none'" for="tasks-repeat-end">重复结束日期</label>
         <input v-if="form.repeat !== 'none'" id="tasks-repeat-end" ref="repeatEndDateInput" v-model="form.repeatEndDate" type="date" :min="repeatBase.date || undefined" :disabled="!repeatBase.date" :aria-invalid="errorField === 'repeatEndDate' || undefined" :aria-describedby="errorField === 'repeatEndDate' ? 'tasks-form-error' : undefined" @input="clearFormError('repeatEndDate')" />
-        <small v-if="form.repeat !== 'none'" class="repeat-hint">完成事项后，所有阶段一起进入下一期。基准：{{ repeatBase.label }}{{ repeatBase.date ? `（${repeatBase.date}）` : '，请填写阶段或截止日期' }}；结束日期含当天，留空持续重复。</small>
+        <small v-if="form.repeat !== 'none'" class="repeat-hint">完成事项后，开始、截止与阶段日期一起进入下一期。基准：{{ repeatBase.label }}{{ repeatBase.date ? `（${repeatBase.date}）` : '，请填写开始、截止或阶段日期' }}；结束日期含当天，留空持续重复。</small>
 
-        <label for="tasks-reminder">提前提醒（分钟）</label>
-        <input id="tasks-reminder" ref="reminderInput" v-model="form.reminderMinutes" type="number" min="0" step="1" :disabled="!form.dueDate" :placeholder="`默认提前 ${defaultTaskReminder} 分钟`" :aria-invalid="errorField === 'reminderMinutes' || undefined" aria-describedby="tasks-reminder-hint" @input="clearFormError('reminderMinutes')" />
-        <small id="tasks-reminder-hint" class="repeat-hint">0 表示到点提醒，留空使用默认设置。未填时间按 23:59 计算；应用打开且允许通知时提醒。</small>
+        <label for="tasks-reminder">{{ form.dueDate ? '截止提醒' : '开始提醒' }}提前量（分钟）</label>
+        <input id="tasks-reminder" ref="reminderInput" v-model="form.reminderMinutes" type="number" min="0" step="1" :disabled="!form.dueDate && !(form.startDate && form.startTime)" :placeholder="`默认提前 ${defaultTaskReminder} 分钟`" :aria-invalid="errorField === 'reminderMinutes' || undefined" aria-describedby="tasks-reminder-hint" @input="clearFormError('reminderMinutes')" />
+        <small id="tasks-reminder-hint" class="repeat-hint">0 表示到点提醒，留空使用默认设置。{{ form.dueDate ? '按截止时间提醒，未填时刻按 23:59 计算。' : '只设开始日期时，请补充开始时刻以启用提醒。' }}{{ reminderHint }}</small>
         </details>
 
         <TaskWorkCheckpointFields :form="form" :task="tasks.find((task) => task.id === editingId)" :editing="Boolean(editingId)" @update:field="updateTaskCheckpointField" />

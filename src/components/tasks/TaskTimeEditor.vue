@@ -114,16 +114,16 @@ watch(() => props.modelValue.length, () => {
 
 <template>
   <section ref="root" class="time-editor" aria-label="事项时间安排">
-    <div class="time-heading"><b>时间安排 <small v-if="modelValue.length">{{ modelValue.length }} 段</small></b><button type="button" class="link-btn" @click="add">＋ {{ modelValue.length ? '添加阶段' : '添加起止时间' }}</button></div>
-    <p v-if="!modelValue.length" class="time-help">有开始、结束或多个步骤时再添加；名称与日期都可以稍后补充。</p>
+    <div class="time-heading"><b>阶段安排 <small v-if="modelValue.length">{{ modelValue.length }} 个阶段</small></b><button type="button" class="link-btn" @click="add">＋ 添加阶段</button></div>
+    <p v-if="!modelValue.length" class="time-help">需要分别跟进准备、提交、审核等步骤时再添加；每个阶段可独立设置时间和提醒。</p>
     <p v-else class="time-help">每段时间都可以独立设置。只跟踪进度的阶段无需勾选完成。</p>
     <p v-if="deleted" class="time-help" role="status">已从草稿移除“{{ stageLabel(deleted.stage, deleted.index) }}”。<button type="button" class="link-btn" @click="undoDelete">撤销删除</button></p>
     <div v-for="(stage, index) in modelValue" :key="stage.id" class="time-stage" :data-stage-id="stage.id">
       <button type="button" class="stage-heading" :aria-expanded="expandedId === stage.id" @click="expandedId = expandedId === stage.id ? '' : stage.id">
-        <span><b>{{ modelValue.length === 1 && !stage.label ? '起止时间' : stageLabel(stage, index) }}</b><small>{{ stageRangeText(stage) }}</small></span><span aria-hidden="true">{{ expandedId === stage.id ? '⌃' : '⌄' }}</span>
+        <span><b>{{ stageLabel(stage, index) }}</b><small>{{ stageRangeText(stage) }}</small></span><span aria-hidden="true">{{ expandedId === stage.id ? '⌃' : '⌄' }}</span>
       </button>
       <div v-if="expandedId === stage.id" class="stage-fields">
-        <label v-if="modelValue.length > 1 || stage.label" :for="`${id}-${stage.id}-label`">阶段名称（选填）<input :id="`${id}-${stage.id}-label`" :value="stage.label" placeholder="例如：准备材料、提交、审核、现场办理" @input="patch(index, { label: valueOf($event) })" /></label>
+        <label :for="`${id}-${stage.id}-label`">阶段名称（选填）<input :id="`${id}-${stage.id}-label`" :value="stage.label" placeholder="例如：准备材料、提交、审核、现场办理" @input="patch(index, { label: valueOf($event) })" /></label>
         <label :for="`${id}-${stage.id}-purpose`">这段时间用来…<select :id="`${id}-${stage.id}-purpose`" :value="purpose(stage)" @change="setPurpose(index, valueOf($event))"><option value="window">在这段时间内完成</option><option value="scheduled">按时参加或执行</option><option value="tracking">只跟踪时间，等待后续</option></select></label>
         <label v-if="stage.kind === 'scheduled'" class="stage-check"><input type="checkbox" :checked="stage.allDay" @change="setAllDay(index, checkedOf($event))" /> 全天占用安排</label>
         <div v-for="anchor in (['start', 'end'])" :key="anchor" class="stage-boundary">

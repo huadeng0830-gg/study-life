@@ -67,7 +67,7 @@ export function selectHomeNextUp({
 
   events.filter((item) => !isArchived(item)).forEach((item) => add('event', item, item.date, item.time))
   tasks.filter((item) => isTaskActionable(item, now)).forEach((item) => {
-    if (!taskStages(item).length) { add('task', item, item.dueDate, item.dueTime); return }
+    if (!item.startDate && !taskStages(item).length) { add('task', item, item.dueDate, item.dueTime); return }
     const plan = taskTimeSummary(item, nowTs)
     // 已结束待确认在风险区显示；这里仍可展示同一事项的后续安排。
     const entry = plan.next?.risk ? plan.following : plan.next

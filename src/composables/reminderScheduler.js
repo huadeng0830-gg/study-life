@@ -159,7 +159,10 @@ export function collectDueReminders(nowMs = clock.value.getTime()) {
 
   for (const task of tasks.value || []) {
     if (!isTaskActionable(task, new Date(nowMs)) || task?.status === 'done' || task?.active === false) continue
-    push('task', task, task?.dueDate, task?.dueTime, task?.reminderMinutes ?? policy.task)
+    if (task.dueDate) push('task', task, task.dueDate, task.dueTime, task.reminderMinutes ?? policy.task)
+    else if (task.startDate && task.startTime) push('task', task, task.startDate, task.startTime, task.reminderMinutes ?? policy.task, {
+      body: `${task.title} · 开始提醒（${task.startDate} ${task.startTime}）`,
+    })
     taskStages(task).forEach((stage, index) => {
       if (stageTimeState(stage, nowMs) === 'completed') return
       const endAt = stageBoundaryAt(stage.end, 'end')
@@ -253,6 +256,15 @@ function notifyState() {
   if (Notification.permission === 'granted') return { state: 'granted', enabled: true }
   if (Notification.permission === 'denied') return { state: 'denied', enabled: false }
   return { state: 'prompt', enabled: false }
+}
+
+/** 与当前浏览器的实际通知能力一致，避免承诺未实现的应用内提醒。 */
+export function reminderNotificationHint() {
+  const state = notifyState()
+  if (state.state === 'unsupported') return '当前浏览器不支持系统通知，暂时无法弹出提醒，请使用支持通知的浏览器。'
+  if (state.state === 'denied') return '系统通知已被拒绝，请在浏览器设置中允许通知后启用提醒。'
+  if (state.state === 'prompt') return '需要先允许系统通知，提醒才会弹出。'
+  return '应用打开且允许通知时提醒。'
 }
 
 export { notifyState as getReminderNotificationState }

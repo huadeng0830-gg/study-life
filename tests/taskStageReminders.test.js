@@ -16,6 +16,25 @@ beforeEach(async () => {
 })
 
 describe('阶段提醒调度', () => {
+  it('浏览器不支持或拒绝通知时，不承诺不存在的应用内提醒', () => {
+    try {
+      vi.stubGlobal('Notification', undefined)
+      expect(scheduler.reminderNotificationHint()).not.toContain('应用内提示')
+      vi.stubGlobal('Notification', { permission: 'denied' })
+      expect(scheduler.reminderNotificationHint()).not.toContain('应用内提示')
+    } finally { vi.unstubAllGlobals() }
+  })
+  it('普通任务无阶段时仍可按开始时刻提醒，完成停止；有截止时间时提醒截止', () => {
+    const task = domain.createTask({ id: 'simple-start', title: '示例开始提醒', startDate: '2026-10-10', startTime: '10:00', reminderMinutes: 0 })
+    expect(scheduler.collectDueReminders(now)).toEqual([expect.objectContaining({ key: 'task:simple-start', body: expect.stringContaining('开始提醒'), at: '2026-10-10 10:00' })])
+    domain.toggleTask(task.id)
+    expect(scheduler.collectDueReminders(now)).toEqual([])
+    domain.toggleTask(task.id)
+    domain.updateTask(task.id, { dueDate: '2026-10-12', dueTime: '18:00' })
+    expect(scheduler.collectDueReminders(now).some((item) => item.body.includes('开始提醒（'))).toBe(false)
+    domain.updateTask(task.id, { dueDate: '', dueTime: '', startTime: '' })
+    expect(scheduler.collectDueReminders(now)).toEqual([])
+  })
   it('结束后 30 秒的零分钟提醒可被分钟轮询捕获，关闭已久的窗口不补响', () => {
     domain.createTask({ id: 'end', title: '阶段结束', timeStages: [phase('正式')] })
     expect(scheduler.collectDueReminders(now).map((item) => item.key)).toContain('task:end:stage:正式:reminder:正式-end')

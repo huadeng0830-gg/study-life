@@ -88,6 +88,8 @@ export interface Task {
   done: boolean
   course?: string
   courseId?: string
+  startDate?: string
+  startTime?: string
   dueDate?: string
   dueTime?: string
   timeStages?: TaskTimeStage[]

@@ -4,6 +4,32 @@
 // RELEASE_UPDATES 仅保留最近 3 条内置说明，完整的简短发布历史保存在 release-history.json。
 export const RELEASE_UPDATES = Object.freeze([
   {
+    version: '1.12.1',
+    legacyVersion: '2026年10月22日-版本1',
+    channel: 'stable',
+    summary: '普通待办直接设置起止时间，阶段按需添加',
+    signature: '6a25d97437',
+    changes: {
+      features: [],
+      improvements: [
+      '普通任务直接填写开始和截止时间，无需添加阶段',
+      '开始日期同步显示在首页、筛选和日历，手机时间表单更紧凑',
+      ],
+      fixes: [
+      '修复开始与截止时间校验、重复任务日期和改期撤销',
+      '修复只设开始时间的提醒及通知权限提示',
+      ],
+      security: [],
+      breaking: [],
+    },
+    notes: [
+      '普通任务直接填写开始和截止时间，无需添加阶段',
+      '开始日期同步显示在首页、筛选和日历，手机时间表单更紧凑',
+      '修复开始与截止时间校验、重复任务日期和改期撤销',
+      '修复只设开始时间的提醒及通知权限提示',
+    ],
+  },
+  {
     version: '1.12.0',
     legacyVersion: '2026年10月20日-版本1',
     channel: 'stable',
@@ -78,51 +104,16 @@ export const RELEASE_UPDATES = Object.freeze([
       '补齐校园治理队列索引、反馈审计和举报申诉所需数据库结构',
     ],
   },
-  {
-    version: '1.11.2',
-    legacyVersion: '2026年10月16日-版本6',
-    channel: 'stable',
-    summary: '账号封禁与禁发支持自定义期限，处理通知清晰可见',
-    signature: '1c8dd69e8a',
-    changes: {
-      features: [],
-      improvements: [
-      '账号封禁与禁止发布独立管理，支持任意分钟、小时、天和指定解除时间',
-      '增加永久限制、单独提前解除和到期自动恢复',
-      '账号展示处理原因、剩余期限和解除通知，封禁后进入告知页',
-      '管理弹窗适配手机和桌面，确认前可预览解除时间',
-      ],
-      fixes: [
-      '防止过期管理页面覆盖新限制',
-      '封禁期间暂停云端同步，退出前保留备份确认',
-      '统一约束旧会话、内容重提与文件访问路径',
-      ],
-      security: [
-      '限制状态与审计通知原子保存，账号仅能查询本人的处理说明',
-      ],
-      breaking: [],
-    },
-    notes: [
-      '账号封禁与禁止发布独立管理，支持任意分钟、小时、天和指定解除时间',
-      '增加永久限制、单独提前解除和到期自动恢复',
-      '账号展示处理原因、剩余期限和解除通知，封禁后进入告知页',
-      '管理弹窗适配手机和桌面，确认前可预览解除时间',
-      '防止过期管理页面覆盖新限制',
-      '封禁期间暂停云端同步，退出前保留备份确认',
-      '统一约束旧会话、内容重提与文件访问路径',
-      '限制状态与审计通知原子保存，账号仅能查询本人的处理说明',
-    ],
-  },
 ])
 
 // SemVer 是面向用户和发布的正式版本。日期式标识只用于旧网页客户端的升级兼容。
-export const APP_VERSION = '1.12.0'
+export const APP_VERSION = '1.12.1'
 export const RELEASE_VERSION = APP_VERSION
 export const RELEASE_CHANNEL = 'stable'
 export const LEGACY_RELEASE_VERSION = RELEASE_UPDATES[0].legacyVersion || RELEASE_UPDATES[0].version
 
 // 与第一条签名保持一致，交给 vite.config.js 校验源码一致性。
-export const RELEASE_SOURCE_SIGNATURE = '92fcda6122'
+export const RELEASE_SOURCE_SIGNATURE = '6a25d97437'
 
 // 兼容旧引用：当前版本的更新说明。
 export const RELEASE_NOTES = RELEASE_UPDATES[0].notes

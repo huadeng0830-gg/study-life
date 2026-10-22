@@ -10,7 +10,7 @@ it('本地夏令时不存在的时刻无法手动写入、按天改期或生成�
   localStorage.clear()
   localStorage.setItem('sl_quick_record_settings', JSON.stringify({ timezone: 'local' }))
   try {
-    const { taskTimePlanError } = await import('../src/composables/tasks/taskTimePlan.ts')
+    const { taskDeadlineError, taskTimePlanError } = await import('../src/composables/tasks/taskTimePlan.ts')
     const { previewTaskTimeShift } = await import('../src/composables/tasks/taskTimeShift.ts')
     const { useDomainCommands } = await import('../src/composables/domain/commands.js')
     const stage = { id: 'dst', label: '示例执行', kind: 'scheduled', start: { date: '2027-03-13', time: '02:30' }, end: { date: '2027-03-13', time: '05:30' }, reminders: [] }
@@ -23,6 +23,13 @@ it('本地夏令时不存在的时刻无法手动写入、按天改期或生成�
     const { useTaskStageActions } = await import('../src/composables/tasks/useTaskStageActions.ts')
     let undo
     const domain = useDomainCommands()
+    expect(taskDeadlineError({ startDate: '2027-03-14', startTime: '02:30' })?.field).toBe('startTime')
+    expect(() => domain.createTask({ title: '错误开始时间', startDate: '2027-03-14', startTime: '02:30' })).toThrow('当前时区不存在')
+    expect(previewTaskTimeShift({ startDate: '2027-03-13', startTime: '02:30' }, { direction: 'later', days: 1, hours: 0, minutes: 0 }).error).toContain('当前时区不存在')
+    const simple = domain.createTask({ title: '示例每日开始', startDate: '2027-03-13', startTime: '02:30', repeat: 'daily' })
+    domain.toggleTask(simple.id)
+    expect(simple.repeatGenerationError).toContain('下一期未生成')
+    domain.deleteTask(simple.id)
     const task = domain.createTask({ title: '每日执行', repeat: 'daily', timeStages: [stage] })
     const actions = useTaskStageActions({ domain, now: ref(new Date('2027-03-13T00:00Z')), notify: (_message, options) => { undo = options.undoFn } })
     actions.toggle(task)

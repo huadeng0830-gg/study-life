@@ -108,7 +108,7 @@ export function selectReminders({ tasks = [], bills = [], milestones = [], event
     if (status === 'completed' || status === 'cancelled' || status === 'archived') continue
     const plan = taskTimeSummary(task, now.getTime())
     const dueAt = plan.next?.at ?? Infinity
-    const item = { key: ref('task', task), sourceType: 'task', sourceId: task.id, stageId: plan.next?.stage?.id, kind: status === 'overdue' || plan.risk ? 'overdue' : 'task', title: task.title, dueAt, actionDate: isTaskPlanToday(task, now.getTime()) ? today : plan.next?.date, timeSummary: taskStages(task).length ? plan.text : '', priority: task.priority || 'normal', entity: task }
+    const item = { key: ref('task', task), sourceType: 'task', sourceId: task.id, stageId: plan.next?.stage?.id, kind: status === 'overdue' || plan.risk ? 'overdue' : 'task', title: task.title, dueAt, actionDate: isTaskPlanToday(task, now.getTime()) ? today : plan.next?.date, timeSummary: task.startDate || taskStages(task).length ? plan.text : '', priority: task.priority || 'normal', entity: task }
     if (!excludedKeys.has(item.key) && (item.kind === 'overdue' || item.actionDate === today || dueAt - now.getTime() <= 7 * 86400000)) results.push(item)
   }
   for (const bill of bills) {

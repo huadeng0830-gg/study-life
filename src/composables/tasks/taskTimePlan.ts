@@ -13,9 +13,15 @@ export function timeClockExists(date: string, time: string): boolean {
 }
 
 export function taskDeadlineError(task: TaskTiming): TimePlanError | null {
+  if (task.startDate && !validTimeDate(task.startDate)) return { message: '请选择有效的开始日期。', field: 'startDate' }
+  if (task.startTime && (!task.startDate || !validTimeClock(task.startTime))) return { message: '请检查开始日期与时刻。', field: 'startTime' }
+  if (task.startDate && task.startTime && !timeClockExists(task.startDate, task.startTime)) return { message: '开始时刻在当前时区不存在，请选择其他时刻。', field: 'startTime' }
   if (task.dueDate && !validTimeDate(task.dueDate)) return { message: '请选择有效的截止日期。', field: 'dueDate' }
   if (task.dueTime && (!task.dueDate || !validTimeClock(task.dueTime))) return { message: '请检查截止日期与时刻。', field: 'dueTime' }
   if (task.dueDate && task.dueTime && !timeClockExists(task.dueDate, task.dueTime)) return { message: '截止时刻在当前时区不存在，请选择其他时刻。', field: 'dueTime' }
+  if (task.startDate && task.dueDate && stageBoundaryAt({ date: task.dueDate, time: task.dueTime }, 'end') <= stageBoundaryAt({ date: task.startDate, time: task.startTime }, 'start')) {
+    return { message: '截止须晚于开始；跨夜请填写次日的截止日期。', field: task.startDate === task.dueDate && task.dueTime ? 'dueTime' : 'dueDate' }
+  }
   return null
 }
 /** 表单和命令共用校验；错误指向阶段与端点，禁止写入日期溢出和隐式时刻。 */
@@ -102,7 +108,7 @@ export function stageRangeText(stage: TaskTimeStage): string {
 }
 
 export function taskHasTime(task: TaskTiming): boolean {
-  return Boolean(task.dueDate || taskStages(task).some((stage) => stage.start?.date || stage.end?.date))
+  return Boolean(task.startDate || task.dueDate || taskStages(task).some((stage) => stage.start?.date || stage.end?.date))
 }
 
 export function stageStatusText(stage: TaskTimeStage, nowMs = Date.now()): string {
@@ -138,6 +144,7 @@ export interface TaskTimeEntry {
 /** 只生成派生条目，始终回到同一事项，不存储第二份日程。 */
 export function taskTimeEntries(task: TaskTiming): TaskTimeEntry[] {
   const entries: TaskTimeEntry[] = []
+  if (task.startDate) entries.push({ key: `${task.id}:start`, anchor: 'start', date: task.startDate, time: task.startTime || '', at: stageBoundaryAt({ date: task.startDate, time: task.startTime }, 'start'), label: '事项开始' })
   if (task.dueDate) entries.push({ key: `${task.id}:due`, anchor: 'due', date: task.dueDate, time: task.dueTime || '', at: policyDateTime(task.dueDate, task.dueTime || '23:59'), label: '事项截止' })
   taskStages(task).forEach((stage, index) => {
     for (const anchor of ['start', 'end'] as const) {
@@ -163,7 +170,12 @@ export function taskTimeSummary(task: TaskTiming, nowMs = Date.now()) {
     const boundary = upcomingStart ? stage.start : stage.end || stage.start
     return { stage, state, at: upcomingStart ? start : Number.isFinite(end) ? end : Number.isFinite(start) ? start : Infinity, date: boundary?.date || '', time: boundary?.time || '', label: `${stageLabel(stage, taskStages(task).indexOf(stage))} · ${stageStatusText(stage, nowMs)}${boundary?.date ? ` · ${boundaryText(boundary, stage.allDay)}${upcomingStart ? ' 开始' : stage.end ? ' 结束' : ''}` : ''}`, risk: state === 'ended' && stage.completionRequired !== false }
   })
-  if (task.dueDate) candidates.push({ stage: undefined as TaskTimeStage | undefined, state: 'active' as StageState, at: policyDateTime(task.dueDate, task.dueTime || '23:59'), date: task.dueDate, time: task.dueTime || '', label: `事项截止 · ${boundaryText({ date: task.dueDate, time: task.dueTime })}`, risk: policyDateTime(task.dueDate, task.dueTime || '23:59') < nowMs })
+  if (task.startDate) {
+    const at = stageBoundaryAt({ date: task.startDate, time: task.startTime }, 'start')
+    // 已过的开始时间不能盖住后续阶段；阶段全部完成时仍提示确认整个事项。
+    if (at > nowMs || (!task.dueDate && !taskStages(task).length)) candidates.push({ stage: undefined, state: at > nowMs ? 'upcoming' : 'active', at, date: task.startDate, time: task.startTime || '', label: `事项${at > nowMs ? '开始' : '已到开始时间'} · ${boundaryText({ date: task.startDate, time: task.startTime })}${task.dueDate ? ` → 截止 ${boundaryText({ date: task.dueDate, time: task.dueTime })}` : ''}`, risk: false })
+  }
+  if (task.dueDate) candidates.push({ stage: undefined as TaskTimeStage | undefined, state: 'active' as StageState, at: policyDateTime(task.dueDate, task.dueTime || '23:59'), date: task.dueDate, time: task.dueTime || '', label: `${task.startDate ? `开始 ${boundaryText({ date: task.startDate, time: task.startTime })} → ` : ''}事项截止 · ${boundaryText({ date: task.dueDate, time: task.dueTime })}`, risk: policyDateTime(task.dueDate, task.dueTime || '23:59') < nowMs })
   candidates.sort((left, right) => Number(right.risk) - Number(left.risk) || left.at - right.at)
   const next = candidates[0]
   const following = candidates.find((entry) => entry !== next && !entry.risk && entry.at >= nowMs)
@@ -181,13 +193,15 @@ export function taskCurrentDate(task: TaskTiming, nowMs = Date.now()): string {
 
 export function isTaskPlanToday(task: TaskTiming, nowMs = Date.now()): boolean {
   const today = policyDateKey(new Date(nowMs))
-  return taskCurrentDate(task, nowMs) === today || remainingTimeStages(task, nowMs).some((stage) => stageTimeState(stage, nowMs) === 'active')
+  const start = task.startDate ? stageBoundaryAt({ date: task.startDate, time: task.startTime }, 'start') : NaN
+  const end = task.dueDate ? stageBoundaryAt({ date: task.dueDate, time: task.dueTime }, 'end') : Infinity
+  return taskCurrentDate(task, nowMs) === today || (start <= nowMs && nowMs < end) || remainingTimeStages(task, nowMs).some((stage) => stageTimeState(stage, nowMs) === 'active')
 }
 
 export function taskPlanInPeriod(task: TaskTiming, period: 'today' | 'week', nowMs = Date.now()): boolean {
   if (isTaskPlanToday(task, nowMs)) return true
   const today = policyDateKey(new Date(nowMs))
   const end = period === 'today' ? today : moveTimeDate(today, 6)
-  const dates = [task.dueDate, ...remainingTimeStages(task, nowMs).flatMap((stage) => [stage.start?.date, stage.end?.date])]
+  const dates = [task.startDate, task.dueDate, ...remainingTimeStages(task, nowMs).flatMap((stage) => [stage.start?.date, stage.end?.date])]
   return dates.some((date) => Boolean(date && date >= today && date <= end))
 }

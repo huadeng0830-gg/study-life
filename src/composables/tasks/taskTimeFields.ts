@@ -1,7 +1,7 @@
 import type { Task, TaskTimeStage } from '../../types/domain'
 import { createId } from '../../utils/ids.js'
 
-export type TaskTiming = Pick<Task, 'dueDate' | 'dueTime' | 'timeStages'> & Partial<Pick<Task, 'id' | 'title' | 'done' | 'status' | 'archivedAt' | 'active' | 'repeat' | 'repeatAnchorDay'>>
+export type TaskTiming = Pick<Task, 'startDate' | 'startTime' | 'dueDate' | 'dueTime' | 'timeStages'> & Partial<Pick<Task, 'id' | 'title' | 'done' | 'status' | 'archivedAt' | 'active' | 'repeat' | 'repeatAnchorDay'>>
 
 export function timePlanId(prefix = 'stage'): string {
   return createId(prefix)
@@ -43,6 +43,7 @@ export function taskRepeatBase(task: TaskTiming): { date: string; label: string 
   const scheduled = taskStages(task).find((stage) => stage.kind === 'scheduled' && stage.start?.date)
   if (scheduled?.start?.date) return { date: scheduled.start.date, label: `${stageLabel(scheduled)}开始` }
   if (task.dueDate) return { date: task.dueDate, label: '事项截止日期' }
+  if (task.startDate) return { date: task.startDate, label: '事项开始日期' }
   const entries = taskStages(task).flatMap((stage, index) => (['start', 'end'] as const).flatMap((anchor) => stage[anchor]?.date ? [{ date: stage[anchor]!.date, label: `${stageLabel(stage, index)}${anchor === 'start' ? '开始' : '结束'}` }] : []))
   const first = entries.sort((a, b) => a.date.localeCompare(b.date))[0]
   return { date: first?.date || '', label: first?.label || '日期待定' }

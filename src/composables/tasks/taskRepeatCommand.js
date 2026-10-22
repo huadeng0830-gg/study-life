@@ -1,5 +1,5 @@
 import { createNextRepeatingTask, nextRepeatDueDate, normalizeTaskRepeat, repeatsTask } from '../taskRecurrence.js'
-import { taskRepeatBase, taskTimePlanError, timeClockExists } from './taskTimePlan'
+import { taskDeadlineError, taskRepeatBase, taskTimePlanError } from './taskTimePlan'
 
 function anchorDay(value) {
   const day = Number(value)
@@ -40,7 +40,7 @@ export function spawnTaskRepeat(item, tasks, now) {
     if (source.repeatEndDate && nextDate && nextDate > source.repeatEndDate) delete item.repeatGenerationError
     return null
   }
-  const error = taskTimePlanError(next.timeStages || [])?.message || (next.dueDate && next.dueTime && !timeClockExists(next.dueDate, next.dueTime) ? '截止时刻在当前时区不存在。' : '')
+  const error = taskDeadlineError(next)?.message || taskTimePlanError(next.timeStages || [])?.message || ''
   if (error) {
     item.repeatGenerationError = `下一期未生成：${error}请编辑重复事项的时间后重新保存。`
     return null
